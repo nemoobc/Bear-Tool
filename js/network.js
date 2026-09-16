@@ -4,6 +4,8 @@
 // Original implementation — no copying.
 // ═══════════════════════════════════════════════════════════════
 
+import { fetchAllPrices } from './price.js';
+
 export const NETWORKS = [
   {
     id: 'ethereum', name: 'Ethereum', chainId: 1, type: 'mainnet',
@@ -231,4 +233,23 @@ export async function getDelegation(provider, address) {
     return '0x' + code.slice(8);
   }
   return null; // regular contract or plain EOA
+}
+
+// current gas price via eth_gasPrice RPC (fallback to feeData)
+export async function getGasPrice(provider) {
+  if (!provider) return 0n;
+  try {
+    const hex = await provider.send('eth_gasPrice', []);
+    return BigInt(hex);
+  } catch {
+    try {
+      const feeData = await provider.getFeeData();
+      return feeData.gasPrice || 0n;
+    } catch { return 0n; }
+  }
+}
+
+// USD prices for a token list (delegates to price.js — single source of truth)
+export function fetchPrices(tokens, chainId) {
+  return fetchAllPrices(tokens, chainId);
 }

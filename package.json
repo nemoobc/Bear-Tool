@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check js/app.js && node --check js/network.js && node --check js/theme.js && node --check js/ui.js && node --check js/wallet.js",
+    "check": "for f in js/*.js; do node --check \"$f\"; done",
     "verify": "npm run check && npm test"
   },
   "devDependencies": {

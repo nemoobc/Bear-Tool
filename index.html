@@ -48,15 +48,15 @@
     <div class="layout">
       <!-- sidebar -->
       <nav class="sidebar" id="sidebar" aria-label="Main navigation">
-        <div class="nav-item active" data-view="dashboard"><span class="icon">🏠</span> Dashboard</div>
-        <div class="nav-item" data-view="send"><span class="icon">✈️</span> Send</div>
-        <div class="nav-item" data-view="swap"><span class="icon">🔄</span> Swap</div>
-        <div class="nav-item" data-view="bridge"><span class="icon">🌉</span> Bridge</div>
-        <div class="nav-item" data-view="eip7702"><span class="icon">⚡</span> EIP-7702</div>
-        <div class="nav-item" data-view="approval"><span class="icon">🔐</span> Approvals</div>
-        <div class="nav-item" data-view="deploy"><span class="icon">🧙</span> Deploy</div>
-        <div class="nav-item" data-view="activity"><span class="icon">📜</span> Activity</div>
-        <div class="nav-item" data-view="settings"><span class="icon">⚙️</span> Settings</div>
+        <div class="nav-item active" data-view="dashboard"><span class="icon">🏠</span> <span data-i18n="nav.dashboard">Dashboard</span></div>
+        <div class="nav-item" data-view="send"><span class="icon">✈️</span> <span data-i18n="nav.send">Send</span></div>
+        <div class="nav-item" data-view="swap"><span class="icon">🔄</span> <span data-i18n="nav.swap">Swap</span></div>
+        <div class="nav-item" data-view="bridge"><span class="icon">🌉</span> <span data-i18n="nav.bridge">Bridge</span></div>
+        <div class="nav-item" data-view="eip7702"><span class="icon">⚡</span> <span data-i18n="nav.eip7702">EIP-7702</span></div>
+        <div class="nav-item" data-view="approval"><span class="icon">🔐</span> <span data-i18n="nav.approval">Approvals</span></div>
+        <div class="nav-item" data-view="deploy"><span class="icon">🧙</span> <span data-i18n="nav.deploy">Deploy</span></div>
+        <div class="nav-item" data-view="activity"><span class="icon">📜</span> <span data-i18n="nav.activity">Activity</span></div>
+        <div class="nav-item" data-view="settings"><span class="icon">⚙️</span> <span data-i18n="nav.settings">Settings</span></div>
       </nav>
 
       <!-- main -->
@@ -69,11 +69,11 @@
             <div class="sub" id="balanceSub">Not connected</div>
           </div>
           <div class="card">
-            <div class="card-title">🐻 My Assets</div>
+            <div class="card-title">🐻 <span data-i18n="dashboard.assets">My Assets</span></div>
             <div id="assetList"><p class="small text-center">Connect or create a wallet to see your assets.</p></div>
           </div>
           <div class="card">
-            <div class="card-title">🖼️ NFTs</div>
+            <div class="card-title">🖼️ <span data-i18n="dashboard.nfts">NFTs</span></div>
             <div class="nft-grid" id="nftGrid"><p class="small text-center">No NFTs yet.</p></div>
           </div>
         </section>
@@ -81,7 +81,7 @@
         <!-- SEND -->
         <section class="view" id="view-send">
           <div class="card">
-            <div class="card-title">✈️ Send</div>
+            <div class="card-title">✈️ <span data-i18n="nav.send">Send</span></div>
             <div class="field">
               <label for="sendTo">To address</label>
               <input class="input" id="sendTo" placeholder="0x...">
@@ -114,7 +114,7 @@
         <!-- SWAP -->
         <section class="view" id="view-swap">
           <div class="card">
-            <div class="card-title">🔄 Swap</div>
+            <div class="card-title">🔄 <span data-i18n="nav.swap">Swap</span></div>
             <div class="field">
               <label for="swapFrom">From</label>
               <div class="flex gap-8">
@@ -143,14 +143,14 @@
               </select>
             </div>
             <div id="swapQuote" class="warn-box hidden"></div>
-            <button class="btn btn-primary btn-block btn-lg" id="btnSwap">Get Quote</button>
+            <button class="btn btn-primary btn-block btn-lg" id="btnSwap">Swap</button>
           </div>
         </section>
 
         <!-- BRIDGE -->
         <section class="view" id="view-bridge">
           <div class="card">
-            <div class="card-title">🌉 Bridge</div>
+            <div class="card-title">🌉 <span data-i18n="nav.bridge">Bridge</span></div>
             <div class="field">
               <label for="bridgeFromChain">From chain</label>
               <select class="select" id="bridgeFromChain"></select>
@@ -175,7 +175,7 @@
         <!-- EIP-7702 -->
         <section class="view" id="view-eip7702">
           <div class="card">
-            <div class="card-title">⚡ EIP-7702 — Smart EOA</div>
+            <div class="card-title">⚡ <span data-i18n="nav.eip7702">EIP-7702</span> — Smart EOA</div>
             <div id="delegateStatus" class="delegate-status eoa">
               <span class="label">Status:</span>
               <span id="delegateStatusText">Checking...</span>
@@ -189,8 +189,14 @@
               <input class="input" id="delegateAddr" placeholder="0x...">
             </div>
             <div class="field">
-              <label for="delegateChainId">Chain ID (0 = all chains — replay risk!)</label>
-              <input class="input" id="delegateChainId" type="number" value="0">
+              <label for="delegateChainId">Chain ID (default = current network)</label>
+              <input class="input" id="delegateChainId" type="number" placeholder="auto (current chain)">
+            </div>
+            <div class="field">
+              <label class="flex gap-8" style="align-items:center;cursor:pointer">
+                <input type="checkbox" id="delegateAnyChain" style="width:20px;height:20px">
+                <span>Allow ALL chains (chainId 0 — replay risk!)</span>
+              </label>
             </div>
             <div class="flex gap-8">
               <button class="btn btn-primary" id="btnDelegate">Delegate</button>
@@ -199,14 +205,14 @@
           </div>
 
           <div class="card">
-            <div class="card-title">🧩 Batch Call (atomic)</div>
+            <div class="card-title">🧩 <span data-i18n="eip7702.batch">Batch Call</span> (atomic)</div>
             <div class="batch-list" id="batchList"></div>
             <button class="btn btn-ghost mb-8" id="btnBatchAdd">+ Add action</button>
             <button class="btn btn-primary btn-block" id="btnBatchExecute">Execute Batch</button>
           </div>
 
           <div class="card">
-            <div class="card-title">🛟 Rescue Atomic</div>
+            <div class="card-title">🛟 <span data-i18n="eip7702.rescue">Rescue Atomic</span></div>
             <p class="small mb-8">Rescue ETH/ERC20/ERC721 from a locked wallet. Deploy rescue contract once, target signs authorization, sponsor pays gas.</p>
             <div class="field">
               <label for="rescueTarget">Locked wallet address</label>
@@ -220,7 +226,7 @@
           </div>
 
           <div class="card">
-            <div class="card-title">🎁 Claim Airdrop</div>
+            <div class="card-title">🎁 <span data-i18n="eip7702.claim">Claim Airdrop</span></div>
             <div class="field">
               <label for="claimToken">Token address</label>
               <input class="input" id="claimToken" placeholder="0x...">
@@ -236,7 +242,7 @@
         <!-- APPROVAL -->
         <section class="view" id="view-approval">
           <div class="card">
-            <div class="card-title">🔐 Approval Manager</div>
+            <div class="card-title">🔐 <span data-i18n="approval.title">Approval Manager</span></div>
             <p class="small mb-8">Scan token approvals and revoke dangerous allowances. Unlimited approvals = risk.</p>
             <div class="field">
               <label for="approvalMode">Scan mode</label>
@@ -257,7 +263,7 @@
         <!-- DEPLOY -->
         <section class="view" id="view-deploy">
           <div class="card">
-            <div class="card-title">🧙 Wizard Deploy</div>
+            <div class="card-title">🧙 <span data-i18n="nav.deploy">Wizard Deploy</span></div>
             <div class="field">
               <label for="deployStandard">Standard</label>
               <select class="select" id="deployStandard">
@@ -282,7 +288,7 @@
         <!-- ACTIVITY -->
         <section class="view" id="view-activity">
           <div class="card">
-            <div class="card-title">📜 Activity</div>
+            <div class="card-title">📜 <span data-i18n="nav.activity">Activity</span></div>
             <div id="activityList"><p class="small text-center">No transactions yet.</p></div>
           </div>
         </section>
@@ -290,7 +296,7 @@
         <!-- SETTINGS -->
         <section class="view" id="view-settings">
           <div class="card">
-            <div class="card-title">⚙️ Settings</div>
+            <div class="card-title">⚙️ <span data-i18n="nav.settings">Settings</span></div>
             <div class="field">
               <label for="setCurrency">Currency</label>
               <select class="select" id="setCurrency">
@@ -333,8 +339,10 @@
   <!-- ═══════════ TOAST ═══════════ -->
   <div id="toast-wrap" aria-live="polite"></div>
 
-  <!-- ethers.js v6 (pinned) -->
-  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+  <!-- ethers.js v6 (pinned 6.14.0, SRI-verified) -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.14.0/dist/ethers.umd.min.js"
+    integrity="sha384-34QHxjpmrckLfsLBqjRCEfb9y2fUhFwOPXGgAcnStQq185tj8/hY8VB6UY94pSUm"
+    crossorigin="anonymous"></script>
   <!-- app modules -->
   <script type="module" src="js/app.js"></script>
 </body>

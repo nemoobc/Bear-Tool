@@ -52,13 +52,23 @@ npm run verify
 
 ```
 Bear-Tool/
-├── index.html          # SPA shell (all views)
-├── css/cartoon.css     # cartoon theme + intro animation + spinner
+├── index.html          # SPA shell (all views, ethers CDN pinned + SRI)
+├── css/cartoon.css     # cartoon theme + intro animation + spinner + reduced-motion
 ├── js/
-│   ├── app.js          # entry: router + all view logic
-│   ├── network.js      # networks, tokens, ABIs, EIP-7702 constants, delegation
-│   ├── wallet.js       # create/import/encrypt/decrypt/derive/sign
-│   ├── ui.js           # modal/toast/spinner/confirm/format helpers
+│   ├── app.js          # entry: boot, router, topbar, wallet modals, dashboard, approvals, activity
+│   ├── state.js        # singleton state + pub/sub + activity persistence
+│   ├── network.js      # networks, tokens, ABIs, EIP-7702 constants, delegation, gas price
+│   ├── wallet.js       # create/import/encrypt/decrypt/derive/sign (unchanged core)
+│   ├── ui.js           # modal/toast/spinner/confirm/format/escape helpers
+│   ├── i18n.js         # EN/ID translations + t() + data-i18n scanning
+│   ├── price.js        # CoinGecko + DexScreener price cache
+│   ├── safetx.js       # double-submit lock + error boundary + button loading
+│   ├── send.js         # send view: preview, gas estimate, poisoning warnings
+│   ├── swap.js         # swap view: 0x quote (simulated fallback)
+│   ├── bridge.js       # bridge view: LI.FI quote (simulated fallback)
+│   ├── eip7702.js      # delegate/revoke (chainId guard), batch, rescue, claim
+│   ├── deploy.js       # deploy wizard (honest stub)
+│   ├── nft.js          # NFT gallery (best-effort enumeration)
 │   └── theme.js        # 5s intro animation
 ├── assets/             # original bear + logo SVG
 ├── docs/PROMPT.md      # full build prompt spec (for AI agents)

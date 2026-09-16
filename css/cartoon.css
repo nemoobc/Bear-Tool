@@ -592,3 +592,92 @@ body::before {
   border: 3px solid var(--ink);
   border-radius: 999px;
 }
+
+/* ── button loading state (DESIGN-AUDIT fix) ── */
+.btn.is-loading {
+  pointer-events: none;
+  opacity: 0.75;
+  position: relative;
+  color: transparent !important;
+}
+.btn.is-loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 18px;
+  height: 18px;
+  border: 3px solid rgba(0, 0, 0, 0.2);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* ── honey spinner (inline loading) ── */
+.spinner-honey {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--honey);
+  border-top-color: var(--fur-dark);
+  border-radius: 50%;
+  animation: btn-spin 0.8s linear infinite;
+  vertical-align: middle;
+}
+
+/* ── simulated banner (honest fallback label) ── */
+.simulated-banner {
+  background: var(--honey);
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+/* ── delegate status ── */
+.delegate-status {
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.delegate-status.delegated { background: var(--mint); }
+.delegate-status.eoa { background: var(--cream); }
+.delegate-status .addr { font-family: 'Courier New', monospace; word-break: break-all; }
+
+/* ── batch list ── */
+.batch-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.batch-item .idx {
+  font-weight: 800;
+  min-width: 24px;
+  text-align: center;
+}
+
+/* ── nft card ── */
+.nft-card {
+  border: var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--white);
+  box-shadow: var(--shadow-sm);
+}
+.nft-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.nft-card .meta { padding: 8px 10px; font-weight: 700; font-size: 0.85rem; }
+
+/* ── reduced motion (a11y) ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
