@@ -125,13 +125,29 @@ jobs:
 
           const BASE = 'http://localhost:3000';
 
+          // Helper: skip intro animation
+          async function skipIntro(page) {
+            await page.goto(BASE);
+            const skip = page.locator('#introSkip');
+            if (await skip.isVisible({ timeout: 3000 }).catch(() => false)) {
+              await skip.click();
+              await page.waitForTimeout(500);
+            }
+            // Also try clicking intro overlay
+            const intro = page.locator('#intro');
+            if (await intro.isVisible({ timeout: 1000 }).catch(() => false)) {
+              await intro.click();
+              await page.waitForTimeout(500);
+            }
+          }
+
           test('page loads with correct title', async ({ page }) => {
             await page.goto(BASE);
             await expect(page).toHaveTitle(/Bear Tool/);
           });
 
           test('all 9 views exist in DOM', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             const views = ['dashboard', 'send', 'swap', 'bridge', 'eip7702', 'approval', 'deploy', 'activity', 'settings'];
             for (const v of views) {
               await expect(page.locator(`#view-${v}`)).toBeAttached();
@@ -139,31 +155,31 @@ jobs:
           });
 
           test('sidebar has 9 nav items', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             const items = page.locator('.nav-item');
             await expect(items).toHaveCount(9);
           });
 
           test('mobile nav has 5 items', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             const items = page.locator('.mobile-nav-item');
             await expect(items).toHaveCount(5);
           });
 
           test('topbar renders with network pill and account pill', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await expect(page.locator('#networkPill')).toBeVisible();
             await expect(page.locator('#accountPill')).toBeVisible();
           });
 
           test('dashboard quick actions exist', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             const btns = page.locator('.quick-action-btn');
             await expect(btns).toHaveCount(4);
           });
 
           test('swap view has slippage buttons', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await page.locator('.nav-item[data-view="swap"]').click();
             await expect(page.locator('#view-swap')).toHaveClass(/active/);
             const btns = page.locator('.slippage-btn');
@@ -171,7 +187,7 @@ jobs:
           });
 
           test('send view has gas buttons', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await page.locator('.nav-item[data-view="send"]').click();
             await expect(page.locator('#view-send')).toHaveClass(/active/);
             const btns = page.locator('.gas-btn');
@@ -179,21 +195,21 @@ jobs:
           });
 
           test('bridge view has quote and exec buttons', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await page.locator('.nav-item[data-view="bridge"]').click();
             await expect(page.locator('#btnBridgeQuote')).toBeVisible();
             await expect(page.locator('#btnBridgeExec')).toBeHidden();
           });
 
           test('eip7702 wizard has 3 steps', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await page.locator('.nav-item[data-view="eip7702"]').click();
             const steps = page.locator('.wizard-step');
             await expect(steps).toHaveCount(3);
           });
 
           test('skip link exists and is hidden', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             const link = page.locator('.skip-link');
             await expect(link).toBeAttached();
             await expect(link).not.toBeVisible();
@@ -206,40 +222,40 @@ jobs:
           });
 
           test('modal overlay exists', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await expect(page.locator('#modalOverlay')).toBeAttached();
           });
 
           test('toast container exists', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await expect(page.locator('#toast-wrap')).toBeAttached();
           });
 
           test('screenshot: dashboard', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await page.screenshot({ path: 'screenshots/dashboard.png', fullPage: true });
           });
 
           test('screenshot: swap view', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await page.locator('.nav-item[data-view="swap"]').click();
             await page.screenshot({ path: 'screenshots/swap.png', fullPage: true });
           });
 
           test('screenshot: send view', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await page.locator('.nav-item[data-view="send"]').click();
             await page.screenshot({ path: 'screenshots/send.png', fullPage: true });
           });
 
           test('screenshot: bridge view', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await page.locator('.nav-item[data-view="bridge"]').click();
             await page.screenshot({ path: 'screenshots/bridge.png', fullPage: true });
           });
 
           test('screenshot: eip7702 view', async ({ page }) => {
-            await page.goto(BASE);
+            await skipIntro(page);
             await page.locator('.nav-item[data-view="eip7702"]').click();
             await page.screenshot({ path: 'screenshots/eip7702.png', fullPage: true });
           });
