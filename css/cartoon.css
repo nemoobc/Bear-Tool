@@ -1455,6 +1455,25 @@ body::before {
 .gas-est-value { font-weight: 700; }
 .gas-est-usd { color: var(--ink-soft); font-size: 0.8rem; }
 
+/* ═══════════ ASSET SEARCH ═══════════ */
+.asset-search {
+  margin-bottom: var(--sp-12);
+}
+.asset-search .input {
+  width: 100%;
+  padding: var(--sp-8) var(--sp-12);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-family: var(--font);
+  background: var(--white);
+}
+.asset-search .input:focus {
+  outline: none;
+  border-color: var(--berry);
+  box-shadow: 0 0 0 3px var(--berry-15);
+}
+
 /* ═══════════ ACTIVITY TIMELINE ═══════════ */
 .activity-timeline {
   display: flex;

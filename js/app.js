@@ -46,6 +46,11 @@ window.addEventListener('DOMContentLoaded', () => {
     toast('Unexpected error: ' + (e.reason?.message || 'unknown'), 'error');
   });
 
+  // ── token search ──
+  document.getElementById('tokenSearchInput')?.addEventListener('input', () => {
+    if (window._assetTokens) renderAssets(window._assetTokens);
+  });
+
   // ── offline detection ──
   const offlineBanner = document.getElementById('offlineBanner');
   const updateOnline = () => {
@@ -522,8 +527,11 @@ function renderAssets(tokens) {
   animateValue($('#totalBalance'), totalUsd, { duration: 600, formatter: fmtUsd });
   if (!tokens.length) {
     $('#assetList').innerHTML = '<p class="small text-center">No assets found.</p>';
+    $('#assetSearch').style.display = 'none';
     return;
   }
+  // Show search if > 3 tokens
+  $('#assetSearch').style.display = tokens.length > 3 ? '' : 'none';
   // Token icon class mapping
   const iconClass = (sym) => {
     const s = (sym || '').toLowerCase();
@@ -532,7 +540,11 @@ function renderAssets(tokens) {
     if (s === 'wbtc') return 'wbtc';
     return 'default';
   };
-  $('#assetList').innerHTML = tokens.map(t => `
+  // Store tokens for filtering
+  window._assetTokens = tokens;
+  const filter = ($('#tokenSearchInput')?.value || '').toLowerCase();
+  const filtered = filter ? tokens.filter(t => (t.symbol || '').toLowerCase().includes(filter)) : tokens;
+  $('#assetList').innerHTML = filtered.map(t => `
     <div class="asset-row">
       <div class="token-icon ${iconClass(t.symbol)}">${(t.symbol || '?').slice(0, 3).toUpperCase()}</div>
       <div class="asset-info">
@@ -544,6 +556,9 @@ function renderAssets(tokens) {
         <div class="usd">${t.usd ? escapeHtml(fmtUsd(t.usd)) : '—'}</div>
       </div>
     </div>`).join('');
+  if (filtered.length === 0) {
+    $('#assetList').innerHTML = '<p class="small text-center">No tokens match your search.</p>';
+  }
 }
 
 // ── view wiring ──
