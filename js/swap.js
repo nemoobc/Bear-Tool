@@ -89,13 +89,13 @@ async function kyberBuild(slug, routeSummary, sender, recipient, slippageBps) {
       routeSummary,
       sender,
       recipient,
-      slippageTolerance: String(slippageBps),
+      slippageTolerance: slippageBps,
     }),
   });
   if (!res.ok) throw new Error(`KyberSwap build HTTP ${res.status}`);
   const json = await res.json();
-  if (!json.data?.data || !json.data?.router) throw new Error('KyberSwap: empty build');
-  return json.data; // { data (calldata), router (address) }
+  if (!json.data?.data || !json.data?.routerAddress) throw new Error('KyberSwap: empty build');
+  return json.data; // { data (calldata), routerAddress (address) }
 }
 
 // ── simulated fallback (honest, labeled) ──
@@ -199,7 +199,7 @@ export async function doSwap() {
     const provider = get('provider');
     const signer = get('signer').connect(provider);
     const userAddr = get('address');
-    const router = quote.built.router;
+    const router = quote.built.routerAddress;
 
     // ERC-20 approve if needed
     if (from !== 'native') {
