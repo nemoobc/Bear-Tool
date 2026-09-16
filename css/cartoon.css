@@ -1364,6 +1364,60 @@ body::before {
 .copy-btn:hover { color: var(--ink); }
 .copy-btn.copied { color: var(--mint); }
 
+/* ═══════════ WALLET STATUS ═══════════ */
+.wallet-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: 0.8rem;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot.connected {
+  background: var(--mint);
+  box-shadow: 0 0 6px var(--mint);
+}
+.status-dot.disconnected {
+  background: var(--berry);
+}
+.status-text {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+/* ═══════════ TOKEN ICONS ═══════════ */
+.token-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+.token-icon.eth {
+  background: linear-gradient(135deg, #627EEA, #8B9FE8);
+  color: white;
+}
+.token-icon.usdc {
+  background: linear-gradient(135deg, #2775CA, #4A9AE8);
+  color: white;
+}
+.token-icon.wbtc {
+  background: linear-gradient(135deg, #F7931A, #F8B34A);
+  color: white;
+}
+.token-icon.default {
+  background: var(--peach);
+  color: var(--ink);
+}
+
 /* ═══════════ GAS ESTIMATE ═══════════ */
 .gas-estimate {
   display: flex;

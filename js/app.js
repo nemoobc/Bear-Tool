@@ -455,7 +455,17 @@ function showAccountModal() {
 async function loadDashboard() {
   if (!get('unlocked')) return;
   const net = getNetworkById(get('networkId'));
-  $('#balanceSub').textContent = `${net.name} · ${wallet.shortAddress(get('address'))}`;
+  const addr = get('address');
+  $('#balanceSub').textContent = `${net.name} · ${wallet.shortAddress(addr)}`;
+
+  // ── wallet status ──
+  const statusDot = document.querySelector('.status-dot');
+  const statusText = document.querySelector('.status-text');
+  const copyBtn = document.getElementById('copyAddress');
+  if (statusDot) { statusDot.className = 'status-dot connected'; }
+  if (statusText) { statusText.textContent = wallet.shortAddress(addr); }
+  if (copyBtn) { copyBtn.dataset.copy = addr; copyBtn.style.display = ''; }
+
   $('#assetList').innerHTML = spinner(64, 0, 'Loading assets...');
   try {
     const provider = await getProvider(net.chainId);
@@ -499,9 +509,17 @@ function renderAssets(tokens) {
     $('#assetList').innerHTML = '<p class="small text-center">No assets found.</p>';
     return;
   }
+  // Token icon class mapping
+  const iconClass = (sym) => {
+    const s = (sym || '').toLowerCase();
+    if (s === 'eth' || s === 'ether') return 'eth';
+    if (s === 'usdc') return 'usdc';
+    if (s === 'wbtc') return 'wbtc';
+    return 'default';
+  };
   $('#assetList').innerHTML = tokens.map(t => `
     <div class="asset-row">
-      <div class="asset-icon">${t.address ? '🪙' : '⬡'}</div>
+      <div class="token-icon ${iconClass(t.symbol)}">${(t.symbol || '?').slice(0, 3).toUpperCase()}</div>
       <div class="asset-info">
         <div class="asset-name">${escapeHtml(t.symbol)}</div>
         <div class="asset-symbol">${t.address ? escapeHtml(wallet.shortAddress(t.address)) : 'Native'}</div>
