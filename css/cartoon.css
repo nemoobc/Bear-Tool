@@ -1457,6 +1457,100 @@ body::before {
   to { transform: rotate(360deg); }
 }
 
+/* ═══════════ TOKEN MODAL ═══════════ */
+.token-modal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-16);
+  margin-bottom: var(--sp-16);
+}
+.token-modal-icon {
+  flex-shrink: 0;
+}
+.token-modal-info {
+  flex: 1;
+}
+.token-modal-symbol {
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+.token-modal-balance {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.token-modal-usd {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+.token-modal-chart {
+  margin: var(--sp-12) 0;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #FFF8F0;
+}
+.token-modal-chart canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.token-modal-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-8);
+  margin: var(--sp-16) 0;
+}
+.token-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-12) var(--sp-8);
+  border: 2px solid var(--ink);
+  border-radius: 14px;
+  background: var(--cream);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 0.75rem;
+  font-weight: 700;
+  transition: all 0.15s;
+}
+.token-action-btn:hover {
+  background: var(--honey);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+.token-action-btn svg {
+  stroke: var(--ink);
+}
+.token-modal-footer {
+  margin-top: var(--sp-8);
+}
+
+/* ═══════════ ASSET ROW ═══════════ */
+.asset-clickable {
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.asset-clickable:hover {
+  transform: translateX(4px);
+  background: var(--cream);
+}
+.token-icon-svg {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+.token-icon-svg svg {
+  width: 100%;
+  height: 100%;
+}
+.asset-arrow {
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
 /* ═══════════ ADDRESS BOOK ═══════════ */
 .address-book-list {
   display: flex;

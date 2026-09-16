@@ -532,21 +532,27 @@ function renderAssets(tokens) {
   }
   // Show search if > 3 tokens
   $('#assetSearch').style.display = tokens.length > 3 ? '' : 'none';
-  // Token icon class mapping
-  const iconClass = (sym) => {
+  // Token SVG logos
+  const tokenLogos = {
+    eth: `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="ethG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#ethG)"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="14" font-weight="800" font-family="Arial">Ξ</text></svg>`,
+    usdc: `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="usdcG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#usdcG)"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">$</text></svg>`,
+    wbtc: `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="wbtcG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#wbtcG)"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">B</text></svg>`,
+    default: `<svg viewBox="0 0 32 32" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#FFD9C0"/><text x="16" y="21" text-anchor="middle" fill="#2D2A32" font-size="11" font-weight="800" font-family="Arial">?</text></svg>`
+  };
+  const getLogo = (sym) => {
     const s = (sym || '').toLowerCase();
-    if (s === 'eth' || s === 'ether') return 'eth';
-    if (s === 'usdc') return 'usdc';
-    if (s === 'wbtc') return 'wbtc';
-    return 'default';
+    if (s === 'eth' || s === 'ether') return tokenLogos.eth;
+    if (s === 'usdc') return tokenLogos.usdc;
+    if (s === 'wbtc') return tokenLogos.wbtc;
+    return tokenLogos.default;
   };
   // Store tokens for filtering
   window._assetTokens = tokens;
   const filter = ($('#tokenSearchInput')?.value || '').toLowerCase();
   const filtered = filter ? tokens.filter(t => (t.symbol || '').toLowerCase().includes(filter)) : tokens;
-  $('#assetList').innerHTML = filtered.map(t => `
-    <div class="asset-row">
-      <div class="token-icon ${iconClass(t.symbol)}">${(t.symbol || '?').slice(0, 3).toUpperCase()}</div>
+  $('#assetList').innerHTML = filtered.map((t, i) => `
+    <div class="asset-row asset-clickable" data-token-idx="${i}" data-symbol="${escapeHtml(t.symbol || '')}" data-address="${escapeHtml(t.address || '')}" data-decimals="${t.decimals || 18}" data-balance="${escapeHtml(t.balance || '0')}" data-usd="${t.usd || 0}">
+      <div class="token-icon-svg">${getLogo(t.symbol)}</div>
       <div class="asset-info">
         <div class="asset-name">${escapeHtml(t.symbol)}</div>
         <div class="asset-symbol">${t.address ? escapeHtml(wallet.shortAddress(t.address)) : 'Native'}</div>
@@ -555,10 +561,167 @@ function renderAssets(tokens) {
         <div class="amount">${escapeHtml(fmtAmount(t.balance, t.decimals))}</div>
         <div class="usd">${t.usd ? escapeHtml(fmtUsd(t.usd)) : '—'}</div>
       </div>
+      <div class="asset-arrow"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
     </div>`).join('');
   if (filtered.length === 0) {
     $('#assetList').innerHTML = '<p class="small text-center">No tokens match your search.</p>';
   }
+  // Click handlers
+  $all('.asset-clickable').forEach(el => {
+    el.addEventListener('click', () => showTokenActions(el));
+  });
+}
+
+function showTokenActions(el) {
+  const symbol = el.dataset.symbol;
+  const address = el.dataset.address;
+  const decimals = parseInt(el.dataset.decimals) || 18;
+  const balance = el.dataset.balance;
+  const usd = parseFloat(el.dataset.usd) || 0;
+  const net = getNetworkById(get('networkId'));
+
+  openModal(`
+    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <div class="token-modal-header">
+      <div class="token-modal-icon">${getLogoSVG(symbol)}</div>
+      <div class="token-modal-info">
+        <div class="token-modal-symbol">${escapeHtml(symbol)}</div>
+        <div class="token-modal-balance">${escapeHtml(fmtAmount(balance, decimals))} ${escapeHtml(symbol)}</div>
+        <div class="token-modal-usd">${usd ? escapeHtml(fmtUsd(usd)) : '—'}</div>
+      </div>
+    </div>
+    <div class="token-modal-chart" id="tokenChart">
+      <canvas id="tokenPriceChart" width="300" height="100"></canvas>
+    </div>
+    <div class="token-modal-actions">
+      <button class="token-action-btn" id="tokenSend">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+        Send
+      </button>
+      <button class="token-action-btn" id="tokenReceive">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+        Receive
+      </button>
+      <button class="token-action-btn" id="tokenSwap">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Swap
+      </button>
+      <button class="token-action-btn" id="tokenHistory">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        History
+      </button>
+    </div>
+    <div class="token-modal-footer">
+      <button class="btn btn-ghost btn-block" onclick="document.getElementById('modalOverlay').classList.remove('open')">Close</button>
+    </div>
+  `);
+
+  // Draw mini chart
+  drawMiniChart(symbol);
+
+  // Action handlers
+  $('#tokenSend').onclick = () => { closeModal(); switchView('send'); };
+  $('#tokenReceive').onclick = () => { closeModal(); showReceiveModal(address, symbol); };
+  $('#tokenSwap').onclick = () => { closeModal(); switchView('swap'); };
+  $('#tokenHistory').onclick = () => { closeModal(); switchView('activity'); };
+}
+
+function getLogoSVG(sym) {
+  const logos = {
+    eth: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="ethG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#ethG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="22" font-weight="800" font-family="Arial">Ξ</text></svg>`,
+    usdc: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdcG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdcG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">$</text></svg>`,
+    wbtc: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wbtcG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wbtcG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">B</text></svg>`
+  };
+  const s = (sym || '').toLowerCase();
+  if (s === 'eth' || s === 'ether') return logos.eth;
+  if (s === 'usdc') return logos.usdc;
+  if (s === 'wbtc') return logos.wbtc;
+  return `<svg viewBox="0 0 48 48" width="48" height="48"><circle cx="24" cy="24" r="24" fill="#FFD9C0"/><text x="24" y="32" text-anchor="middle" fill="#2D2A32" font-size="16" font-weight="800" font-family="Arial">${(sym || '?').slice(0, 1).toUpperCase()}</text></svg>`;
+}
+
+function showReceiveModal(address, symbol) {
+  openModal(`
+    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <h2>Receive ${escapeHtml(symbol)}</h2>
+    <div class="text-center mb-16">
+      <div class="mono" style="font-size:0.85rem;word-break:break-all;padding:12px;background:var(--cream);border-radius:10px;border:2px solid var(--ink)">${escapeHtml(address || get('address'))}</div>
+    </div>
+    <button class="copy-btn btn btn-primary btn-block" data-copy="${escapeHtml(address || get('address'))}">Copy Address</button>
+  `);
+}
+
+function drawMiniChart(symbol) {
+  const canvas = document.getElementById('tokenPriceChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  // Generate fake price data for demo
+  const points = 30;
+  const data = [];
+  let price = 100 + Math.random() * 200;
+  for (let i = 0; i < points; i++) {
+    price += (Math.random() - 0.48) * 10;
+    price = Math.max(50, price);
+    data.push(price);
+  }
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const w = canvas.width;
+  const h = canvas.height;
+  const step = w / (points - 1);
+
+  // Background
+  ctx.fillStyle = '#FFF8F0';
+  ctx.fillRect(0, 0, w, h);
+
+  // Grid lines
+  ctx.strokeStyle = '#E8E0D8';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i < 4; i++) {
+    const y = (h / 4) * i + 10;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+
+  // Line
+  const gradient = ctx.createLinearGradient(0, 0, 0, h);
+  gradient.addColorStop(0, '#FF6B35');
+  gradient.addColorStop(1, '#FF8A3D');
+
+  ctx.beginPath();
+  ctx.strokeStyle = gradient;
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = 'round';
+  data.forEach((val, i) => {
+    const x = i * step;
+    const y = h - ((val - min) / range) * (h - 20) - 10;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Fill under line
+  const lastX = (points - 1) * step;
+  const lastY = h - ((data[data.length - 1] - min) / range) * (h - 20) - 10;
+  ctx.lineTo(lastX, h);
+  ctx.lineTo(0, h);
+  ctx.closePath();
+  const fillGrad = ctx.createLinearGradient(0, 0, 0, h);
+  fillGrad.addColorStop(0, 'rgba(255,107,53,0.3)');
+  fillGrad.addColorStop(1, 'rgba(255,107,53,0.02)');
+  ctx.fillStyle = fillGrad;
+  ctx.fill();
+
+  // Current price dot
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+  ctx.fillStyle = '#FF6B35';
+  ctx.fill();
+  ctx.strokeStyle = '#FFF8F0';
+  ctx.lineWidth = 2;
+  ctx.stroke();
 }
 
 // ── view wiring ──
