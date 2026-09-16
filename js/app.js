@@ -638,15 +638,35 @@ function renderActivity() {
     return;
   }
   const net = getNetworkById(get('networkId'));
+  // Activity icon mapping
+  const actIcon = (type) => {
+    const t = (type || '').toLowerCase();
+    if (t.includes('send')) return 'send';
+    if (t.includes('receive')) return 'receive';
+    if (t.includes('swap')) return 'swap';
+    if (t.includes('bridge')) return 'bridge';
+    if (t.includes('approve')) return 'approve';
+    return 'send';
+  };
+  const actSvg = (type) => {
+    const cls = actIcon(type);
+    const svgs = {
+      send: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+      receive: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
+      swap: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+      bridge: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 17h20"/><path d="M4 12V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5"/><circle cx="12" cy="17" r="3"/></svg>',
+      approve: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'
+    };
+    return `<div class="activity-icon ${cls}">${svgs[cls] || svgs.send}</div>`;
+  };
   list.innerHTML = get('activity').map(a => `
-    <div class="asset-row">
-      <div class="asset-icon">${a.status === 'success' ? '✅' : a.status === 'failed' ? '❌' : a.status === 'info' ? 'ℹ️' : '⏳'}</div>
-      <div class="asset-info">
-        <div class="asset-name">${escapeHtml(a.type)} ${escapeHtml(a.status)}</div>
-        <div class="asset-symbol">${escapeHtml(a.detail)}</div>
-        <div class="asset-symbol">${escapeHtml(fmtTime(a.ts))}</div>
+    <div class="activity-item">
+      ${actSvg(a.type)}
+      <div class="activity-details">
+        <div class="activity-action">${escapeHtml(a.type)} — ${escapeHtml(a.status)}</div>
+        <div class="activity-meta">${escapeHtml(a.detail)} · ${escapeHtml(fmtTime(a.ts))}</div>
       </div>
-      ${a.hash && a.hash.startsWith('0x') ? `<a class="btn btn-ghost" href="${escapeHtml(net.explorer)}/tx/${escapeHtml(a.hash)}" target="_blank" rel="noopener">View</a>` : ''}
+      ${a.hash && a.hash.startsWith('0x') ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(net.explorer)}/tx/${escapeHtml(a.hash)}" target="_blank" rel="noopener">View</a>` : ''}
     </div>`).join('');
 }
 
