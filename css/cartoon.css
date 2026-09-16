@@ -1418,6 +1418,27 @@ body::before {
   color: var(--ink);
 }
 
+/* ═══════════ SWAP ROUTE ═══════════ */
+.swap-route {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  background: var(--cream);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  font-size: 0.8rem;
+  margin-bottom: var(--sp-8);
+}
+.route-label { color: var(--ink-soft); font-weight: 600; }
+.route-info { font-weight: 700; }
+.swap-impact {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  padding: 0 var(--sp-4);
+  margin-bottom: var(--sp-8);
+}
+
 /* ═══════════ GAS ESTIMATE ═══════════ */
 .gas-estimate {
   display: flex;
@@ -1433,6 +1454,66 @@ body::before {
 .gas-est-label { color: var(--ink-soft); font-weight: 600; }
 .gas-est-value { font-weight: 700; }
 .gas-est-usd { color: var(--ink-soft); font-size: 0.8rem; }
+
+/* ═══════════ ACTIVITY TIMELINE ═══════════ */
+.activity-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-12);
+  padding: var(--sp-12);
+  border: 2px solid var(--ink);
+  border-radius: 14px;
+  background: var(--white);
+  transition: transform 0.15s;
+}
+.activity-item:hover { transform: translateY(-1px); }
+.activity-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.activity-icon.send {
+  background: var(--sky);
+  color: var(--sea);
+}
+.activity-icon.receive {
+  background: var(--mint-bg);
+  color: var(--mint);
+}
+.activity-icon.swap {
+  background: var(--lavender-bg);
+  color: var(--lavender);
+}
+.activity-icon.bridge {
+  background: var(--peach-bg);
+  color: var(--berry);
+}
+.activity-icon.approve {
+  background: var(--cream);
+  color: var(--ink-soft);
+}
+.activity-details {
+  flex: 1;
+  min-width: 0;
+}
+.activity-action {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.activity-meta {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
 
 /* ═══════════ THEME TOGGLE ═══════════ */
 .theme-toggle {
