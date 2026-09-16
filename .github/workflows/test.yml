@@ -108,19 +108,19 @@ jobs:
 
       - name: Install Playwright
         run: |
-          npm init -y
-          npm install playwright @playwright/test
+          npm init -y 2>/dev/null || true
+          npm install playwright @playwright/test serve
           npx playwright install chromium --with-deps
 
       - name: Start local server
         run: |
           npx serve -l 3000 &
-          sleep 2
-          curl -s http://localhost:3000 > /dev/null && echo "Server running ✓" || echo "Server failed"
+          sleep 3
+          curl -s http://localhost:3000 | head -5 && echo "Server running ✓" || echo "Server failed"
 
       - name: Run Playwright tests
         run: |
-          cat > bear-tool.spec.js << 'TESTEOF'
+          cat > bear-tool.spec.cjs << 'TESTEOF'
           const { test, expect } = require('@playwright/test');
 
           const BASE = 'http://localhost:3000';
@@ -196,7 +196,6 @@ jobs:
             await page.goto(BASE);
             const link = page.locator('.skip-link');
             await expect(link).toBeAttached();
-            // Should be off-screen (not visible)
             await expect(link).not.toBeVisible();
           });
 
@@ -247,7 +246,7 @@ jobs:
           TESTEOF
 
           mkdir -p screenshots
-          npx playwright test bear-tool.spec.js --reporter=list 2>&1
+          npx playwright test bear-tool.spec.cjs --reporter=list 2>&1
 
       - name: Upload screenshots
         if: always()
