@@ -341,8 +341,23 @@ function showNetworkModal() {
 
 function netRow(n) {
   const active = n.id === get('networkId') ? 'style="border-left:8px solid var(--mint)"' : '';
+  // Network icon colors
+  const netColors = {
+    'Ethereum': '#627EEA',
+    'Sepolia': '#627EEA',
+    'Arbitrum': '#28A0F0',
+    'Arbitrum Sepolia': '#28A0F0',
+    'Optimism': '#FF0420',
+    'OP Sepolia': '#FF0420',
+    'Base': '#0052FF',
+    'Base Sepolia': '#0052FF',
+    'Polygon': '#8247E5',
+    'BSC': '#F3BA2F',
+    'Avalanche': '#E84142'
+  };
+  const color = netColors[n.name] || n.color || '#627EEA';
   return `<div class="asset-row" data-net="${escapeHtml(n.id)}" ${active}>
-    <div class="asset-icon" style="background:${escapeHtml(n.color)}22">${escapeHtml(n.icon)}</div>
+    <div class="token-icon" style="background:${color};color:white;font-size:0.6rem">${escapeHtml(n.symbol?.slice(0, 3) || '???')}</div>
     <div class="asset-info"><div class="asset-name">${escapeHtml(n.name)}</div>
       <div class="asset-symbol">Chain ${escapeHtml(String(n.chainId))} · ${escapeHtml(n.symbol)}</div></div>
     <span class="badge ${n.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(n.type)}</span>
