@@ -9,7 +9,7 @@ import { POPULAR_TOKENS, ERC20_ABI,
          getAllNetworks, getNetworkById, getProvider,
          addCustomNetwork } from './network.js';
 import * as wallet from './wallet.js';
-import { $, $all, toast, openModal, closeModal, spinnerBear, confirmTx, promptPassword,
+import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
          fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue } from './ui.js';
 import { runIntro } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity } from './state.js';
@@ -409,7 +409,7 @@ async function loadDashboard() {
   if (!get('unlocked')) return;
   const net = getNetworkById(get('networkId'));
   $('#balanceSub').textContent = `${net.name} · ${wallet.shortAddress(get('address'))}`;
-  $('#assetList').innerHTML = spinnerBear();
+  $('#assetList').innerHTML = spinner(64, 0, 'Loading assets...');
   try {
     const provider = await getProvider(net.chainId);
     set('provider', provider);
@@ -447,7 +447,7 @@ async function loadDashboard() {
 
 function renderAssets(tokens) {
   const totalUsd = tokens.reduce((s, t) => s + (t.usd || 0), 0);
-  animateValue($('#totalBalance'), totalUsd, { formatter: fmtUsd });
+  animateValue($('#totalBalance'), totalUsd, { duration: 600, formatter: fmtUsd });
   if (!tokens.length) {
     $('#assetList').innerHTML = '<p class="small text-center">No assets found.</p>';
     return;
@@ -489,7 +489,7 @@ async function scanApprovals() {
   const mode = $('#approvalMode').value;
   const net = getNetworkById(get('networkId'));
   const list = $('#approvalList');
-  list.innerHTML = spinnerBear();
+  list.innerHTML = spinner(64, 0, 'Scanning approvals...');
   try {
     const provider = get('provider');
     const tokens = mode === 'popular'

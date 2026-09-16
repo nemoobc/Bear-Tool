@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — theme.js
-// Intro logo animation (exactly 5s, skippable) + mascot helpers.
+// Intro logo animation (exactly 5s, skippable, reduced-motion aware)
+// + mascot helpers.
 // Original implementation — no copying.
 // ═══════════════════════════════════════════════════════════════
 
@@ -8,19 +9,29 @@ export function runIntro(onDone) {
   const intro = document.getElementById('intro');
   const title = document.getElementById('introTitle');
   const skip = document.getElementById('introSkip');
-  const logo = document.getElementById('introLogo');
+  const counter = document.getElementById('introCounter');
 
   let finished = false;
-  const finish = () => {
+  const finish = (instant) => {
     if (finished) return;
     finished = true;
-    intro.classList.add('hidden');
+    if (instant) {
+      intro.classList.add('hidden');
+    } else {
+      intro.classList.add('intro-fade'); // 0.4s fade (CSS transition)
+      setTimeout(() => intro.classList.add('hidden'), 400);
+    }
     if (onDone) onDone();
   };
 
+  // reduced motion: skip the whole animation, still call onDone
+  const prefersReduced = typeof matchMedia !== 'undefined' &&
+    matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReduced) return finish(true);
+
   // skip on click anywhere on intro
-  intro.addEventListener('click', finish);
-  skip.addEventListener('click', (e) => { e.stopPropagation(); finish(); });
+  intro.addEventListener('click', () => finish(true));
+  skip.addEventListener('click', (e) => { e.stopPropagation(); finish(true); });
 
   // letter-by-letter title (phase 3: 2-3s)
   const text = 'BEAR TOOL';
@@ -32,12 +43,14 @@ export function runIntro(onDone) {
     title.appendChild(span);
   });
 
-  // eye blink handled by CSS (intro-blink on .eye — logo has no .eye class,
-  // so we add a subtle scale pulse to the whole logo at 1-2s via CSS class)
-  logo.classList.add('eye');
+  // countdown 3 → 2 → 1 (phase 4: 3-4.6s)
+  const counts = [['3', 3000], ['2', 4000], ['1', 4600]];
+  counts.forEach(([val, ms]) => {
+    setTimeout(() => { if (!finished && counter) counter.textContent = val; }, ms);
+  });
 
-  // exact 5s timer
-  setTimeout(finish, 5000);
+  // exact 5s timer → fade out
+  setTimeout(() => finish(false), 5000);
 }
 
 // mascot reaction helper: swap bear image expression

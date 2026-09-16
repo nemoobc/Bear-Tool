@@ -1,7 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — ui.js
-// Render helpers: modal, toast, spinner, confirm dialogs, escaping,
-// button loading state, animated counter.
+// Render helpers: modal (a11y: focus trap, Escape, restore focus),
+// toast, spinner (unified helper + countdown), confirm dialogs,
+// escaping, button loading state, animated counter.
 // Original implementation — no copying.
 // ═══════════════════════════════════════════════════════════════
 
@@ -33,22 +34,116 @@ export function toast(msg, type = 'info') {
   }, 3500);
 }
 
-// ── modal ──
+// ── modal (a11y: aria-labelledby, focus trap, Escape, restore focus) ──
+let lastFocused = null;
+
+function getFocusable(box) {
+  if (!box) return [];
+  return [...box.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter(el => el.offsetParent !== null && !el.classList.contains('modal-close'));
+}
+
 export function openModal(html) {
   const overlay = $('#modalOverlay');
   const box = $('#modalBox');
   box.innerHTML = html;
+  // aria-labelledby → first heading (WCAG 4.1.2)
+  const heading = box.querySelector('h1, h2, h3');
+  if (heading) {
+    if (!heading.id) heading.id = 'modalTitle';
+    box.setAttribute('aria-labelledby', heading.id);
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+  }
   overlay.classList.add('open');
+  // scroll lock
+  document.body.style.overflow = 'hidden';
+  // remember who opened it, then move focus inside (WCAG 2.4.3)
+  lastFocused = document.activeElement;
+  box.tabIndex = -1;
+  const first = getFocusable(box)[0];
+  (first || box).focus();
   // close on overlay click (outside modal)
   overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
   return box;
 }
 
 export function closeModal() {
-  $('#modalOverlay').classList.remove('open');
+  const overlay = $('#modalOverlay');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  document.body.style.overflow = '';
+  // restore focus to opener (WCAG 2.4.3)
+  if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus();
+  lastFocused = null;
 }
 
-// ── spinner ──
+// Delegated listeners — guarded so module import works in test stubs
+// (tests/e2e-probe.test.js uses a minimal document without addEventListener).
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('keydown', (e) => {
+    const overlay = document.getElementById('modalOverlay');
+    if (!overlay || !overlay.classList.contains('open')) return;
+    if (e.key === 'Escape') { closeModal(); return; }
+    if (e.key === 'Tab') {
+      const box = document.getElementById('modalBox');
+      const items = getFocusable(box);
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  });
+  // safety net: any .modal-close click closes (legacy inline onclick still works)
+  document.addEventListener('click', (e) => {
+    if (e.target.closest && e.target.closest('.modal-close')) closeModal();
+  });
+}
+
+// ── spinner (unified helper) ──
+// spinner(size, timeoutSec, label) → HTML string.
+// size: wrap diameter in px (default 64). timeoutSec: pass >0 and call
+// startSpinnerCountdown() to show a live countdown. label: status text.
+export function spinner(size = 64, timeoutSec = 0, label = 'Loading...') {
+  const count = timeoutSec > 0
+    ? `<span class="spinner-count" data-countdown role="timer" aria-live="polite">${timeoutSec}s</span>`
+    : '';
+  return `<div class="spinner-wrap" role="status" aria-live="polite">
+    <span class="spinner-bear-wrap" style="width:${size}px;height:${size}px;">
+      <span class="ring" aria-hidden="true"></span>
+      <img src="assets/bear.svg" alt="" class="spinner-bear">
+    </span>
+    <span class="spinner-info">
+      <span class="spinner-label">${escapeHtml(label)}</span>
+      ${count}
+      <span class="spinner-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+    </span>
+  </div>`;
+}
+
+// Live countdown for a spinner already inserted in the DOM.
+// container: element containing .spinner-count. seconds: total to count down.
+// Returns the interval id (caller may clearInterval early).
+export function startSpinnerCountdown(container, seconds) {
+  const el = container && container.querySelector('.spinner-count');
+  if (!el) return null;
+  let left = seconds;
+  el.textContent = left + 's';
+  const id = setInterval(() => {
+    left -= 1;
+    if (left <= 0) { el.textContent = '0s'; clearInterval(id); return; }
+    el.textContent = left + 's';
+  }, 1000);
+  return id;
+}
+
+// ── legacy spinner variants (kept for swap.js / bridge.js) ──
 export function spinnerBear() {
   return `<div class="spinner-wrap" role="status" aria-label="Loading">
     <img src="assets/bear.svg" alt="loading" class="spinner-bear">

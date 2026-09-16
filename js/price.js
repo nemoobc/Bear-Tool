@@ -100,13 +100,38 @@ async function fetchCoinGeckoTokens(chainId, addresses) {
   return res.json();
 }
 
+// DexScreener chainId slugs per numeric chainId (search endpoint uses slugs)
+const DEXSCREENER_CHAINS = {
+  1: 'ethereum',
+  56: 'bsc',
+  137: 'polygon',
+  42161: 'arbitrum',
+  10: 'optimism',
+  8453: 'base'
+};
+
+// Fallback for tokens whose /tokens/v1 pair list is empty (new / not yet indexed):
+// search endpoint returns { pairs: [...] } — take first pair with priceUsd on same chain.
+async function fetchDexScreenerSearch(chainId, address) {
+  const url = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(address)}`;
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error('DexScreener search ' + res.status);
+  const data = await res.json();
+  const pairs = Array.isArray(data?.pairs) ? data.pairs : [];
+  const slug = DEXSCREENER_CHAINS[chainId];
+  const pair = pairs.find(p => p?.priceUsd && (!slug || p.chainId === slug));
+  return pair?.priceUsd ? parseFloat(pair.priceUsd) : null;
+}
+
 async function fetchDexScreener(chainId, address) {
   const url = `https://api.dexscreener.com/tokens/v1/${chainId}/${address}`;
   const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error('DexScreener ' + res.status);
   const data = await res.json();
   const pair = Array.isArray(data) ? data[0] : null;
-  return pair?.priceUsd ? parseFloat(pair.priceUsd) : null;
+  if (pair?.priceUsd) return parseFloat(pair.priceUsd);
+  // Empty/null pair list → try search endpoint before giving up honestly.
+  return fetchDexScreenerSearch(chainId, address);
 }
 
 // tokens: [{address, symbol, decimals}] — address null = native

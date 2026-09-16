@@ -127,7 +127,10 @@ export async function unlockWallet(password) {
   if (!accounts[idx]) throw new Error('Account not found.');
   let wallet;
   if (accounts[idx].path === 'imported') {
-    wallet = new ethers.Wallet(secret);
+    // secret can be a private key (0x...) or a seed phrase (12/24 words)
+    wallet = /^0x[a-fA-F0-9]{64}$/.test(secret)
+      ? new ethers.Wallet(secret)
+      : ethers.Wallet.fromPhrase(secret);
   } else {
     const hd = ethers.HDNodeWallet.fromPhrase(secret, undefined, "m/44'/60'/0'/0");
     wallet = hd.derivePath(String(idx));
