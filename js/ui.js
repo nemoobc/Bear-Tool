@@ -127,6 +127,18 @@ export function spinner(size = 64, timeoutSec = 0, label = 'Loading...') {
   </div>`;
 }
 
+// ── button loading state ──
+export function setBtnLoading(btn, loading) {
+  if (!btn) return;
+  if (loading) {
+    btn.classList.add('loading');
+    btn.disabled = true;
+  } else {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  }
+}
+
 // Live countdown for a spinner already inserted in the DOM.
 // container: element containing .spinner-count. seconds: total to count down.
 // Returns the interval id (caller may clearInterval early).
