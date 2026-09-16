@@ -14,10 +14,27 @@ const { ethers } = globalThis;
 
 export function bindSendEvents() {
   $('#btnSend').addEventListener('click', doSend);
-  $('#btnSendMax').addEventListener('click', () => {
-    const sel = $('#sendToken');
-    const t = get('tokens').find(x => (x.address || 'native') === sel.value);
-    if (t) $('#sendAmount').value = fmtAmount(t.balance, t.decimals);
+  // percentage buttons
+  document.querySelectorAll('.pct-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pct = parseInt(btn.dataset.pct);
+      const sel = $('#sendToken');
+      const t = get('tokens').find(x => (x.address || 'native') === sel.value);
+      if (!t) return;
+      const bal = parseFloat(fmtAmount(t.balance, t.decimals));
+      $('#sendAmount').value = (bal * pct / 100).toFixed(6);
+      document.querySelectorAll('.pct-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      updateSendPreview();
+    });
+  });
+  // gas speed buttons
+  document.querySelectorAll('.gas-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.gas-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      updateSendPreview();
+    });
   });
   $('#sendAmount').addEventListener('input', updateSendPreview);
   $('#sendTo').addEventListener('input', updateSendPreview);
@@ -135,7 +152,8 @@ export async function doSend() {
   const to = $('#sendTo').value.trim();
   const amt = $('#sendAmount').value;
   const tokenSel = $('#sendToken').value;
-  const gasSpeed = $('#sendGas').value;
+  const gasBtn = document.querySelector('.gas-btn.active');
+  const gasSpeed = gasBtn ? gasBtn.dataset.speed : 'normal';
   if (!wallet.isValidAddress(to)) return toast('Invalid destination address', 'error');
   if (!amt || parseFloat(amt) <= 0) return toast('Enter a valid amount', 'error');
 

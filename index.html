@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="css/cartoon.css">
 </head>
 <body>
+  <a href="#main" class="skip-link" id="skipLink">Skip to main content</a>
   <div id="app">
 
     <!-- ═══════════ INTRO / LOGO ANIMATION (5s, 5 phases, skippable) ═══════════ -->
@@ -118,13 +119,19 @@
             <div class="total" id="totalBalance">$0.00</div>
             <div class="sub" id="balanceSub">Not connected</div>
           </div>
+          <div class="quick-actions" id="quickActions">
+            <button class="quick-action-btn" data-view="send"><span class="qa-icon">✈️</span><span class="qa-label">Send</span></button>
+            <button class="quick-action-btn" data-view="swap"><span class="qa-icon">🔄</span><span class="qa-label">Swap</span></button>
+            <button class="quick-action-btn" data-view="bridge"><span class="qa-icon">🌉</span><span class="qa-label">Bridge</span></button>
+            <button class="quick-action-btn" data-view="deploy"><span class="qa-icon">🧙</span><span class="qa-label">Deploy</span></button>
+          </div>
           <div class="card">
             <div class="card-title">🐻 <span data-i18n="dashboard.assets">My Assets</span></div>
-            <div id="assetList"><p class="small text-center">Connect or create a wallet to see your assets.</p></div>
+            <div class="asset-grid" id="assetList"><p class="small text-center">Connect or create a wallet to see your assets.</p></div>
           </div>
           <div class="card">
             <div class="card-title">🖼️ <span data-i18n="dashboard.nfts">NFTs</span></div>
-            <div class="nft-grid" id="nftGrid"><p class="small text-center">No NFTs yet.</p></div>
+            <div class="nft-carousel" id="nftGrid"><p class="small text-center">No NFTs yet.</p></div>
           </div>
         </section>
 
@@ -132,32 +139,44 @@
         <section class="view" id="view-send">
           <div class="card">
             <div class="card-title">✈️ <span data-i18n="nav.send">Send</span></div>
-            <div class="field">
-              <label for="sendTo">To address</label>
-              <input class="input" id="sendTo" placeholder="0x...">
-            </div>
-            <div class="field">
-              <label for="sendToken">Token</label>
-              <select class="select" id="sendToken"></select>
-            </div>
-            <div class="field">
-              <label for="sendAmount">Amount</label>
-              <div class="flex gap-8">
-                <input class="input" id="sendAmount" type="number" placeholder="0.0">
-                <button class="btn btn-ghost" id="btnSendMax">MAX</button>
+            <div class="send-card">
+              <div class="field">
+                <label for="sendTo">To address</label>
+                <div class="send-address-wrap">
+                  <input class="input" id="sendTo" placeholder="0x... or ENS name" autocomplete="off" spellcheck="false">
+                  <button class="btn btn-ghost btn-sm" id="btnSendPaste" title="Paste">📋</button>
+                </div>
+                <div class="send-ens-status hidden" id="sendEnsStatus"></div>
               </div>
+              <div class="field">
+                <label for="sendToken">Token</label>
+                <div class="send-token-wrap">
+                  <select class="select" id="sendToken"></select>
+                  <span class="send-token-balance" id="sendTokenBalance"></span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="sendAmount">Amount</label>
+                <input class="input" id="sendAmount" type="number" placeholder="0.0" min="0" step="any">
+                <div class="send-pct-btns">
+                  <button class="pct-btn" data-pct="25">25%</button>
+                  <button class="pct-btn" data-pct="50">50%</button>
+                  <button class="pct-btn" data-pct="75">75%</button>
+                  <button class="pct-btn" data-pct="100">100%</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Gas speed</label>
+                <div class="gas-btns" id="sendGas">
+                  <button class="gas-btn" data-speed="slow">🐢 Slow</button>
+                  <button class="gas-btn active" data-speed="normal">🚶 Normal</button>
+                  <button class="gas-btn" data-speed="fast">🏃 Fast</button>
+                  <button class="gas-btn" data-speed="auto">🤖 Auto</button>
+                </div>
+              </div>
+              <div id="sendPreview" class="quote-box hidden"></div>
+              <button class="btn btn-primary btn-block btn-lg" id="btnSend">Send</button>
             </div>
-            <div class="field">
-              <label for="sendGas">Gas speed</label>
-              <select class="select" id="sendGas">
-                <option value="slow">🐢 Slow</option>
-                <option value="normal" selected>🚶 Normal</option>
-                <option value="fast">🏃 Fast</option>
-                <option value="auto">🤖 Auto</option>
-              </select>
-            </div>
-            <div id="sendPreview" class="warn-box hidden"></div>
-            <button class="btn btn-primary btn-block btn-lg" id="btnSend">Send</button>
           </div>
         </section>
 
@@ -165,35 +184,48 @@
         <section class="view" id="view-swap">
           <div class="card">
             <div class="card-title">🔄 <span data-i18n="nav.swap">Swap</span></div>
-            <div class="field">
-              <label for="swapFrom">From</label>
-              <div class="flex gap-8">
-                <select class="select" id="swapFrom"></select>
-                <input class="input" id="swapFromAmount" type="number" placeholder="0.0">
+            <div class="swap-card">
+              <div class="swap-field">
+                <label for="swapFrom">From</label>
+                <div class="swap-input-row">
+                  <select class="select swap-token-select" id="swapFrom"></select>
+                  <div class="swap-amount-wrap">
+                    <input class="input" id="swapFromAmount" type="number" placeholder="0.0" min="0" step="any">
+                    <button class="btn btn-ghost btn-sm swap-max-btn" id="btnSwapMax" title="Max amount">MAX</button>
+                  </div>
+                </div>
+                <div class="swap-balance" id="swapFromBalance">Balance: 0</div>
               </div>
-            </div>
-            <div class="text-center mt-8 mb-8">
-              <button class="btn btn-ghost" id="btnSwapFlip" title="Flip">⇅</button>
-            </div>
-            <div class="field">
-              <label for="swapTo">To</label>
-              <div class="flex gap-8">
-                <select class="select" id="swapTo"></select>
-                <input class="input" id="swapToAmount" type="number" placeholder="0.0" readonly>
+              <div class="swap-flip-wrap">
+                <button class="btn btn-ghost swap-flip-btn" id="btnSwapFlip" title="Flip tokens">⇅</button>
               </div>
+              <div class="swap-field">
+                <label for="swapTo">To</label>
+                <div class="swap-input-row">
+                  <select class="select swap-token-select" id="swapTo"></select>
+                  <input class="input" id="swapToAmount" type="number" placeholder="0.0" readonly>
+                </div>
+                <div class="swap-balance" id="swapToBalance">Balance: 0</div>
+              </div>
+              <div class="swap-extras">
+                <div class="field">
+                  <label for="swapSlippage">Slippage</label>
+                  <div class="slippage-btns" id="swapSlippage">
+                    <button class="slippage-btn" data-val="0.1">0.1%</button>
+                    <button class="slippage-btn active" data-val="0.5">0.5%</button>
+                    <button class="slippage-btn" data-val="1">1%</button>
+                    <button class="slippage-btn" data-val="3">3%</button>
+                    <button class="slippage-btn" data-val="5">5%</button>
+                  </div>
+                </div>
+              </div>
+              <div id="swapQuote" class="quote-box hidden"></div>
+              <button class="btn btn-primary btn-block btn-lg" id="btnSwap">Swap</button>
             </div>
-            <div class="field">
-              <label for="swapSlippage">Slippage</label>
-              <select class="select" id="swapSlippage">
-                <option value="0.1">0.1%</option>
-                <option value="0.5" selected>0.5%</option>
-                <option value="1">1%</option>
-                <option value="3">3%</option>
-                <option value="5">5%</option>
-              </select>
+            <div id="swapPending" class="swap-pending hidden">
+              <div class="spinner-wrap"><div class="spinner-bear-wrap"><div class="ring"></div><span class="spinner-bear">🐻</span></div></div>
+              <div class="spinner-info"><span class="spinner-label">Swapping tokens…</span><span class="spinner-count" id="swapPendingText"></span></div>
             </div>
-            <div id="swapQuote" class="warn-box hidden"></div>
-            <button class="btn btn-primary btn-block btn-lg" id="btnSwap">Swap</button>
           </div>
         </section>
 
@@ -201,24 +233,35 @@
         <section class="view" id="view-bridge">
           <div class="card">
             <div class="card-title">🌉 <span data-i18n="nav.bridge">Bridge</span></div>
-            <div class="field">
-              <label for="bridgeFromChain">From chain</label>
-              <select class="select" id="bridgeFromChain"></select>
+            <div class="bridge-card">
+              <div class="bridge-chains">
+                <div class="bridge-chain-field">
+                  <label for="bridgeFromChain">From</label>
+                  <select class="select bridge-chain-select" id="bridgeFromChain"></select>
+                </div>
+                <div class="bridge-chain-arrow">→</div>
+                <div class="bridge-chain-field">
+                  <label for="bridgeToChain">To</label>
+                  <select class="select bridge-chain-select" id="bridgeToChain"></select>
+                </div>
+              </div>
+              <div class="field">
+                <label for="bridgeToken">Token</label>
+                <select class="select" id="bridgeToken"></select>
+              </div>
+              <div class="field">
+                <label for="bridgeAmount">Amount</label>
+                <input class="input" id="bridgeAmount" type="number" placeholder="0.0" min="0" step="any">
+              </div>
+              <button class="btn btn-primary btn-block" id="btnBridgeQuote">Get Route</button>
+              <div id="bridgeRoute" class="bridge-route hidden"></div>
+              <button class="btn btn-success btn-block btn-lg hidden" id="btnBridgeExec">Execute Bridge</button>
+              <div id="bridgeQuote" class="quote-box hidden"></div>
+              <div id="bridgeStatus" class="bridge-status hidden">
+                <div class="bridge-progress"><div class="bridge-progress-fill" id="bridgeProgressFill"></div></div>
+                <div class="bridge-steps" id="bridgeSteps"></div>
+              </div>
             </div>
-            <div class="field">
-              <label for="bridgeToChain">To chain</label>
-              <select class="select" id="bridgeToChain"></select>
-            </div>
-            <div class="field">
-              <label for="bridgeToken">Token</label>
-              <select class="select" id="bridgeToken"></select>
-            </div>
-            <div class="field">
-              <label for="bridgeAmount">Amount</label>
-              <input class="input" id="bridgeAmount" type="number" placeholder="0.0">
-            </div>
-            <div id="bridgeQuote" class="warn-box hidden"></div>
-            <button class="btn btn-primary btn-block btn-lg" id="btnBridge">Get Route</button>
           </div>
         </section>
 
@@ -234,29 +277,38 @@
               ⚠️ <strong>EIP-7702</strong> lets your EOA borrow smart-contract code. A malicious delegation = total compromise.
               Only delegate to audited implementations. Mainnet requires RPC with type-4 support (Alchemy/QuickNode).
             </div>
-            <div class="field">
-              <label for="delegateAddr">Implementation contract address</label>
-              <input class="input" id="delegateAddr" placeholder="0x...">
-            </div>
-            <div class="field">
-              <label for="delegateChainId">Chain ID (default = current network)</label>
-              <input class="input" id="delegateChainId" type="number" placeholder="auto (current chain)">
-            </div>
-            <div class="field">
-              <label class="flex gap-8" style="align-items:center;cursor:pointer">
-                <input type="checkbox" id="delegateAnyChain" style="width:20px;height:20px">
-                <span>Allow ALL chains (chainId 0 — replay risk!)</span>
-              </label>
-            </div>
-            <div class="flex gap-8">
-              <button class="btn btn-primary" id="btnDelegate">Delegate</button>
-              <button class="btn btn-danger" id="btnRevoke">Revoke</button>
+            <div class="eip7702-wizard">
+              <div class="wizard-steps">
+                <div class="wizard-step active" data-step="1"><span class="step-num">1</span><span class="step-text">Enter address</span></div>
+                <div class="wizard-step" data-step="2"><span class="step-num">2</span><span class="step-text">Configure chain</span></div>
+                <div class="wizard-step" data-step="3"><span class="step-num">3</span><span class="step-text">Confirm & sign</span></div>
+              </div>
+              <div class="wizard-content">
+                <div class="field">
+                  <label for="delegateAddr">Implementation contract address</label>
+                  <input class="input" id="delegateAddr" placeholder="0x...">
+                </div>
+                <div class="field">
+                  <label for="delegateChainId">Chain ID (default = current network)</label>
+                  <input class="input" id="delegateChainId" type="number" placeholder="auto (current chain)">
+                </div>
+                <div class="field">
+                  <label class="flex gap-8" style="align-items:center;cursor:pointer">
+                    <input type="checkbox" id="delegateAnyChain" style="width:20px;height:20px">
+                    <span>Allow ALL chains (chainId 0 — replay risk!)</span>
+                  </label>
+                </div>
+                <div class="flex gap-8">
+                  <button class="btn btn-primary" id="btnDelegate">Delegate</button>
+                  <button class="btn btn-danger" id="btnRevoke">Revoke</button>
+                </div>
+              </div>
             </div>
           </div>
 
           <div class="card">
             <div class="card-title">🧩 <span data-i18n="eip7702.batch">Batch Call</span> (atomic)</div>
-            <div class="batch-list" id="batchList"></div>
+            <div class="batch-queue" id="batchList"></div>
             <button class="btn btn-ghost mb-8" id="btnBatchAdd">+ Add action</button>
             <button class="btn btn-primary btn-block" id="btnBatchExecute">Execute Batch</button>
           </div>
@@ -294,16 +346,18 @@
           <div class="card">
             <div class="card-title">🔐 <span data-i18n="approval.title">Approval Manager</span></div>
             <p class="small mb-8">Scan token approvals and revoke dangerous allowances. Unlimited approvals = risk.</p>
-            <div class="field">
-              <label for="approvalMode">Scan mode</label>
-              <select class="select" id="approvalMode">
-                <option value="popular">Popular tokens (19 built-in)</option>
-                <option value="custom">Custom token address</option>
-              </select>
-            </div>
-            <div class="field hidden" id="approvalCustomWrap">
-              <label for="approvalCustom">Token address</label>
-              <input class="input" id="approvalCustom" placeholder="0x...">
+            <div class="approval-controls">
+              <div class="field">
+                <label for="approvalMode">Scan mode</label>
+                <select class="select" id="approvalMode">
+                  <option value="popular">Popular tokens (19 built-in)</option>
+                  <option value="custom">Custom token address</option>
+                </select>
+              </div>
+              <div class="field hidden" id="approvalCustomWrap">
+                <label for="approvalCustom">Token address</label>
+                <input class="input" id="approvalCustom" placeholder="0x...">
+              </div>
             </div>
             <button class="btn btn-primary btn-block" id="btnApprovalScan">Scan Approvals</button>
             <div id="approvalList" class="mt-16"></div>
@@ -314,24 +368,32 @@
         <section class="view" id="view-deploy">
           <div class="card">
             <div class="card-title">🧙 <span data-i18n="nav.deploy">Wizard Deploy</span></div>
-            <div class="field">
-              <label for="deployStandard">Standard</label>
-              <select class="select" id="deployStandard">
-                <option value="erc20">ERC-20 (fungible token)</option>
-                <option value="erc721">ERC-721 (NFT)</option>
-                <option value="erc1155">ERC-1155 (multi-token)</option>
-              </select>
+            <div class="deploy-card">
+              <div class="field">
+                <label for="deployStandard">Standard</label>
+                <select class="select" id="deployStandard">
+                  <option value="erc20">ERC-20 (fungible token)</option>
+                  <option value="erc721">ERC-721 (NFT)</option>
+                  <option value="erc1155">ERC-1155 (multi-token)</option>
+                </select>
+              </div>
+              <div class="deploy-preview" id="deployPreview">
+                <div class="deploy-preview-card">
+                  <span class="deploy-preview-icon">📄</span>
+                  <span class="deploy-preview-text">ERC-20 Token Contract</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="deployName">Name</label>
+                <input class="input" id="deployName" placeholder="My Token">
+              </div>
+              <div class="field">
+                <label for="deploySymbol">Symbol</label>
+                <input class="input" id="deploySymbol" placeholder="MTK">
+              </div>
+              <div id="deployExtra"></div>
+              <button class="btn btn-primary btn-block btn-lg" id="btnDeploy">Deploy Contract</button>
             </div>
-            <div class="field">
-              <label for="deployName">Name</label>
-              <input class="input" id="deployName" placeholder="My Token">
-            </div>
-            <div class="field">
-              <label for="deploySymbol">Symbol</label>
-              <input class="input" id="deploySymbol" placeholder="MTK">
-            </div>
-            <div id="deployExtra"></div>
-            <button class="btn btn-primary btn-block btn-lg" id="btnDeploy">Deploy Contract</button>
           </div>
         </section>
 
@@ -339,7 +401,7 @@
         <section class="view" id="view-activity">
           <div class="card">
             <div class="card-title">📜 <span data-i18n="nav.activity">Activity</span></div>
-            <div id="activityList"><p class="small text-center">No transactions yet.</p></div>
+            <div class="activity-timeline" id="activityList"><p class="small text-center">No transactions yet.</p></div>
           </div>
         </section>
 
@@ -378,7 +440,16 @@
         </section>
 
       </main>
-    </div>
+    </div><!-- end .layout -->
+
+    <!-- ═══════════ MOBILE BOTTOM NAV (visible ≤768px) ═══════════ -->
+    <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation">
+      <button class="mobile-nav-item active" data-view="dashboard"><span class="icon">🏠</span>Home</button>
+      <button class="mobile-nav-item" data-view="send"><span class="icon">✈️</span>Send</button>
+      <button class="mobile-nav-item" data-view="swap"><span class="icon">🔄</span>Swap</button>
+      <button class="mobile-nav-item" data-view="bridge"><span class="icon">🌉</span>Bridge</button>
+      <button class="mobile-nav-item" data-view="settings"><span class="icon">⚙️</span>More</button>
+    </nav>
   </div>
 
   <!-- ═══════════ MODAL (generic) ═══════════ -->

@@ -44,16 +44,44 @@ export function bindSwapEvents() {
   $('#btnSwap').addEventListener('click', doSwap);
   $('#btnSwapFlip').addEventListener('click', flipSwap);
   $('#swapFromAmount').addEventListener('input', debounce(getSwapQuote, 600));
+  // slippage buttons
+  document.querySelectorAll('.slippage-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.slippage-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  // MAX button
+  const maxBtn = $('#btnSwapMax');
+  if (maxBtn) {
+    maxBtn.addEventListener('click', () => {
+      const sel = $('#swapFrom');
+      const t = get('tokens').find(x => (x.address || 'native') === sel.value);
+      if (t) $('#swapFromAmount').value = parseFloat(ethers.formatUnits(t.balance, t.decimals)).toFixed(6);
+    });
+  }
 }
 
 export function loadSwapTokens() {
   const from = $('#swapFrom'), to = $('#swapTo');
-  const opts = get('tokens').map(t =>
+  const tokens = get('tokens');
+  const opts = tokens.map(t =>
     `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)}</option>`
   ).join('');
   from.innerHTML = opts;
   to.innerHTML = opts;
   if (from.options.length > 1) to.selectedIndex = 1;
+  // update balance displays
+  const updateBalance = () => {
+    const ft = tokens.find(x => (x.address || 'native') === from.value);
+    const tt = tokens.find(x => (x.address || 'native') === to.value);
+    const fb = $('#swapFromBalance'), tb = $('#swapToBalance');
+    if (fb && ft) fb.textContent = `Balance: ${parseFloat(ethers.formatUnits(ft.balance, ft.decimals)).toFixed(4)}`;
+    if (tb && tt) tb.textContent = `Balance: ${parseFloat(ethers.formatUnits(tt.balance, tt.decimals)).toFixed(4)}`;
+  };
+  from.addEventListener('change', updateBalance);
+  to.addEventListener('change', updateBalance);
+  updateBalance();
 }
 
 export function flipSwap() {
@@ -112,7 +140,8 @@ export async function getSwapQuote() {
 
   const from = $('#swapFrom').value, to = $('#swapTo').value;
   const net = getNetworkById(get('networkId'));
-  const slippage = $('#swapSlippage').value;
+  const slippageBtn = document.querySelector('.slippage-btn.active');
+  const slippage = slippageBtn ? slippageBtn.dataset.val : '0.5';
   const quoteBox = $('#swapQuote');
   quoteBox.innerHTML = spinnerDots();
   quoteBox.classList.remove('hidden');

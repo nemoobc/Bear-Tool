@@ -61,15 +61,36 @@ function saveSettings() {
 
 // ── nav ──
 function bindNav() {
+  // sidebar nav
   $all('.nav-item').forEach(item => {
     item.addEventListener('click', () => {
-      $all('.nav-item').forEach(i => i.classList.remove('active'));
-      item.classList.add('active');
-      $all('.view').forEach(v => v.classList.remove('active'));
-      $('#view-' + item.dataset.view).classList.add('active');
-      refreshView(item.dataset.view);
+      switchView(item.dataset.view);
     });
   });
+  // mobile bottom nav
+  $all('.mobile-nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      switchView(item.dataset.view);
+    });
+  });
+  // dashboard quick actions
+  $all('.quick-action-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.view) switchView(btn.dataset.view);
+    });
+  });
+}
+
+function switchView(view) {
+  $all('.nav-item').forEach(i => i.classList.remove('active'));
+  $all('.mobile-nav-item').forEach(i => i.classList.remove('active'));
+  const sidebarItem = $(`.nav-item[data-view="${view}"]`);
+  const mobileItem = $(`.mobile-nav-item[data-view="${view}"]`);
+  if (sidebarItem) sidebarItem.classList.add('active');
+  if (mobileItem) mobileItem.classList.add('active');
+  $all('.view').forEach(v => v.classList.remove('active'));
+  $('#view-' + view).classList.add('active');
+  refreshView(view);
 }
 
 function refreshView(view) {
@@ -85,11 +106,7 @@ function refreshView(view) {
 // ── topbar ──
 function bindTopbar() {
   $('#btnHome').addEventListener('click', () => {
-    $all('.nav-item').forEach(i => i.classList.remove('active'));
-    $('.nav-item[data-view="dashboard"]').classList.add('active');
-    $all('.view').forEach(v => v.classList.remove('active'));
-    $('#view-dashboard').classList.add('active');
-    refreshView('dashboard');
+    switchView('dashboard');
   });
   $('#networkPill').addEventListener('click', showNetworkModal);
   $('#accountPill').addEventListener('click', showAccountModal);
