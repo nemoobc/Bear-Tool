@@ -749,5 +749,63 @@ function clearAllData() {
   };
 }
 
+// ── address book ──
+function loadAddressBook() {
+  try {
+    return JSON.parse(localStorage.getItem('bear.addressBook') || '[]');
+  } catch { return []; }
+}
+function saveAddressBook(list) {
+  localStorage.setItem('bear.addressBook', JSON.stringify(list));
+}
+function renderAddressBook() {
+  const list = loadAddressBook();
+  const el = $('#addressBookList');
+  if (!list.length) {
+    el.innerHTML = '<p class="small text-center">No saved addresses yet.</p>';
+    return;
+  }
+  el.innerHTML = list.map((item, i) => `
+    <div class="ab-item">
+      <div class="token-icon default">${(item.label || '?').slice(0, 2).toUpperCase()}</div>
+      <div class="ab-item-info">
+        <div class="ab-item-label">${escapeHtml(item.label)}</div>
+        <div class="ab-item-address">${escapeHtml(wallet.shortAddress(item.address))}</div>
+      </div>
+      <div class="ab-item-actions">
+        <button class="copy-btn" data-copy="${escapeHtml(item.address)}" title="Copy"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <button class="copy-btn ab-delete" data-idx="${i}" title="Delete"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+    </div>`).join('');
+  // Delete handlers
+  el.querySelectorAll('.ab-delete').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx);
+      const ab = loadAddressBook();
+      ab.splice(idx, 1);
+      saveAddressBook(ab);
+      renderAddressBook();
+      toast('Address removed', 'info');
+    });
+  });
+}
+function initAddressBook() {
+  renderAddressBook();
+  $('#btnAddAddress')?.addEventListener('click', () => {
+    const label = $('#abLabel').value.trim();
+    const address = $('#abAddress').value.trim();
+    if (!label || !address) return toast('Label and address required', 'error');
+    if (!wallet.isValidAddress(address)) return toast('Invalid address', 'error');
+    const ab = loadAddressBook();
+    ab.push({ label, address });
+    saveAddressBook(ab);
+    $('#abLabel').value = '';
+    $('#abAddress').value = '';
+    renderAddressBook();
+    toast('Address saved', 'success');
+  });
+}
+
 // init activity
 loadActivity();
+initAddressBook();

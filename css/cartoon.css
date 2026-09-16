@@ -1474,6 +1474,41 @@ body::before {
   box-shadow: 0 0 0 3px var(--berry-15);
 }
 
+/* ═══════════ ADDRESS BOOK ═══════════ */
+.address-book-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.ab-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-8) var(--sp-12);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  background: var(--cream);
+}
+.ab-item-info {
+  flex: 1;
+  min-width: 0;
+}
+.ab-item-label {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.ab-item-address {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ab-item-actions {
+  display: flex;
+  gap: var(--sp-4);
+}
+
 /* ═══════════ ACTIVITY TIMELINE ═══════════ */
 .activity-timeline {
   display: flex;
