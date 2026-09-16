@@ -1,0 +1,251 @@
+name: Bear Tool — Auto Test
+
+on:
+  push:
+    branches: [master, gh-pages]
+  pull_request:
+    branches: [master]
+
+jobs:
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate HTML structure
+        run: |
+          echo "=== HTML Structure Check ==="
+          # Check all sections have matching open/close tags
+          SECTIONS_OPEN=$(grep -c '<section' index.html)
+          SECTIONS_CLOSE=$(grep -c '</section>' index.html)
+          echo "Sections: $SECTIONS_OPEN open, $SECTIONS_CLOSE close"
+          [ "$SECTIONS_OPEN" -eq "$SECTIONS_CLOSE" ] || { echo "FAIL: Section tag mismatch"; exit 1; }
+
+          # Check all views have IDs
+          VIEWS=$(grep -oP 'id="view-\K[^"]+' index.html | sort)
+          echo "Views found: $(echo $VIEWS | tr '\n' ' ')"
+          VIEW_COUNT=$(echo "$VIEWS" | wc -l)
+          [ "$VIEW_COUNT" -eq 9 ] || { echo "FAIL: Expected 9 views, got $VIEW_COUNT"; exit 1; }
+
+          # Check nav items match views
+          NAV_VIEWS=$(grep -oP 'data-view="\K[^"]+' index.html | sort -u)
+          echo "Nav views: $(echo $NAV_VIEWS | tr '\n' ' ')"
+          
+          # Check all JS-referenced IDs exist in HTML
+          python3 -c "
+          import re
+          html = open('index.html').read()
+          html_ids = set(re.findall(r'id=\"([^\"]+)\"', html))
+          missing = []
+          import glob
+          for f in glob.glob('js/*.js'):
+              content = open(f).read()
+              refs = set(re.findall(r\"\\$\\(['\\\"]#([^'\\\"]+)['\\\"]\\)\", content))
+              for r in refs:
+                  if r not in html_ids:
+                      missing.append(f'{f}: #{r}')
+          if missing:
+              print('FAIL: Missing IDs in HTML:')
+              for m in missing: print(f'  {m}')
+              exit(1)
+          else:
+              print('All JS-referenced IDs found in HTML ✓')
+          "
+
+      - name: Validate CSS syntax
+        run: |
+          echo "=== CSS Check ==="
+          OPEN=$(grep -o '{' css/cartoon.css | wc -l)
+          CLOSE=$(grep -o '}' css/cartoon.css | wc -l)
+          echo "Braces: $OPEN open, $CLOSE close"
+          [ "$OPEN" -eq "$CLOSE" ] || { echo "FAIL: CSS brace mismatch"; exit 1; }
+          
+          # Check required classes exist
+          for cls in quick-actions swap-card bridge-card send-card mobile-nav skip-link; do
+            grep -q "$cls" css/cartoon.css || { echo "FAIL: Missing CSS class: $cls"; exit 1; }
+          done
+          echo "All required CSS classes found ✓"
+
+      - name: Validate JS syntax
+        run: |
+          echo "=== JS Syntax Check ==="
+          for f in js/*.js; do
+            node --check "$f" 2>&1 && echo "$f: OK" || { echo "FAIL: $f syntax error"; exit 1; }
+          done
+          echo "All JS files valid ✓"
+
+      - name: Check for secrets
+        run: |
+          echo "=== Secret Scan ==="
+          FOUND=0
+          for f in js/*.js css/*.css index.html; do
+            if grep -qPn '(sk-[a-zA-Z0-9]{20,}|api_key\s*=\s*["\x27][a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16})' "$f" 2>/dev/null; then
+              echo "FAIL: Possible secret in $f"
+              grep -Pn '(sk-[a-zA-Z0-9]{20,}|api_key\s*=\s*["\x27][a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16})' "$f"
+              FOUND=1
+            fi
+          done
+          [ "$FOUND" -eq 0 ] && echo "No secrets found ✓"
+
+  playwright-test:
+    name: Playwright E2E Test
+    runs-on: ubuntu-latest
+    needs: static-analysis
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright @playwright/test
+          npx playwright install chromium --with-deps
+
+      - name: Start local server
+        run: |
+          npx serve -l 3000 &
+          sleep 2
+          curl -s http://localhost:3000 > /dev/null && echo "Server running ✓" || echo "Server failed"
+
+      - name: Run Playwright tests
+        run: |
+          cat > bear-tool.spec.js << 'TESTEOF'
+          const { test, expect } = require('@playwright/test');
+
+          const BASE = 'http://localhost:3000';
+
+          test('page loads with correct title', async ({ page }) => {
+            await page.goto(BASE);
+            await expect(page).toHaveTitle(/Bear Tool/);
+          });
+
+          test('all 9 views exist in DOM', async ({ page }) => {
+            await page.goto(BASE);
+            const views = ['dashboard', 'send', 'swap', 'bridge', 'eip7702', 'approval', 'deploy', 'activity', 'settings'];
+            for (const v of views) {
+              await expect(page.locator(`#view-${v}`)).toBeAttached();
+            }
+          });
+
+          test('sidebar has 9 nav items', async ({ page }) => {
+            await page.goto(BASE);
+            const items = page.locator('.nav-item');
+            await expect(items).toHaveCount(9);
+          });
+
+          test('mobile nav has 5 items', async ({ page }) => {
+            await page.goto(BASE);
+            const items = page.locator('.mobile-nav-item');
+            await expect(items).toHaveCount(5);
+          });
+
+          test('topbar renders with network pill and account pill', async ({ page }) => {
+            await page.goto(BASE);
+            await expect(page.locator('#networkPill')).toBeVisible();
+            await expect(page.locator('#accountPill')).toBeVisible();
+          });
+
+          test('dashboard quick actions exist', async ({ page }) => {
+            await page.goto(BASE);
+            const btns = page.locator('.quick-action-btn');
+            await expect(btns).toHaveCount(4);
+          });
+
+          test('swap view has slippage buttons', async ({ page }) => {
+            await page.goto(BASE);
+            await page.locator('.nav-item[data-view="swap"]').click();
+            await expect(page.locator('#view-swap')).toHaveClass(/active/);
+            const btns = page.locator('.slippage-btn');
+            await expect(btns).toHaveCount(5);
+          });
+
+          test('send view has gas buttons', async ({ page }) => {
+            await page.goto(BASE);
+            await page.locator('.nav-item[data-view="send"]').click();
+            await expect(page.locator('#view-send')).toHaveClass(/active/);
+            const btns = page.locator('.gas-btn');
+            await expect(btns).toHaveCount(4);
+          });
+
+          test('bridge view has quote and exec buttons', async ({ page }) => {
+            await page.goto(BASE);
+            await page.locator('.nav-item[data-view="bridge"]').click();
+            await expect(page.locator('#btnBridgeQuote')).toBeVisible();
+            await expect(page.locator('#btnBridgeExec')).toBeHidden();
+          });
+
+          test('eip7702 wizard has 3 steps', async ({ page }) => {
+            await page.goto(BASE);
+            await page.locator('.nav-item[data-view="eip7702"]').click();
+            const steps = page.locator('.wizard-step');
+            await expect(steps).toHaveCount(3);
+          });
+
+          test('skip link exists and is hidden', async ({ page }) => {
+            await page.goto(BASE);
+            const link = page.locator('.skip-link');
+            await expect(link).toBeAttached();
+            // Should be off-screen (not visible)
+            await expect(link).not.toBeVisible();
+          });
+
+          test('intro animation exists', async ({ page }) => {
+            await page.goto(BASE);
+            await expect(page.locator('#intro')).toBeAttached();
+            await expect(page.locator('.intro-skip')).toBeVisible();
+          });
+
+          test('modal overlay exists', async ({ page }) => {
+            await page.goto(BASE);
+            await expect(page.locator('#modalOverlay')).toBeAttached();
+          });
+
+          test('toast container exists', async ({ page }) => {
+            await page.goto(BASE);
+            await expect(page.locator('#toast-wrap')).toBeAttached();
+          });
+
+          test('screenshot: dashboard', async ({ page }) => {
+            await page.goto(BASE);
+            await page.screenshot({ path: 'screenshots/dashboard.png', fullPage: true });
+          });
+
+          test('screenshot: swap view', async ({ page }) => {
+            await page.goto(BASE);
+            await page.locator('.nav-item[data-view="swap"]').click();
+            await page.screenshot({ path: 'screenshots/swap.png', fullPage: true });
+          });
+
+          test('screenshot: send view', async ({ page }) => {
+            await page.goto(BASE);
+            await page.locator('.nav-item[data-view="send"]').click();
+            await page.screenshot({ path: 'screenshots/send.png', fullPage: true });
+          });
+
+          test('screenshot: bridge view', async ({ page }) => {
+            await page.goto(BASE);
+            await page.locator('.nav-item[data-view="bridge"]').click();
+            await page.screenshot({ path: 'screenshots/bridge.png', fullPage: true });
+          });
+
+          test('screenshot: eip7702 view', async ({ page }) => {
+            await page.goto(BASE);
+            await page.locator('.nav-item[data-view="eip7702"]').click();
+            await page.screenshot({ path: 'screenshots/eip7702.png', fullPage: true });
+          });
+          TESTEOF
+
+          mkdir -p screenshots
+          npx playwright test bear-tool.spec.js --reporter=list 2>&1
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bear-tool-screenshots
+          path: screenshots/
+          retention-days: 7
