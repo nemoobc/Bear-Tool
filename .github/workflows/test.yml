@@ -128,17 +128,16 @@ jobs:
           // Helper: skip intro animation
           async function skipIntro(page) {
             await page.goto(BASE);
-            const skip = page.locator('#introSkip');
-            if (await skip.isVisible({ timeout: 3000 }).catch(() => false)) {
-              await skip.click();
-              await page.waitForTimeout(500);
-            }
-            // Also try clicking intro overlay
-            const intro = page.locator('#intro');
-            if (await intro.isVisible({ timeout: 1000 }).catch(() => false)) {
-              await intro.click();
-              await page.waitForTimeout(500);
-            }
+            // Force hide intro via JS (multiple methods)
+            await page.evaluate(() => {
+              const intro = document.getElementById('intro');
+              if (intro) {
+                intro.style.display = 'none';
+                intro.classList.add('hidden');
+                intro.remove();
+              }
+            });
+            await page.waitForTimeout(300);
           }
 
           test('page loads with correct title', async ({ page }) => {
