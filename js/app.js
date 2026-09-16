@@ -45,6 +45,35 @@ window.addEventListener('DOMContentLoaded', () => {
     console.error('[BearTool] unhandled rejection:', e.reason);
     toast('Unexpected error: ' + (e.reason?.message || 'unknown'), 'error');
   });
+
+  // ── offline detection ──
+  const offlineBanner = document.getElementById('offlineBanner');
+  const updateOnline = () => {
+    if (navigator.onLine) {
+      offlineBanner?.classList.add('hidden');
+    } else {
+      offlineBanner?.classList.remove('hidden');
+    }
+  };
+  window.addEventListener('online', updateOnline);
+  window.addEventListener('offline', updateOnline);
+  updateOnline();
+
+  // ── copy-to-clipboard ──
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    const text = btn.dataset.copy;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.classList.add('copied');
+      toast('Copied!', 'success');
+      setTimeout(() => btn.classList.remove('copied'), 1500);
+    } catch {
+      toast('Copy failed', 'error');
+    }
+  });
 });
 
 // ── settings ──

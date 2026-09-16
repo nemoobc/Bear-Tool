@@ -1325,6 +1325,61 @@ body::before {
 .activity-status.confirmed { background: var(--mint); }
 .activity-status.failed { background: var(--berry); color: var(--white); }
 
+/* ═══════════ OFFLINE BANNER ═══════════ */
+.offline-banner {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0;
+  right: 0;
+  background: var(--berry);
+  color: var(--white);
+  padding: var(--sp-8) var(--sp-16);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-weight: 700;
+  font-size: 0.85rem;
+  z-index: 99;
+  animation: slideDown 0.3s ease;
+}
+@keyframes slideDown {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
+}
+
+/* ═══════════ COPY BTN ═══════════ */
+.copy-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--ink-soft);
+  transition: color 0.15s;
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.copy-btn:hover { color: var(--ink); }
+.copy-btn.copied { color: var(--mint); }
+
+/* ═══════════ GAS ESTIMATE ═══════════ */
+.gas-estimate {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  background: var(--cream);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  font-size: 0.85rem;
+  margin-bottom: var(--sp-12);
+}
+.gas-est-label { color: var(--ink-soft); font-weight: 600; }
+.gas-est-value { font-weight: 700; }
+.gas-est-usd { color: var(--ink-soft); font-size: 0.8rem; }
+
 /* ═══════════ THEME TOGGLE ═══════════ */
 .theme-toggle {
   display: flex;
