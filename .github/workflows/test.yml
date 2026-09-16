@@ -327,6 +327,39 @@ jobs:
               expect(box.width).toBeGreaterThan(0);
             }
           });
+
+          // ── DARK MODE TESTS ──
+          test('settings has theme toggle buttons', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="settings"]').click();
+            const btns = page.locator('.theme-btn');
+            await expect(btns).toHaveCount(3);
+          });
+
+          test('dark mode toggle works', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="settings"]').click();
+            await page.locator('.theme-btn[data-theme="dark"]').click();
+            const hasDark = await page.evaluate(() => document.documentElement.classList.contains('theme-dark'));
+            expect(hasDark).toBeTruthy();
+          });
+
+          test('light mode toggle works', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="settings"]').click();
+            await page.locator('.theme-btn[data-theme="dark"]').click();
+            await page.locator('.theme-btn[data-theme="light"]').click();
+            const hasDark = await page.evaluate(() => document.documentElement.classList.contains('theme-dark'));
+            expect(hasDark).toBeFalsy();
+          });
+
+          test('screenshot: dark mode', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="settings"]').click();
+            await page.locator('.theme-btn[data-theme="dark"]').click();
+            await page.waitForTimeout(300);
+            await page.screenshot({ path: 'screenshots/dark-mode.png', fullPage: true });
+          });
           TESTEOF
 
           mkdir -p screenshots

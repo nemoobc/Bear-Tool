@@ -11,7 +11,7 @@ import { POPULAR_TOKENS, ERC20_ABI,
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
          fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue } from './ui.js';
-import { runIntro } from './theme.js';
+import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity } from './state.js';
 import { fetchAllPrices } from './price.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
@@ -36,6 +36,7 @@ window.addEventListener('DOMContentLoaded', () => {
   bindNav();
   bindTopbar();
   bindViews();
+  initTheme();
   runIntro(() => {
     if (wallet.getKeystore()) showUnlockModal();
     else showWelcomeModal();

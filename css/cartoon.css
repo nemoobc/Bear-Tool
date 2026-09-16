@@ -864,6 +864,38 @@ body::before {
   scroll-snap-align: start;
 }
 
+/* ═══════════ LOADING SKELETON ═══════════ */
+.skeleton {
+  background: linear-gradient(90deg, var(--cream) 25%, #f0e6d0 50%, var(--cream) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-line { height: 16px; margin-bottom: 8px; }
+.skeleton-line-short { width: 60%; }
+.skeleton-line-long { width: 90%; }
+.skeleton-circle { width: 40px; height: 40px; border-radius: 50%; }
+.skeleton-card {
+  background: var(--white);
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-16);
+  margin-bottom: var(--sp-12);
+}
+
+/* ═══════════ ENHANCED HOVER STATES ═══════════ */
+.card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 6px 6px 0 var(--ink);
+}
+
 /* ═══════════ WALLET STATES ═══════════ */
 .wallet-welcome {
   text-align: center;
@@ -1292,6 +1324,65 @@ body::before {
 .activity-status.pending { background: var(--honey); }
 .activity-status.confirmed { background: var(--mint); }
 .activity-status.failed { background: var(--berry); color: var(--white); }
+
+/* ═══════════ THEME TOGGLE ═══════════ */
+.theme-toggle {
+  display: flex;
+  gap: var(--sp-4);
+}
+.theme-btn {
+  flex: 1;
+  padding: 10px 8px;
+  min-height: var(--touch-min);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  background: var(--white);
+  font-family: var(--font);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.theme-btn:hover { background: var(--cream); }
+.theme-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); }
+
+/* ═══════════ DARK MODE ═══════════ */
+.theme-dark {
+  --cream: #1a1a2e;
+  --white: #16213e;
+  --ink: #e0e0e0;
+  --ink-soft: #a0a0b0;
+  --honey: #FFC93C;
+  --orange: #FF8A3D;
+  --sky: #4ECDC4;
+  --berry: #FF6B6B;
+  --grape: #9B5DE5;
+  --mint: #06D6A0;
+  --fur: #FFD97A;
+  --fur-dark: #F5A623;
+  --shadow: 4px 4px 0 rgba(0,0,0,0.3);
+  --shadow-sm: 2px 2px 0 rgba(0,0,0,0.3);
+}
+.theme-dark body::before {
+  background-image: radial-gradient(var(--ink-soft) 2px, transparent 2px);
+  opacity: 0.08;
+}
+.theme-dark .topbar { background: var(--white); }
+.theme-dark .sidebar { background: var(--white); }
+.theme-dark .card { background: var(--white); }
+.theme-dark .modal { background: var(--cream); }
+.theme-dark .input, .theme-dark .select, .theme-dark .textarea {
+  background: var(--cream);
+  color: var(--ink);
+}
+.theme-dark .btn-ghost { background: var(--cream); }
+.theme-dark .network-pill { background: var(--white); }
+.theme-dark .account-pill { background: var(--honey); }
+.theme-dark .mobile-nav { background: var(--white); }
+.theme-dark .toast { background: var(--white); }
+.theme-dark .warn-box { background: rgba(255,201,60,0.15); }
+.theme-dark .danger-box { background: rgba(255,107,107,0.15); }
+.theme-dark .simulated-banner { background: rgba(255,201,60,0.2); }
 
 /* ═══════════ MOBILE BOTTOM NAV ═══════════ */
 .mobile-nav {

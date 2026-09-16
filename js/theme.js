@@ -58,3 +58,34 @@ export function bearReaction(kind) {
   // kinds: happy, sad, thinking, warning — future: different SVG expressions
   return `<img src="assets/bear.svg" alt="Bear" style="width:64px;height:64px;display:block;margin:0 auto 8px;">`;
 }
+
+// ── DARK MODE ──
+const THEME_KEY = 'bt-theme';
+
+export function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY) || 'light';
+  applyTheme(saved);
+  // bind toggle buttons
+  document.querySelectorAll('.theme-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      applyTheme(btn.dataset.theme);
+      localStorage.setItem(THEME_KEY, btn.dataset.theme);
+    });
+    if (btn.dataset.theme === saved) {
+      btn.classList.add('active');
+    }
+  });
+}
+
+function applyTheme(mode) {
+  const root = document.documentElement;
+  root.classList.remove('theme-dark');
+  if (mode === 'dark') {
+    root.classList.add('theme-dark');
+  } else if (mode === 'auto') {
+    const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+    if (prefersDark) root.classList.add('theme-dark');
+  }
+}
