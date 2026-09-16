@@ -211,7 +211,10 @@ jobs:
             await skipIntro(page);
             const link = page.locator('.skip-link');
             await expect(link).toBeAttached();
-            await expect(link).not.toBeVisible();
+            // Skip link is off-screen (top: -100px), check it's not in viewport
+            const box = await link.boundingBox();
+            const isOffScreen = !box || box.y + box.height <= 0;
+            expect(isOffScreen).toBeTruthy();
           });
 
           test('intro animation exists', async ({ page }) => {
