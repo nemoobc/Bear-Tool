@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <!-- Bear Tool logo — bear head + honey pot + orbiting dots -->
+  <defs>
+    <radialGradient id="fur" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#FFD97A"/>
+      <stop offset="100%" stop-color="#F5A623"/>
+    </radialGradient>
+    <radialGradient id="belly" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFF3D6"/>
+      <stop offset="100%" stop-color="#FFE3A8"/>
+    </radialGradient>
+  </defs>
+
+  <!-- orbit ring -->
+  <circle cx="120" cy="120" r="104" fill="none" stroke="#4ECDC4" stroke-width="4" stroke-dasharray="8 10" opacity="0.6"/>
+
+  <!-- orbit dots -->
+  <circle cx="120" cy="16" r="9" fill="#FF6B6B" stroke="#2D2A32" stroke-width="3"/>
+  <circle cx="224" cy="120" r="9" fill="#06D6A0" stroke="#2D2A32" stroke-width="3"/>
+  <circle cx="120" cy="224" r="9" fill="#9B5DE5" stroke="#2D2A32" stroke-width="3"/>
+  <circle cx="16" cy="120" r="9" fill="#FFC93C" stroke="#2D2A32" stroke-width="3"/>
+
+  <!-- ears -->
+  <circle cx="82" cy="72" r="24" fill="url(#fur)" stroke="#2D2A32" stroke-width="5"/>
+  <circle cx="158" cy="72" r="24" fill="url(#fur)" stroke="#2D2A32" stroke-width="5"/>
+  <circle cx="82" cy="72" r="11" fill="#FF8A3D"/>
+  <circle cx="158" cy="72" r="11" fill="#FF8A3D"/>
+
+  <!-- head -->
+  <circle cx="120" cy="118" r="62" fill="url(#fur)" stroke="#2D2A32" stroke-width="6"/>
+
+  <!-- face patch -->
+  <ellipse cx="120" cy="134" rx="36" ry="28" fill="url(#belly)" stroke="#2D2A32" stroke-width="3"/>
+
+  <!-- eyes -->
+  <ellipse cx="101" cy="112" rx="9" ry="11" fill="#2D2A32"/>
+  <ellipse cx="139" cy="112" rx="9" ry="11" fill="#2D2A32"/>
+  <circle cx="105" cy="108" r="3.5" fill="#fff"/>
+  <circle cx="143" cy="108" r="3.5" fill="#fff"/>
+
+  <!-- nose -->
+  <ellipse cx="120" cy="126" rx="12" ry="8" fill="#2D2A32"/>
+  <!-- mouth -->
+  <path d="M110 134 Q120 146 130 134" stroke="#2D2A32" stroke-width="4" fill="none" stroke-linecap="round"/>
+
+  <!-- honey pot -->
+  <g transform="translate(120, 172)">
+    <rect x="-20" y="-12" width="40" height="26" rx="7" fill="#FFC93C" stroke="#2D2A32" stroke-width="4"/>
+    <rect x="-14" y="-18" width="28" height="9" rx="4" fill="#FF8A3D" stroke="#2D2A32" stroke-width="3"/>
+    <text x="0" y="5" text-anchor="middle" font-family="Fredoka, sans-serif" font-size="12" font-weight="700" fill="#2D2A32">BT</text>
+  </g>
+</svg>

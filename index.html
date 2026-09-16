@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bear Tool — The Cartoon Wallet That Means Business</title>
+  <meta name="description" content="Bear Tool — self-custody crypto wallet, all EVM networks mainnet & testnet, EIP-7702 suite. 100% client-side.">
+  <link rel="icon" href="assets/bear.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Baloo+2:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/cartoon.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ═══════════ INTRO / LOGO ANIMATION (5s) ═══════════ -->
+    <div id="intro" role="presentation" aria-label="Bear Tool intro animation">
+      <div class="intro-orbit">
+        <span class="intro-dot"></span><span class="intro-dot"></span>
+        <span class="intro-dot"></span><span class="intro-dot"></span>
+      </div>
+      <img src="assets/logo.svg" alt="Bear Tool logo" class="intro-logo" id="introLogo">
+      <div class="intro-title" id="introTitle" aria-hidden="true">BEAR TOOL</div>
+      <button class="intro-skip" id="introSkip">Skip intro ⏭</button>
+    </div>
+
+    <!-- ═══════════ TOPBAR ═══════════ -->
+    <header class="topbar">
+      <div class="topbar-logo" id="btnHome">
+        <img src="assets/bear.svg" alt="Bear Tool">
+        <h1>Bear Tool</h1>
+      </div>
+      <div class="topbar-right">
+        <div class="network-pill" id="networkPill" title="Switch network">
+          <span class="dot"></span>
+          <span class="label" id="networkName">Ethereum</span>
+          <span>▾</span>
+        </div>
+        <div class="account-pill" id="accountPill" title="Accounts">
+          <span>🐻</span>
+          <span class="label" id="accountShort">Not connected</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ═══════════ LAYOUT ═══════════ -->
+    <div class="layout">
+      <!-- sidebar -->
+      <nav class="sidebar" id="sidebar" aria-label="Main navigation">
+        <div class="nav-item active" data-view="dashboard"><span class="icon">🏠</span> Dashboard</div>
+        <div class="nav-item" data-view="send"><span class="icon">✈️</span> Send</div>
+        <div class="nav-item" data-view="swap"><span class="icon">🔄</span> Swap</div>
+        <div class="nav-item" data-view="bridge"><span class="icon">🌉</span> Bridge</div>
+        <div class="nav-item" data-view="eip7702"><span class="icon">⚡</span> EIP-7702</div>
+        <div class="nav-item" data-view="approval"><span class="icon">🔐</span> Approvals</div>
+        <div class="nav-item" data-view="deploy"><span class="icon">🧙</span> Deploy</div>
+        <div class="nav-item" data-view="activity"><span class="icon">📜</span> Activity</div>
+        <div class="nav-item" data-view="settings"><span class="icon">⚙️</span> Settings</div>
+      </nav>
+
+      <!-- main -->
+      <main class="main">
+
+        <!-- DASHBOARD -->
+        <section class="view active" id="view-dashboard">
+          <div class="balance-hero">
+            <div class="total" id="totalBalance">$0.00</div>
+            <div class="sub" id="balanceSub">Not connected</div>
+          </div>
+          <div class="card">
+            <div class="card-title">🐻 My Assets</div>
+            <div id="assetList"><p class="small text-center">Connect or create a wallet to see your assets.</p></div>
+          </div>
+          <div class="card">
+            <div class="card-title">🖼️ NFTs</div>
+            <div class="nft-grid" id="nftGrid"><p class="small text-center">No NFTs yet.</p></div>
+          </div>
+        </section>
+
+        <!-- SEND -->
+        <section class="view" id="view-send">
+          <div class="card">
+            <div class="card-title">✈️ Send</div>
+            <div class="field">
+              <label for="sendTo">To address</label>
+              <input class="input" id="sendTo" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="sendToken">Token</label>
+              <select class="select" id="sendToken"></select>
+            </div>
+            <div class="field">
+              <label for="sendAmount">Amount</label>
+              <div class="flex gap-8">
+                <input class="input" id="sendAmount" type="number" placeholder="0.0">
+                <button class="btn btn-ghost" id="btnSendMax">MAX</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="sendGas">Gas speed</label>
+              <select class="select" id="sendGas">
+                <option value="slow">🐢 Slow</option>
+                <option value="normal" selected>🚶 Normal</option>
+                <option value="fast">🏃 Fast</option>
+                <option value="auto">🤖 Auto</option>
+              </select>
+            </div>
+            <div id="sendPreview" class="warn-box hidden"></div>
+            <button class="btn btn-primary btn-block btn-lg" id="btnSend">Send</button>
+          </div>
+        </section>
+
+        <!-- SWAP -->
+        <section class="view" id="view-swap">
+          <div class="card">
+            <div class="card-title">🔄 Swap</div>
+            <div class="field">
+              <label for="swapFrom">From</label>
+              <div class="flex gap-8">
+                <select class="select" id="swapFrom"></select>
+                <input class="input" id="swapFromAmount" type="number" placeholder="0.0">
+              </div>
+            </div>
+            <div class="text-center mt-8 mb-8">
+              <button class="btn btn-ghost" id="btnSwapFlip" title="Flip">⇅</button>
+            </div>
+            <div class="field">
+              <label for="swapTo">To</label>
+              <div class="flex gap-8">
+                <select class="select" id="swapTo"></select>
+                <input class="input" id="swapToAmount" type="number" placeholder="0.0" readonly>
+              </div>
+            </div>
+            <div class="field">
+              <label for="swapSlippage">Slippage</label>
+              <select class="select" id="swapSlippage">
+                <option value="0.1">0.1%</option>
+                <option value="0.5" selected>0.5%</option>
+                <option value="1">1%</option>
+                <option value="3">3%</option>
+                <option value="5">5%</option>
+              </select>
+            </div>
+            <div id="swapQuote" class="warn-box hidden"></div>
+            <button class="btn btn-primary btn-block btn-lg" id="btnSwap">Get Quote</button>
+          </div>
+        </section>
+
+        <!-- BRIDGE -->
+        <section class="view" id="view-bridge">
+          <div class="card">
+            <div class="card-title">🌉 Bridge</div>
+            <div class="field">
+              <label for="bridgeFromChain">From chain</label>
+              <select class="select" id="bridgeFromChain"></select>
+            </div>
+            <div class="field">
+              <label for="bridgeToChain">To chain</label>
+              <select class="select" id="bridgeToChain"></select>
+            </div>
+            <div class="field">
+              <label for="bridgeToken">Token</label>
+              <select class="select" id="bridgeToken"></select>
+            </div>
+            <div class="field">
+              <label for="bridgeAmount">Amount</label>
+              <input class="input" id="bridgeAmount" type="number" placeholder="0.0">
+            </div>
+            <div id="bridgeQuote" class="warn-box hidden"></div>
+            <button class="btn btn-primary btn-block btn-lg" id="btnBridge">Get Route</button>
+          </div>
+        </section>
+
+        <!-- EIP-7702 -->
+        <section class="view" id="view-eip7702">
+          <div class="card">
+            <div class="card-title">⚡ EIP-7702 — Smart EOA</div>
+            <div id="delegateStatus" class="delegate-status eoa">
+              <span class="label">Status:</span>
+              <span id="delegateStatusText">Checking...</span>
+            </div>
+            <div class="danger-box">
+              ⚠️ <strong>EIP-7702</strong> lets your EOA borrow smart-contract code. A malicious delegation = total compromise.
+              Only delegate to audited implementations. Mainnet requires RPC with type-4 support (Alchemy/QuickNode).
+            </div>
+            <div class="field">
+              <label for="delegateAddr">Implementation contract address</label>
+              <input class="input" id="delegateAddr" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="delegateChainId">Chain ID (0 = all chains — replay risk!)</label>
+              <input class="input" id="delegateChainId" type="number" value="0">
+            </div>
+            <div class="flex gap-8">
+              <button class="btn btn-primary" id="btnDelegate">Delegate</button>
+              <button class="btn btn-danger" id="btnRevoke">Revoke</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">🧩 Batch Call (atomic)</div>
+            <div class="batch-list" id="batchList"></div>
+            <button class="btn btn-ghost mb-8" id="btnBatchAdd">+ Add action</button>
+            <button class="btn btn-primary btn-block" id="btnBatchExecute">Execute Batch</button>
+          </div>
+
+          <div class="card">
+            <div class="card-title">🛟 Rescue Atomic</div>
+            <p class="small mb-8">Rescue ETH/ERC20/ERC721 from a locked wallet. Deploy rescue contract once, target signs authorization, sponsor pays gas.</p>
+            <div class="field">
+              <label for="rescueTarget">Locked wallet address</label>
+              <input class="input" id="rescueTarget" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="rescueSafe">SAFE destination address</label>
+              <input class="input" id="rescueSafe" placeholder="0x...">
+            </div>
+            <button class="btn btn-secondary btn-block" id="btnRescue">Rescue Assets</button>
+          </div>
+
+          <div class="card">
+            <div class="card-title">🎁 Claim Airdrop</div>
+            <div class="field">
+              <label for="claimToken">Token address</label>
+              <input class="input" id="claimToken" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="claimSafe">Forward to SAFE</label>
+              <input class="input" id="claimSafe" placeholder="0x...">
+            </div>
+            <button class="btn btn-success btn-block" id="btnClaim">Claim + Forward</button>
+          </div>
+        </section>
+
+        <!-- APPROVAL -->
+        <section class="view" id="view-approval">
+          <div class="card">
+            <div class="card-title">🔐 Approval Manager</div>
+            <p class="small mb-8">Scan token approvals and revoke dangerous allowances. Unlimited approvals = risk.</p>
+            <div class="field">
+              <label for="approvalMode">Scan mode</label>
+              <select class="select" id="approvalMode">
+                <option value="popular">Popular tokens (19 built-in)</option>
+                <option value="custom">Custom token address</option>
+              </select>
+            </div>
+            <div class="field hidden" id="approvalCustomWrap">
+              <label for="approvalCustom">Token address</label>
+              <input class="input" id="approvalCustom" placeholder="0x...">
+            </div>
+            <button class="btn btn-primary btn-block" id="btnApprovalScan">Scan Approvals</button>
+            <div id="approvalList" class="mt-16"></div>
+          </div>
+        </section>
+
+        <!-- DEPLOY -->
+        <section class="view" id="view-deploy">
+          <div class="card">
+            <div class="card-title">🧙 Wizard Deploy</div>
+            <div class="field">
+              <label for="deployStandard">Standard</label>
+              <select class="select" id="deployStandard">
+                <option value="erc20">ERC-20 (fungible token)</option>
+                <option value="erc721">ERC-721 (NFT)</option>
+                <option value="erc1155">ERC-1155 (multi-token)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="deployName">Name</label>
+              <input class="input" id="deployName" placeholder="My Token">
+            </div>
+            <div class="field">
+              <label for="deploySymbol">Symbol</label>
+              <input class="input" id="deploySymbol" placeholder="MTK">
+            </div>
+            <div id="deployExtra"></div>
+            <button class="btn btn-primary btn-block btn-lg" id="btnDeploy">Deploy Contract</button>
+          </div>
+        </section>
+
+        <!-- ACTIVITY -->
+        <section class="view" id="view-activity">
+          <div class="card">
+            <div class="card-title">📜 Activity</div>
+            <div id="activityList"><p class="small text-center">No transactions yet.</p></div>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section class="view" id="view-settings">
+          <div class="card">
+            <div class="card-title">⚙️ Settings</div>
+            <div class="field">
+              <label for="setCurrency">Currency</label>
+              <select class="select" id="setCurrency">
+                <option value="usd">USD $</option>
+                <option value="eur">EUR €</option>
+                <option value="idr">IDR Rp</option>
+                <option value="cny">CNY ¥</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="setLang">Language</label>
+              <select class="select" id="setLang">
+                <option value="en">English</option>
+                <option value="id">Bahasa Indonesia</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="setAutoLock">Auto-lock (minutes)</label>
+              <input class="input" id="setAutoLock" type="number" value="5" min="1" max="60">
+            </div>
+            <div class="field">
+              <label for="setRpc">Custom RPC URL (optional)</label>
+              <input class="input" id="setRpc" placeholder="https://...">
+            </div>
+            <button class="btn btn-secondary" id="btnSaveSettings">Save Settings</button>
+            <hr class="mt-16 mb-16">
+            <button class="btn btn-danger" id="btnClearData">🗑️ Clear all data</button>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ═══════════ MODAL (generic) ═══════════ -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modalBox" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <!-- ═══════════ TOAST ═══════════ -->
+  <div id="toast-wrap" aria-live="polite"></div>
+
+  <!-- ethers.js v6 (pinned) -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+  <!-- app modules -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+// ═══════════════════════════════════════════════════════════════
+// Bear Tool — network.js
+// All EVM networks: mainnet + testnet + custom RPC support.
+// Original implementation — no copying.
+// ═══════════════════════════════════════════════════════════════
+
+export const NETWORKS = [
+  {
+    id: 'ethereum', name: 'Ethereum', chainId: 1, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: ['https://eth.llamarpc.com', 'https://rpc.ankr.com/eth', 'https://cloudflare-eth.com'],
+    explorer: 'https://etherscan.io',
+    icon: '⬡', color: '#627EEA'
+  },
+  {
+    id: 'bsc', name: 'BNB Smart Chain', chainId: 56, type: 'mainnet',
+    symbol: 'BNB', decimals: 18,
+    rpc: ['https://bsc-dataseed.binance.org', 'https://bsc-dataseed1.defibit.io'],
+    explorer: 'https://bscscan.com',
+    icon: '🟡', color: '#F0B90B'
+  },
+  {
+    id: 'polygon', name: 'Polygon', chainId: 137, type: 'mainnet',
+    symbol: 'POL', decimals: 18,
+    rpc: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'],
+    explorer: 'https://polygonscan.com',
+    icon: '🟣', color: '#8247E5'
+  },
+  {
+    id: 'arbitrum', name: 'Arbitrum One', chainId: 42161, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: ['https://arb1.arbitrum.io/rpc', 'https://rpc.ankr.com/arbitrum'],
+    explorer: 'https://arbiscan.io',
+    icon: '🔵', color: '#28A0F0'
+  },
+  {
+    id: 'optimism', name: 'OP Mainnet', chainId: 10, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: ['https://mainnet.optimism.io', 'https://rpc.ankr.com/optimism'],
+    explorer: 'https://optimistic.etherscan.io',
+    icon: '🔴', color: '#FF0420'
+  },
+  {
+    id: 'base', name: 'Base', chainId: 8453, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: ['https://mainnet.base.org', 'https://base.llamarpc.com'],
+    explorer: 'https://basescan.org',
+    icon: '🔷', color: '#0052FF'
+  },
+  {
+    id: 'sepolia', name: 'Sepolia', chainId: 11155111, type: 'testnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: ['https://rpc.sepolia.org', 'https://sepolia.gateway.tenderly.co'],
+    explorer: 'https://sepolia.etherscan.io',
+    icon: '🧪', color: '#06D6A0'
+  },
+  {
+    id: 'amoy', name: 'Polygon Amoy', chainId: 80002, type: 'testnet',
+    symbol: 'POL', decimals: 18,
+    rpc: ['https://rpc-amoy.polygon.technology'],
+    explorer: 'https://amoy.polygonscan.com',
+    icon: '🧪', color: '#06D6A0'
+  },
+  {
+    id: 'arbitrum-sepolia', name: 'Arbitrum Sepolia', chainId: 421614, type: 'testnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: ['https://sepolia-rollup.arbitrum.io/rpc'],
+    explorer: 'https://sepolia.arbiscan.io',
+    icon: '🧪', color: '#06D6A0'
+  },
+  {
+    id: 'op-sepolia', name: 'OP Sepolia', chainId: 11155420, type: 'testnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: ['https://sepolia.optimism.io'],
+    explorer: 'https://sepolia-optimistic.etherscan.io',
+    icon: '🧪', color: '#06D6A0'
+  },
+  {
+    id: 'base-sepolia', name: 'Base Sepolia', chainId: 84532, type: 'testnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: ['https://sepolia.base.org'],
+    explorer: 'https://sepolia.basescan.org',
+    icon: '🧪', color: '#06D6A0'
+  },
+  {
+    id: 'bsc-testnet', name: 'BSC Testnet', chainId: 97, type: 'testnet',
+    symbol: 'tBNB', decimals: 18,
+    rpc: ['https://data-seed-prebsc-1-s1.bnbchain.org:8545'],
+    explorer: 'https://testnet.bscscan.com',
+    icon: '🧪', color: '#06D6A0'
+  }
+];
+
+// popular ERC-20 tokens per network (address, symbol, decimals)
+export const POPULAR_TOKENS = {
+  1: [
+    { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6 },
+    { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', decimals: 6 },
+    { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', symbol: 'DAI', decimals: 18 },
+    { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', symbol: 'WETH', decimals: 18 },
+    { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', symbol: 'WBTC', decimals: 8 },
+    { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18 },
+    { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', symbol: 'UNI', decimals: 18 },
+    { address: '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9', symbol: 'AAVE', decimals: 18 },
+    { address: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', symbol: 'SHIB', decimals: 18 },
+    { address: '0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0', symbol: 'MATIC', decimals: 18 },
+    { address: '0xB50721BCf8d664c30412Cfbc6cf7a15145234ad1', symbol: 'ARB', decimals: 18 },
+    { address: '0x4200000000000000000000000000000000000042', symbol: 'OP', decimals: 18 },
+    { address: '0x6982508145454Ce325dDbE47a25d4ec3d2311933', symbol: 'PEPE', decimals: 18 },
+    { address: '0xD533a949740bb3306d119CC777fa900bA034cd52', symbol: 'CRV', decimals: 18 },
+    { address: '0xC011a73ee8576Fb46F5E1c5751cA3B9Fe0af2a6F', symbol: 'SNX', decimals: 18 },
+    { address: '0x6B3595068778DD592e39A122f4f5a5cF09C90fE2', symbol: 'SUSHI', decimals: 18 },
+    { address: '0xc00e94Cb662C3520282E6f5717214004A7f26888', symbol: 'COMP', decimals: 18 },
+    { address: '0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2', symbol: 'MKR', decimals: 18 },
+    { address: '0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32', symbol: 'LDO', decimals: 18 }
+  ],
+  11155111: [
+    { address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', symbol: 'USDC', decimals: 6 },
+    { address: '0x779877A7B0D9E8603169DdbD7836e478b4624789', symbol: 'LINK', decimals: 18 }
+  ],
+  137: [
+    { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', symbol: 'USDC', decimals: 6 },
+    { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', symbol: 'USDT', decimals: 6 }
+  ],
+  8453: [
+    { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6 }
+  ],
+  42161: [
+    { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 },
+    { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', decimals: 6 }
+  ],
+  10: [
+    { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', symbol: 'USDC', decimals: 6 }
+  ],
+  56: [
+    { address: '0x55d398326f99059fF775485246999027B3197955', symbol: 'USDT', decimals: 18 },
+    { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', symbol: 'USDC', decimals: 18 }
+  ]
+};
+
+// ERC-20 ABI (minimal)
+export const ERC20_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+  'function balanceOf(address) view returns (uint256)',
+  'function allowance(address,address) view returns (uint256)',
+  'function approve(address,uint256) returns (bool)',
+  'function transfer(address,uint256) returns (bool)',
+  'event Transfer(address indexed,address indexed,uint256)',
+  'event Approval(address indexed,address indexed,uint256)'
+];
+
+// ERC-721 ABI (minimal)
+export const ERC721_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function balanceOf(address) view returns (uint256)',
+  'function tokenOfOwnerByIndex(address,uint256) view returns (uint256)',
+  'function tokenURI(uint256) view returns (string)',
+  'function ownerOf(uint256) view returns (address)'
+];
+
+// ERC-1155 ABI (minimal)
+export const ERC1155_ABI = [
+  'function balanceOf(address,uint256) view returns (uint256)',
+  'function uri(uint256) view returns (string)'
+];
+
+// EIP-7702 constants
+export const EIP7702 = {
+  MAGIC: '0x05',
+  DELEGATION_PREFIX: '0xef0100',
+  ZERO_ADDRESS: '0x0000000000000000000000000000000000000000',
+  GAS_PER_AUTH: 25000
+};
+
+// custom networks stored in localStorage
+const CUSTOM_KEY = 'bear.customNetworks';
+
+export function getCustomNetworks() {
+  try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); }
+  catch { return []; }
+}
+
+export function addCustomNetwork(net) {
+  const list = getCustomNetworks();
+  list.push({ ...net, id: 'custom-' + Date.now(), type: net.type || 'mainnet', custom: true });
+  localStorage.setItem(CUSTOM_KEY, JSON.stringify(list));
+  return list;
+}
+
+export function removeCustomNetwork(id) {
+  const list = getCustomNetworks().filter(n => n.id !== id);
+  localStorage.setItem(CUSTOM_KEY, JSON.stringify(list));
+  return list;
+}
+
+export function getAllNetworks() {
+  return [...NETWORKS, ...getCustomNetworks()];
+}
+
+export function getNetwork(chainId) {
+  return getAllNetworks().find(n => n.chainId === Number(chainId));
+}
+
+export function getNetworkById(id) {
+  return getAllNetworks().find(n => n.id === id);
+}
+
+// try RPCs in order, return first working provider
+export async function getProvider(chainId) {
+  const net = getNetwork(chainId);
+  if (!net) throw new Error('Unknown network chainId ' + chainId);
+  for (const url of net.rpc) {
+    try {
+      const p = new ethers.JsonRpcProvider(url, Number(chainId), { staticNetwork: true });
+      await p.getBlockNumber();
+      return p;
+    } catch { /* try next */ }
+  }
+  throw new Error('All RPCs failed for ' + net.name);
+}
+
+// detect EIP-7702 delegation: returns delegate address or null
+export async function getDelegation(provider, address) {
+  const code = await provider.getCode(address);
+  if (!code || code === '0x') return null;
+  if (code.startsWith(EIP7702.DELEGATION_PREFIX)) {
+    // 0xef0100 (8 chars) + 40-hex address
+    return '0x' + code.slice(8);
+  }
+  return null; // regular contract or plain EOA
+}
