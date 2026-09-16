@@ -486,7 +486,7 @@ async function loadDashboard() {
   if (statusText) { statusText.textContent = wallet.shortAddress(addr); }
   if (copyBtn) { copyBtn.dataset.copy = addr; copyBtn.style.display = ''; }
 
-  $('#assetList').innerHTML = spinner(64, 0, 'Loading assets...');
+  $('#assetList').innerHTML = spinner(64, 'Loading assets...');
   try {
     const provider = await getProvider(net.chainId);
     set('provider', provider);
@@ -584,7 +584,7 @@ async function scanApprovals() {
   const mode = $('#approvalMode').value;
   const net = getNetworkById(get('networkId'));
   const list = $('#approvalList');
-  list.innerHTML = spinner(64, 0, 'Scanning approvals...');
+  list.innerHTML = spinner(64, 'Scanning approvals...');
   try {
     const provider = get('provider');
     const tokens = mode === 'popular'

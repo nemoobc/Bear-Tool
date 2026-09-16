@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — theme.js
-// Intro logo animation (exactly 5s, skippable, reduced-motion aware)
+// Intro logo animation (exactly 5s, reduced-motion aware)
 // + mascot helpers.
 // Original implementation — no copying.
 // ═══════════════════════════════════════════════════════════════
@@ -8,8 +8,6 @@
 export function runIntro(onDone) {
   const intro = document.getElementById('intro');
   const title = document.getElementById('introTitle');
-  const skip = document.getElementById('introSkip');
-  const counter = document.getElementById('introCounter');
 
   let finished = false;
   const finish = (instant) => {
@@ -31,7 +29,6 @@ export function runIntro(onDone) {
 
   // skip on click anywhere on intro
   intro.addEventListener('click', () => finish(true));
-  skip.addEventListener('click', (e) => { e.stopPropagation(); finish(true); });
 
   // letter-by-letter title (phase 3: 2-3s)
   const text = 'BEAR TOOL';
@@ -41,12 +38,6 @@ export function runIntro(onDone) {
     span.textContent = ch === ' ' ? '\u00A0' : ch;
     span.style.animationDelay = (2 + i * 0.08) + 's';
     title.appendChild(span);
-  });
-
-  // countdown 3 → 2 → 1 (phase 4: 3-4.6s)
-  const counts = [['3', 3000], ['2', 4000], ['1', 4600]];
-  counts.forEach(([val, ms]) => {
-    setTimeout(() => { if (!finished && counter) counter.textContent = val; }, ms);
   });
 
   // exact 5s timer → fade out

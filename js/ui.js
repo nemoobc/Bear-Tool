@@ -107,13 +107,9 @@ if (typeof document !== 'undefined' && document.addEventListener) {
 }
 
 // ── spinner (unified helper) ──
-// spinner(size, timeoutSec, label) → HTML string.
-// size: wrap diameter in px (default 64). timeoutSec: pass >0 and call
-// startSpinnerCountdown() to show a live countdown. label: status text.
-export function spinner(size = 64, timeoutSec = 0, label = 'Loading...') {
-  const count = timeoutSec > 0
-    ? `<span class="spinner-count" data-countdown role="timer" aria-live="polite">${timeoutSec}s</span>`
-    : '';
+// spinner(size, label) → HTML string.
+// size: wrap diameter in px (default 64). label: status text.
+export function spinner(size = 64, label = 'Loading...') {
   return `<div class="spinner-wrap" role="status" aria-live="polite">
     <span class="spinner-bear-wrap" style="width:${size}px;height:${size}px;">
       <span class="ring" aria-hidden="true"></span>
@@ -121,7 +117,6 @@ export function spinner(size = 64, timeoutSec = 0, label = 'Loading...') {
     </span>
     <span class="spinner-info">
       <span class="spinner-label">${escapeHtml(label)}</span>
-      ${count}
       <span class="spinner-dots" aria-hidden="true"><span></span><span></span><span></span></span>
     </span>
   </div>`;

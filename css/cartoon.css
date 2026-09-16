@@ -245,21 +245,6 @@ body::before {
 }
 @keyframes intro-letter { to { opacity: 1; transform: translateY(0); } from { transform: translateY(-20px); } }
 
-/* F4 (3-4s): counter countdown number */
-.intro-counter {
-  margin-top: 8px;
-  font-size: 2.2rem;
-  font-weight: 800;
-  color: var(--orange);
-  text-shadow: 3px 3px 0 var(--ink);
-  opacity: 0;
-  animation: intro-counter-in 0.3s cubic-bezier(.34,1.56,.64,1) 3s both;
-}
-@keyframes intro-counter-in {
-  from { transform: scale(0) rotate(-10deg); opacity: 0; }
-  to   { transform: scale(1) rotate(0); opacity: 1; }
-}
-
 /* F4 (3-4s): progress bar appears at 60%, fills to 100% by 5s */
 .intro-progress {
   position: fixed;
@@ -295,29 +280,7 @@ body::before {
   100% { transform: scale(1.6); opacity: 0; }
 }
 
-/* Skip: ≥44px touch target, prominent, top-right, always visible */
-.intro-skip {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 10px 20px;
-  font-family: var(--font);
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--ink);
-  background: var(--white);
-  border: var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  z-index: 10001;
-  transition: all 0.12s;
-}
-.intro-skip:hover { background: var(--honey); transform: translateY(-2px); box-shadow: var(--shadow); }
-
-/* ═══════════ LOADING SPINNER (bear idle + orbit ring + dots + countdown) ═══════════ */
+/* ═══════════ LOADING SPINNER (bear idle + orbit ring + dots) ═══════════ */
 .spinner-wrap {
   display: flex;
   align-items: center;
