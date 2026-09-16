@@ -366,12 +366,17 @@ jobs:
       - name: Run mobile tests (iPhone 14 viewport)
         run: |
           cat > mobile.spec.cjs << 'TESTEOF'
-          const { test, expect, devices } = require('@playwright/test');
+          const { test, expect } = require('@playwright/test');
 
-          const iPhone = devices['iPhone 14'];
           const BASE = 'http://localhost:3001';
 
-          test.use({ ...iPhone });
+          // Use Chromium with iPhone 14 dimensions
+          test.use({
+            viewport: { width: 390, height: 844 },
+            userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+            isMobile: true,
+            hasTouch: true,
+          });
 
           async function skipIntro(page) {
             await page.goto(BASE);
