@@ -470,7 +470,19 @@ body::before {
   border-color: var(--ink);
   box-shadow: var(--shadow-sm);
 }
-.nav-item .icon { font-size: 1.2rem; }
+.nav-item .icon {
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.nav-item .icon svg {
+  width: 20px;
+  height: 20px;
+}
 
 /* main content */
 .main { min-width: 0; }
@@ -494,6 +506,11 @@ body::before {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.card-title svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .btn {
@@ -800,7 +817,16 @@ body::before {
 }
 .quick-action-btn:hover { transform: translateY(-3px); box-shadow: var(--shadow); background: var(--cream); }
 .quick-action-btn:active { transform: translateY(1px); box-shadow: none; }
-.qa-icon { font-size: 1.6rem; }
+.qa-icon {
+  font-size: 1.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qa-icon svg {
+  width: 28px;
+  height: 28px;
+}
 .qa-label { color: var(--ink); }
 
 /* ═══════════ DASHBOARD — ASSET GRID ═══════════ */
@@ -1300,7 +1326,16 @@ body::before {
   font-family: var(--font);
   transition: all 0.15s;
 }
-.mobile-nav-item .icon { font-size: 1.4rem; }
+.mobile-nav-item .icon {
+  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mobile-nav-item .icon svg {
+  width: 22px;
+  height: 22px;
+}
 .mobile-nav-item:hover { background: var(--cream); }
 .mobile-nav-item.active { color: var(--ink); background: var(--honey); font-weight: 700; }
 
