@@ -553,7 +553,7 @@ jobs:
           path: screenshots/
 
   onchain-fork:
-    name: Onchain Fork Test (Mainnet + Testnet)
+    name: Onchain Fork Test (All Networks)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -572,20 +572,34 @@ jobs:
           sleep 3
           curl -sf http://localhost:8080/ > /dev/null || { echo "Server failed"; exit 1; }
 
-      - name: Run onchain fork tests (Ethereum Mainnet)
+      - name: Run onchain fork tests (All Networks)
         run: |
-          cat > onchain-mainnet.spec.cjs << 'TESTEOF'
+          cat > onchain-all.spec.cjs << 'TESTEOF'
           const { test, expect } = require('@playwright/test');
 
-          // Use multiple RPC fallbacks
-          const RPCS = ['https://eth.llamarpc.com', 'https://eth.drpc.org', 'https://cloudflare-eth.com'];
-          
-          async function rpc(method, params = []) {
-            for (const rpc of RPCS) {
+          const NETWORKS = [
+            // Mainnets
+            { name: 'Ethereum',     chainId: 1,     rpcs: ['https://eth.llamarpc.com', 'https://eth.drpc.org', 'https://cloudflare-eth.com'], minBlock: 19000000 },
+            { name: 'BSC',          chainId: 56,    rpcs: ['https://bsc-dataseed.binance.org', 'https://bsc-dataseed1.defibit.io'], minBlock: 30000000 },
+            { name: 'Polygon',      chainId: 137,   rpcs: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'], minBlock: 50000000 },
+            { name: 'Arbitrum One', chainId: 42161, rpcs: ['https://arb1.arbitrum.io/rpc', 'https://rpc.ankr.com/arbitrum'], minBlock: 200000000 },
+            { name: 'OP Mainnet',   chainId: 10,    rpcs: ['https://mainnet.optimism.io', 'https://rpc.ankr.com/optimism'], minBlock: 100000000 },
+            { name: 'Base',         chainId: 8453,  rpcs: ['https://mainnet.base.org', 'https://base.llamarpc.com'], minBlock: 10000000 },
+            // Testnets
+            { name: 'Sepolia',         chainId: 11155111, rpcs: ['https://rpc.sepolia.org', 'https://sepolia.gateway.tenderly.co'], minBlock: 5000000 },
+            { name: 'Polygon Amoy',    chainId: 80002,    rpcs: ['https://rpc-amoy.polygon.technology'], minBlock: 1000000 },
+            { name: 'Arbitrum Sepolia', chainId: 421614,   rpcs: ['https://sepolia-rollup.arbitrum.io/rpc'], minBlock: 1000000 },
+            { name: 'OP Sepolia',      chainId: 11155420, rpcs: ['https://sepolia.optimism.io'], minBlock: 1000000 },
+            { name: 'Base Sepolia',    chainId: 84532,    rpcs: ['https://sepolia.base.org'], minBlock: 1000000 },
+            { name: 'BSC Testnet',     chainId: 97,       rpcs: ['https://data-seed-prebsc-1-s1.bnbchain.org:8545'], minBlock: 30000000 },
+          ];
+
+          async function rpc(rpcs, method, params = []) {
+            for (const url of rpcs) {
               try {
                 const controller = new AbortController();
-                const t = setTimeout(() => controller.abort(), 8000);
-                const r = await fetch(rpc, {
+                const t = setTimeout(() => controller.abort(), 10000);
+                const r = await fetch(url, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
@@ -593,85 +607,36 @@ jobs:
                 });
                 clearTimeout(t);
                 const data = await r.json();
-                if (data.result) return data;
+                if (data.result !== undefined) return data;
               } catch (e) { continue; }
             }
-            throw new Error('All RPCs failed');
+            throw new Error('All RPCs failed for ' + method);
           }
 
-          test.describe('Onchain Fork — Ethereum Mainnet', () => {
-            test.describe.configure({ timeout: 45000 });
-            test('RPC mainnet responds (blockNumber)', async () => {
-              const res = await rpc('eth_blockNumber');
-              expect(res.result).toBeTruthy();
-              const blockNum = parseInt(res.result, 16);
-              expect(blockNum).toBeGreaterThan(19000000);
+          for (const net of NETWORKS) {
+            test.describe(`Onchain Fork — ${net.name} (${net.chainId})`, () => {
+              test.describe.configure({ timeout: 60000 });
+
+              test(`${net.name}: RPC responds (blockNumber)`, async () => {
+                const res = await rpc(net.rpcs, 'eth_blockNumber');
+                expect(res.result).toBeTruthy();
+                const blockNum = parseInt(res.result, 16);
+                expect(blockNum).toBeGreaterThan(net.minBlock);
+              });
+
+              test(`${net.name}: correct chainId`, async () => {
+                const res = await rpc(net.rpcs, 'eth_chainId');
+                const chainId = parseInt(res.result, 16);
+                expect(chainId).toBe(net.chainId);
+              });
+
+              test(`${net.name}: gas price available`, async () => {
+                const res = await rpc(net.rpcs, 'eth_gasPrice');
+                const gas = parseInt(res.result, 16);
+                expect(gas).toBeGreaterThan(0);
+              });
             });
-
-            test('RPC mainnet returns chainId = 1', async () => {
-              const res = await rpc('eth_chainId');
-              const chainId = parseInt(res.result, 16);
-              expect(chainId).toBe(1);
-            });
-
-            test('Gas price available on mainnet', async () => {
-              const res = await rpc('eth_gasPrice');
-              const gas = parseInt(res.result, 16);
-              expect(gas).toBeGreaterThan(0);
-            });
-          });
-          TESTEOF
-
-          npx playwright test onchain-mainnet.spec.cjs --reporter=list 2>&1
-
-      - name: Run onchain fork tests (Sepolia Testnet)
-        run: |
-          cat > onchain-sepolia.spec.cjs << 'TESTEOF'
-          const { test, expect } = require('@playwright/test');
-
-          const RPCS = ['https://rpc.sepolia.org', 'https://ethereum-sepolia-rpc.publicnode.com'];
-          
-          async function rpc(method, params = []) {
-            for (const rpc of RPCS) {
-              try {
-                const controller = new AbortController();
-                const t = setTimeout(() => controller.abort(), 8000);
-                const r = await fetch(rpc, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-                  signal: controller.signal
-                });
-                clearTimeout(t);
-                const data = await r.json();
-                if (data.result) return data;
-              } catch (e) { continue; }
-            }
-            throw new Error('All RPCs failed');
           }
-
-          test.describe('Onchain Fork — Sepolia Testnet', () => {
-            test.describe.configure({ timeout: 45000 });
-            test('RPC sepolia responds (blockNumber)', async () => {
-              const res = await rpc('eth_blockNumber');
-              expect(res.result).toBeTruthy();
-              const blockNum = parseInt(res.result, 16);
-              expect(blockNum).toBeGreaterThan(5000000);
-            });
-
-            test('RPC sepolia returns chainId = 11155111', async () => {
-              const res = await rpc('eth_chainId');
-              const chainId = parseInt(res.result, 16);
-              expect(chainId).toBe(11155111);
-            });
-
-            test('Gas price available on sepolia', async () => {
-              const res = await rpc('eth_gasPrice');
-              const gas = parseInt(res.result, 16);
-              expect(gas).toBeGreaterThan(0);
-            });
-          });
           TESTEOF
 
-          npx playwright test onchain-sepolia.spec.cjs --reporter=list 2>&1
-          retention-days: 7
+          npx playwright test onchain-all.spec.cjs --reporter=list 2>&1
