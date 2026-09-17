@@ -26,7 +26,7 @@ jobs:
           VIEWS=$(grep -oP 'id="view-\K[^"]+' index.html | sort)
           echo "Views found: $(echo $VIEWS | tr '\n' ' ')"
           VIEW_COUNT=$(echo "$VIEWS" | wc -l)
-          [ "$VIEW_COUNT" -eq 9 ] || { echo "FAIL: Expected 9 views, got $VIEW_COUNT"; exit 1; }
+          [ "$VIEW_COUNT" -eq 10 ] || { echo "FAIL: Expected 10 views, got $VIEW_COUNT"; exit 1; }
 
           # Check nav items match views
           NAV_VIEWS=$(grep -oP 'data-view="\K[^"]+' index.html | sort -u)
