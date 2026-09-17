@@ -119,16 +119,6 @@ export function bindSwapEvents() {
       btn.classList.add('active');
     });
   });
-  // swap tabs
-  document.querySelectorAll('.swap-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.swap-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.swap-tab-content').forEach(c => c.classList.remove('active'));
-      tab.classList.add('active');
-      const target = tab.dataset.tab;
-      document.getElementById(target === 'swap' ? 'swapTabSwap' : 'swapTabBridge').classList.add('active');
-    });
-  });
   // MAX button
   const maxBtn = $('#btnSwapMax');
   if (maxBtn) {

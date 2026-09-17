@@ -148,7 +148,7 @@ jobs:
 
           test('all 9 views exist in DOM', async ({ page }) => {
             await skipIntro(page);
-            const views = ['dashboard', 'send', 'receive', 'swap', 'eip7702', 'approval', 'deploy', 'activity', 'settings'];
+            const views = ['dashboard', 'send', 'swap', 'bridge', 'nft', 'eip7702', 'approval', 'deploy', 'activity', 'settings'];
             for (const v of views) {
               await expect(page.locator(`#view-${v}`)).toBeAttached();
             }
@@ -194,11 +194,11 @@ jobs:
             await expect(btns).toHaveCount(4);
           });
 
-          test('swap view has tabs (Swap & Bridge)', async ({ page }) => {
+          test('swap view has no tabs (standalone)', async ({ page }) => {
             await skipIntro(page);
             await page.locator('.nav-item[data-view="swap"]').click();
             const tabs = page.locator('.swap-tab');
-            await expect(tabs).toHaveCount(2);
+            await expect(tabs).toHaveCount(0);
             await expect(page.locator('#btnSwap')).toBeVisible();
           });
 
@@ -251,10 +251,18 @@ jobs:
             await page.screenshot({ path: 'screenshots/send.png', fullPage: true });
           });
 
-          test('screenshot: swap & bridge tabs', async ({ page }) => {
+          test('screenshot: swap view', async ({ page }) => {
             await skipIntro(page);
             await page.locator('.nav-item[data-view="swap"]').click();
-            await page.screenshot({ path: 'screenshots/swap-tabs.png', fullPage: true });
+            await page.waitForTimeout(300);
+            await page.screenshot({ path: 'screenshots/swap.png', fullPage: true });
+          });
+
+          test('screenshot: bridge view', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="bridge"]').click();
+            await page.waitForTimeout(300);
+            await page.screenshot({ path: 'screenshots/bridge.png', fullPage: true });
           });
 
           test('screenshot: eip7702 view', async ({ page }) => {

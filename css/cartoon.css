@@ -1042,35 +1042,7 @@ body::before {
 }
 .receive-warning svg { stroke: var(--berry); flex-shrink: 0; margin-top: 2px; }
 
-/* ═══════════ SWAP TABS ═══════════ */
-.swap-tabs {
-  display: flex;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-16);
-  background: var(--cream);
-  border: 2px solid var(--ink);
-  border-radius: 12px;
-  padding: var(--sp-4);
-}
-.swap-tab {
-  flex: 1;
-  padding: var(--sp-8) var(--sp-12);
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  font-family: var(--font);
-  font-weight: 700;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.swap-tab:hover { background: var(--white); }
-.swap-tab.active {
-  background: var(--berry);
-  color: var(--white);
-}
-.swap-tab-content { display: none; }
-.swap-tab-content.active { display: block; }
+/* ═══════════ SWAP ═══════════ */
 
 /* ═══════════ SWAP CARD ═══════════ */
 .swap-card { display: flex; flex-direction: column; gap: var(--sp-12); }
@@ -1955,3 +1927,13 @@ body::before {
 }
 .nft-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
 .nft-card .meta { padding: 8px 10px; font-weight: 700; font-size: 0.85rem; }
+
+/* ═══════════ EMPTY STATE ═══════════ */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--ink-soft);
+}
+.empty-state svg { margin-bottom: 16px; opacity: 0.4; }
+.empty-state p { margin: 8px 0; font-weight: 700; }
+.empty-state .sub { font-weight: 400; font-size: 0.85rem; opacity: 0.7; }

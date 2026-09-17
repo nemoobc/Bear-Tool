@@ -132,23 +132,10 @@ function refreshView(view) {
   if (!get('unlocked')) return;
   if (view === 'dashboard') loadDashboard();
   if (view === 'send') loadSendTokens();
-  if (view === 'receive') loadReceiveView();
   if (view === 'swap') loadSwapTokens();
+  if (view === 'bridge') loadBridgeChains();
   if (view === 'eip7702') loadEip702();
   if (view === 'activity') renderActivity();
-}
-
-function loadReceiveView() {
-  const addr = get('address');
-  const net = getNetworkById(get('networkId'));
-  const el = document.getElementById('receiveAddress');
-  const copyBtn = document.getElementById('receiveCopyBtn');
-  const netName = document.getElementById('receiveNetName');
-  const netName2 = document.getElementById('receiveNetworkName2');
-  if (el) el.textContent = addr || 'Connect wallet to see address';
-  if (copyBtn) copyBtn.dataset.copy = addr || '';
-  if (netName) netName.textContent = net?.name || 'Ethereum';
-  if (netName2) netName2.textContent = net?.name || 'Ethereum';
 }
 
 // ── topbar ──
@@ -545,19 +532,38 @@ function renderAssets(tokens) {
   }
   // Show search if > 3 tokens
   $('#assetSearch').style.display = tokens.length > 3 ? '' : 'none';
-  // Token SVG logos
+  // Token SVG logos — unique IDs per symbol to avoid gradient clash
   const tokenLogos = {
-    eth: `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="ethG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#ethG)"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="14" font-weight="800" font-family="Arial">Ξ</text></svg>`,
-    usdc: `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="usdcG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#usdcG)"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">$</text></svg>`,
-    wbtc: `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="wbtcG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#wbtcG)"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">B</text></svg>`,
-    default: `<svg viewBox="0 0 32 32" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#FFD9C0"/><text x="16" y="21" text-anchor="middle" fill="#2D2A32" font-size="11" font-weight="800" font-family="Arial">?</text></svg>`
+    eth: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="ethG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#ethG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="14" font-weight="800" font-family="Arial">Ξ</text></svg>`,
+    usdc: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="usdcG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#usdcG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">$</text></svg>`,
+    usdt: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="usdtG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#26A17B"/><stop offset="100%" stop-color="#3DD68C"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#usdtG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">₮</text></svg>`,
+    dai: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="daiG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F5AC37"/><stop offset="100%" stop-color="#F8C967"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#daiG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">D</text></svg>`,
+    wbtc: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="wbtcG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#wbtcG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">B</text></svg>`,
+    link: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="linkG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2A5ADA"/><stop offset="100%" stop-color="#5B8DEF"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#linkG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="13" font-weight="800" font-family="Arial">⬡</text></svg>`,
+    uni: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="uniG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF007A"/><stop offset="100%" stop-color="#FF4DA6"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#uniG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="13" font-weight="800" font-family="Arial">U</text></svg>`,
+    aave: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="aaveG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B6509E"/><stop offset="100%" stop-color="#2EBAC6"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#aaveG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">AA</text></svg>`,
+    reth: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="rethG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E84142"/><stop offset="100%" stop-color="#FF6B6B"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#rethG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">rΞ</text></svg>`,
+    cbeth: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="cbethG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0052FF"/><stop offset="100%" stop-color="#4D8BFF"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#cbethG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">cb</text></svg>`,
+    wsteth: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="wstG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00A3FF"/><stop offset="100%" stop-color="#66C2FF"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#wstG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="10" font-weight="800" font-family="Arial">wΞ</text></svg>`,
+    frax: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="fraxG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000"/><stop offset="100%" stop-color="#333"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#fraxG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">FX</text></svg>`,
+    default: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#FFD9C0"/><text x="16" y="21" text-anchor="middle" fill="#2D2A32" font-size="11" font-weight="800" font-family="Arial">?</text></svg>`
   };
-  const getLogo = (sym) => {
+  const getLogo = (sym, idx) => {
     const s = (sym || '').toLowerCase();
-    if (s === 'eth' || s === 'ether') return tokenLogos.eth;
-    if (s === 'usdc') return tokenLogos.usdc;
-    if (s === 'wbtc') return tokenLogos.wbtc;
-    return tokenLogos.default;
+    const i = idx ?? 0;
+    if (s === 'eth' || s === 'ether') return tokenLogos.eth(i);
+    if (s === 'usdc') return tokenLogos.usdc(i);
+    if (s === 'usdt') return tokenLogos.usdt(i);
+    if (s === 'dai') return tokenLogos.dai(i);
+    if (s === 'wbtc') return tokenLogos.wbtc(i);
+    if (s === 'link') return tokenLogos.link(i);
+    if (s === 'uni') return tokenLogos.uni(i);
+    if (s === 'aave') return tokenLogos.aave(i);
+    if (s === 'reth') return tokenLogos.reth(i);
+    if (s === 'cbeth') return tokenLogos.cbeth(i);
+    if (s === 'wsteth') return tokenLogos.wsteth(i);
+    if (s === 'frax') return tokenLogos.frax(i);
+    return tokenLogos.default(i);
   };
   // Store tokens for filtering
   window._assetTokens = tokens;
@@ -565,7 +571,7 @@ function renderAssets(tokens) {
   const filtered = filter ? tokens.filter(t => (t.symbol || '').toLowerCase().includes(filter)) : tokens;
   $('#assetList').innerHTML = filtered.map((t, i) => `
     <div class="asset-row asset-clickable" data-token-idx="${i}" data-symbol="${escapeHtml(t.symbol || '')}" data-address="${escapeHtml(t.address || '')}" data-decimals="${t.decimals || 18}" data-balance="${escapeHtml(t.balance || '0')}" data-usd="${t.usd || 0}">
-      <div class="token-icon-svg">${getLogo(t.symbol)}</div>
+      <div class="token-icon-svg">${getLogo(t.symbol, i)}</div>
       <div class="asset-info">
         <div class="asset-name">${escapeHtml(t.symbol)}</div>
         <div class="asset-symbol">${t.address ? escapeHtml(wallet.shortAddress(t.address)) : 'Native'}</div>
@@ -629,26 +635,48 @@ function showTokenActions(el) {
     </div>
   `);
 
+  // Store for action handlers
+  window._tokenModalSymbol = symbol;
+  window._tokenModalAddress = address;
+
   // Draw mini chart
   drawMiniChart(symbol);
 
   // Action handlers
   $('#tokenSend').onclick = () => { closeModal(); switchView('send'); };
-  $('#tokenReceive').onclick = () => { closeModal(); switchView('receive'); };
+  $('#tokenReceive').onclick = () => { const s = window._tokenModalSymbol; const a = window._tokenModalAddress; closeModal(); showReceiveModal(a, s); };
   $('#tokenSwap').onclick = () => { closeModal(); switchView('swap'); };
   $('#tokenHistory').onclick = () => { closeModal(); switchView('activity'); };
 }
 
 function getLogoSVG(sym) {
-  const logos = {
-    eth: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="ethG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#ethG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="22" font-weight="800" font-family="Arial">Ξ</text></svg>`,
-    usdc: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdcG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdcG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">$</text></svg>`,
-    wbtc: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wbtcG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wbtcG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">B</text></svg>`
-  };
   const s = (sym || '').toLowerCase();
+  const logos = {
+    eth:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="ethG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#ethG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="22" font-weight="800" font-family="Arial">Ξ</text></svg>`,
+    usdc:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdcG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdcG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">$</text></svg>`,
+    usdt:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdtG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#26A17B"/><stop offset="100%" stop-color="#3DD68C"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdtG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">₮</text></svg>`,
+    dai:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="daiG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F5AC37"/><stop offset="100%" stop-color="#F8C967"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#daiG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">D</text></svg>`,
+    wbtc:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wbtcG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wbtcG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">B</text></svg>`,
+    link:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="linkG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2A5ADA"/><stop offset="100%" stop-color="#5B8DEF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#linkG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="20" font-weight="800" font-family="Arial">⬡</text></svg>`,
+    uni:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="uniG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF007A"/><stop offset="100%" stop-color="#FF4DA6"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#uniG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="20" font-weight="800" font-family="Arial">U</text></svg>`,
+    aave:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="aaveG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B6509E"/><stop offset="100%" stop-color="#2EBAC6"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#aaveG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">AA</text></svg>`,
+    reth:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="rethG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E84142"/><stop offset="100%" stop-color="#FF6B6B"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#rethG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">rΞ</text></svg>`,
+    cbeth:  `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="cbethG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0052FF"/><stop offset="100%" stop-color="#4D8BFF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#cbethG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">cb</text></svg>`,
+    wsteth: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wstG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00A3FF"/><stop offset="100%" stop-color="#66C2FF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wstG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="14" font-weight="800" font-family="Arial">wΞ</text></svg>`,
+    frax:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="fraxG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000"/><stop offset="100%" stop-color="#333"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#fraxG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">FX</text></svg>`
+  };
   if (s === 'eth' || s === 'ether') return logos.eth;
   if (s === 'usdc') return logos.usdc;
+  if (s === 'usdt') return logos.usdt;
+  if (s === 'dai') return logos.dai;
   if (s === 'wbtc') return logos.wbtc;
+  if (s === 'link') return logos.link;
+  if (s === 'uni') return logos.uni;
+  if (s === 'aave') return logos.aave;
+  if (s === 'reth') return logos.reth;
+  if (s === 'cbeth') return logos.cbeth;
+  if (s === 'wsteth') return logos.wsteth;
+  if (s === 'frax') return logos.frax;
   return `<svg viewBox="0 0 48 48" width="48" height="48"><circle cx="24" cy="24" r="24" fill="#FFD9C0"/><text x="24" y="32" text-anchor="middle" fill="#2D2A32" font-size="16" font-weight="800" font-family="Arial">${(sym || '?').slice(0, 1).toUpperCase()}</text></svg>`;
 }
 
