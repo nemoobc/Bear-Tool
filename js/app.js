@@ -1011,7 +1011,7 @@ function clearAllData() {
       }
     });
   });
-  btn.onclick = () => {
+  $('#clearBtn').onclick = () => {
     if (!verified) return;
     wallet.clearKeystore();
     localStorage.removeItem('bear.settings');

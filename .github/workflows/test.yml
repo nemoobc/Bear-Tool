@@ -589,6 +589,7 @@ jobs:
           }
 
           test.describe('Onchain Fork — Ethereum Mainnet', () => {
+            test.describe.configure({ timeout: 30000 });
             test('RPC mainnet responds (cloudflare)', async ({ page }) => {
               await skipIntro(page);
               const res = await page.evaluate(async () => {
@@ -676,6 +677,7 @@ jobs:
           }
 
           test.describe('Onchain Fork — Sepolia Testnet', () => {
+            test.describe.configure({ timeout: 30000 });
             test('RPC sepolia responds', async ({ page }) => {
               await skipIntro(page);
               const res = await page.evaluate(async () => {
