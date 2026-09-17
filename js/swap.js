@@ -212,6 +212,7 @@ export async function getSwapQuote() {
   const slippageBtn = document.querySelector('.slippage-btn.active');
   const slippage = slippageBtn ? slippageBtn.dataset.val : '0.5';
   const quoteBox = $('#swapQuote');
+  if (!quoteBox) return;
   quoteBox.innerHTML = spinnerDots();
   quoteBox.classList.remove('hidden');
 

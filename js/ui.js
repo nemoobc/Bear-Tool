@@ -46,6 +46,7 @@ function getFocusable(box) {
 export function openModal(html, { fullscreen = false } = {}) {
   const overlay = $('#modalOverlay');
   const box = $('#modalBox');
+  if (!overlay || !box) return null; // no modal shell in this DOM
   box.classList.toggle('welcome-screen', fullscreen);
   overlay.classList.toggle('welcome-screen', fullscreen);
   box.innerHTML = html;

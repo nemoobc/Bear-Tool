@@ -631,13 +631,17 @@ async function loadDashboard() {
       });
     } catch {}
     renderAssets(tokens);
-    loadNfts();
+    // not awaited on purpose (NFT scan is slow) — but its rejection must be
+    // handled here, or a null element becomes a global "Unexpected error" toast
+    loadNfts().catch((e) => console.warn('[BearTool] NFT scan failed:', e?.message || e));
   } catch (e) {
     assetList.innerHTML = `<p class="small text-center">Error: ${escapeHtml(e.message)}</p>`;
   }
 }
 
 function renderAssets(tokens) {
+  const assetList = $('#assetList');
+  if (!assetList) return;
   const totalUsd = tokens.reduce((s, t) => s + (t.usd || 0), 0);
   animateValue($('#totalBalance'), totalUsd, { duration: 600, formatter: fmtUsd });
   if (!tokens.length) {

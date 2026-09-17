@@ -14,8 +14,9 @@ export function bindDeployEvents() {
 }
 
 export function renderDeployExtra() {
-  const std = $('#deployStandard').value;
+  const std = $('#deployStandard')?.value;
   const extra = $('#deployExtra');
+  if (!extra) return;
   if (std === 'erc20') {
     extra.innerHTML = `
       <div class="field"><label>Initial supply</label><input class="input" id="deploySupply" type="number" placeholder="1000000"></div>

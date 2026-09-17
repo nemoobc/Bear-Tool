@@ -286,6 +286,20 @@ test('E2E-probe: every $(\'#id\') reference across ALL js files exists in index.
   assert.deepEqual(missing, [], 'every static JS-referenced ID must exist in index.html (null element = innerHTML crash)');
 });
 
+test('E2E-probe: unawaited async render calls are caught (no global "Unexpected error" toast)', async () => {
+  const fs = await import('node:fs');
+  const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  // loadNfts() is async and deliberately not awaited (slow scan) — its
+  // rejection MUST be handled locally or a null element leaks as a global toast.
+  assert.match(app, /loadNfts\(\)\.catch\(/, 'loadNfts() must be .catch()-handled where it is fired');
+  // renderAssets must own its element reference (no accidental window named-access global)
+  const ra = app.slice(app.indexOf('function renderAssets'));
+  assert.match(ra, /const assetList = \$\('#assetList'\);/, 'renderAssets must declare its own assetList');
+  // openModal must not assume the modal shell exists
+  const ui = fs.readFileSync(new URL('../js/ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /if \(!overlay \|\| !box\) return null;/, 'openModal must guard missing modal shell');
+});
+
 // let undici fetch resources settle before the runner tears down
 await new Promise(r => setTimeout(r, 1500));
 // silence undici resource-timing noise (Node 24 + node:test)

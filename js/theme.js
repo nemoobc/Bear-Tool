@@ -29,10 +29,11 @@ export function runIntro(onDone) {
   if (prefersReduced) return finish(true);
 
   // skip on click anywhere on intro
-  intro.addEventListener('click', () => finish(true));
+  if (intro) intro.addEventListener('click', () => finish(true));
 
   // letter-by-letter title (phase 3: 2-3s)
   const text = 'BEAR TOOL';
+  if (!title) return; // no intro title in this DOM — animation is optional
   title.innerHTML = '';
   [...text].forEach((ch, i) => {
     const span = document.createElement('span');
