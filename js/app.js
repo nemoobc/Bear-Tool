@@ -46,6 +46,10 @@ window.addEventListener('DOMContentLoaded', () => {
     console.error('[BearTool] unhandled rejection:', e.reason);
     toast('Unexpected error: ' + (e.reason?.message || 'unknown'), 'error');
   });
+  window.addEventListener('error', (e) => {
+    console.error('[BearTool] uncaught error:', e.message, e.filename, e.lineno);
+    toast('Unexpected error: ' + e.message, 'error');
+  });
 
   // ── token search ──
   document.getElementById('tokenSearchInput')?.addEventListener('input', () => {
@@ -423,14 +427,41 @@ function showNetworkModal() {
   const html = `
     <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
     <h2>🌐 Networks</h2>
-    <div class="mb-8"><span class="badge badge-mainnet">MAINNET</span></div>
-    ${nets.filter(n => n.type === 'mainnet').map(n => netRow(n)).join('')}
-    <div class="mb-8 mt-16"><span class="badge badge-testnet">TESTNET</span></div>
-    ${nets.filter(n => n.type === 'testnet').map(n => netRow(n)).join('')}
+    <div class="field" style="margin-bottom:12px">
+      <input class="input" id="netSearchInput" type="text" placeholder="🔍 Search networks..." style="width:100%">
+    </div>
+    <div id="netListMainnet">
+      <div class="mb-8"><span class="badge badge-mainnet">MAINNET</span></div>
+      ${nets.filter(n => n.type === 'mainnet').map(n => netRow(n)).join('')}
+    </div>
+    <div id="netListTestnet">
+      <div class="mb-8 mt-16"><span class="badge badge-testnet">TESTNET</span></div>
+      ${nets.filter(n => n.type === 'testnet').map(n => netRow(n)).join('')}
+    </div>
     <hr class="mt-16 mb-16">
     <button class="btn btn-secondary btn-block" id="addNetBtn">+ Add Custom Network</button>
   `;
   openModal(html);
+  // network search
+  const searchInput = $('#netSearchInput');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.toLowerCase().trim();
+      $all('[data-net]').forEach(el => {
+        const name = (el.querySelector('.asset-name')?.textContent || '').toLowerCase();
+        const chainId = (el.querySelector('.asset-symbol')?.textContent || '').toLowerCase();
+        el.style.display = (!q || name.includes(q) || chainId.includes(q)) ? '' : 'none';
+      });
+      // hide section headers if all rows hidden
+      const mainnetRows = document.querySelectorAll('#netListMainnet [data-net]');
+      const testnetRows = document.querySelectorAll('#netListTestnet [data-net]');
+      const mainnetVisible = [...mainnetRows].some(r => r.style.display !== 'none');
+      const testnetVisible = [...testnetRows].some(r => r.style.display !== 'none');
+      document.querySelector('#netListMainnet .mb-8').style.display = mainnetVisible ? '' : 'none';
+      document.querySelector('#netListTestnet .mb-8').style.display = testnetVisible ? '' : 'none';
+    });
+    searchInput.focus();
+  }
   $('#addNetBtn').onclick = showAddNetworkModal;
   $all('[data-net]').forEach(el => el.addEventListener('click', () => {
     set('networkId', el.dataset.net);

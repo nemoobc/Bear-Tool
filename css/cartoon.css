@@ -2015,6 +2015,13 @@ body::before {
 .welcome-full {
   text-align: center;
   padding: 32px 16px;
+  width: 100%;
+}
+.modal:has(.welcome-full) {
+  max-width: 100%;
+  min-height: 100vh;
+  border-radius: 0;
+  border: none;
 }
 .welcome-logo {
   margin-bottom: 16px;
