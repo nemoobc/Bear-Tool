@@ -81,7 +81,7 @@
       </div>
       <div class="topbar-right">
         <div class="network-pill" id="networkPill" title="Switch network">
-          <span class="dot"></span>
+          <span class="net-logo"></span>
           <span class="label" id="networkName">Ethereum</span>
           <span>▾</span>
         </div>
@@ -175,6 +175,19 @@
         <section class="view" id="view-send">
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> <span data-i18n="nav.send">Send</span></div>
+            <details class="address-book-accordion" id="addressBookAccordion">
+              <summary class="address-book-toggle"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Address Book</summary>
+              <div class="address-book" id="addressBook">
+                <div class="address-book-list" id="addressBookList">
+                  <p class="small text-center">No saved addresses yet.</p>
+                </div>
+                <div class="address-book-add mt-8">
+                  <input class="input" id="abLabel" placeholder="Label (e.g. My Safe)">
+                  <input class="input mt-4" id="abAddress" placeholder="0x...">
+                  <button class="btn btn-primary btn-block mt-8" id="btnAddAddress">Add Address</button>
+                </div>
+              </div>
+            </details>
             <div class="send-card">
               <div class="field">
                 <label for="sendTo">To address</label>
@@ -458,6 +471,85 @@
               <div class="gas-estimate"><span class="gas-est-label">Earned:</span> <span class="gas-est-value" id="miningEarned">0 ETH</span></div>
             </div>
           </div>
+
+          <!-- ═══════════ BATCH CALL ═══════════ -->
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg> Batch Call</div>
+            <p class="small mb-8">Execute multiple contract calls in a SINGLE atomic transaction via EIP-7702 delegation.</p>
+            <div class="batch-queue" id="eip7702BatchList">
+              <p class="small text-center">No calls yet. Add one below.</p>
+            </div>
+            <button class="btn btn-ghost btn-block mb-8" id="btnEip7702BatchAdd">+ Add Call</button>
+            <button class="btn btn-primary btn-block" id="btnEip7702BatchExec">Execute All</button>
+          </div>
+
+          <!-- ═══════════ RESCUE ATOMIC ═══════════ -->
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Rescue Atomic</div>
+            <p class="small mb-8">Rescue ETH/ERC20/ERC721 from a locked wallet (can't pay gas). Gas paid by sponsor.</p>
+            <div class="field">
+              <label for="eip7702RescueTarget">Locked wallet address</label>
+              <input class="input" id="eip7702RescueTarget" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="eip7702RescueSafe">SAFE destination address</label>
+              <input class="input" id="eip7702RescueSafe" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="eip7702RescueType">Token type</label>
+              <select class="select" id="eip7702RescueType">
+                <option value="eth">ETH (native)</option>
+                <option value="erc20">ERC-20 Token</option>
+                <option value="erc721">ERC-721 NFT</option>
+              </select>
+            </div>
+            <div class="field hidden" id="eip7702RescueTokenWrap">
+              <label for="eip7702RescueTokenAddr">Token contract address</label>
+              <input class="input" id="eip7702RescueTokenAddr" placeholder="0x...">
+            </div>
+            <div class="field hidden" id="eip7702RescueTokenIdWrap">
+              <label for="eip7702RescueTokenId">Token ID (comma-separated for multiple)</label>
+              <input class="input" id="eip7702RescueTokenId" placeholder="e.g. 1,2,3">
+            </div>
+            <div class="field">
+              <label for="eip7702RescueSponsorKey">Sponsor private key (pays gas)</label>
+              <div class="password-wrap">
+                <input class="input" id="eip7702RescueSponsorKey" type="password" placeholder="0x...">
+                <button class="btn btn-ghost btn-sm password-toggle" id="btnRescueKeyToggle" type="button">👁️</button>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-block" id="btnEip7702RescueExec">Rescue Assets</button>
+          </div>
+
+          <!-- ═══════════ CLAIM AIRDROP ═══════════ -->
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg> Claim Airdrop</div>
+            <p class="small mb-8">Claim airdrop + forward reward to a SAFE in one atomic EIP-7702 transaction.</p>
+            <div class="field">
+              <label for="eip7702ClaimContract">Airdrop contract address</label>
+              <input class="input" id="eip7702ClaimContract" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="eip7702ClaimData">Claim calldata (0x...)</label>
+              <input class="input" id="eip7702ClaimData" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="eip7702ClaimToken">Reward token address (leave empty for ETH)</label>
+              <input class="input" id="eip7702ClaimToken" placeholder="0x... (optional)">
+            </div>
+            <div class="field">
+              <label for="eip7702ClaimSafe">Forward to SAFE address</label>
+              <input class="input" id="eip7702ClaimSafe" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="eip7702ClaimSponsorKey">Sponsor private key (pays gas)</label>
+              <div class="password-wrap">
+                <input class="input" id="eip7702ClaimSponsorKey" type="password" placeholder="0x...">
+                <button class="btn btn-ghost btn-sm password-toggle" id="btnClaimKeyToggle" type="button">👁️</button>
+              </div>
+            </div>
+            <button class="btn btn-success btn-block" id="btnEip7702ClaimExec">Claim + Forward</button>
+          </div>
         </section>
 
         <!-- ACTIVITY -->
@@ -519,18 +611,6 @@
               <input class="input" id="setRpc" placeholder="https://...">
             </div>
             <button class="btn btn-secondary" id="btnSaveSettings">Save Settings</button>
-            <hr class="mt-16 mb-16">
-            <div class="card-title mb-8"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Address Book</div>
-            <div class="address-book" id="addressBook">
-              <div class="address-book-list" id="addressBookList">
-                <p class="small text-center">No saved addresses yet.</p>
-              </div>
-              <div class="address-book-add mt-8">
-                <input class="input" id="abLabel" placeholder="Label (e.g. My Safe)">
-                <input class="input mt-4" id="abAddress" placeholder="0x...">
-                <button class="btn btn-primary btn-block mt-8" id="btnAddAddress">Add Address</button>
-              </div>
-            </div>
             <hr class="mt-16 mb-16">
             <button class="btn btn-danger" id="btnClearData"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Clear all data</button>
           </div>

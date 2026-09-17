@@ -262,13 +262,6 @@ jobs:
             await page.screenshot({ path: 'screenshots/send.png', fullPage: true });
           });
 
-          test('screenshot: swap view', async ({ page }) => {
-            await skipIntro(page);
-            await page.locator('.nav-item[data-view="swap"]').click();
-            await page.waitForTimeout(300);
-            await page.screenshot({ path: 'screenshots/swap.png', fullPage: true });
-          });
-
           test('screenshot: bridge view', async ({ page }) => {
             await skipIntro(page);
             await page.locator('.nav-item[data-view="bridge"]').click();

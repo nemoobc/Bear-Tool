@@ -18,6 +18,7 @@ import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
 import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
 import { bindEip7702Events, loadEip7702 } from './eip7702.js';
+import { bindEip7702ToolsEvents } from './eip7702-tools.js';
 import { bindDeployEvents } from './deploy.js';
 import { loadNfts } from './nft.js';
 import { t, setLang, applyTranslations } from './i18n.js';
@@ -134,7 +135,7 @@ function refreshView(view) {
   if (view === 'send') loadSendTokens();
   if (view === 'swap') loadSwapTokens();
   if (view === 'bridge') loadBridgeChains();
-  if (view === 'eip7702') loadEip702();
+  if (view === 'eip7702') loadEip7702();
   if (view === 'activity') renderActivity();
 }
 
@@ -151,6 +152,17 @@ function updateTopbar() {
   const net = getNetworkById(get('networkId'));
   const pill = $('#networkPill');
   pill.className = 'network-pill ' + (net?.type || 'mainnet');
+  const netLogoEl = pill.querySelector('.net-logo');
+  if (netLogoEl) netLogoEl.innerHTML = getNetworkLogo(net?.name, 18);
+  else {
+    const logoWrap = document.createElement('span');
+    logoWrap.className = 'net-logo';
+    logoWrap.innerHTML = getNetworkLogo(net?.name, 18);
+    pill.prepend(logoWrap);
+  }
+  // Remove the old .dot span if present
+  const oldDot = pill.querySelector('.dot');
+  if (oldDot) oldDot.remove();
   $('#networkName').textContent = net?.name || '?';
   $('#accountShort').textContent = get('address') ? wallet.shortAddress(get('address')) : 'Not connected';
 }
@@ -217,18 +229,19 @@ function showUnlockModal() {
 
 function showCreateModal() {
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
-    <h2>🐻 Create Wallet</h2>
-    <div class="field">
-      <label for="createPw">Password (min 8 chars)</label>
-      <input class="input" id="createPw" type="password" placeholder="••••••••">
+    <div class="modal-full">
+      <h2>🐻 Create Wallet</h2>
+      <div class="field">
+        <label for="createPw">Password (min 8 chars)</label>
+        <input class="input" id="createPw" type="password" placeholder="••••••••">
+      </div>
+      <div class="field">
+        <label for="createPw2">Repeat password</label>
+        <input class="input" id="createPw2" type="password" placeholder="••••••••">
+      </div>
+      <div class="danger-box">⚠️ You will see your seed phrase ONCE. Write it down. Anyone with it controls your funds.</div>
+      <button class="btn btn-primary btn-block btn-lg" id="createBtn">Create</button>
     </div>
-    <div class="field">
-      <label for="createPw2">Repeat password</label>
-      <input class="input" id="createPw2" type="password" placeholder="••••••••">
-    </div>
-    <div class="danger-box">⚠️ You will see your seed phrase ONCE. Write it down. Anyone with it controls your funds.</div>
-    <button class="btn btn-primary btn-block" id="createBtn">Create</button>
   `);
   $('#createBtn').onclick = async () => {
     const p1 = $('#createPw').value, p2 = $('#createPw2').value;
@@ -308,18 +321,19 @@ function showSeedPhrase(mnemonic, address) {
 
 function showImportModal() {
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
-    <h2>📥 Import Wallet</h2>
-    <div class="field">
-      <label for="importSecret">Seed phrase (12/24 words) or private key</label>
-      <textarea class="textarea" id="importSecret" placeholder="word1 word2 ..."></textarea>
+    <div class="modal-full">
+      <h2>📥 Import Wallet</h2>
+      <div class="field">
+        <label for="importSecret">Seed phrase (12/24 words) or private key</label>
+        <textarea class="textarea" id="importSecret" placeholder="word1 word2 ..."></textarea>
+      </div>
+      <div class="field">
+        <label for="importPw">New password</label>
+        <input class="input" id="importPw" type="password" placeholder="••••••••">
+      </div>
+      <div class="danger-box">⚠️ Never import a seed phrase on a website you don't trust. This tool is 100% client-side.</div>
+      <button class="btn btn-primary btn-block btn-lg" id="importBtn">Import</button>
     </div>
-    <div class="field">
-      <label for="importPw">New password</label>
-      <input class="input" id="importPw" type="password" placeholder="••••••••">
-    </div>
-    <div class="danger-box">⚠️ Never import a seed phrase on a website you don't trust. This tool is 100% client-side.</div>
-    <button class="btn btn-primary btn-block" id="importBtn">Import</button>
   `);
   $('#importBtn').onclick = async () => {
     const secret = $('#importSecret').value.trim();
@@ -359,6 +373,50 @@ function resetLock() {
   window.addEventListener(ev, resetLock, { passive: true })
 );
 
+// ── network SVG logos ──
+function getNetworkLogo(name, size = 24) {
+  const n = (name || '').toLowerCase();
+  // Ethereum — blue diamond
+  if (n === 'ethereum' || n === 'eth') {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/></svg>`;
+  }
+  // Sepolia — blue diamond with S
+  if (n === 'sepolia') {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/><text x="12" y="15" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">S</text></svg>`;
+  }
+  // Arbitrum — blue circle with A chevron
+  if (n.includes('arbitrum')) {
+    const isTest = n.includes('sepolia');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#28A0F0"/><path d="M8 16l4-10 4 10" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 13h5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // Optimism — red circle with OP
+  if (n.includes('optimism') || n === 'op mainnet' || n === 'op sepolia') {
+    const isTest = n.includes('sepolia');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#FF0420"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">OP</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // Base — blue circle with B
+  if (n === 'base' || n === 'base sepolia') {
+    const isTest = n.includes('sepolia');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#0052FF"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="9" font-weight="800" font-family="Arial">B</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // Polygon — purple hexagon
+  if (n.includes('polygon') || n === 'amoy') {
+    const isTest = n.includes('amoy');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,1 21,6.5 21,17.5 12,23 3,17.5 3,6.5" fill="#8247E5"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">POL</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // BSC — yellow diamond
+  if (n.includes('bnb') || n.includes('bsc')) {
+    const isTest = n.includes('testnet');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L2 12l10 10 10-10z" fill="#F0B90B"/><path d="M8 9h8l-4 6z" fill="#2D2A32"/><path d="M8 9l4-4 4 4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 15l4 4 4-4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // Avalanche — red triangle
+  if (n.includes('avalanche')) {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,2 2,22 22,22" fill="#E84142"/><text x="12" y="18" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">AVAX</text></svg>`;
+  }
+  // Custom / unknown — satellite icon
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="10" fill="#9B5DE5"/><circle cx="12" cy="12" r="4" fill="white"/><line x1="12" y1="2" x2="12" y2="6" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="18" x2="12" y2="22" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="2" y1="12" x2="6" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="18" y1="12" x2="22" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`;
+}
+
 // ── network modal ──
 function showNetworkModal() {
   const nets = getAllNetworks();
@@ -385,23 +443,8 @@ function showNetworkModal() {
 
 function netRow(n) {
   const active = n.id === get('networkId') ? 'style="border-left:8px solid var(--mint)"' : '';
-  // Network icon colors
-  const netColors = {
-    'Ethereum': '#627EEA',
-    'Sepolia': '#627EEA',
-    'Arbitrum': '#28A0F0',
-    'Arbitrum Sepolia': '#28A0F0',
-    'Optimism': '#FF0420',
-    'OP Sepolia': '#FF0420',
-    'Base': '#0052FF',
-    'Base Sepolia': '#0052FF',
-    'Polygon': '#8247E5',
-    'BSC': '#F3BA2F',
-    'Avalanche': '#E84142'
-  };
-  const color = netColors[n.name] || n.color || '#627EEA';
   return `<div class="asset-row" data-net="${escapeHtml(n.id)}" ${active}>
-    <div class="token-icon" style="background:${color};color:white;font-size:0.6rem">${escapeHtml(n.symbol?.slice(0, 3) || '???')}</div>
+    <div class="net-logo">${getNetworkLogo(n.name, 32)}</div>
     <div class="asset-info"><div class="asset-name">${escapeHtml(n.name)}</div>
       <div class="asset-symbol">Chain ${escapeHtml(String(n.chainId))} · ${escapeHtml(n.symbol)}</div></div>
     <span class="badge ${n.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(n.type)}</span>
@@ -690,19 +733,20 @@ function showTokenActions(el) {
 
 function getLogoSVG(sym) {
   const s = (sym || '').toLowerCase();
+  // Use 'm' suffix to avoid collision with getLogo's indexed suffixes
   const logos = {
-    eth:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="ethG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#ethG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="22" font-weight="800" font-family="Arial">Ξ</text></svg>`,
-    usdc:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdcG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdcG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">$</text></svg>`,
-    usdt:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdtG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#26A17B"/><stop offset="100%" stop-color="#3DD68C"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdtG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">₮</text></svg>`,
-    dai:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="daiG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F5AC37"/><stop offset="100%" stop-color="#F8C967"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#daiG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">D</text></svg>`,
-    wbtc:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wbtcG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wbtcG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">B</text></svg>`,
-    link:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="linkG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2A5ADA"/><stop offset="100%" stop-color="#5B8DEF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#linkG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="20" font-weight="800" font-family="Arial">⬡</text></svg>`,
-    uni:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="uniG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF007A"/><stop offset="100%" stop-color="#FF4DA6"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#uniG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="20" font-weight="800" font-family="Arial">U</text></svg>`,
-    aave:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="aaveG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B6509E"/><stop offset="100%" stop-color="#2EBAC6"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#aaveG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">AA</text></svg>`,
-    reth:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="rethG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E84142"/><stop offset="100%" stop-color="#FF6B6B"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#rethG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">rΞ</text></svg>`,
-    cbeth:  `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="cbethG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0052FF"/><stop offset="100%" stop-color="#4D8BFF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#cbethG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">cb</text></svg>`,
-    wsteth: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wstG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00A3FF"/><stop offset="100%" stop-color="#66C2FF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wstG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="14" font-weight="800" font-family="Arial">wΞ</text></svg>`,
-    frax:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="fraxG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000"/><stop offset="100%" stop-color="#333"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#fraxG2)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">FX</text></svg>`
+    eth:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="ethGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#ethGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="22" font-weight="800" font-family="Arial">Ξ</text></svg>`,
+    usdc:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdcGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdcGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">$</text></svg>`,
+    usdt:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdtGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#26A17B"/><stop offset="100%" stop-color="#3DD68C"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdtGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">₮</text></svg>`,
+    dai:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="daiGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F5AC37"/><stop offset="100%" stop-color="#F8C967"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#daiGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">D</text></svg>`,
+    wbtc:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wbtcGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wbtcGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">B</text></svg>`,
+    link:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="linkGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2A5ADA"/><stop offset="100%" stop-color="#5B8DEF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#linkGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="20" font-weight="800" font-family="Arial">⬡</text></svg>`,
+    uni:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="uniGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF007A"/><stop offset="100%" stop-color="#FF4DA6"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#uniGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="20" font-weight="800" font-family="Arial">U</text></svg>`,
+    aave:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="aaveGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B6509E"/><stop offset="100%" stop-color="#2EBAC6"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#aaveGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">AA</text></svg>`,
+    reth:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="rethGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E84142"/><stop offset="100%" stop-color="#FF6B6B"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#rethGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">rΞ</text></svg>`,
+    cbeth:  `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="cbethGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0052FF"/><stop offset="100%" stop-color="#4D8BFF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#cbethGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">cb</text></svg>`,
+    wsteth: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wstGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00A3FF"/><stop offset="100%" stop-color="#66C2FF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wstGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="14" font-weight="800" font-family="Arial">wΞ</text></svg>`,
+    frax:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="fraxGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000"/><stop offset="100%" stop-color="#333"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#fraxGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">FX</text></svg>`
   };
   if (s === 'eth' || s === 'ether') return logos.eth;
   if (s === 'usdc') return logos.usdc;
@@ -810,6 +854,7 @@ function bindViews() {
   bindSwapEvents();
   bindBridgeEvents();
   bindEip7702Events();
+  bindEip7702ToolsEvents();
   bindDeployEvents();
 
   $('#approvalMode').addEventListener('change', () => {
@@ -966,53 +1011,16 @@ function saveSettingsHandler() {
 }
 
 function clearAllData() {
-  // Generate 3 random confirm words, one is DELETE
-  const allChoices = ['DELETE', 'REMOVE', 'DESTROY', 'CONFIRM', 'ERASE'];
-  const correct = 'DELETE';
-  const distractors = allChoices.filter(w => w !== correct);
-  // Pick 2 random distractors
-  const picked = [];
-  while (picked.length < 2) {
-    const w = distractors[Math.floor(Math.random() * distractors.length)];
-    if (!picked.includes(w)) picked.push(w);
-  }
-  const choices = [...picked];
-  const insertIdx = Math.floor(Math.random() * 3);
-  choices.splice(insertIdx, 0, correct);
-
   openModal(`
     <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
-    <h2>🗑️ Clear all data?</h2>
+    <h2>🗑️ Delete Wallet?</h2>
     <div class="danger-box">This deletes ALL wallets, settings, and activity from this browser. Irreversible!</div>
-    <div class="field">
-      <label>Select <b>DELETE</b> to confirm</label>
-      <div class="seed-choices" id="deleteChoices">
-        ${choices.map((w, i) => `<button class="btn btn-ghost seed-choice-btn delete-choice" data-word="${w}" data-idx="${i}">${w}</button>`).join('')}
-      </div>
+    <div class="flex gap-8" style="justify-content:center">
+      <button class="btn btn-danger btn-lg" id="clearBtn">Delete Wallet</button>
+      <button class="btn btn-ghost btn-lg" onclick="document.getElementById('modalOverlay').classList.remove('open')">No</button>
     </div>
-    <button class="btn btn-danger btn-block" id="clearBtn" disabled>Delete everything</button>
   `);
-  let verified = false;
-  $all('.delete-choice').forEach(btn => {
-    btn.addEventListener('click', () => {
-      $all('.delete-choice').forEach(b => { b.classList.remove('active'); b.style.background = ''; b.style.color = ''; });
-      btn.classList.add('active');
-      if (btn.dataset.word === correct) {
-        verified = true;
-        btn.style.background = 'var(--danger)';
-        btn.style.color = 'var(--white)';
-        $('#clearBtn').disabled = false;
-      } else {
-        verified = false;
-        btn.style.background = 'var(--danger)';
-        btn.style.color = 'var(--white)';
-        toast('Wrong! Select DELETE.', 'error');
-        $('#clearBtn').disabled = true;
-      }
-    });
-  });
   $('#clearBtn').onclick = () => {
-    if (!verified) return;
     wallet.clearKeystore();
     localStorage.removeItem('bear.settings');
     localStorage.removeItem('bear.activity');
