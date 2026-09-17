@@ -146,7 +146,7 @@ jobs:
             await expect(page).toHaveTitle(/Bear Tool/);
           });
 
-          test('all 9 views exist in DOM', async ({ page }) => {
+          test('all 10 views exist in DOM', async ({ page }) => {
             await skipIntro(page);
             const views = ['dashboard', 'send', 'swap', 'bridge', 'nft', 'eip7702', 'approval', 'deploy', 'activity', 'settings'];
             for (const v of views) {
@@ -154,10 +154,10 @@ jobs:
             }
           });
 
-          test('sidebar has 9 nav items', async ({ page }) => {
+          test('sidebar has 10 nav items', async ({ page }) => {
             await skipIntro(page);
             const items = page.locator('.nav-item');
-            await expect(items).toHaveCount(9);
+            await expect(items).toHaveCount(10);
           });
 
           test('mobile nav has 5 items', async ({ page }) => {
@@ -547,4 +547,181 @@ jobs:
         with:
           name: bear-tool-mobile-screenshots
           path: screenshots/
+
+  onchain-fork:
+    name: Onchain Fork Test (Mainnet + Testnet)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start local server
+        run: |
+          npx http-server . -p 8080 -s &
+          sleep 3
+          curl -sf http://localhost:8080/ > /dev/null || { echo "Server failed"; exit 1; }
+
+      - name: Run onchain fork tests (Ethereum Mainnet)
+        run: |
+          cat > onchain-mainnet.spec.cjs << 'TESTEOF'
+          const { test, expect } = require('@playwright/test');
+
+          const BASE = 'http://localhost:8080';
+
+          async function skipIntro(page) {
+            await page.goto(BASE);
+            await page.waitForSelector('.intro-overlay', { timeout: 5000 }).catch(() => {});
+            await page.click('.intro-overlay').catch(() => {});
+            await page.waitForTimeout(1500);
+          }
+
+          test.describe('Onchain Fork — Ethereum Mainnet', () => {
+            test('RPC mainnet responds (cloudflare)', async ({ page }) => {
+              const res = await page.evaluate(async () => {
+                const r = await fetch('https://cloudflare-eth.com', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
+                });
+                return r.json();
+              });
+              expect(res.result).toBeTruthy();
+              const blockNum = parseInt(res.result, 16);
+              expect(blockNum).toBeGreaterThan(19000000);
+            });
+
+            test('RPC mainnet returns valid chainId', async ({ page }) => {
+              const res = await page.evaluate(async () => {
+                const r = await fetch('https://cloudflare-eth.com', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] })
+                });
+                return r.json();
+              });
+              const chainId = parseInt(res.result, 16);
+              expect(chainId).toBe(1);
+            });
+
+            test('ERC20 USDC balanceOf on mainnet', async ({ page }) => {
+              const res = await page.evaluate(async () => {
+                const r = await fetch('https://cloudflare-eth.com', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jsonrpc: '2.0', id: 1,
+                    method: 'eth_call',
+                    params: [{
+                      to: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+                      data: '0x70a08231000000000000000000000000d8dA6BF26964aF9D7eEd9e03E53415D37aA96045'
+                    }, 'latest']
+                  })
+                });
+                return r.json();
+              });
+              expect(res.result).toBeTruthy();
+              expect(res.error).toBeUndefined();
+            });
+
+            test('Gas price available on mainnet', async ({ page }) => {
+              const res = await page.evaluate(async () => {
+                const r = await fetch('https://cloudflare-eth.com', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_gasPrice', params: [] })
+                });
+                return r.json();
+              });
+              const gas = parseInt(res.result, 16);
+              expect(gas).toBeGreaterThan(0);
+            });
+          });
+          TESTEOF
+
+          npx playwright test onchain-mainnet.spec.cjs --reporter=list 2>&1
+
+      - name: Run onchain fork tests (Sepolia Testnet)
+        run: |
+          cat > onchain-sepolia.spec.cjs << 'TESTEOF'
+          const { test, expect } = require('@playwright/test');
+
+          const BASE = 'http://localhost:8080';
+
+          async function skipIntro(page) {
+            await page.goto(BASE);
+            await page.waitForSelector('.intro-overlay', { timeout: 5000 }).catch(() => {});
+            await page.click('.intro-overlay').catch(() => {});
+            await page.waitForTimeout(1500);
+          }
+
+          test.describe('Onchain Fork — Sepolia Testnet', () => {
+            test('RPC sepolia responds', async ({ page }) => {
+              const res = await page.evaluate(async () => {
+                const r = await fetch('https://rpc.sepolia.org', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
+                });
+                return r.json();
+              });
+              expect(res.result).toBeTruthy();
+              const blockNum = parseInt(res.result, 16);
+              expect(blockNum).toBeGreaterThan(5000000);
+            });
+
+            test('RPC sepolia returns chainId 11155111', async ({ page }) => {
+              const res = await page.evaluate(async () => {
+                const r = await fetch('https://rpc.sepolia.org', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] })
+                });
+                return r.json();
+              });
+              const chainId = parseInt(res.result, 16);
+              expect(chainId).toBe(11155111);
+            });
+
+            test('Gas price available on sepolia', async ({ page }) => {
+              const res = await page.evaluate(async () => {
+                const r = await fetch('https://rpc.sepolia.org', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_gasPrice', params: [] })
+                });
+                return r.json();
+              });
+              const gas = parseInt(res.result, 16);
+              expect(gas).toBeGreaterThan(0);
+            });
+
+            test('Sepolia ERC20 totalSupply (SepoliaETH WETH)', async ({ page }) => {
+              const res = await page.evaluate(async () => {
+                const r = await fetch('https://rpc.sepolia.org', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jsonrpc: '2.0', id: 1,
+                    method: 'eth_call',
+                    params: [{
+                      to: '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9',
+                      data: '0x18160ddd'
+                    }, 'latest']
+                  })
+                });
+                return r.json();
+              });
+              expect(res.result).toBeTruthy();
+              expect(res.error).toBeUndefined();
+            });
+          });
+          TESTEOF
+
+          npx playwright test onchain-sepolia.spec.cjs --reporter=list 2>&1
           retention-days: 7

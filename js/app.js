@@ -158,14 +158,21 @@ function updateTopbar() {
 // ── welcome / unlock modals ──
 function showWelcomeModal() {
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
-    <div class="tx-confirm">
-      <img src="assets/bear.svg" alt="Bear Tool">
-      <div class="question">${escapeHtml(t('welcome.title'))}</div>
-      <p class="small mb-16">${escapeHtml(t('welcome.desc'))}</p>
-      <div class="flex gap-8">
-        <button class="btn btn-primary" id="wCreate">${escapeHtml(t('welcome.create'))}</button>
-        <button class="btn btn-secondary" id="wImport">${escapeHtml(t('welcome.import'))}</button>
+    <div class="welcome-full">
+      <div class="welcome-logo">
+        <img src="assets/bear.svg" alt="Bear Tool" style="width:80px;height:80px">
+      </div>
+      <h1 class="welcome-title">Bear Tool</h1>
+      <p class="welcome-sub">Self-custody wallet</p>
+      <div class="welcome-actions">
+        <button class="btn btn-primary btn-lg btn-block" id="wCreate">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Create Wallet
+        </button>
+        <button class="btn btn-secondary btn-lg btn-block" id="wImport">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Import Wallet
+        </button>
       </div>
     </div>
   `);
@@ -236,26 +243,58 @@ function showCreateModal() {
 }
 
 function showSeedPhrase(mnemonic, address) {
+  const words = mnemonic.split(' ');
+  // Pick 3 random words for verification, one is correct
+  const correctIdx = Math.floor(Math.random() * 3);
+  const correctWord = words[0]; // Always verify word #1
+  const distractors = [];
+  const allWords = [...words];
+  while (distractors.length < 2) {
+    const w = allWords[Math.floor(Math.random() * allWords.length)];
+    if (w !== correctWord && !distractors.includes(w)) distractors.push(w);
+  }
+  // Build choices array
+  const choices = [...distractors];
+  choices.splice(correctIdx, 0, correctWord);
+
   openModal(`
     <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
     <h2>🔑 Your Seed Phrase</h2>
     <div class="danger-box">Write these 12 words DOWN. Never share them. Never type them into any website.</div>
     <div class="card" style="box-shadow:none;background:var(--cream)">
-      <div class="mono" style="font-size:1.1rem;line-height:2">${mnemonic.split(' ').map((w, i) => `<b>${i + 1}.</b> ${escapeHtml(w)}`).join(' ')}</div>
+      <div class="mono" style="font-size:1.1rem;line-height:2">${words.map((w, i) => `<b>${i + 1}.</b> ${escapeHtml(w)}`).join(' ')}</div>
     </div>
     <div class="field">
-      <label>Confirm: type word #1 to continue</label>
-      <input class="input" id="seedConfirm" placeholder="First word">
+      <label>Select word #1 to confirm</label>
+      <div class="seed-choices" id="seedChoices">
+        ${choices.map((w, i) => `<button class="btn btn-ghost seed-choice-btn" data-word="${escapeHtml(w)}" data-idx="${i}">${escapeHtml(w)}</button>`).join('')}
+      </div>
     </div>
-    <button class="btn btn-primary btn-block" id="seedDone">I saved it</button>
+    <button class="btn btn-primary btn-block" id="seedDone" disabled>I saved it</button>
   `);
-  const first = mnemonic.split(' ')[0];
-  const btn = $('#seedDone');
-  btn.disabled = true;
-  $('#seedConfirm').addEventListener('input', (e) => {
-    btn.disabled = e.target.value.trim().toLowerCase() !== first.toLowerCase();
+
+  let verified = false;
+  $all('.seed-choice-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $all('.seed-choice-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (btn.dataset.word.toLowerCase() === correctWord.toLowerCase()) {
+        verified = true;
+        btn.style.background = 'var(--mint)';
+        btn.style.color = 'var(--white)';
+        $('#seedDone').disabled = false;
+      } else {
+        verified = false;
+        btn.style.background = 'var(--danger)';
+        btn.style.color = 'var(--white)';
+        toast('Wrong word! Try again.', 'error');
+        $('#seedDone').disabled = true;
+      }
+    });
   });
-  btn.onclick = () => {
+
+  $('#seedDone').onclick = () => {
+    if (!verified) return;
     set('signer', ethers.Wallet.fromPhrase(mnemonic));
     set('address', address);
     set('unlocked', true);
@@ -927,19 +966,53 @@ function saveSettingsHandler() {
 }
 
 function clearAllData() {
+  // Generate 3 random confirm words, one is DELETE
+  const allChoices = ['DELETE', 'REMOVE', 'DESTROY', 'CONFIRM', 'ERASE'];
+  const correct = 'DELETE';
+  const distractors = allChoices.filter(w => w !== correct);
+  // Pick 2 random distractors
+  const picked = [];
+  while (picked.length < 2) {
+    const w = distractors[Math.floor(Math.random() * distractors.length)];
+    if (!picked.includes(w)) picked.push(w);
+  }
+  const choices = [...picked];
+  const insertIdx = Math.floor(Math.random() * 3);
+  choices.splice(insertIdx, 0, correct);
+
   openModal(`
     <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
     <h2>🗑️ Clear all data?</h2>
     <div class="danger-box">This deletes ALL wallets, settings, and activity from this browser. Irreversible!</div>
-    <div class="field"><label>Type <b>HAPUS</b> to confirm</label>
-      <input class="input" id="clearConfirm" placeholder="HAPUS"></div>
+    <div class="field">
+      <label>Select <b>DELETE</b> to confirm</label>
+      <div class="seed-choices" id="deleteChoices">
+        ${choices.map((w, i) => `<button class="btn btn-ghost seed-choice-btn delete-choice" data-word="${w}" data-idx="${i}">${w}</button>`).join('')}
+      </div>
+    </div>
     <button class="btn btn-danger btn-block" id="clearBtn" disabled>Delete everything</button>
   `);
-  const btn = $('#clearBtn');
-  $('#clearConfirm').addEventListener('input', (e) => {
-    btn.disabled = e.target.value.trim() !== 'HAPUS';
+  let verified = false;
+  $all('.delete-choice').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $all('.delete-choice').forEach(b => { b.classList.remove('active'); b.style.background = ''; b.style.color = ''; });
+      btn.classList.add('active');
+      if (btn.dataset.word === correct) {
+        verified = true;
+        btn.style.background = 'var(--danger)';
+        btn.style.color = 'var(--white)';
+        $('#clearBtn').disabled = false;
+      } else {
+        verified = false;
+        btn.style.background = 'var(--danger)';
+        btn.style.color = 'var(--white)';
+        toast('Wrong! Select DELETE.', 'error');
+        $('#clearBtn').disabled = true;
+      }
+    });
   });
   btn.onclick = () => {
+    if (!verified) return;
     wallet.clearKeystore();
     localStorage.removeItem('bear.settings');
     localStorage.removeItem('bear.activity');

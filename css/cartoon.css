@@ -1937,3 +1937,61 @@ body::before {
 .empty-state svg { margin-bottom: 16px; opacity: 0.4; }
 .empty-state p { margin: 8px 0; font-weight: 700; }
 .empty-state .sub { font-weight: 400; font-size: 0.85rem; opacity: 0.7; }
+
+/* ═══════════ WELCOME FULL SCREEN ═══════════ */
+.welcome-full {
+  text-align: center;
+  padding: 32px 16px;
+}
+.welcome-logo {
+  margin-bottom: 16px;
+}
+.welcome-title {
+  font-size: 2rem;
+  font-weight: 800;
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+.welcome-sub {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  margin: 0 0 32px;
+}
+.welcome-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.welcome-actions .btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 1rem;
+  padding: 14px 20px;
+}
+
+/* ═══════════ SEED / DELETE CHOICES ═══════════ */
+.seed-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+.seed-choice-btn {
+  padding: 10px 20px !important;
+  font-weight: 700 !important;
+  border: 2px solid var(--ink) !important;
+  border-radius: 12px !important;
+  background: var(--cream) !important;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 0.9rem;
+}
+.seed-choice-btn:hover {
+  background: var(--white) !important;
+  transform: translateY(-2px);
+}
+.seed-choice-btn.active {
+  transform: translateY(0);
+}
