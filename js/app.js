@@ -599,7 +599,9 @@ async function loadDashboard() {
   if (statusText) { statusText.textContent = wallet.shortAddress(addr); }
   if (copyBtn) { copyBtn.dataset.copy = addr; copyBtn.style.display = ''; }
 
-  $('#assetList').innerHTML = spinner(64, 'Loading assets...');
+  const assetList = $('#assetList');
+  if (!assetList) return;
+  assetList.innerHTML = spinner(64, 'Loading assets...');
   try {
     const provider = await getProvider(net.chainId);
     set('provider', provider);
@@ -631,7 +633,7 @@ async function loadDashboard() {
     renderAssets(tokens);
     loadNfts();
   } catch (e) {
-    $('#assetList').innerHTML = `<p class="small text-center">Error: ${escapeHtml(e.message)}</p>`;
+    assetList.innerHTML = `<p class="small text-center">Error: ${escapeHtml(e.message)}</p>`;
   }
 }
 
@@ -639,7 +641,7 @@ function renderAssets(tokens) {
   const totalUsd = tokens.reduce((s, t) => s + (t.usd || 0), 0);
   animateValue($('#totalBalance'), totalUsd, { duration: 600, formatter: fmtUsd });
   if (!tokens.length) {
-    $('#assetList').innerHTML = '<p class="small text-center">No assets found.</p>';
+    assetList.innerHTML = '<p class="small text-center">No assets found.</p>';
     $('#assetSearch').style.display = 'none';
     return;
   }
@@ -682,7 +684,7 @@ function renderAssets(tokens) {
   window._assetTokens = tokens;
   const filter = ($('#tokenSearchInput')?.value || '').toLowerCase();
   const filtered = filter ? tokens.filter(t => (t.symbol || '').toLowerCase().includes(filter)) : tokens;
-  $('#assetList').innerHTML = filtered.map((t, i) => `
+  assetList.innerHTML = filtered.map((t, i) => `
     <div class="asset-row asset-clickable" data-token-idx="${i}" data-symbol="${escapeHtml(t.symbol || '')}" data-address="${escapeHtml(t.address || '')}" data-decimals="${t.decimals || 18}" data-balance="${escapeHtml(t.balance || '0')}" data-usd="${t.usd || 0}">
       <div class="token-icon-svg">${getLogo(t.symbol, i)}</div>
       <div class="asset-info">
@@ -696,7 +698,7 @@ function renderAssets(tokens) {
       <div class="asset-arrow"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
     </div>`).join('');
   if (filtered.length === 0) {
-    $('#assetList').innerHTML = '<p class="small text-center">No tokens match your search.</p>';
+    assetList.innerHTML = '<p class="small text-center">No tokens match your search.</p>';
   }
   // Click handlers
   $all('.asset-clickable').forEach(el => {
@@ -900,9 +902,10 @@ function bindViews() {
 // ── approval manager ──
 async function scanApprovals() {
   if (!get('unlocked')) { showUnlockModal(); return; }
-  const mode = $('#approvalMode').value;
+  const mode = $('#approvalMode')?.value;
   const net = getNetworkById(get('networkId'));
   const list = $('#approvalList');
+  if (!list) return;
   list.innerHTML = spinner(64, 'Scanning approvals...');
   try {
     const provider = get('provider');
@@ -982,6 +985,7 @@ function renderApprovals(approvals) {
 function renderActivity() {
   loadActivity();
   const list = $('#activityList');
+  if (!list) return;
   if (!get('activity').length) {
     list.innerHTML = '<p class="small text-center">No transactions yet.</p>';
     return;
@@ -1077,6 +1081,7 @@ function saveAddressBook(list) {
 function renderAddressBook() {
   const list = loadAddressBook();
   const el = $('#addressBookList');
+  if (!el) return;
   if (!list.length) {
     el.innerHTML = '<p class="small text-center">No saved addresses yet.</p>';
     return;

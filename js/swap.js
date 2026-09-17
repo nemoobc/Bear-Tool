@@ -132,6 +132,7 @@ export function bindSwapEvents() {
 
 export function loadSwapTokens() {
   const from = $('#swapFrom'), to = $('#swapTo');
+  if (!from || !to) return;
   const tokens = get('tokens');
   const opts = tokens.map(t =>
     `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)}</option>`

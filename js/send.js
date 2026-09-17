@@ -42,6 +42,7 @@ export function bindSendEvents() {
 
 export function loadSendTokens() {
   const sel = $('#sendToken');
+  if (!sel) return;
   sel.innerHTML = get('tokens').map(t =>
     `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)} (${escapeHtml(fmtAmount(t.balance, t.decimals))})</option>`
   ).join('');
@@ -49,9 +50,10 @@ export function loadSendTokens() {
 
 // live preview + gas estimate (best effort)
 export async function updateSendPreview() {
-  const to = $('#sendTo').value.trim();
-  const amt = $('#sendAmount').value;
+  const to = $('#sendTo')?.value?.trim() || '';
+  const amt = $('#sendAmount')?.value || '';
   const preview = $('#sendPreview');
+  if (!preview) return;
   if (!to || !amt) { preview.classList.add('hidden'); return; }
   if (!wallet.isValidAddress(to)) {
     preview.innerHTML = '⚠️ Invalid address';

@@ -17,12 +17,12 @@ export function bindBridgeEvents() {
 }
 
 export function loadBridgeChains() {
-  const from = $('#bridgeFromChain'), to = $('#bridgeToChain');
+  const from = $('#bridgeFromChain'), to = $('#bridgeToChain'), tok = $('#bridgeToken');
+  if (!from || !to || !tok) return;
   const opts = getAllNetworks().map(n => `<option value="${escapeHtml(n.id)}">${escapeHtml(n.name)} (${escapeHtml(n.type)})</option>`).join('');
   from.innerHTML = opts;
   to.innerHTML = opts;
   if (from.options.length > 1) to.selectedIndex = 1;
-  const tok = $('#bridgeToken');
   tok.innerHTML = get('tokens').map(t => `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)}</option>`).join('');
 }
 

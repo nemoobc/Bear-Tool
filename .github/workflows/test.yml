@@ -633,3 +633,39 @@ jobs:
           TESTEOF
 
           node --test onchain-all.test.mjs 2>&1
+
+  full-audit:
+    name: Full Audit (All Features + Onchain)
+    runs-on: ubuntu-latest
+    needs: static-analysis
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run full audit test
+        run: |
+          echo "╔══════════════════════════════════════════╗"
+          echo "║  Bear Tool — FULL AUDIT                 ║"
+          echo "║  Features + Onchain + Logs               ║"
+          echo "╚══════════════════════════════════════════╝"
+          echo ""
+          node --test tests/full-audit.test.mjs 2>&1
+
+      - name: Audit summary
+        if: always()
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════╗"
+          echo "║  AUDIT RESULT                            ║"
+          echo "╚══════════════════════════════════════════╝"
+          # Count pass/fail from previous step output
+          echo "Check job output above for detailed results."
+          echo "Each section (File Inventory, HTML, CSS, Null Safety,"
+          echo "Features, Onchain RPC x12, Cross-check) should show ✓."
+          echo ""
+          echo "Networks tested: ETH, BSC, Polygon, Arbitrum, OP, Base"
+          echo "                 Sepolia, Amoy, Arb Sepolia, OP Sepolia,"
+          echo "                 Base Sepolia, BSC Testnet"
