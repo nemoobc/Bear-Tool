@@ -1,0 +1,74 @@
+﻿2026-09-17T12:08:47.5035009Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-17T12:08:47.5043766Z ##[group]Run actions/checkout@v4
+2026-09-17T12:08:47.5044528Z with:
+2026-09-17T12:08:47.5045088Z   repository: nemoobc/Bear-Tool
+2026-09-17T12:08:47.5048787Z   token: ***
+2026-09-17T12:08:47.5049239Z   ssh-strict: true
+2026-09-17T12:08:47.5049676Z   ssh-user: git
+2026-09-17T12:08:47.5050137Z   persist-credentials: true
+2026-09-17T12:08:47.5050635Z   clean: true
+2026-09-17T12:08:47.5051275Z   sparse-checkout-cone-mode: true
+2026-09-17T12:08:47.5051818Z   fetch-depth: 1
+2026-09-17T12:08:47.5052255Z   fetch-tags: false
+2026-09-17T12:08:47.5052769Z   show-progress: true
+2026-09-17T12:08:47.5053267Z   lfs: false
+2026-09-17T12:08:47.5053721Z   submodules: false
+2026-09-17T12:08:47.5054218Z   set-safe-directory: true
+2026-09-17T12:08:47.5054720Z   allow-unsafe-pr-checkout: false
+2026-09-17T12:08:47.5055537Z ##[endgroup]
+2026-09-17T12:08:47.6105273Z Syncing repository: nemoobc/Bear-Tool
+2026-09-17T12:08:47.6108122Z ##[group]Getting Git version info
+2026-09-17T12:08:47.6108923Z Working directory is '/home/runner/work/Bear-Tool/Bear-Tool'
+2026-09-17T12:08:47.6109988Z [command]/usr/bin/git version
+2026-09-17T12:08:47.7489060Z git version 2.55.0
+2026-09-17T12:08:47.7512980Z ##[endgroup]
+2026-09-17T12:08:47.7528368Z Temporarily overriding HOME='/home/runner/work/_temp/1ee02c23-e123-4df1-a422-1857866ddc55' before making global git config changes
+2026-09-17T12:08:47.7529855Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-17T12:08:47.7534112Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Bear-Tool/Bear-Tool
+2026-09-17T12:08:47.7813554Z Deleting the contents of '/home/runner/work/Bear-Tool/Bear-Tool'
+2026-09-17T12:08:47.7818385Z ##[group]Initializing the repository
+2026-09-17T12:08:47.7822573Z [command]/usr/bin/git init /home/runner/work/Bear-Tool/Bear-Tool
+2026-09-17T12:08:47.8465669Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-17T12:08:47.8467567Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-17T12:08:47.8469322Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-17T12:08:47.8470944Z hint: call:
+2026-09-17T12:08:47.8471442Z hint:
+2026-09-17T12:08:47.8471988Z hint: 	git config --global init.defaultBranch <name>
+2026-09-17T12:08:47.8472650Z hint:
+2026-09-17T12:08:47.8473294Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-17T12:08:47.8474298Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-17T12:08:47.8475534Z hint:
+2026-09-17T12:08:47.8476209Z hint: 	git branch -m <name>
+2026-09-17T12:08:47.8477047Z hint:
+2026-09-17T12:08:47.8477855Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-17T12:08:47.8478970Z Initialized empty Git repository in /home/runner/work/Bear-Tool/Bear-Tool/.git/
+2026-09-17T12:08:47.8481883Z [command]/usr/bin/git remote add origin https://github.com/nemoobc/Bear-Tool
+2026-09-17T12:08:47.8764067Z ##[endgroup]
+2026-09-17T12:08:47.8765350Z ##[group]Disabling automatic garbage collection
+2026-09-17T12:08:47.8767502Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-17T12:08:47.8799494Z ##[endgroup]
+2026-09-17T12:08:47.8800233Z ##[group]Setting up auth
+2026-09-17T12:08:47.8806278Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-17T12:08:47.8840183Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-17T12:08:48.0961518Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-17T12:08:48.0999275Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-17T12:08:48.1226803Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-17T12:08:48.1264999Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-17T12:08:48.1490196Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-17T12:08:48.1528858Z ##[endgroup]
+2026-09-17T12:08:48.1538687Z ##[group]Fetching the repository
+2026-09-17T12:08:48.1542049Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +6788a2cf27c078b52d61fbd68a4129115cc6ce10:refs/remotes/origin/master
+2026-09-17T12:08:48.6953269Z From https://github.com/nemoobc/Bear-Tool
+2026-09-17T12:08:48.6967804Z  * [new ref]         6788a2cf27c078b52d61fbd68a4129115cc6ce10 -> origin/master
+2026-09-17T12:08:48.6969784Z ##[endgroup]
+2026-09-17T12:08:48.6970386Z ##[group]Determining the checkout info
+2026-09-17T12:08:48.6971308Z ##[endgroup]
+2026-09-17T12:08:48.6971669Z [command]/usr/bin/git sparse-checkout disable
+2026-09-17T12:08:48.7189616Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-17T12:08:48.7223373Z ##[group]Checking out the ref
+2026-09-17T12:08:48.7228329Z [command]/usr/bin/git checkout --progress --force -B master refs/remotes/origin/master
+2026-09-17T12:08:48.7336563Z Reset branch 'master'
+2026-09-17T12:08:48.7344363Z branch 'master' set up to track 'origin/master'.
+2026-09-17T12:08:48.7353173Z ##[endgroup]
+2026-09-17T12:08:48.7392520Z [command]/usr/bin/git log -1 --format=%H
+2026-09-17T12:08:48.7420588Z 6788a2cf27c078b52d61fbd68a4129115cc6ce10

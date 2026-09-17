@@ -1,0 +1,73 @@
+﻿2026-09-17T12:09:02.8289494Z ##[group]Run cat > onchain-mainnet.spec.cjs << 'TESTEOF'
+2026-09-17T12:09:02.8290012Z [36;1mcat > onchain-mainnet.spec.cjs << 'TESTEOF'[0m
+2026-09-17T12:09:02.8290403Z [36;1mconst { test, expect } = require('@playwright/test');[0m
+2026-09-17T12:09:02.8290767Z [36;1m[0m
+2026-09-17T12:09:02.8290984Z [36;1m// Use multiple RPC fallbacks[0m
+2026-09-17T12:09:02.8291484Z [36;1mconst RPCS = ['https://eth.llamarpc.com', 'https://eth.drpc.org', 'https://cloudflare-eth.com'];[0m
+2026-09-17T12:09:02.8292149Z [36;1m[0m
+2026-09-17T12:09:02.8292530Z [36;1masync function rpc(method, params = []) {[0m
+2026-09-17T12:09:02.8292855Z [36;1m  for (const rpc of RPCS) {[0m
+2026-09-17T12:09:02.8293107Z [36;1m    try {[0m
+2026-09-17T12:09:02.8293358Z [36;1m      const controller = new AbortController();[0m
+2026-09-17T12:09:02.8293764Z [36;1m      const t = setTimeout(() => controller.abort(), 8000);[0m
+2026-09-17T12:09:02.8294119Z [36;1m      const r = await fetch(rpc, {[0m
+2026-09-17T12:09:02.8294669Z [36;1m        method: 'POST',[0m
+2026-09-17T12:09:02.8295002Z [36;1m        headers: { 'Content-Type': 'application/json' },[0m
+2026-09-17T12:09:02.8295433Z [36;1m        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),[0m
+2026-09-17T12:09:02.8296005Z [36;1m        signal: controller.signal[0m
+2026-09-17T12:09:02.8296284Z [36;1m      });[0m
+2026-09-17T12:09:02.8296502Z [36;1m      clearTimeout(t);[0m
+2026-09-17T12:09:02.8296777Z [36;1m      const data = await r.json();[0m
+2026-09-17T12:09:02.8297070Z [36;1m      if (data.result) return data;[0m
+2026-09-17T12:09:02.8297348Z [36;1m    } catch (e) { continue; }[0m
+2026-09-17T12:09:02.8297603Z [36;1m  }[0m
+2026-09-17T12:09:02.8297823Z [36;1m  throw new Error('All RPCs failed');[0m
+2026-09-17T12:09:02.8298091Z [36;1m}[0m
+2026-09-17T12:09:02.8298269Z [36;1m[0m
+2026-09-17T12:09:02.8298537Z [36;1mtest.describe('Onchain Fork — Ethereum Mainnet', () => {[0m
+2026-09-17T12:09:02.8298947Z [36;1m  test.describe.configure({ timeout: 45000 });[0m
+2026-09-17T12:09:02.8299345Z [36;1m  test('RPC mainnet responds (blockNumber)', async () => {[0m
+2026-09-17T12:09:02.8299895Z [36;1m    const res = await rpc('eth_blockNumber');[0m
+2026-09-17T12:09:02.8300235Z [36;1m    expect(res.result).toBeTruthy();[0m
+2026-09-17T12:09:02.8300559Z [36;1m    const blockNum = parseInt(res.result, 16);[0m
+2026-09-17T12:09:02.8300913Z [36;1m    expect(blockNum).toBeGreaterThan(19000000);[0m
+2026-09-17T12:09:02.8301224Z [36;1m  });[0m
+2026-09-17T12:09:02.8301414Z [36;1m[0m
+2026-09-17T12:09:02.8301669Z [36;1m  test('RPC mainnet returns chainId = 1', async () => {[0m
+2026-09-17T12:09:02.8302029Z [36;1m    const res = await rpc('eth_chainId');[0m
+2026-09-17T12:09:02.8302362Z [36;1m    const chainId = parseInt(res.result, 16);[0m
+2026-09-17T12:09:02.8302665Z [36;1m    expect(chainId).toBe(1);[0m
+2026-09-17T12:09:02.8303001Z [36;1m  });[0m
+2026-09-17T12:09:02.8303327Z [36;1m[0m
+2026-09-17T12:09:02.8303705Z [36;1m  test('Gas price available on mainnet', async () => {[0m
+2026-09-17T12:09:02.8304093Z [36;1m    const res = await rpc('eth_gasPrice');[0m
+2026-09-17T12:09:02.8304419Z [36;1m    const gas = parseInt(res.result, 16);[0m
+2026-09-17T12:09:02.8304740Z [36;1m    expect(gas).toBeGreaterThan(0);[0m
+2026-09-17T12:09:02.8305013Z [36;1m  });[0m
+2026-09-17T12:09:02.8305210Z [36;1m});[0m
+2026-09-17T12:09:02.8305411Z [36;1mTESTEOF[0m
+2026-09-17T12:09:02.8305609Z [36;1m[0m
+2026-09-17T12:09:02.8306161Z [36;1mnpx playwright test onchain-mainnet.spec.cjs --reporter=list 2>&1[0m
+2026-09-17T12:09:02.8342951Z shell: /usr/bin/bash -e {0}
+2026-09-17T12:09:02.8343226Z ##[endgroup]
+2026-09-17T12:09:03.6152218Z npm warn exec The following package was not found and will be installed: playwright@1.63.0
+2026-09-17T12:09:05.4371400Z Error: Cannot find module '@playwright/test'
+2026-09-17T12:09:05.4372154Z Require stack:
+2026-09-17T12:09:05.4372798Z - /home/runner/work/Bear-Tool/Bear-Tool/onchain-mainnet.spec.cjs
+2026-09-17T12:09:05.4374198Z - /home/runner/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/lib/common/index.js
+2026-09-17T12:09:05.4376581Z - /home/runner/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/lib/program.js
+2026-09-17T12:09:05.4378021Z - /home/runner/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/cli.js
+2026-09-17T12:09:05.4378711Z 
+2026-09-17T12:09:05.4379010Z    at onchain-mainnet.spec.cjs:1
+2026-09-17T12:09:05.4379423Z 
+2026-09-17T12:09:05.4379958Z > 1 | const { test, expect } = require('@playwright/test');
+2026-09-17T12:09:05.4380582Z     |                          ^
+2026-09-17T12:09:05.4380920Z   2 |
+2026-09-17T12:09:05.4381250Z   3 | // Use multiple RPC fallbacks
+2026-09-17T12:09:05.4382022Z   4 | const RPCS = ['https://eth.llamarpc.com', 'https://eth.drpc.org', 'https://cloudflare-eth.com'];
+2026-09-17T12:09:05.4383118Z     at Object.<anonymous> (/home/runner/work/Bear-Tool/Bear-Tool/onchain-mainnet.spec.cjs:1:26)
+2026-09-17T12:09:05.4383842Z Error: No tests found.
+2026-09-17T12:09:05.4384638Z Make sure that arguments are regular expressions matching test files.
+2026-09-17T12:09:05.4386204Z You may need to escape symbols like "$" or "*" and quote the arguments.
+2026-09-17T12:09:05.4386899Z 
+2026-09-17T12:09:05.4729500Z ##[error]Process completed with exit code 1.

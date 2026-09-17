@@ -1,0 +1,241 @@
+﻿2026-09-17T12:08:47.6278928Z Current runner version: '2.337.0'
+2026-09-17T12:08:47.6305206Z ##[group]Runner Image Provisioner
+2026-09-17T12:08:47.6306334Z Hosted Compute Agent
+2026-09-17T12:08:47.6307080Z Version: 20260828.587
+2026-09-17T12:08:47.6307747Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-17T12:08:47.6308529Z Build Date: 2026-08-28T16:44:25Z
+2026-09-17T12:08:47.6309218Z Worker ID: {75bf38b5-6020-42b2-a490-809787d9c05e}
+2026-09-17T12:08:47.6309939Z Azure Region: westus
+2026-09-17T12:08:47.6310578Z ##[endgroup]
+2026-09-17T12:08:47.6312274Z ##[group]Operating System
+2026-09-17T12:08:47.6312992Z Ubuntu
+2026-09-17T12:08:47.6313544Z 24.04.5
+2026-09-17T12:08:47.6314078Z LTS
+2026-09-17T12:08:47.6314634Z ##[endgroup]
+2026-09-17T12:08:47.6315220Z ##[group]Runner Image
+2026-09-17T12:08:47.6316141Z Image: ubuntu-24.04
+2026-09-17T12:08:47.6316851Z Version: 20260907.300.1
+2026-09-17T12:08:47.6318176Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-17T12:08:47.6319753Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-17T12:08:47.6320757Z ##[endgroup]
+2026-09-17T12:08:47.6321936Z ##[group]GITHUB_TOKEN Permissions
+2026-09-17T12:08:47.6324325Z Contents: read
+2026-09-17T12:08:47.6324955Z Metadata: read
+2026-09-17T12:08:47.6325528Z Packages: read
+2026-09-17T12:08:47.6326853Z ##[endgroup]
+2026-09-17T12:08:47.6329126Z Secret source: Actions
+2026-09-17T12:08:47.6330195Z Cache mode: write
+2026-09-17T12:08:47.6330917Z Prepare workflow directory
+2026-09-17T12:08:47.6726397Z Prepare all required actions
+2026-09-17T12:08:47.6788746Z Getting action download info
+2026-09-17T12:08:48.0292743Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-09-17T12:08:48.1326541Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-09-17T12:08:48.3234519Z Complete job name: Onchain Fork Test (Mainnet + Testnet)
+2026-09-17T12:08:48.4013586Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-17T12:08:48.4022310Z ##[group]Run actions/checkout@v4
+2026-09-17T12:08:48.4023060Z with:
+2026-09-17T12:08:48.4023510Z   repository: nemoobc/Bear-Tool
+2026-09-17T12:08:48.4028101Z   token: ***
+2026-09-17T12:08:48.4028556Z   ssh-strict: true
+2026-09-17T12:08:48.4028992Z   ssh-user: git
+2026-09-17T12:08:48.4029436Z   persist-credentials: true
+2026-09-17T12:08:48.4029916Z   clean: true
+2026-09-17T12:08:48.4030349Z   sparse-checkout-cone-mode: true
+2026-09-17T12:08:48.4030869Z   fetch-depth: 1
+2026-09-17T12:08:48.4031301Z   fetch-tags: false
+2026-09-17T12:08:48.4031744Z   show-progress: true
+2026-09-17T12:08:48.4032188Z   lfs: false
+2026-09-17T12:08:48.4032639Z   submodules: false
+2026-09-17T12:08:48.4033095Z   set-safe-directory: true
+2026-09-17T12:08:48.4033599Z   allow-unsafe-pr-checkout: false
+2026-09-17T12:08:48.4034441Z ##[endgroup]
+2026-09-17T12:08:48.5060530Z Syncing repository: nemoobc/Bear-Tool
+2026-09-17T12:08:48.5062702Z ##[group]Getting Git version info
+2026-09-17T12:08:48.5063769Z Working directory is '/home/runner/work/Bear-Tool/Bear-Tool'
+2026-09-17T12:08:48.5065019Z [command]/usr/bin/git version
+2026-09-17T12:08:48.5123882Z git version 2.55.0
+2026-09-17T12:08:48.5162153Z ##[endgroup]
+2026-09-17T12:08:48.5175205Z Temporarily overriding HOME='/home/runner/work/_temp/6ff9736c-723b-46a1-b151-16bc25400ee6' before making global git config changes
+2026-09-17T12:08:48.5177848Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-17T12:08:48.5179618Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Bear-Tool/Bear-Tool
+2026-09-17T12:08:48.5230487Z Deleting the contents of '/home/runner/work/Bear-Tool/Bear-Tool'
+2026-09-17T12:08:48.5239871Z ##[group]Initializing the repository
+2026-09-17T12:08:48.5248459Z [command]/usr/bin/git init /home/runner/work/Bear-Tool/Bear-Tool
+2026-09-17T12:08:48.5347717Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-17T12:08:48.5351440Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-17T12:08:48.5353057Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-17T12:08:48.5353861Z hint: call:
+2026-09-17T12:08:48.5354332Z hint:
+2026-09-17T12:08:48.5355249Z hint: 	git config --global init.defaultBranch <name>
+2026-09-17T12:08:48.5356616Z hint:
+2026-09-17T12:08:48.5357293Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-17T12:08:48.5358260Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-17T12:08:48.5359021Z hint:
+2026-09-17T12:08:48.5359436Z hint: 	git branch -m <name>
+2026-09-17T12:08:48.5359963Z hint:
+2026-09-17T12:08:48.5360614Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-17T12:08:48.5361657Z Initialized empty Git repository in /home/runner/work/Bear-Tool/Bear-Tool/.git/
+2026-09-17T12:08:48.5373311Z [command]/usr/bin/git remote add origin https://github.com/nemoobc/Bear-Tool
+2026-09-17T12:08:48.5413886Z ##[endgroup]
+2026-09-17T12:08:48.5414812Z ##[group]Disabling automatic garbage collection
+2026-09-17T12:08:48.5418642Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-17T12:08:48.5451153Z ##[endgroup]
+2026-09-17T12:08:48.5452034Z ##[group]Setting up auth
+2026-09-17T12:08:48.5459181Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-17T12:08:48.5493730Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-17T12:08:48.5866983Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-17T12:08:48.5907231Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-17T12:08:48.6163965Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-17T12:08:48.6201248Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-17T12:08:48.6428557Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-17T12:08:48.6468564Z ##[endgroup]
+2026-09-17T12:08:48.6469988Z ##[group]Fetching the repository
+2026-09-17T12:08:48.6480085Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +6788a2cf27c078b52d61fbd68a4129115cc6ce10:refs/remotes/origin/master
+2026-09-17T12:08:49.1299535Z From https://github.com/nemoobc/Bear-Tool
+2026-09-17T12:08:49.1300655Z  * [new ref]         6788a2cf27c078b52d61fbd68a4129115cc6ce10 -> origin/master
+2026-09-17T12:08:49.1303786Z ##[endgroup]
+2026-09-17T12:08:49.1304847Z ##[group]Determining the checkout info
+2026-09-17T12:08:49.1307287Z ##[endgroup]
+2026-09-17T12:08:49.1315205Z [command]/usr/bin/git sparse-checkout disable
+2026-09-17T12:08:49.1373174Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-17T12:08:49.1406643Z ##[group]Checking out the ref
+2026-09-17T12:08:49.1412279Z [command]/usr/bin/git checkout --progress --force -B master refs/remotes/origin/master
+2026-09-17T12:08:49.1510396Z Reset branch 'master'
+2026-09-17T12:08:49.1517237Z branch 'master' set up to track 'origin/master'.
+2026-09-17T12:08:49.1522638Z ##[endgroup]
+2026-09-17T12:08:49.1565580Z [command]/usr/bin/git log -1 --format=%H
+2026-09-17T12:08:49.1593081Z 6788a2cf27c078b52d61fbd68a4129115cc6ce10
+2026-09-17T12:08:49.1881032Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-17T12:08:49.1883890Z ##[group]Run actions/setup-node@v4
+2026-09-17T12:08:49.1884410Z with:
+2026-09-17T12:08:49.1884809Z   node-version: 20
+2026-09-17T12:08:49.1885249Z   always-auth: false
+2026-09-17T12:08:49.1885689Z   check-latest: false
+2026-09-17T12:08:49.1889890Z   token: ***
+2026-09-17T12:08:49.1890308Z ##[endgroup]
+2026-09-17T12:08:49.3344010Z Attempting to download 20...
+2026-09-17T12:08:49.3453763Z (node:2238) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-17T12:08:49.3455355Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-17T12:08:50.1283462Z Acquiring 20.20.2 - x64 from https://github.com/actions/node-versions/releases/download/20.20.2-23521894959/node-20.20.2-linux-x64.tar.gz
+2026-09-17T12:08:50.5633881Z Extracting ...
+2026-09-17T12:08:50.5753934Z [command]/usr/bin/tar xz --strip 1 --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/18e0d6d0-2eca-4d56-aabe-2aa0333e44a4 -f /home/runner/work/_temp/cb3a256d-f9aa-424d-bc8c-858219983ea9
+2026-09-17T12:08:51.5930044Z Adding to the cache ...
+2026-09-17T12:08:53.4476249Z ##[group]Environment details
+2026-09-17T12:08:53.6707345Z node: v20.20.2
+2026-09-17T12:08:53.6707767Z npm: 10.8.2
+2026-09-17T12:08:53.6708013Z yarn: 1.22.22
+2026-09-17T12:08:53.6709069Z ##[endgroup]
+2026-09-17T12:08:53.6880333Z ##[group]Run npm ci
+2026-09-17T12:08:53.6880717Z [36;1mnpm ci[0m
+2026-09-17T12:08:53.6924155Z shell: /usr/bin/bash -e {0}
+2026-09-17T12:08:53.6924516Z ##[endgroup]
+2026-09-17T12:08:54.7803719Z 
+2026-09-17T12:08:54.7811654Z added 9 packages, and audited 10 packages in 1s
+2026-09-17T12:08:54.7812213Z 
+2026-09-17T12:08:54.7812490Z 3 packages are looking for funding
+2026-09-17T12:08:54.7813209Z   run `npm fund` for details
+2026-09-17T12:08:54.7813620Z 
+2026-09-17T12:08:54.7813923Z found 0 vulnerabilities
+2026-09-17T12:08:54.7932819Z ##[group]Run npx http-server . -p 8080 -s &
+2026-09-17T12:08:54.7933226Z [36;1mnpx http-server . -p 8080 -s &[0m
+2026-09-17T12:08:54.7933510Z [36;1msleep 3[0m
+2026-09-17T12:08:54.7933897Z [36;1mcurl -sf http://localhost:8080/ > /dev/null || { echo "Server failed"; exit 1; }[0m
+2026-09-17T12:08:54.7972804Z shell: /usr/bin/bash -e {0}
+2026-09-17T12:08:54.7973095Z ##[endgroup]
+2026-09-17T12:08:55.3268062Z npm warn exec The following package was not found and will be installed: http-server@14.1.1
+2026-09-17T12:08:56.3051266Z npm warn deprecated whatwg-encoding@2.0.0: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+2026-09-17T12:08:57.8190293Z (node:2299) [DEP0066] DeprecationWarning: OutgoingMessage.prototype._headers is deprecated
+2026-09-17T12:08:57.8191782Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-17T12:09:02.8289518Z ##[group]Run cat > onchain-mainnet.spec.cjs << 'TESTEOF'
+2026-09-17T12:09:02.8290017Z [36;1mcat > onchain-mainnet.spec.cjs << 'TESTEOF'[0m
+2026-09-17T12:09:02.8290407Z [36;1mconst { test, expect } = require('@playwright/test');[0m
+2026-09-17T12:09:02.8290771Z [36;1m[0m
+2026-09-17T12:09:02.8290988Z [36;1m// Use multiple RPC fallbacks[0m
+2026-09-17T12:09:02.8291488Z [36;1mconst RPCS = ['https://eth.llamarpc.com', 'https://eth.drpc.org', 'https://cloudflare-eth.com'];[0m
+2026-09-17T12:09:02.8292156Z [36;1m[0m
+2026-09-17T12:09:02.8292537Z [36;1masync function rpc(method, params = []) {[0m
+2026-09-17T12:09:02.8292859Z [36;1m  for (const rpc of RPCS) {[0m
+2026-09-17T12:09:02.8293110Z [36;1m    try {[0m
+2026-09-17T12:09:02.8293368Z [36;1m      const controller = new AbortController();[0m
+2026-09-17T12:09:02.8293768Z [36;1m      const t = setTimeout(() => controller.abort(), 8000);[0m
+2026-09-17T12:09:02.8294122Z [36;1m      const r = await fetch(rpc, {[0m
+2026-09-17T12:09:02.8294698Z [36;1m        method: 'POST',[0m
+2026-09-17T12:09:02.8295005Z [36;1m        headers: { 'Content-Type': 'application/json' },[0m
+2026-09-17T12:09:02.8295436Z [36;1m        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),[0m
+2026-09-17T12:09:02.8296010Z [36;1m        signal: controller.signal[0m
+2026-09-17T12:09:02.8296287Z [36;1m      });[0m
+2026-09-17T12:09:02.8296506Z [36;1m      clearTimeout(t);[0m
+2026-09-17T12:09:02.8296779Z [36;1m      const data = await r.json();[0m
+2026-09-17T12:09:02.8297073Z [36;1m      if (data.result) return data;[0m
+2026-09-17T12:09:02.8297351Z [36;1m    } catch (e) { continue; }[0m
+2026-09-17T12:09:02.8297607Z [36;1m  }[0m
+2026-09-17T12:09:02.8297826Z [36;1m  throw new Error('All RPCs failed');[0m
+2026-09-17T12:09:02.8298094Z [36;1m}[0m
+2026-09-17T12:09:02.8298271Z [36;1m[0m
+2026-09-17T12:09:02.8298541Z [36;1mtest.describe('Onchain Fork — Ethereum Mainnet', () => {[0m
+2026-09-17T12:09:02.8298957Z [36;1m  test.describe.configure({ timeout: 45000 });[0m
+2026-09-17T12:09:02.8299348Z [36;1m  test('RPC mainnet responds (blockNumber)', async () => {[0m
+2026-09-17T12:09:02.8299899Z [36;1m    const res = await rpc('eth_blockNumber');[0m
+2026-09-17T12:09:02.8300239Z [36;1m    expect(res.result).toBeTruthy();[0m
+2026-09-17T12:09:02.8300562Z [36;1m    const blockNum = parseInt(res.result, 16);[0m
+2026-09-17T12:09:02.8300921Z [36;1m    expect(blockNum).toBeGreaterThan(19000000);[0m
+2026-09-17T12:09:02.8301227Z [36;1m  });[0m
+2026-09-17T12:09:02.8301418Z [36;1m[0m
+2026-09-17T12:09:02.8301672Z [36;1m  test('RPC mainnet returns chainId = 1', async () => {[0m
+2026-09-17T12:09:02.8302032Z [36;1m    const res = await rpc('eth_chainId');[0m
+2026-09-17T12:09:02.8302365Z [36;1m    const chainId = parseInt(res.result, 16);[0m
+2026-09-17T12:09:02.8302668Z [36;1m    expect(chainId).toBe(1);[0m
+2026-09-17T12:09:02.8303008Z [36;1m  });[0m
+2026-09-17T12:09:02.8303332Z [36;1m[0m
+2026-09-17T12:09:02.8303714Z [36;1m  test('Gas price available on mainnet', async () => {[0m
+2026-09-17T12:09:02.8304096Z [36;1m    const res = await rpc('eth_gasPrice');[0m
+2026-09-17T12:09:02.8304424Z [36;1m    const gas = parseInt(res.result, 16);[0m
+2026-09-17T12:09:02.8304743Z [36;1m    expect(gas).toBeGreaterThan(0);[0m
+2026-09-17T12:09:02.8305016Z [36;1m  });[0m
+2026-09-17T12:09:02.8305222Z [36;1m});[0m
+2026-09-17T12:09:02.8305414Z [36;1mTESTEOF[0m
+2026-09-17T12:09:02.8305612Z [36;1m[0m
+2026-09-17T12:09:02.8306166Z [36;1mnpx playwright test onchain-mainnet.spec.cjs --reporter=list 2>&1[0m
+2026-09-17T12:09:02.8342959Z shell: /usr/bin/bash -e {0}
+2026-09-17T12:09:02.8343230Z ##[endgroup]
+2026-09-17T12:09:03.6152254Z npm warn exec The following package was not found and will be installed: playwright@1.63.0
+2026-09-17T12:09:05.4371450Z Error: Cannot find module '@playwright/test'
+2026-09-17T12:09:05.4372161Z Require stack:
+2026-09-17T12:09:05.4372802Z - /home/runner/work/Bear-Tool/Bear-Tool/onchain-mainnet.spec.cjs
+2026-09-17T12:09:05.4374665Z - /home/runner/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/lib/common/index.js
+2026-09-17T12:09:05.4376591Z - /home/runner/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/lib/program.js
+2026-09-17T12:09:05.4378025Z - /home/runner/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/cli.js
+2026-09-17T12:09:05.4378715Z 
+2026-09-17T12:09:05.4379014Z    at onchain-mainnet.spec.cjs:1
+2026-09-17T12:09:05.4379427Z 
+2026-09-17T12:09:05.4379963Z > 1 | const { test, expect } = require('@playwright/test');
+2026-09-17T12:09:05.4380585Z     |                          ^
+2026-09-17T12:09:05.4380923Z   2 |
+2026-09-17T12:09:05.4381252Z   3 | // Use multiple RPC fallbacks
+2026-09-17T12:09:05.4382025Z   4 | const RPCS = ['https://eth.llamarpc.com', 'https://eth.drpc.org', 'https://cloudflare-eth.com'];
+2026-09-17T12:09:05.4383129Z     at Object.<anonymous> (/home/runner/work/Bear-Tool/Bear-Tool/onchain-mainnet.spec.cjs:1:26)
+2026-09-17T12:09:05.4383845Z Error: No tests found.
+2026-09-17T12:09:05.4384687Z Make sure that arguments are regular expressions matching test files.
+2026-09-17T12:09:05.4386212Z You may need to escape symbols like "$" or "*" and quote the arguments.
+2026-09-17T12:09:05.4386903Z 
+2026-09-17T12:09:05.4729522Z ##[error]Process completed with exit code 1.
+2026-09-17T12:09:05.4874266Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-17T12:09:05.4875532Z Post job cleanup.
+2026-09-17T12:09:05.5757047Z [command]/usr/bin/git version
+2026-09-17T12:09:05.5778711Z git version 2.55.0
+2026-09-17T12:09:05.5820557Z Temporarily overriding HOME='/home/runner/work/_temp/bfa26748-2da3-433b-9ccc-dc7bdef8ad96' before making global git config changes
+2026-09-17T12:09:05.5821489Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-17T12:09:05.5837180Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Bear-Tool/Bear-Tool
+2026-09-17T12:09:05.5865722Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-17T12:09:05.5906021Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-17T12:09:05.6154749Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-17T12:09:05.6183748Z http.https://github.com/.extraheader
+2026-09-17T12:09:05.6196465Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-09-17T12:09:05.6232393Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-17T12:09:05.6481994Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-17T12:09:05.6519231Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-17T12:09:05.6941674Z Cleaning up orphan processes
+2026-09-17T12:09:05.7294004Z Terminate orphan process: pid (2286) (npm exec http-server . -p 8080 -s)
+2026-09-17T12:09:05.7319685Z Terminate orphan process: pid (2298) (sh)
+2026-09-17T12:09:05.7343090Z Terminate orphan process: pid (2299) (http-server)
+2026-09-17T12:09:05.7354237Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

@@ -1,0 +1,20 @@
+﻿2026-09-17T12:08:49.1881010Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-17T12:08:49.1883884Z ##[group]Run actions/setup-node@v4
+2026-09-17T12:08:49.1884406Z with:
+2026-09-17T12:08:49.1884806Z   node-version: 20
+2026-09-17T12:08:49.1885246Z   always-auth: false
+2026-09-17T12:08:49.1885687Z   check-latest: false
+2026-09-17T12:08:49.1889885Z   token: ***
+2026-09-17T12:08:49.1890306Z ##[endgroup]
+2026-09-17T12:08:49.3343940Z Attempting to download 20...
+2026-09-17T12:08:49.3453721Z (node:2238) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-17T12:08:49.3455350Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-17T12:08:50.1283237Z Acquiring 20.20.2 - x64 from https://github.com/actions/node-versions/releases/download/20.20.2-23521894959/node-20.20.2-linux-x64.tar.gz
+2026-09-17T12:08:50.5633782Z Extracting ...
+2026-09-17T12:08:50.5753846Z [command]/usr/bin/tar xz --strip 1 --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/18e0d6d0-2eca-4d56-aabe-2aa0333e44a4 -f /home/runner/work/_temp/cb3a256d-f9aa-424d-bc8c-858219983ea9
+2026-09-17T12:08:51.5929684Z Adding to the cache ...
+2026-09-17T12:08:53.4476012Z ##[group]Environment details
+2026-09-17T12:08:53.6707241Z node: v20.20.2
+2026-09-17T12:08:53.6707760Z npm: 10.8.2
+2026-09-17T12:08:53.6708009Z yarn: 1.22.22
+2026-09-17T12:08:53.6709055Z ##[endgroup]

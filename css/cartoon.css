@@ -645,9 +645,6 @@ body::before {
   padding: 32px 24px;
 }
 .modal-full .btn-lg { margin-top: 16px; }
-  padding: 24px;
-  animation: modal-in 0.2s ease;
-}
 @keyframes modal-in { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .modal h2 { font-size: 1.3rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .modal-close {
