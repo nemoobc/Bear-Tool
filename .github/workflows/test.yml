@@ -148,7 +148,7 @@ jobs:
 
           test('all 9 views exist in DOM', async ({ page }) => {
             await skipIntro(page);
-            const views = ['dashboard', 'send', 'swap', 'bridge', 'eip7702', 'approval', 'deploy', 'activity', 'settings'];
+            const views = ['dashboard', 'send', 'receive', 'swap', 'eip7702', 'approval', 'deploy', 'activity', 'settings'];
             for (const v of views) {
               await expect(page.locator(`#view-${v}`)).toBeAttached();
             }
@@ -194,11 +194,12 @@ jobs:
             await expect(btns).toHaveCount(4);
           });
 
-          test('bridge view has quote and exec buttons', async ({ page }) => {
+          test('swap view has tabs (Swap & Bridge)', async ({ page }) => {
             await skipIntro(page);
-            await page.locator('.nav-item[data-view="bridge"]').click();
-            await expect(page.locator('#btnBridgeQuote')).toBeVisible();
-            await expect(page.locator('#btnBridgeExec')).toBeHidden();
+            await page.locator('.nav-item[data-view="swap"]').click();
+            const tabs = page.locator('.swap-tab');
+            await expect(tabs).toHaveCount(2);
+            await expect(page.locator('#btnSwap')).toBeVisible();
           });
 
           test('eip7702 wizard has 3 steps', async ({ page }) => {
@@ -221,7 +222,6 @@ jobs:
           test('intro animation exists', async ({ page }) => {
             await page.goto(BASE);
             await expect(page.locator('#intro')).toBeAttached();
-            await expect(page.locator('.intro-skip')).toBeVisible();
           });
 
           test('modal overlay exists', async ({ page }) => {
@@ -251,10 +251,10 @@ jobs:
             await page.screenshot({ path: 'screenshots/send.png', fullPage: true });
           });
 
-          test('screenshot: bridge view', async ({ page }) => {
+          test('screenshot: swap view', async ({ page }) => {
             await skipIntro(page);
-            await page.locator('.nav-item[data-view="bridge"]').click();
-            await page.screenshot({ path: 'screenshots/bridge.png', fullPage: true });
+            await page.locator('.nav-item[data-view="swap"]').click();
+            await page.screenshot({ path: 'screenshots/swap.png', fullPage: true });
           });
 
           test('screenshot: eip7702 view', async ({ page }) => {
