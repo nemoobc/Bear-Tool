@@ -13,11 +13,12 @@ export function runIntro(onDone) {
   const finish = (instant) => {
     if (finished) return;
     finished = true;
+    if (!intro || !intro.parentNode) return; // already removed (e.g. CI skipIntro)
     if (instant) {
       intro.classList.add('hidden');
     } else {
       intro.classList.add('intro-fade'); // 0.4s fade (CSS transition)
-      setTimeout(() => intro.classList.add('hidden'), 400);
+      setTimeout(() => { if (intro.parentNode) intro.classList.add('hidden'); }, 400);
     }
     if (onDone) onDone();
   };
