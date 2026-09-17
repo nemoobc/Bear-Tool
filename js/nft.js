@@ -84,7 +84,8 @@ export async function enumerateNfts(address, chainId, provider) {
 export async function loadNfts() {
   if (!get('unlocked')) return;
   const net = getNetworkById(get('networkId'));
-  const grid = $('#nftGrid');
+  const grid = $('#nftList');
+  if (!grid) return;
   const provider = get('provider');
   try {
     const items = await enumerateNfts(get('address'), net.chainId, provider);

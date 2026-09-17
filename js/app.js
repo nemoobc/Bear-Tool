@@ -964,6 +964,7 @@ async function scanApprovals() {
 
 function renderApprovals(approvals, scannedFrom = null) {
   const list = $('#approvalList');
+  if (!list) return;
   if (!approvals.length) {
     const note = scannedFrom !== null
       ? `<p class="small text-center">No active approvals found in the scan window (from block ${scannedFrom.toLocaleString()}). Older approvals are not shown — use a block explorer to verify.</p>`

@@ -258,6 +258,34 @@ test('E2E-probe: approval scan is honest about its window and has no 10-event ca
   assert.ok(app.includes('scannedFrom'), 'scan window must be tracked and shown');
 });
 
+test('E2E-probe: every $(\'#id\') reference across ALL js files exists in index.html', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const htmlIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
+  // IDs created dynamically by wallet.js modals/forms — not static HTML
+  const dynamicSkip = new Set([
+    'pwCancel','confirmYes','confirmTypeInput','confirmNo','pwOk','pwInput',
+    'cnRpc','cnType','cnExplorer','clearConfirm','cnSymbol','importSecret',
+    'importPw','lockBtn','wImport','createPw2','exportBtn','seedDone',
+    'importBtn','unlockPw','cnSave','wCreate','createPw','unlockBtn',
+    'clearBtn','cnChainId','cnName','createBtn','addAccBtn','seedConfirm','addNetBtn',
+    'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart',
+    'netSearchInput','netListMainnet','netListTestnet'
+  ]);
+  const dir = path.resolve(new URL('../js/', import.meta.url).pathname);
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
+  const missing = [];
+  for (const f of files) {
+    const content = fs.readFileSync(path.join(dir, f), 'utf8');
+    for (const m of content.matchAll(/\$\('#([^']+)'\)/g)) {
+      const id = m[1];
+      if (!htmlIds.has(id) && !dynamicSkip.has(id)) missing.push(`${f}: #${id}`);
+    }
+  }
+  assert.deepEqual(missing, [], 'every static JS-referenced ID must exist in index.html (null element = innerHTML crash)');
+});
+
 // let undici fetch resources settle before the runner tears down
 await new Promise(r => setTimeout(r, 1500));
 // silence undici resource-timing noise (Node 24 + node:test)

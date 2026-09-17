@@ -211,6 +211,7 @@ let batchCalls = [];
 
 function renderBatchList() {
   const list = $('#eip7702BatchList');
+  if (!list) return;
   if (!batchCalls.length) {
     list.innerHTML = '<p class="small text-center">No calls yet. Add one below.</p>';
     return;

@@ -124,6 +124,7 @@ export function addBatchItem() {
 
 export function renderBatch() {
   const list = $('#batchList');
+  if (!list) return;
   const batch = get('batch');
   if (!batch.length) {
     list.innerHTML = '<p class="small text-center">No actions. Add one to batch.</p>';
