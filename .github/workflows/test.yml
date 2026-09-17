@@ -563,19 +563,11 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Start local server
-        run: |
-          npx http-server . -p 8080 -s &
-          sleep 3
-          curl -sf http://localhost:8080/ > /dev/null || { echo "Server failed"; exit 1; }
-
       - name: Run onchain fork tests (All Networks)
         run: |
-          cat > onchain-all.spec.cjs << 'TESTEOF'
-          const { test, expect } = require('@playwright/test');
+          cat > onchain-all.test.mjs << 'TESTEOF'
+          import { describe, it } from 'node:test';
+          import assert from 'node:assert/strict';
 
           const NETWORKS = [
             // Mainnets
@@ -614,29 +606,30 @@ jobs:
           }
 
           for (const net of NETWORKS) {
-            test.describe(`Onchain Fork — ${net.name} (${net.chainId})`, () => {
-              test.describe.configure({ timeout: 60000 });
-
-              test(`${net.name}: RPC responds (blockNumber)`, async () => {
+            describe(`Onchain — ${net.name} (${net.chainId})`, () => {
+              it('RPC responds (blockNumber)', { timeout: 60000 }, async () => {
                 const res = await rpc(net.rpcs, 'eth_blockNumber');
-                expect(res.result).toBeTruthy();
+                assert.ok(res.result, `${net.name}: blockNumber is empty`);
                 const blockNum = parseInt(res.result, 16);
-                expect(blockNum).toBeGreaterThan(net.minBlock);
+                assert.ok(blockNum > net.minBlock, `${net.name}: blockNum ${blockNum} <= minBlock ${net.minBlock}`);
+                console.log(`  ✓ ${net.name}: block ${blockNum.toLocaleString()}`);
               });
 
-              test(`${net.name}: correct chainId`, async () => {
+              it('correct chainId', { timeout: 60000 }, async () => {
                 const res = await rpc(net.rpcs, 'eth_chainId');
                 const chainId = parseInt(res.result, 16);
-                expect(chainId).toBe(net.chainId);
+                assert.equal(chainId, net.chainId, `${net.name}: chainId ${chainId} !== ${net.chainId}`);
+                console.log(`  ✓ ${net.name}: chainId ${chainId}`);
               });
 
-              test(`${net.name}: gas price available`, async () => {
+              it('gas price available', { timeout: 60000 }, async () => {
                 const res = await rpc(net.rpcs, 'eth_gasPrice');
                 const gas = parseInt(res.result, 16);
-                expect(gas).toBeGreaterThan(0);
+                assert.ok(gas > 0, `${net.name}: gas price is 0`);
+                console.log(`  ✓ ${net.name}: gas ${gas.toLocaleString()}`);
               });
             });
           }
           TESTEOF
 
-          npx playwright test onchain-all.spec.cjs --reporter=list 2>&1
+          node --test onchain-all.test.mjs 2>&1
