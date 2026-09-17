@@ -2102,3 +2102,46 @@ body::before {
 .seed-choice-btn.active {
   transform: translateY(0);
 }
+
+/* ═══════════ DEPLOYED CONTRACT REGISTRY ═══════════ */
+.registry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.registry-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  background: var(--white);
+}
+.registry-item .reg-type {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: var(--cream);
+  flex-shrink: 0;
+}
+.registry-item .addr {
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+}
+.registry-item .btn {
+  flex-shrink: 0;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}

@@ -9,6 +9,7 @@ import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
 import * as wallet from './wallet.js';
+import { saveDeployed, findDeployed, listDeployed, removeDeployed } from './registry.js';
 
 const { ethers } = globalThis;
 
@@ -190,6 +191,21 @@ async function delegateAndExecute(targetAddress, implAddress, calldata, opts = {
   }
 }
 
+// ── deployed-contract registry (reuse to save gas) ──
+async function contractExists(provider, address) {
+  try { return (await provider.getCode(address)) !== '0x'; } catch { return false; }
+}
+
+// Find a registry entry that is still alive on-chain. Stale entries
+// (contract gone / wrong chain) are dropped so they never get reused.
+async function findUsableDeployed(type, chainId, predicate, provider) {
+  const found = findDeployed(type, chainId, predicate);
+  if (!found) return null;
+  if (await contractExists(provider, found.address)) return found;
+  removeDeployed(type, found.address, chainId);
+  return null;
+}
+
 // ── batch call helpers ──
 let batchCalls = [];
 
@@ -247,15 +263,26 @@ async function executeBatch() {
   }
 
   await runTx('eip7702-batch', $('#btnEip7702BatchExec'), async () => {
-    toast('Compiling batch contract...', 'info');
-    const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
-
-    // Deploy batch contract from the wallet
     const provider = get('provider');
     const signer = get('signer').connect(provider);
-    const batchContract = await deployContract(signer, abi, bytecode);
+    const chainId = Number(net.chainId);
+
+    // Reuse an existing batch contract deployed by this wallet (gas savings)
+    let batchContract;
+    const existing = await findUsableDeployed('batch', chainId, item =>
+      item.deployer?.toLowerCase() === get('address').toLowerCase(), provider);
+    if (existing) {
+      batchContract = new ethers.Contract(existing.address, existing.abi, signer);
+      toast('Reusing batch contract: ' + wallet.shortAddress(existing.address), 'info');
+    } else {
+      toast('Compiling batch contract...', 'info');
+      const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
+      batchContract = await deployContract(signer, abi, bytecode);
+      const batchAddr = await batchContract.getAddress();
+      saveDeployed('batch', batchAddr, { chainId, deployer: get('address'), abi });
+      toast('Batch contract deployed: ' + wallet.shortAddress(batchAddr), 'success');
+    }
     const batchAddr = await batchContract.getAddress();
-    toast('Batch contract deployed: ' + wallet.shortAddress(batchAddr), 'success');
 
     // Encode execute() calldata
     const calls = valid.map(b => ({
@@ -278,6 +305,7 @@ async function executeBatch() {
     const receipt = await tx.wait();
     addActivity({ hash: tx.hash, type: 'eip7702-batch', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${valid.length} calls` });
     toast(receipt.status === 1 ? 'Batch executed! 🎉' : 'Batch failed!', receipt.status === 1 ? 'success' : 'error');
+    renderDeployedRegistry();
     emit('refresh');
   });
 }
@@ -319,15 +347,26 @@ async function executeRescue() {
   }
 
   await runTx('eip7702-rescue', $('#btnEip7702RescueExec'), async () => {
-    toast('Compiling rescue contract...', 'info');
-    const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
-
-    // Deploy rescue contract from sponsor
     const provider = await getProvider(net.chainId);
-    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
-    const rescueContract = await deployContract(sponsorSigner, abi, bytecode, [safe, target]);
+    const chainId = Number(net.chainId);
+
+    // Reuse an existing rescue contract for the same (safe, target) pair
+    let rescueContract;
+    const existing = await findUsableDeployed('rescue', chainId, item =>
+      item.safe?.toLowerCase() === safe.toLowerCase() && item.target?.toLowerCase() === target.toLowerCase(), provider);
+    if (existing) {
+      rescueContract = new ethers.Contract(existing.address, existing.abi, provider);
+      toast('Reusing rescue contract: ' + wallet.shortAddress(existing.address), 'info');
+    } else {
+      toast('Compiling rescue contract...', 'info');
+      const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+      const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
+      rescueContract = await deployContract(sponsorSigner, abi, bytecode, [safe, target]);
+      const rescueAddr = await rescueContract.getAddress();
+      saveDeployed('rescue', rescueAddr, { chainId, safe, target, abi });
+      toast('Rescue contract deployed: ' + wallet.shortAddress(rescueAddr), 'success');
+    }
     const rescueAddr = await rescueContract.getAddress();
-    toast('Rescue contract deployed: ' + wallet.shortAddress(rescueAddr), 'success');
 
     // Build calldata based on token type
     let calldata;
@@ -361,6 +400,7 @@ async function executeRescue() {
     const receipt = await tx.wait();
     addActivity({ hash: tx.hash, type: 'eip7702-rescue', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `Rescue ${type}` });
     toast(receipt.status === 1 ? 'Assets rescued! 🎉' : 'Rescue failed!', receipt.status === 1 ? 'success' : 'error');
+    renderDeployedRegistry();
     emit('refresh');
   });
 }
@@ -394,16 +434,27 @@ async function executeClaim() {
   }
 
   await runTx('eip7702-claim', $('#btnEip7702ClaimExec'), async () => {
-    toast('Compiling airdrop claimer contract...', 'info');
-    const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
-
-    // Deploy claimer contract from sponsor
     const provider = await getProvider(net.chainId);
-    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+    const chainId = Number(net.chainId);
     const targetAddress = get('address');
-    const claimerContract = await deployContract(sponsorSigner, abi, bytecode, [targetAddress]);
+
+    // Reuse an existing claimer contract for this wallet (gas savings)
+    let claimerContract;
+    const existing = await findUsableDeployed('airdrop', chainId, item =>
+      item.target?.toLowerCase() === targetAddress.toLowerCase(), provider);
+    if (existing) {
+      claimerContract = new ethers.Contract(existing.address, existing.abi, provider);
+      toast('Reusing claimer contract: ' + wallet.shortAddress(existing.address), 'info');
+    } else {
+      toast('Compiling airdrop claimer contract...', 'info');
+      const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+      const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
+      claimerContract = await deployContract(sponsorSigner, abi, bytecode, [targetAddress]);
+      const claimerAddr = await claimerContract.getAddress();
+      saveDeployed('airdrop', claimerAddr, { chainId, target: targetAddress, abi });
+      toast('Claimer contract deployed: ' + wallet.shortAddress(claimerAddr), 'success');
+    }
     const claimerAddr = await claimerContract.getAddress();
-    toast('Claimer contract deployed: ' + wallet.shortAddress(claimerAddr), 'success');
 
     // Encode claimAndForward() calldata
     const tokenAddress = tokenAddr || ethers.ZeroAddress;
@@ -429,7 +480,37 @@ async function executeClaim() {
     const receipt = await tx.wait();
     addActivity({ hash: tx.hash, type: 'eip7702-claim', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: 'Airdrop claim' });
     toast(receipt.status === 1 ? 'Airdrop claimed + forwarded! 🎉' : 'Claim failed!', receipt.status === 1 ? 'success' : 'error');
+    renderDeployedRegistry();
     emit('refresh');
+  });
+}
+
+// ── deployed-contract registry UI ──
+export function renderDeployedRegistry() {
+  const list = $('#deployedRegistryList');
+  if (!list) return;
+  const net = getNetworkById(get('networkId'));
+  const chainId = Number(net?.chainId || 0);
+  const all = ['batch', 'rescue', 'airdrop', 'proxy', 'revoker']
+    .flatMap(type => listDeployed(type, chainId).map(item => ({ ...item, type })));
+  if (!all.length) {
+    list.innerHTML = '<p class="small text-center">No deployed helper contracts on this chain yet.</p>';
+    return;
+  }
+  list.innerHTML = all.map((item, i) => `
+    <div class="registry-item">
+      <span class="reg-type">${escapeHtml(item.type)}</span>
+      <span class="addr">${escapeHtml(wallet.shortAddress(item.address))}</span>
+      <button class="btn btn-danger btn-sm" data-reg-remove="${i}" aria-label="Remove from registry">✕</button>
+    </div>`).join('');
+  list.querySelectorAll('[data-reg-remove]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const item = all[Number(btn.dataset.regRemove)];
+      if (!item) return;
+      removeDeployed(item.type, item.address, chainId);
+      renderDeployedRegistry();
+      toast('Removed from registry', 'info');
+    });
   });
 }
 
@@ -461,4 +542,7 @@ export function bindEip7702ToolsEvents() {
   // Password toggles
   bindPasswordToggle('#btnRescueKeyToggle', '#eip7702RescueSponsorKey');
   bindPasswordToggle('#btnClaimKeyToggle', '#eip7702ClaimSponsorKey');
+
+  // Registry list (delegated remove buttons re-render themselves)
+  renderDeployedRegistry();
 }

@@ -402,6 +402,12 @@
             </div>
             <button class="btn btn-success btn-block" id="btnClaim">Claim + Forward</button>
           </div>
+
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg> <span>Deployed Contracts</span> <span class="small">(this chain)</span></div>
+            <p class="small mb-8">Helper contracts deployed via EIP-7702 flows are saved here and reused to save gas. Remove an entry to force a fresh deploy.</p>
+            <div id="deployedRegistryList" class="registry-list"></div>
+          </div>
         </section>
 
         <!-- APPROVAL -->
@@ -560,7 +566,7 @@
         <section class="view" id="view-activity">
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> <span data-i18n="nav.activity">Activity</span></div>
-            <div class="activity-timeline" id="activityList"><p class="small text-center">No transactions yet.</p></div>
+            <div class="activity-timeline" id="activityList"><div class="empty-state"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><p>No transactions yet</p><p class="sub">Send, swap, bridge or deploy to see activity here</p></div></div>
           </div>
         </section>
 

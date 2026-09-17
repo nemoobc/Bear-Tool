@@ -917,19 +917,36 @@ async function scanApprovals() {
       return;
     }
     const approvals = [];
+    let scannedFrom = null;
     for (const t of tokens) {
       if (!wallet.isValidAddress(t.address)) continue;
       try {
         const c = new ethers.Contract(t.address, ERC20_ABI, provider);
         const block = await provider.getBlockNumber();
-        const fromBlock = Math.max(0, block - 2000);
-        const events = await c.queryFilter(c.filters.Approval(get('address')), fromBlock, block);
+        // Wide window (~2 weeks on mainnet). If the provider rejects the
+        // range, fall back to a smaller window so the scan still works.
+        // The actual window is reported in the UI — "Clean! 🐻" must never
+        // hide the fact that old approvals are out of scope.
+        let fromBlock = Math.max(0, block - 100000);
+        let events;
+        try {
+          events = await c.queryFilter(c.filters.Approval(get('address')), fromBlock, block);
+        } catch {
+          fromBlock = Math.max(0, block - 2000);
+          events = await c.queryFilter(c.filters.Approval(get('address')), fromBlock, block);
+        }
+        scannedFrom = scannedFrom === null ? fromBlock : Math.min(scannedFrom, fromBlock);
+        // Dedupe by spender across ALL events (no arbitrary 10-event cap)
         const seen = new Set();
-        for (const ev of events.slice(-10)) {
+        for (const ev of events) {
           const spender = ev.args[1];
-          if (seen.has(spender)) continue;
-          seen.add(spender);
+          if (spender) seen.add(spender);
+        }
+        // Check the CURRENT allowance for each unique spender; skip
+        // spenders whose approval was already revoked (allowance = 0).
+        for (const spender of seen) {
           const allowance = await c.allowance(get('address'), spender);
+          if (allowance <= 0n) continue;
           approvals.push({
             token: t, spender,
             allowance: allowance.toString(),
@@ -939,19 +956,25 @@ async function scanApprovals() {
       } catch {}
     }
     set('approvals', approvals);
-    renderApprovals(approvals);
+    renderApprovals(approvals, scannedFrom);
   } catch (e) {
     list.innerHTML = `<p class="small text-center">Error: ${escapeHtml(e.message)}</p>`;
   }
 }
 
-function renderApprovals(approvals) {
+function renderApprovals(approvals, scannedFrom = null) {
   const list = $('#approvalList');
   if (!approvals.length) {
-    list.innerHTML = '<p class="small text-center">No approvals found. Clean! 🐻</p>';
+    const note = scannedFrom !== null
+      ? `<p class="small text-center">No active approvals found in the scan window (from block ${scannedFrom.toLocaleString()}). Older approvals are not shown — use a block explorer to verify.</p>`
+      : '';
+    list.innerHTML = note + '<p class="small text-center">No active approvals found. Clean! 🐻</p>';
     return;
   }
-  list.innerHTML = approvals.map((a, i) => `
+  const windowNote = scannedFrom !== null
+    ? `<p class="small text-center">Scan window: from block ${scannedFrom.toLocaleString()} — approvals older than this are not shown.</p>`
+    : '';
+  list.innerHTML = windowNote + approvals.map((a, i) => `
     <div class="asset-row">
       <div class="asset-icon">🔐</div>
       <div class="asset-info">
@@ -987,7 +1010,11 @@ function renderActivity() {
   const list = $('#activityList');
   if (!list) return;
   if (!get('activity').length) {
-    list.innerHTML = '<p class="small text-center">No transactions yet.</p>';
+    list.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <p>No transactions yet</p>
+      <p class="sub">Send, swap, bridge or deploy to see activity here</p>
+    </div>`;
     return;
   }
   const net = getNetworkById(get('networkId'));

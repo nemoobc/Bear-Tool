@@ -225,6 +225,39 @@ test('E2E-probe: 7702 modules use authorizeSync, not nonexistent signAuthorizati
   }
 });
 
+test('E2E-probe: EIP-7702 flows save + reuse deployed contracts via registry', async () => {
+  const fs = await import('node:fs');
+  const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
+  const reg = fs.readFileSync(new URL('../js/registry.js', import.meta.url), 'utf8');
+  // registry module exists with the core API
+  for (const fn of ['saveDeployed', 'findDeployed', 'listDeployed', 'removeDeployed']) {
+    assert.ok(reg.includes(`export function ${fn}`), `registry.js must export ${fn}`);
+  }
+  // all three flows persist their deployed contract
+  for (const type of ["'batch'", "'rescue'", "'airdrop'"]) {
+    assert.ok(tools.includes(`saveDeployed(${type},`), `flow must save ${type} contract`);
+  }
+  // reuse path exists and verifies the contract is still alive on-chain
+  assert.ok(tools.includes('findUsableDeployed'), 'reuse helper must exist');
+  assert.ok(tools.includes('provider.getCode'), 'reuse must verify contract exists on-chain');
+  assert.ok(tools.includes('removeDeployed(type, found.address, chainId)'), 'stale entries must be dropped');
+});
+
+test('E2E-probe: approval scan is honest about its window and has no 10-event cap', async () => {
+  const fs = await import('node:fs');
+  const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  // no arbitrary cap on events per token
+  assert.ok(!app.includes('events.slice(-10)'), 'approval scan must not cap events');
+  // wide window with provider-limit fallback
+  assert.ok(app.includes('block - 100000'), 'approval scan must use a wide window');
+  assert.ok(app.includes('block - 2000'), 'approval scan must keep a fallback window');
+  // revoked approvals (allowance 0) are filtered out
+  assert.ok(app.includes('allowance <= 0n'), 'zero allowances must be skipped');
+  // the UI reports the actual scan window so "Clean! 🐻" is never misleading
+  assert.ok(app.includes('Scan window'), 'UI must disclose the scan window');
+  assert.ok(app.includes('scannedFrom'), 'scan window must be tracked and shown');
+});
+
 // let undici fetch resources settle before the runner tears down
 await new Promise(r => setTimeout(r, 1500));
 // silence undici resource-timing noise (Node 24 + node:test)

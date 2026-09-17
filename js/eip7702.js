@@ -10,6 +10,7 @@ import { get, addActivity, requireUnlock, emit } from './state.js';
 import { runTx } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
 import * as wallet from './wallet.js';
+import { renderDeployedRegistry } from './eip7702-tools.js';
 
 const { ethers } = globalThis;
 
@@ -24,6 +25,7 @@ export function bindEip7702Events() {
 
 export async function loadEip7702() {
   if (!get('unlocked')) return;
+  renderDeployedRegistry();
   const status = $('#delegateStatus');
   const text = $('#delegateStatusText');
   try {
