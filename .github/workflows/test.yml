@@ -43,7 +43,8 @@ jobs:
               'cnRpc','cnType','cnExplorer','clearConfirm','cnSymbol','importSecret',
               'importPw','lockBtn','wImport','createPw2','exportBtn','seedDone',
               'importBtn','unlockPw','cnSave','wCreate','createPw','unlockBtn',
-              'clearBtn','cnChainId','cnName','createBtn','addAccBtn','seedConfirm','addNetBtn'
+              'clearBtn','cnChainId','cnName','createBtn','addAccBtn','seedConfirm','addNetBtn',
+              'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart'
           }
           missing = []
           for f in ['js/swap.js','js/bridge.js','js/send.js','js/app.js']:
