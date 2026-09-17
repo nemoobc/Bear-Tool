@@ -573,13 +573,13 @@ jobs:
             // Mainnets
             { name: 'Ethereum',     chainId: 1,     rpcs: ['https://eth.llamarpc.com', 'https://eth.drpc.org', 'https://cloudflare-eth.com'], minBlock: 19000000 },
             { name: 'BSC',          chainId: 56,    rpcs: ['https://bsc-dataseed.binance.org', 'https://bsc-dataseed1.defibit.io'], minBlock: 30000000 },
-            { name: 'Polygon',      chainId: 137,   rpcs: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'], minBlock: 50000000 },
+            { name: 'Polygon',      chainId: 137,   rpcs: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon', 'https://polygon.llamarpc.com'], minBlock: 50000000 },
             { name: 'Arbitrum One', chainId: 42161, rpcs: ['https://arb1.arbitrum.io/rpc', 'https://rpc.ankr.com/arbitrum'], minBlock: 200000000 },
             { name: 'OP Mainnet',   chainId: 10,    rpcs: ['https://mainnet.optimism.io', 'https://rpc.ankr.com/optimism'], minBlock: 100000000 },
             { name: 'Base',         chainId: 8453,  rpcs: ['https://mainnet.base.org', 'https://base.llamarpc.com'], minBlock: 10000000 },
             // Testnets
             { name: 'Sepolia',         chainId: 11155111, rpcs: ['https://rpc.sepolia.org', 'https://sepolia.gateway.tenderly.co'], minBlock: 5000000 },
-            { name: 'Polygon Amoy',    chainId: 80002,    rpcs: ['https://rpc-amoy.polygon.technology'], minBlock: 1000000 },
+            { name: 'Polygon Amoy',    chainId: 80002,    rpcs: ['https://rpc-amoy.polygon.technology', 'https://polygon-amoy-rpc.publicnode.com'], minBlock: 1000000 },
             { name: 'Arbitrum Sepolia', chainId: 421614,   rpcs: ['https://sepolia-rollup.arbitrum.io/rpc'], minBlock: 1000000 },
             { name: 'OP Sepolia',      chainId: 11155420, rpcs: ['https://sepolia.optimism.io'], minBlock: 1000000 },
             { name: 'Base Sepolia',    chainId: 84532,    rpcs: ['https://sepolia.base.org'], minBlock: 1000000 },
