@@ -129,7 +129,7 @@ jobs:
           // Helper: skip intro animation
           async function skipIntro(page) {
             await page.goto(BASE);
-            // Force hide intro via JS
+            // Remove intro + prevent delayed onDone callback from re-opening modal
             await page.evaluate(() => {
               const intro = document.getElementById('intro');
               if (intro) {
@@ -137,11 +137,19 @@ jobs:
                 intro.classList.add('hidden');
                 intro.remove();
               }
-              // Also dismiss welcome/unlock modal if open
+              // Close any modal that opened
               const overlay = document.getElementById('modalOverlay');
               if (overlay) overlay.classList.remove('open');
+              document.body.style.overflow = '';
             });
-            await page.waitForTimeout(300);
+            await page.waitForTimeout(200);
+            // Re-close modal in case delayed onDone re-opens it
+            await page.evaluate(() => {
+              const overlay = document.getElementById('modalOverlay');
+              if (overlay) overlay.classList.remove('open');
+              document.body.style.overflow = '';
+            });
+            await page.waitForTimeout(200);
           }
 
           test('page loads with correct title', async ({ page }) => {
