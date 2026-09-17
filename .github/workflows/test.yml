@@ -251,10 +251,10 @@ jobs:
             await page.screenshot({ path: 'screenshots/send.png', fullPage: true });
           });
 
-          test('screenshot: swap view', async ({ page }) => {
+          test('screenshot: swap & bridge tabs', async ({ page }) => {
             await skipIntro(page);
             await page.locator('.nav-item[data-view="swap"]').click();
-            await page.screenshot({ path: 'screenshots/swap.png', fullPage: true });
+            await page.screenshot({ path: 'screenshots/swap-tabs.png', fullPage: true });
           });
 
           test('screenshot: eip7702 view', async ({ page }) => {
