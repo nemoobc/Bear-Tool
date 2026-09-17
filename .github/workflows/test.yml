@@ -575,81 +575,43 @@ jobs:
           cat > onchain-mainnet.spec.cjs << 'TESTEOF'
           const { test, expect } = require('@playwright/test');
 
-          const BASE = 'http://localhost:8080';
+          const RPC = 'https://cloudflare-eth.com';
 
-          async function skipIntro(page) {
-            await page.goto(BASE);
-            await page.evaluate(() => {
-              const intro = document.getElementById('intro');
-              if (intro) { intro.style.display = 'none'; intro.remove(); }
-              const overlay = document.getElementById('modalOverlay');
-              if (overlay) overlay.classList.remove('open');
+          async function rpc(method, params = []) {
+            const r = await fetch(RPC, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
             });
-            await page.waitForTimeout(500);
+            return r.json();
           }
 
           test.describe('Onchain Fork — Ethereum Mainnet', () => {
             test.describe.configure({ timeout: 30000 });
-            test('RPC mainnet responds (cloudflare)', async ({ page }) => {
-              await skipIntro(page);
-              const res = await page.evaluate(async () => {
-                const r = await fetch('https://cloudflare-eth.com', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
-                });
-                return r.json();
-              });
+            test('RPC mainnet responds (blockNumber)', async () => {
+              const res = await rpc('eth_blockNumber');
               expect(res.result).toBeTruthy();
               const blockNum = parseInt(res.result, 16);
               expect(blockNum).toBeGreaterThan(19000000);
             });
 
-            test('RPC mainnet returns valid chainId', async ({ page }) => {
-              await skipIntro(page);
-              const res = await page.evaluate(async () => {
-                const r = await fetch('https://cloudflare-eth.com', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] })
-                });
-                return r.json();
-              });
+            test('RPC mainnet returns chainId = 1', async () => {
+              const res = await rpc('eth_chainId');
               const chainId = parseInt(res.result, 16);
               expect(chainId).toBe(1);
             });
 
-            test('ERC20 USDC balanceOf on mainnet', async ({ page }) => {
-              await skipIntro(page);
-              const res = await page.evaluate(async () => {
-                const r = await fetch('https://cloudflare-eth.com', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    jsonrpc: '2.0', id: 1,
-                    method: 'eth_call',
-                    params: [{
-                      to: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-                      data: '0x70a08231000000000000000000000000d8dA6BF26964aF9D7eEd9e03E53415D37aA96045'
-                    }, 'latest']
-                  })
-                });
-                return r.json();
-              });
+            test('ERC20 USDC balanceOf on mainnet', async () => {
+              const res = await rpc('eth_call', [{
+                to: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+                data: '0x70a08231000000000000000000000000d8dA6BF26964aF9D7eEd9e03E53415D37aA96045'
+              }, 'latest']);
               expect(res.result).toBeTruthy();
               expect(res.error).toBeUndefined();
             });
 
-            test('Gas price available on mainnet', async ({ page }) => {
-              await skipIntro(page);
-              const res = await page.evaluate(async () => {
-                const r = await fetch('https://cloudflare-eth.com', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_gasPrice', params: [] })
-                });
-                return r.json();
-              });
+            test('Gas price available on mainnet', async () => {
+              const res = await rpc('eth_gasPrice');
               const gas = parseInt(res.result, 16);
               expect(gas).toBeGreaterThan(0);
             });
@@ -663,81 +625,43 @@ jobs:
           cat > onchain-sepolia.spec.cjs << 'TESTEOF'
           const { test, expect } = require('@playwright/test');
 
-          const BASE = 'http://localhost:8080';
+          const RPC = 'https://rpc.sepolia.org';
 
-          async function skipIntro(page) {
-            await page.goto(BASE);
-            await page.evaluate(() => {
-              const intro = document.getElementById('intro');
-              if (intro) { intro.style.display = 'none'; intro.remove(); }
-              const overlay = document.getElementById('modalOverlay');
-              if (overlay) overlay.classList.remove('open');
+          async function rpc(method, params = []) {
+            const r = await fetch(RPC, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
             });
-            await page.waitForTimeout(500);
+            return r.json();
           }
 
           test.describe('Onchain Fork — Sepolia Testnet', () => {
             test.describe.configure({ timeout: 30000 });
-            test('RPC sepolia responds', async ({ page }) => {
-              await skipIntro(page);
-              const res = await page.evaluate(async () => {
-                const r = await fetch('https://rpc.sepolia.org', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
-                });
-                return r.json();
-              });
+            test('RPC sepolia responds (blockNumber)', async () => {
+              const res = await rpc('eth_blockNumber');
               expect(res.result).toBeTruthy();
               const blockNum = parseInt(res.result, 16);
               expect(blockNum).toBeGreaterThan(5000000);
             });
 
-            test('RPC sepolia returns chainId 11155111', async ({ page }) => {
-              await skipIntro(page);
-              const res = await page.evaluate(async () => {
-                const r = await fetch('https://rpc.sepolia.org', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] })
-                });
-                return r.json();
-              });
+            test('RPC sepolia returns chainId = 11155111', async () => {
+              const res = await rpc('eth_chainId');
               const chainId = parseInt(res.result, 16);
               expect(chainId).toBe(11155111);
             });
 
-            test('Gas price available on sepolia', async ({ page }) => {
-              await skipIntro(page);
-              const res = await page.evaluate(async () => {
-                const r = await fetch('https://rpc.sepolia.org', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_gasPrice', params: [] })
-                });
-                return r.json();
-              });
+            test('Gas price available on sepolia', async () => {
+              const res = await rpc('eth_gasPrice');
               const gas = parseInt(res.result, 16);
               expect(gas).toBeGreaterThan(0);
             });
 
-            test('Sepolia ERC20 totalSupply (SepoliaETH WETH)', async ({ page }) => {
-              await skipIntro(page);
-              const res = await page.evaluate(async () => {
-                const r = await fetch('https://rpc.sepolia.org', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    jsonrpc: '2.0', id: 1,
-                    method: 'eth_call',
-                    params: [{
-                      to: '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9',
-                      data: '0x18160ddd'
-                    }, 'latest']
-                  })
-                });
-                return r.json();
-              });
+            test('Sepolia ERC20 totalSupply (WETH)', async () => {
+              const res = await rpc('eth_call', [{
+                to: '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9',
+                data: '0x18160ddd'
+              }, 'latest']);
               expect(res.result).toBeTruthy();
               expect(res.error).toBeUndefined();
             });
