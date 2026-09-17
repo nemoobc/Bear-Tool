@@ -79,3 +79,53 @@ test('getDelegation: regular contract code → null', async () => {
   const provider = { getCode: async () => '0x6080604052' };
   assert.equal(await net.getDelegation(provider, '0xabc'), null);
 });
+// ── RPC endpoint hygiene ────────────────────────────────────────
+// Measured 2026-09-17 from a mobile/Termux network: llamarpc, ankr and
+// cloudflare-eth were all unreachable, which surfaced as the global
+// "All RPCs failed for Ethereum" error and an empty dashboard.
+const DEAD_RPC = [
+  'eth.llamarpc.com', 'binance.llamarpc.com', 'base.llamarpc.com',
+  'arbitrum.llamarpc.com', 'optimism.llamarpc.com',
+  'rpc.ankr.com',
+  'cloudflare-eth.com',
+  'polygon-rpc.com',
+  'rpc.sepolia.org',
+  'rpc-amoy.polygon.technology'
+];
+
+test('RPC: every network has ≥2 endpoints (no single point of failure)', () => {
+  for (const n of net.NETWORKS) {
+    assert.ok(n.rpc.length >= 2, `${n.id} needs ≥2 endpoints, has ${n.rpc.length}`);
+  }
+});
+
+test('RPC: no known-dead endpoint is configured', () => {
+  for (const n of net.NETWORKS) {
+    for (const url of n.rpc) {
+      for (const dead of DEAD_RPC) {
+        assert.ok(!url.includes(dead), `${n.id} still points at unreachable endpoint ${url}`);
+      }
+    }
+  }
+});
+
+test('RPC: every mainnet has a publicnode/drpc endpoint (verified reachable fallback)', () => {
+  for (const n of net.NETWORKS.filter(x => x.type === 'mainnet')) {
+    assert.ok(
+      n.rpc.some(u => u.includes('publicnode.com') || u.includes('drpc.org')),
+      `${n.id} has no publicnode/drpc fallback`
+    );
+  }
+});
+
+test('RPC: every endpoint is https', () => {
+  for (const n of net.NETWORKS) {
+    for (const u of n.rpc) assert.ok(u.startsWith('https://'), u);
+  }
+});
+
+test('RPC: no duplicate endpoints within a network', () => {
+  for (const n of net.NETWORKS) {
+    assert.equal(new Set(n.rpc).size, n.rpc.length, n.id + ' has duplicate rpc urls');
+  }
+});

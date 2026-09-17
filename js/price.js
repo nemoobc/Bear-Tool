@@ -28,6 +28,7 @@ const MEM_TTL = 60_000;          // in-memory TTL
 const LS_MAX_AGE = 5 * 60_000;   // localStorage max age
 
 const memCache = new Map(); // key -> { price, ts }
+const historyCache = new Map(); // key -> { data, ts } (24h chart history)
 
 function loadLsCache() {
   try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}'); }
@@ -55,6 +56,7 @@ export function getPriceFromCache(address) {
 
 export function clearPriceCache() {
   memCache.clear();
+  historyCache.clear();
   try { localStorage.removeItem(CACHE_KEY); } catch {}
 }
 
@@ -184,4 +186,44 @@ export async function fetchAllPrices(tokens, chainId) {
   }));
 
   return result;
+}
+
+// ── 24h price history for the token mini-chart ──────────────────
+// CoinGecko keyless market_chart, cached 5 min. Returns a number[]
+// (oldest → newest, downsampled to ~30 points) or [] when unavailable.
+// Replaces the old random-walk chart, which looked different on every open.
+const HISTORY_TTL = 5 * 60_000;
+
+export async function fetchPriceHistory({ address, chainId }) {
+  const platform = COINGECKO_PLATFORMS[chainId];
+  const nativeId = NATIVE_COIN_IDS[chainId];
+  const key = address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`;
+
+  const hit = historyCache.get(key);
+  if (hit && Date.now() - hit.ts < HISTORY_TTL) return hit.data;
+
+  let url = null;
+  if (address && platform) {
+    url = `https://api.coingecko.com/api/v3/coins/${platform}/contract/${String(address).toLowerCase()}/market_chart?vs_currency=usd&days=1`;
+  } else if (!address && nativeId) {
+    url = `https://api.coingecko.com/api/v3/coins/${nativeId}/market_chart?vs_currency=usd&days=1`;
+  }
+  if (!url) return [];
+
+  try {
+    const res = await fetchWithTimeout(url, 12000);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const raw = (data.prices || [])
+      .map(p => p[1])
+      .filter(v => typeof v === 'number' && Number.isFinite(v));
+    if (raw.length < 2) return [];
+    // evenly spaced sample (~30 points), always keeping first + latest
+    const target = Math.min(30, raw.length);
+    const sampled = Array.from({ length: target }, (_, k) => raw[Math.round(k * (raw.length - 1) / (target - 1))]);
+    historyCache.set(key, { data: sampled, ts: Date.now() });
+    return sampled;
+  } catch {
+    return [];
+  }
 }

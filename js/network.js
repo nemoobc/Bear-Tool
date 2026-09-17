@@ -1,6 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — network.js
 // All EVM networks: mainnet + testnet + custom RPC support.
+// RPC lists ordered by verified reachability — publicnode/drpc first.
+// llamarpc, ankr and cloudflare-eth are frequently unreachable from mobile
+// networks, which made "All RPCs failed for Ethereum" common. getProvider()
+// tries each URL in order until one answers.
 // Original implementation — no copying.
 // ═══════════════════════════════════════════════════════════════
 
@@ -10,84 +14,125 @@ export const NETWORKS = [
   {
     id: 'ethereum', name: 'Ethereum', chainId: 1, type: 'mainnet',
     symbol: 'ETH', decimals: 18,
-    rpc: ['https://eth.llamarpc.com', 'https://rpc.ankr.com/eth', 'https://cloudflare-eth.com'],
+    rpc: [
+      'https://ethereum-rpc.publicnode.com',
+      'https://eth.drpc.org',
+      'https://rpc.flashbots.net',
+      'https://eth-mainnet.public.blastapi.io'
+    ],
     explorer: 'https://etherscan.io',
     icon: '⬡', color: '#627EEA'
   },
   {
     id: 'bsc', name: 'BNB Smart Chain', chainId: 56, type: 'mainnet',
     symbol: 'BNB', decimals: 18,
-    rpc: ['https://bsc-dataseed.binance.org', 'https://bsc-dataseed1.defibit.io'],
+    rpc: [
+      'https://bsc-dataseed.binance.org',
+      'https://bsc-rpc.publicnode.com',
+      'https://bsc-dataseed1.defibit.io'
+    ],
     explorer: 'https://bscscan.com',
     icon: '🟡', color: '#F0B90B'
   },
   {
     id: 'polygon', name: 'Polygon', chainId: 137, type: 'mainnet',
     symbol: 'POL', decimals: 18,
-    rpc: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'],
+    rpc: [
+      'https://polygon-bor-rpc.publicnode.com',
+      'https://polygon.drpc.org',
+      'https://1rpc.io/matic'
+    ],
     explorer: 'https://polygonscan.com',
     icon: '🟣', color: '#8247E5'
   },
   {
     id: 'arbitrum', name: 'Arbitrum One', chainId: 42161, type: 'mainnet',
     symbol: 'ETH', decimals: 18,
-    rpc: ['https://arb1.arbitrum.io/rpc', 'https://rpc.ankr.com/arbitrum'],
+    rpc: [
+      'https://arb1.arbitrum.io/rpc',
+      'https://arbitrum-one-rpc.publicnode.com'
+    ],
     explorer: 'https://arbiscan.io',
     icon: '🔵', color: '#28A0F0'
   },
   {
     id: 'optimism', name: 'OP Mainnet', chainId: 10, type: 'mainnet',
     symbol: 'ETH', decimals: 18,
-    rpc: ['https://mainnet.optimism.io', 'https://rpc.ankr.com/optimism'],
+    rpc: [
+      'https://mainnet.optimism.io',
+      'https://optimism-rpc.publicnode.com'
+    ],
     explorer: 'https://optimistic.etherscan.io',
     icon: '🔴', color: '#FF0420'
   },
   {
     id: 'base', name: 'Base', chainId: 8453, type: 'mainnet',
     symbol: 'ETH', decimals: 18,
-    rpc: ['https://mainnet.base.org', 'https://base.llamarpc.com'],
+    rpc: [
+      'https://mainnet.base.org',
+      'https://base-rpc.publicnode.com',
+      'https://base.drpc.org'
+    ],
     explorer: 'https://basescan.org',
     icon: '🔷', color: '#0052FF'
   },
   {
     id: 'sepolia', name: 'Sepolia', chainId: 11155111, type: 'testnet',
     symbol: 'ETH', decimals: 18,
-    rpc: ['https://rpc.sepolia.org', 'https://sepolia.gateway.tenderly.co'],
+    rpc: [
+      'https://sepolia.gateway.tenderly.co',
+      'https://ethereum-sepolia-rpc.publicnode.com'
+    ],
     explorer: 'https://sepolia.etherscan.io',
     icon: '🧪', color: '#06D6A0'
   },
   {
     id: 'amoy', name: 'Polygon Amoy', chainId: 80002, type: 'testnet',
     symbol: 'POL', decimals: 18,
-    rpc: ['https://rpc-amoy.polygon.technology'],
+    rpc: [
+      'https://polygon-amoy.drpc.org',
+      'https://polygon-amoy-bor-rpc.publicnode.com'
+    ],
     explorer: 'https://amoy.polygonscan.com',
     icon: '🧪', color: '#06D6A0'
   },
   {
     id: 'arbitrum-sepolia', name: 'Arbitrum Sepolia', chainId: 421614, type: 'testnet',
     symbol: 'ETH', decimals: 18,
-    rpc: ['https://sepolia-rollup.arbitrum.io/rpc'],
+    rpc: [
+      'https://sepolia-rollup.arbitrum.io/rpc',
+      'https://arbitrum-sepolia-rpc.publicnode.com'
+    ],
     explorer: 'https://sepolia.arbiscan.io',
     icon: '🧪', color: '#06D6A0'
   },
   {
     id: 'op-sepolia', name: 'OP Sepolia', chainId: 11155420, type: 'testnet',
     symbol: 'ETH', decimals: 18,
-    rpc: ['https://sepolia.optimism.io'],
+    rpc: [
+      'https://sepolia.optimism.io',
+      'https://optimism-sepolia-rpc.publicnode.com'
+    ],
     explorer: 'https://sepolia-optimistic.etherscan.io',
     icon: '🧪', color: '#06D6A0'
   },
   {
     id: 'base-sepolia', name: 'Base Sepolia', chainId: 84532, type: 'testnet',
     symbol: 'ETH', decimals: 18,
-    rpc: ['https://sepolia.base.org'],
+    rpc: [
+      'https://sepolia.base.org',
+      'https://base-sepolia-rpc.publicnode.com'
+    ],
     explorer: 'https://sepolia.basescan.org',
     icon: '🧪', color: '#06D6A0'
   },
   {
     id: 'bsc-testnet', name: 'BSC Testnet', chainId: 97, type: 'testnet',
     symbol: 'tBNB', decimals: 18,
-    rpc: ['https://data-seed-prebsc-1-s1.bnbchain.org:8545'],
+    rpc: [
+      'https://data-seed-prebsc-1-s1.bnbchain.org:8545',
+      'https://bsc-testnet-rpc.publicnode.com'
+    ],
     explorer: 'https://testnet.bscscan.com',
     icon: '🧪', color: '#06D6A0'
   }

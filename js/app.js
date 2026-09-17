@@ -13,7 +13,7 @@ import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPasswo
          fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue } from './ui.js';
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity } from './state.js';
-import { fetchAllPrices } from './price.js';
+import { fetchAllPrices, fetchPriceHistory } from './price.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
 import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
@@ -639,10 +639,23 @@ async function loadDashboard() {
   }
 }
 
+// USD value of what the user actually holds (amount × unit price).
+// The home total and each asset row must show this, NOT the token's unit
+// price — summing unit prices made the portfolio total nonsense ($0.99 for
+// 1 ETH) and made the rows read like a price ticker.
+function holdingUsd(t) {
+  if (t.usd === null || t.usd === undefined) return 0;
+  let amt = 0;
+  try { amt = Number(ethers.formatUnits(t.balance || '0', t.decimals ?? 18)); }
+  catch { amt = 0; }
+  if (!Number.isFinite(amt)) amt = 0;
+  return amt * t.usd;
+}
+
 function renderAssets(tokens) {
   const assetList = $('#assetList');
   if (!assetList) return;
-  const totalUsd = tokens.reduce((s, t) => s + (t.usd || 0), 0);
+  const totalUsd = tokens.reduce((s, t) => s + holdingUsd(t), 0);
   animateValue($('#totalBalance'), totalUsd, { duration: 600, formatter: fmtUsd });
   if (!tokens.length) {
     assetList.innerHTML = '<p class="small text-center">No assets found.</p>';
@@ -697,7 +710,7 @@ function renderAssets(tokens) {
       </div>
       <div class="asset-balance">
         <div class="amount">${escapeHtml(fmtAmount(t.balance, t.decimals))}</div>
-        <div class="usd">${t.usd ? escapeHtml(fmtUsd(t.usd)) : '—'}</div>
+        <div class="usd">${t.usd ? escapeHtml(fmtUsd(holdingUsd(t))) : '—'}</div>
       </div>
       <div class="asset-arrow"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
     </div>`).join('');
@@ -717,6 +730,10 @@ function showTokenActions(el) {
   const balance = el.dataset.balance;
   const usd = parseFloat(el.dataset.usd) || 0;
   const net = getNetworkById(get('networkId'));
+  // Holding value (what the user owns) vs unit price (price of 1 token)
+  let holding = 0;
+  try { holding = Number(ethers.formatUnits(balance || '0', decimals)) * usd; } catch { holding = 0; }
+  if (!Number.isFinite(holding)) holding = 0;
 
   openModal(`
     <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
@@ -725,7 +742,8 @@ function showTokenActions(el) {
       <div class="token-modal-info">
         <div class="token-modal-symbol">${escapeHtml(symbol)}</div>
         <div class="token-modal-balance">${escapeHtml(fmtAmount(balance, decimals))} ${escapeHtml(symbol)}</div>
-        <div class="token-modal-usd">${usd ? escapeHtml(fmtUsd(usd)) : '—'}</div>
+        <div class="token-modal-usd">${usd ? escapeHtml(fmtUsd(holding)) : '—'}</div>
+        ${usd ? `<div class="small" style="opacity:0.7">@ ${escapeHtml(fmtUsd(usd))} / ${escapeHtml(symbol)}</div>` : ''}
       </div>
     </div>
     <div class="token-modal-chart" id="tokenChart">
@@ -758,8 +776,8 @@ function showTokenActions(el) {
   window._tokenModalSymbol = symbol;
   window._tokenModalAddress = address;
 
-  // Draw mini chart
-  drawMiniChart(symbol);
+  // Draw mini chart from real 24h history
+  drawMiniChart({ symbol, address });
 
   // Action handlers
   $('#tokenSend').onclick = () => { closeModal(); switchView('send'); };
@@ -811,40 +829,61 @@ function showReceiveModal(address, symbol) {
   `);
 }
 
-function drawMiniChart(symbol) {
+// Real 24h price history (CoinGecko keyless, 5-min cache).
+// The previous version generated a fresh random walk on every open, so the
+// chart was different each time and never matched the displayed price.
+async function drawMiniChart({ symbol, address }) {
   const canvas = document.getElementById('tokenPriceChart');
   if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  // Generate fake price data for demo
-  const points = 30;
-  const data = [];
-  let price = 100 + Math.random() * 200;
-  for (let i = 0; i < points; i++) {
-    price += (Math.random() - 0.48) * 10;
-    price = Math.max(50, price);
-    data.push(price);
+  const w = canvas.width;
+  const h = canvas.height;
+  const paintBase = () => {
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFF8F0';
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = '#E8E0D8';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < 4; i++) {
+      const y = (h / 4) * i + 10;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+  };
+  const paintMessage = (msg) => {
+    const ctx = canvas.getContext('2d');
+    paintBase();
+    ctx.fillStyle = '#8A8178';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(msg, w / 2, h / 2);
+  };
+
+  paintMessage('Loading 24h chart…');
+
+  let data = [];
+  try {
+    const chainId = getNetworkById(get('networkId'))?.chainId;
+    data = await fetchPriceHistory({ address, chainId });
+  } catch { data = []; }
+
+  // modal may have been closed/reopened while we awaited
+  if (!canvas.isConnected || document.getElementById('tokenPriceChart') !== canvas) return;
+
+  if (!Array.isArray(data) || data.length < 2) {
+    paintMessage('No 24h chart data');
+    return;
   }
+
+  const points = data.length;
   const min = Math.min(...data);
   const max = Math.max(...data);
   const range = max - min || 1;
-  const w = canvas.width;
-  const h = canvas.height;
   const step = w / (points - 1);
+  const ctx = canvas.getContext('2d');
 
-  // Background
-  ctx.fillStyle = '#FFF8F0';
-  ctx.fillRect(0, 0, w, h);
-
-  // Grid lines
-  ctx.strokeStyle = '#E8E0D8';
-  ctx.lineWidth = 0.5;
-  for (let i = 0; i < 4; i++) {
-    const y = (h / 4) * i + 10;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
-    ctx.stroke();
-  }
+  paintBase();
 
   // Line
   const gradient = ctx.createLinearGradient(0, 0, 0, h);

@@ -300,6 +300,10 @@ test('E2E-probe: unawaited async render calls are caught (no global "Unexpected 
   assert.match(ui, /if \(!overlay \|\| !box\) return null;/, 'openModal must guard missing modal shell');
 });
 
+// NOTE: no live CoinGecko probe for fetchPriceHistory here on purpose —
+// it would consume the keyless rate limit and make the native-price probe
+// above flaky with HTTP 429. Covered by mocked tests in price.test.js.
+
 // let undici fetch resources settle before the runner tears down
 await new Promise(r => setTimeout(r, 1500));
 // silence undici resource-timing noise (Node 24 + node:test)
