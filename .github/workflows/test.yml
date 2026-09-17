@@ -129,7 +129,7 @@ jobs:
           // Helper: skip intro animation
           async function skipIntro(page) {
             await page.goto(BASE);
-            // Force hide intro via JS (multiple methods)
+            // Force hide intro via JS
             await page.evaluate(() => {
               const intro = document.getElementById('intro');
               if (intro) {
@@ -137,6 +137,9 @@ jobs:
                 intro.classList.add('hidden');
                 intro.remove();
               }
+              // Also dismiss welcome/unlock modal if open
+              const overlay = document.getElementById('modalOverlay');
+              if (overlay) overlay.classList.remove('open');
             });
             await page.waitForTimeout(300);
           }
@@ -576,13 +579,18 @@ jobs:
 
           async function skipIntro(page) {
             await page.goto(BASE);
-            await page.waitForSelector('.intro-overlay', { timeout: 5000 }).catch(() => {});
-            await page.click('.intro-overlay').catch(() => {});
-            await page.waitForTimeout(1500);
+            await page.evaluate(() => {
+              const intro = document.getElementById('intro');
+              if (intro) { intro.style.display = 'none'; intro.remove(); }
+              const overlay = document.getElementById('modalOverlay');
+              if (overlay) overlay.classList.remove('open');
+            });
+            await page.waitForTimeout(500);
           }
 
           test.describe('Onchain Fork — Ethereum Mainnet', () => {
             test('RPC mainnet responds (cloudflare)', async ({ page }) => {
+              await skipIntro(page);
               const res = await page.evaluate(async () => {
                 const r = await fetch('https://cloudflare-eth.com', {
                   method: 'POST',
@@ -597,6 +605,7 @@ jobs:
             });
 
             test('RPC mainnet returns valid chainId', async ({ page }) => {
+              await skipIntro(page);
               const res = await page.evaluate(async () => {
                 const r = await fetch('https://cloudflare-eth.com', {
                   method: 'POST',
@@ -610,6 +619,7 @@ jobs:
             });
 
             test('ERC20 USDC balanceOf on mainnet', async ({ page }) => {
+              await skipIntro(page);
               const res = await page.evaluate(async () => {
                 const r = await fetch('https://cloudflare-eth.com', {
                   method: 'POST',
@@ -630,6 +640,7 @@ jobs:
             });
 
             test('Gas price available on mainnet', async ({ page }) => {
+              await skipIntro(page);
               const res = await page.evaluate(async () => {
                 const r = await fetch('https://cloudflare-eth.com', {
                   method: 'POST',
@@ -655,13 +666,18 @@ jobs:
 
           async function skipIntro(page) {
             await page.goto(BASE);
-            await page.waitForSelector('.intro-overlay', { timeout: 5000 }).catch(() => {});
-            await page.click('.intro-overlay').catch(() => {});
-            await page.waitForTimeout(1500);
+            await page.evaluate(() => {
+              const intro = document.getElementById('intro');
+              if (intro) { intro.style.display = 'none'; intro.remove(); }
+              const overlay = document.getElementById('modalOverlay');
+              if (overlay) overlay.classList.remove('open');
+            });
+            await page.waitForTimeout(500);
           }
 
           test.describe('Onchain Fork — Sepolia Testnet', () => {
             test('RPC sepolia responds', async ({ page }) => {
+              await skipIntro(page);
               const res = await page.evaluate(async () => {
                 const r = await fetch('https://rpc.sepolia.org', {
                   method: 'POST',
@@ -676,6 +692,7 @@ jobs:
             });
 
             test('RPC sepolia returns chainId 11155111', async ({ page }) => {
+              await skipIntro(page);
               const res = await page.evaluate(async () => {
                 const r = await fetch('https://rpc.sepolia.org', {
                   method: 'POST',
@@ -689,6 +706,7 @@ jobs:
             });
 
             test('Gas price available on sepolia', async ({ page }) => {
+              await skipIntro(page);
               const res = await page.evaluate(async () => {
                 const r = await fetch('https://rpc.sepolia.org', {
                   method: 'POST',
@@ -702,6 +720,7 @@ jobs:
             });
 
             test('Sepolia ERC20 totalSupply (SepoliaETH WETH)', async ({ page }) => {
+              await skipIntro(page);
               const res = await page.evaluate(async () => {
                 const r = await fetch('https://rpc.sepolia.org', {
                   method: 'POST',
