@@ -232,7 +232,9 @@ export async function getSwapQuote() {
 
   const tokenIn = from === 'native' ? NATIVE_SENTINEL : from;
   const tokenOut = to === 'native' ? NATIVE_SENTINEL : to;
-  const amountInWei = ethers.parseEther(amt).toString();
+  // amount must respect the SELL token's decimals (ERC-20 ≠ 18)
+  const fromDecimals = from === 'native' ? 18 : (tokenInfo(from)?.decimals ?? 18);
+  const amountInWei = ethers.parseUnits(amt, fromDecimals).toString();
   const key = cacheKey(slug, tokenIn, tokenOut, amountInWei);
   const now = Date.now();
 

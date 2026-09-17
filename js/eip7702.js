@@ -93,7 +93,7 @@ export async function doEip7702(action) {
     const nonce = await provider.getTransactionCount(get('address'));
     // EIP-7702: self-sponsored → auth nonce = nonce + 1
     const authNonce = nonce + 1;
-    const authorization = await signer.signAuthorization({
+    const authorization = signer.authorizeSync({
       chainId, address: impl, nonce: authNonce
     });
     const feeData = await provider.getFeeData();

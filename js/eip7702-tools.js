@@ -158,7 +158,7 @@ async function delegateAndExecute(targetAddress, implAddress, calldata, opts = {
     // Self-sponsored: auth nonce = nonce + 1
     const authNonce = nonce + 1;
 
-    const authorization = await targetSigner.signAuthorization({
+    const authorization = targetSigner.authorizeSync({
       chainId: net.chainId,
       address: implAddress,
       nonce: authNonce

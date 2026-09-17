@@ -162,7 +162,9 @@ describe('3. CSS INTEGRITY', () => {
   });
 
   it('welcome-full makes modal fullscreen', () => {
-    assert.ok(css.includes('.modal:has(.welcome-full)'), 'Missing modal:has(.welcome-full) override');
+    assert.ok(css.includes('.modal.welcome-screen'), 'Missing fullscreen box override');
+    assert.ok(css.includes('.modal-overlay.welcome-screen'), 'Missing fullscreen overlay override');
+    assert.ok(!css.includes('.modal:has(.welcome-full)'), 'Fullscreen must use explicit lifecycle classes');
     log('✓ Welcome modal fullscreen CSS present');
   });
 
@@ -274,7 +276,11 @@ describe('5. FEATURE COMPLETENESS', () => {
 
   it('welcome modal fullscreen', () => {
     assert.ok(appJs.includes('welcome-full'), 'Missing welcome-full class in JS');
-    assert.ok(css.includes('.modal:has(.welcome-full)'), 'Missing CSS override');
+    const welcome = appJs.slice(appJs.indexOf('function showWelcomeModal()'), appJs.indexOf('function showUnlockModal()'));
+    assert.ok(welcome.includes('{ fullscreen: true }'), 'Welcome must request fullscreen');
+    assert.ok(!welcome.includes('classList'), 'Welcome must not manually tag the modal');
+    assert.ok(welcome.includes("$('#wCreate').onclick") && welcome.includes("$('#wImport').onclick"), 'Keep both welcome actions');
+    assert.ok(css.includes('.modal.welcome-screen'), 'Missing explicit fullscreen CSS override');
     log('✓ Welcome modal fullscreen');
   });
 

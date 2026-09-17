@@ -191,7 +191,7 @@ function showWelcomeModal() {
         </button>
       </div>
     </div>
-  `);
+  `, { fullscreen: true });
   $('#wCreate').onclick = () => { closeModal(); showCreateModal(); };
   $('#wImport').onclick = () => { closeModal(); showImportModal(); };
 }
@@ -759,7 +759,7 @@ function showTokenActions(el) {
 
   // Action handlers
   $('#tokenSend').onclick = () => { closeModal(); switchView('send'); };
-  $('#tokenReceive').onclick = () => { const s = window._tokenModalSymbol; const a = window._tokenModalAddress; closeModal(); showReceiveModal(a, s); };
+  $('#tokenReceive').onclick = () => { const s = window._tokenModalSymbol; closeModal(); showReceiveModal(get('address'), s); };
   $('#tokenSwap').onclick = () => { closeModal(); switchView('swap'); };
   $('#tokenHistory').onclick = () => { closeModal(); switchView('activity'); };
 }

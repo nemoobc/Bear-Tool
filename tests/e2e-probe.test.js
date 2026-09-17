@@ -169,6 +169,62 @@ test('E2E-probe: CoinGecko native price API works (dashboard USD)', async () => 
   console.log('  CoinGecko ETH USD:', json.ethereum.usd);
 });
 
+// ── 8. Audit-fix regression contracts (source-level, deterministic) ──
+test('E2E-probe: tokenReceive shows wallet address, not token contract', async () => {
+  const appJs = (await import('node:fs')).readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const i = appJs.indexOf("$('#tokenReceive').onclick");
+  const line = appJs.slice(i, appJs.indexOf('};', i));
+  assert.ok(line.includes("showReceiveModal(get('address')"), 'receive modal must use wallet address');
+  assert.ok(!line.includes('_tokenModalAddress'), 'receive modal must NOT use token contract address');
+});
+
+test('E2E-probe: swap quote encodes amount in SELL token decimals', async () => {
+  const swapJs = (await import('node:fs')).readFileSync(new URL('../js/swap.js', import.meta.url), 'utf8');
+  const i = swapJs.indexOf('async function getSwapQuote');
+  const body = swapJs.slice(i, swapJs.indexOf('}', swapJs.indexOf('amountInWei')));
+  assert.ok(body.includes('parseUnits(amt, fromDecimals)'), 'quote amount must use fromDecimals');
+  assert.ok(!body.includes('parseEther(amt)'), 'parseEther(amt) is wrong for ERC-20 with decimals≠18');
+});
+
+test('E2E-probe: bridge is native-only, context-bound, fail-closed (supersedes old ERC-20 token contract)', async () => {
+  const bridgeJs = (await import('node:fs')).readFileSync(new URL('../js/bridge.js', import.meta.url), 'utf8');
+  const i = bridgeJs.indexOf('export async function doBridge()');
+  const body = bridgeJs.slice(i, bridgeJs.indexOf('export async function doBridgeExec()'));
+  // NATIVE ONLY: non-native selection rejected loudly, never silently substituted
+  assert.ok(body.includes("tok !== 'native'"), 'bridge must fail closed on non-native token selection');
+  assert.ok(body.includes('native_only_reject'), 'ERC-20 rejection must have a clear user-facing message');
+  // Quote URL is strictly native on both sides (0x0) — no fromToken===toToken ERC-20 contract
+  assert.ok(body.includes('fromToken=${NATIVE}&toToken=${NATIVE}'), 'quote must request native on both chains');
+  assert.ok(!body.includes('fromToken=${tokenAddr}'), 'old same-address ERC-20 contract must be gone');
+  // Context captured before any await; stale quote state cleared
+  assert.ok(body.includes('Object.freeze({'), 'quote context must be immutable');
+  assert.ok(body.includes("set('bridgeQuote', null)"), 'old quote state must be cleared before await');
+  assert.ok((body.match(/seq !== quoteSeq/g) || []).length >= 4, 'out-of-order responses must be ignored via seq id');
+  // Response validated field-by-field against context
+  assert.ok(body.includes('Quote fromChain mismatch'), 'action.fromChainId must be validated');
+  assert.ok(body.includes('Quote toChain mismatch'), 'action.toChainId must be validated');
+  assert.ok(body.includes('Quote tx value exceeds requested amount'), 'tx value must be capped at requested amount');
+  assert.ok(body.includes('txReq.chainId'), 'txRequest.chainId must be validated');
+});
+
+// ── 9. EIP-7702 authorization API regression (ethers 6.14 has authorizeSync, NOT signAuthorization) ──
+test('E2E-probe: ethers Wallet has authorizeSync (runtime proof)', async () => {
+  const w = ethers.Wallet.createRandom();
+  assert.equal(typeof w.signAuthorization, 'undefined', 'signAuthorization must NOT be relied on');
+  assert.equal(typeof w.authorizeSync, 'function', 'authorizeSync must exist for 7702 auth');
+  const auth = w.authorizeSync({ address: '0x0000000000000000000000000000000000000001', nonce: 1, chainId: 11155111 });
+  assert.ok(auth.signature && auth.address && auth.nonce === 1n, 'authorizeSync returns {address, nonce, chainId, signature}');
+});
+
+test('E2E-probe: 7702 modules use authorizeSync, not nonexistent signAuthorization', async () => {
+  const fs = await import('node:fs');
+  for (const f of ['eip7702.js', 'eip7702-tools.js']) {
+    const js = fs.readFileSync(new URL(`../js/${f}`, import.meta.url), 'utf8');
+    assert.ok(!js.includes('signAuthorization'), `${f}: signAuthorization does not exist in ethers 6.14 → dead button`);
+    assert.ok(js.includes('authorizeSync({'), `${f}: must call authorizeSync(...)`);
+  }
+});
+
 // let undici fetch resources settle before the runner tears down
 await new Promise(r => setTimeout(r, 1500));
 // silence undici resource-timing noise (Node 24 + node:test)
