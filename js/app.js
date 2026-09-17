@@ -132,10 +132,23 @@ function refreshView(view) {
   if (!get('unlocked')) return;
   if (view === 'dashboard') loadDashboard();
   if (view === 'send') loadSendTokens();
+  if (view === 'receive') loadReceiveView();
   if (view === 'swap') loadSwapTokens();
-  if (view === 'bridge') loadBridgeChains();
-  if (view === 'eip7702') loadEip7702();
+  if (view === 'eip7702') loadEip702();
   if (view === 'activity') renderActivity();
+}
+
+function loadReceiveView() {
+  const addr = get('address');
+  const net = getNetworkById(get('networkId'));
+  const el = document.getElementById('receiveAddress');
+  const copyBtn = document.getElementById('receiveCopyBtn');
+  const netName = document.getElementById('receiveNetName');
+  const netName2 = document.getElementById('receiveNetworkName2');
+  if (el) el.textContent = addr || 'Connect wallet to see address';
+  if (copyBtn) copyBtn.dataset.copy = addr || '';
+  if (netName) netName.textContent = net?.name || 'Ethereum';
+  if (netName2) netName2.textContent = net?.name || 'Ethereum';
 }
 
 // ── topbar ──
@@ -621,7 +634,7 @@ function showTokenActions(el) {
 
   // Action handlers
   $('#tokenSend').onclick = () => { closeModal(); switchView('send'); };
-  $('#tokenReceive').onclick = () => { closeModal(); showReceiveModal(address, symbol); };
+  $('#tokenReceive').onclick = () => { closeModal(); switchView('receive'); };
   $('#tokenSwap').onclick = () => { closeModal(); switchView('swap'); };
   $('#tokenHistory').onclick = () => { closeModal(); switchView('activity'); };
 }
