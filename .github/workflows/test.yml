@@ -579,7 +579,7 @@ jobs:
             { name: 'Base',         chainId: 8453,  rpcs: ['https://mainnet.base.org', 'https://base.llamarpc.com'], minBlock: 10000000 },
             // Testnets
             { name: 'Sepolia',         chainId: 11155111, rpcs: ['https://rpc.sepolia.org', 'https://sepolia.gateway.tenderly.co'], minBlock: 5000000 },
-            { name: 'Polygon Amoy',    chainId: 80002,    rpcs: ['https://rpc.ankr.com/polygon_amoy', 'https://polygon-amoy-rpc.publicnode.com', 'https://rpc-amoy.polygon.technology'], minBlock: 1000000 },
+            { name: 'Polygon Amoy',    chainId: 80002,    rpcs: ['https://rpc.ankr.com/polygon_amoy', 'https://polygon-amoy-rpc.publicnode.com', 'https://rpc-amoy.polygon.technology', 'https://polygon-amoy.drpc.org'], minBlock: 1000000 },
             { name: 'Arbitrum Sepolia', chainId: 421614,   rpcs: ['https://sepolia-rollup.arbitrum.io/rpc'], minBlock: 1000000 },
             { name: 'OP Sepolia',      chainId: 11155420, rpcs: ['https://sepolia.optimism.io'], minBlock: 1000000 },
             { name: 'Base Sepolia',    chainId: 84532,    rpcs: ['https://sepolia.base.org'], minBlock: 1000000 },
@@ -590,7 +590,7 @@ jobs:
             for (const url of rpcs) {
               try {
                 const controller = new AbortController();
-                const t = setTimeout(() => controller.abort(), 10000);
+                const t = setTimeout(() => controller.abort(), 15000);
                 const r = await fetch(url, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
