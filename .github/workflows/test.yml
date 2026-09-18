@@ -197,10 +197,10 @@ jobs:
             }
           });
 
-          test('sidebar has 9 nav items (Bridge shares the Swap button)', async ({ page }) => {
+          test('sidebar has 8 nav items (Send lives in quick actions, Bridge shares the Swap button)', async ({ page }) => {
             await skipIntro(page);
             const items = page.locator('.nav-item');
-            await expect(items).toHaveCount(9);
+            await expect(items).toHaveCount(8);
           });
 
           test('swap nav button is the single Swap/Bridge entry (second click chooses)', async ({ page }) => {
@@ -264,7 +264,7 @@ jobs:
 
           test('send view has gas buttons', async ({ page }) => {
             await skipIntro(page);
-            await page.locator('.nav-item[data-view="send"]').click();
+            await page.locator('.quick-action-btn[data-view="send"]').click();
             await expect(page.locator('#view-send')).toHaveClass(/active/);
             const btns = page.locator('.gas-btn');
             await expect(btns).toHaveCount(4);
@@ -323,7 +323,7 @@ jobs:
 
           test('screenshot: send view', async ({ page }) => {
             await skipIntro(page);
-            await page.locator('.nav-item[data-view="send"]').click();
+            await page.locator('.quick-action-btn[data-view="send"]').click();
             await page.screenshot({ path: 'screenshots/send.png', fullPage: true });
           });
 
@@ -597,7 +597,7 @@ jobs:
 
           test('mobile: screenshot send', async ({ page }) => {
             await skipIntro(page);
-            await page.locator('.mobile-nav-item[data-view="send"]').click();
+            await page.locator('.quick-action-btn[data-view="send"]').click();
             await page.screenshot({ path: 'screenshots/mobile-send.png', fullPage: true });
           });
 
