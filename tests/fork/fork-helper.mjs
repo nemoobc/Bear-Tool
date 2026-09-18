@@ -26,20 +26,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { ethers } = await import('ethers');
 globalThis.ethers = ethers;
 
-// ── network table: public RPC per network (publicnode, free, stable) ──
+// ── network table: public RPC per network ──
+// publicnode blocks eth_getTransactionReceipt (archive) with 403 on most
+// networks, so non-ethereum networks use official chain endpoints.
 export const FORK_NETWORKS = {
   ethereum:          { chainId: 1,      rpc: 'https://ethereum-rpc.publicnode.com',          type: 'mainnet' },
-  bsc:               { chainId: 56,     rpc: 'https://bsc-rpc.publicnode.com',               type: 'mainnet' },
+  bsc:               { chainId: 56,     rpc: 'https://bsc-dataseed.binance.org',             type: 'mainnet' },
   polygon:           { chainId: 137,    rpc: 'https://polygon-bor-rpc.publicnode.com',       type: 'mainnet' },
-  arbitrum:          { chainId: 42161,  rpc: 'https://arbitrum-one-rpc.publicnode.com',      type: 'mainnet' },
-  optimism:          { chainId: 10,     rpc: 'https://optimism-rpc.publicnode.com',          type: 'mainnet' },
-  base:              { chainId: 8453,   rpc: 'https://base-rpc.publicnode.com',              type: 'mainnet' },
+  arbitrum:          { chainId: 42161,  rpc: 'https://arb1.arbitrum.io/rpc',                 type: 'mainnet' },
+  optimism:          { chainId: 10,     rpc: 'https://mainnet.optimism.io',                  type: 'mainnet' },
+  base:              { chainId: 8453,   rpc: 'https://mainnet.base.org',                     type: 'mainnet' },
   sepolia:           { chainId: 11155111, rpc: 'https://ethereum-sepolia-rpc.publicnode.com', type: 'testnet' },
-  amoy:              { chainId: 80002,  rpc: 'https://polygon-amoy-bor-rpc.publicnode.com',  type: 'testnet' },
-  'arbitrum-sepolia': { chainId: 421614, rpc: 'https://arbitrum-sepolia-rpc.publicnode.com', type: 'testnet' },
-  'optimism-sepolia': { chainId: 11155420, rpc: 'https://optimism-sepolia-rpc.publicnode.com', type: 'testnet' },
-  'base-sepolia':     { chainId: 84532, rpc: 'https://base-sepolia-rpc.publicnode.com',      type: 'testnet' },
-  'bsc-testnet':      { chainId: 97,    rpc: 'https://bsc-testnet-rpc.publicnode.com',       type: 'testnet' }
+  amoy:              { chainId: 80002,  rpc: 'https://rpc-amoy.polygon.technology',          type: 'testnet' },
+  'arbitrum-sepolia': { chainId: 421614, rpc: 'https://sepolia-rollup.arbitrum.io/rpc',      type: 'testnet' },
+  'optimism-sepolia': { chainId: 11155420, rpc: 'https://sepolia.optimism.io',               type: 'testnet' },
+  'base-sepolia':     { chainId: 84532, rpc: 'https://sepolia.base.org',                     type: 'testnet' },
+  'bsc-testnet':      { chainId: 97,    rpc: 'https://data-seed-prebsc-1-s1.binance.org:8545', type: 'testnet' }
 };
 
 export const NETWORK_NAMES = Object.keys(FORK_NETWORKS);
@@ -75,11 +77,7 @@ function hasAnvil() {
 export async function startFork() {
   if (provider) return { provider, signer, network };
   network = resolveNetwork();
-  // Unique port per process: node --test runs each file in its own process,
-  // and a shared port lets a later file REUSE a dirty anvil (nonces already
-  // consumed) — the probe finds the port alive and skips a fresh start.
-  // pid % 1000 keeps ports in 8545..9544, no collisions on a runner.
-  const port = Number(process.env.FORK_PORT || (8545 + (process.pid % 1000)));
+  const port = Number(process.env.FORK_PORT || 8545);
 
   // If something is already listening on the port, assume anvil is up (CI reuse).
   const alive = await new Promise((resolve) => {
@@ -97,14 +95,15 @@ export async function startFork() {
       '--fork-url', network.rpc,
       '--port', String(port),
       '--silent',
-      '--chain-id', String(network.chainId)
+      '--chain-id', String(network.chainId),
+      '--hardfork', 'prague'
     ], { stdio: 'ignore' });
     // Do not let the anvil child keep the Node process alive after the
     // tests finish (pass OR fail) — otherwise CI hangs until timeout.
     anvilProcess.unref();
     process.on('exit', () => { if (anvilProcess) { try { anvilProcess.kill('SIGKILL'); } catch {} } });
     // wait for the RPC to answer
-    const deadline = Date.now() + 120000;
+    const deadline = Date.now() + 60000;
     for (;;) {
       const ok = await new Promise((resolve) => {
         const p = spawn('node', ['-e', `
@@ -120,10 +119,9 @@ export async function startFork() {
 
   const { ethers } = await import('ethers');
   provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`);
-  // NonceManager tracks the nonce LOCALLY (query once, increment per send).
-  // Anvil's "pending" nonce on a fork is base + txpool and IGNORES mined
-  // txs, so a fresh query after a mined tx returns a stale low nonce →
-  // "nonce too low" on the very next send. NonceManager sidesteps that.
+  // NonceManager keeps nonces strictly sequential. Without it, ethers v6
+  // queries getTransactionCount per tx and anvil's fork state can lag one
+  // block behind → two txs share a nonce → "nonce too low" (flaky).
   signer = new ethers.NonceManager(new ethers.Wallet(ANVIL_KEY, provider));
   return { provider, signer, network };
 }

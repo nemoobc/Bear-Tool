@@ -7,6 +7,32 @@
 
 ---
 
+## 0. UPDATE 2026-09-18 — SUITE BROWSER E2E (PLAYWRIGHT)
+
+**Metode**: Playwright 1.63 + Chromium headless (libs sistem diekstrak, tanpa install paket), server lokal `python3 -m http.server 8080`.
+
+| Item | Hasil |
+|---|---|
+| Spec | 11 file (`tests/e2e/00-load` … `10-mobile`) |
+| Total test | **51/51 PASS** (7.3 menit, 1 worker) |
+| Unit test | **157 pass / 1 skip / 0 fail** |
+| `npm run check` | PASS |
+
+**Cakupan**: load & intro, create/import/unlock wallet, seed phrase verification, session expiry & tab-close, nav (sidebar/mobile/quick-action), send (validasi, preview, address-poisoning, token-contract warning), swap & bridge chooser, EIP-7702 (delegate guard, batch), settings & i18n (EN→ID, persist, testnet toggle), approvals/deploy/activity/NFT render, a11y (skip link, keyboard nav, accessible names, modal close), mobile viewport.
+
+**Bug app yang ditemukan & difix oleh suite** (lihat §5, baris baru):
+- **B6 (P1)** — Testnet toggle fallback rusak: `saveSettingsHandler` memakai `getNetworkById()` yang sudah memfilter testnet saat `settings.testnet=false` → wallet diam-diam duduk di chain invisible. Fix: lookup unfiltered `NETWORKS` (`js/app.js`).
+- **B7 (P2)** — Nav tidak keyboard-operable: `.nav-item` `role="button" tabindex="0"` tanpa handler Enter/Space (WCAG 2.1.1). Fix: keydown handler (`js/app.js` bindNav).
+
+**Temuan minor (dilaporkan, bukan kegagalan)**:
+- `<meta http-equiv="X-Frame-Options">` di `index.html:10` diabaikan browser (harus HTTP header).
+- `#modalBox` tidak dikosongkan saat `closeModal()` — textContent lama tertinggal di DOM (bukan bug fungsional).
+- Console 429/400 dari API eksternal (CoinGecko rate-limit) — noise, bukan crash.
+
+**Cara jalan**: `npm run test:e2e` (butuh `PATH` node tarball + `LD_LIBRARY_PATH` libs browser — lihat catatan sesi).
+
+---
+
 ## 1. GATE UNIT TEST — `npm run verify`
 
 | Item | Hasil |
@@ -76,6 +102,8 @@ Tidak ada browser → tidak ada console browser. Yang tertangkap dari probe:
 | B3 | **P1** | Bridge simulated walau API 200: shape response LI.FI salah dibaca (`q.routes?.[0]` vs objek route tunggal) | `js/bridge.js:54-55` | Baca `q.id/q.tool/q.action` langsung (LI.FI `/quote` = objek tunggal), atau pakai endpoint `/advanced/routes` yang mengembalikan `{routes:[...]}`. |
 | B4 | **P2** | DexScreener fallback mengembalikan array kosong untuk USDC mainnet → harga token bisa '—' walau API hidup | `js/price.js:103-110` | Tambah fallback kedua (mis. CoinGecko retry dengan delay, atau 1inch price API). |
 | B5 | **P3** | Tidak ada theme toggle sama sekali (langkah 11 tidak bisa diuji) | `index.html` / `js/theme.js` | Tambah toggle di Settings + persist `bear.theme` di localStorage. |
+| B6 | **P1** | Testnet toggle fallback rusak — `getNetworkById()` memfilter testnet saat `settings.testnet=false`, jadi cek `activeNet.type === 'testnet'` selalu false → wallet diam di chain invisible | `js/app.js` saveSettingsHandler | Lookup unfiltered `NETWORKS.find(...)` — **DIFIX 2026-09-18** (ditemukan suite browser E2E). |
+| B7 | **P2** | Nav tidak keyboard-operable — `.nav-item` `role="button"` tanpa handler Enter/Space | `js/app.js` bindNav | Tambah keydown handler — **DIFIX 2026-09-18** (ditemukan suite browser E2E). |
 
 ---
 

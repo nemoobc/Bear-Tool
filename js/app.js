@@ -6,8 +6,8 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { POPULAR_TOKENS, ERC20_ABI,
-         getAllNetworks, getNetworkById, getProvider,
-         addCustomNetwork } from './network.js';
+         NETWORKS, getAllNetworks, getNetworkById, getProvider,
+         addCustomNetwork, getCustomNetworks } from './network.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
          fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue } from './ui.js';
@@ -150,30 +150,31 @@ function saveSettings() {
 
 // ── nav ──
 function bindNav() {
+  // .nav-item is a <div role="button" tabindex="0"> — it must also respond
+  // to Enter/Space, not just click (WCAG 2.1.1 keyboard).
+  const activateNav = (item) => {
+    const view = item.dataset.view;
+    // Swap and Bridge share one nav button: first click opens Swap,
+    // clicking the button again while already on Swap offers the choice.
+    if (view === 'swap' && $('#view-swap')?.classList.contains('active')) {
+      showSwapBridgeChooser();
+      return;
+    }
+    switchView(view);
+  };
   // sidebar nav
   $all('.nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const view = item.dataset.view;
-      // Swap and Bridge share one nav button: first click opens Swap,
-      // clicking the button again while already on Swap offers the choice.
-      if (view === 'swap' && $('#view-swap')?.classList.contains('active')) {
-        showSwapBridgeChooser();
-        return;
+    item.addEventListener('click', () => activateNav(item));
+    item.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activateNav(item);
       }
-      switchView(view);
     });
   });
-  // mobile bottom nav
+  // mobile bottom nav (native <button> — click only is fine)
   $all('.mobile-nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const view = item.dataset.view;
-      // same one-button Swap/Bridge pattern — Bridge is otherwise unreachable
-      if (view === 'swap' && $('#view-swap')?.classList.contains('active')) {
-        showSwapBridgeChooser();
-        return;
-      }
-      switchView(view);
-    });
+    item.addEventListener('click', () => activateNav(item));
   });
   // dashboard quick actions
   $all('.quick-action-btn').forEach(btn => {
@@ -1337,8 +1338,11 @@ function saveSettingsHandler() {
   startAutoLock();
   // testnet toggle: if the active network is a testnet and testnets are now
   // hidden, fall back to Ethereum so the app never sits on an invisible chain.
+  // NOTE: look up the active chain in the UNFILTERED list — getNetworkById()
+  // and getAllNetworks() already hide testnets once settings.testnet is false,
+  // so they would report the active chain as Ethereum and skip the fallback.
   if (!settings.testnet) {
-    const activeNet = getNetworkById(get('networkId'));
+    const activeNet = [...NETWORKS, ...getCustomNetworks()].find(n => n.id === get('networkId'));
     if (activeNet?.type === 'testnet') {
       set('networkId', 'ethereum');
       updateTopbar();

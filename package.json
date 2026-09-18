@@ -9,9 +9,12 @@
     "test:fork": "node --test --test-concurrency=1 tests/fork/*.test.js",
     "test:fork:net": "node --test --test-concurrency=1 tests/fork/*.test.js",
     "check": "for f in js/*.js; do node --check \"$f\"; done",
+    "test:e2e": "bash tests/e2e/run.sh",
     "verify": "npm run check && npm test"
   },
   "devDependencies": {
-    "ethers": "^6.13.4"
+    "@playwright/test": "^1.63.0",
+    "ethers": "^6.13.4",
+    "playwright": "^1.63.0"
   }
 }
