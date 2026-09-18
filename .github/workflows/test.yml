@@ -17,6 +17,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: JS syntax check
         run: |
           for f in js/*.js; do node --check "$f" || exit 1; done
@@ -323,7 +326,12 @@ jobs:
 
           test('screenshot: bridge view', async ({ page }) => {
             await skipIntro(page);
-            await page.locator('.nav-item[data-view="bridge"]').click();
+            // Bridge no longer has its own nav item: Swap is the single entry,
+            // a second tap opens the Swap/Bridge chooser.
+            await page.locator('.nav-item[data-view="swap"]').click();
+            await page.locator('.nav-item[data-view="swap"]').click();
+            await page.locator('#chooseBridge').click();
+            await expect(page.locator('#view-bridge')).toHaveClass(/active/);
             await page.waitForTimeout(300);
             await page.screenshot({ path: 'screenshots/bridge.png', fullPage: true });
           });
