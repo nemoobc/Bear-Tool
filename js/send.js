@@ -223,15 +223,11 @@ export async function doSend() {
 
     let tx;
     if (tokenSel === 'native') {
-      const p = provider;
-      const pr = withTimeout(signer.sendTransaction({
+      tx = await withTimeout(signer.sendTransaction({
         to, value: ethers.parseEther(amt),
         maxFeePerGas: feeData.maxFeePerGas || gasPrice,
         maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || gasPrice
       }), BROADCAST_TIMEOUT_MS, 'broadcast');
-      tx = await (await pr).wait ? pr : await pr;
-      // wait: sendTransaction already resolves to the tx (not a promise-wrapped tx)
-      tx = await pr;
     } else {
       const c = new ethers.Contract(t.address, ERC20_ABI, signer);
       tx = await withTimeout(c.transfer(to, ethers.parseUnits(amt, t.decimals)), BROADCAST_TIMEOUT_MS, 'broadcast');
