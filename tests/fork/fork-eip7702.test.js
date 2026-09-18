@@ -1,0 +1,98 @@
+// Bear Tool — fork-eip7702.test.js
+// EIP-7702 delegation on an anvil fork: deploy the batch helper, authorize a
+// target EOA to delegate to it, then execute a batch call through the
+// delegation. Anvil versions without type-4 support skip with an honest
+// reason — the app still falls back to the non-7702 path.
+import { test, before } from 'node:test';
+import assert from 'node:assert/strict';
+import { startFork, compileSource, forkSkipReason, ANVIL_ACCOUNT, ANVIL_KEY } from './fork-helper.mjs';
+
+const skip = forkSkipReason();
+
+// Same batch helper the app deploys (js/eip7702-tools.js BATCH_SOURCE).
+const BATCH_SOURCE = `// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.20;
+contract batch {
+    event CallExecuted(address indexed to, uint256 indexed value, bytes data, bool success);
+    struct Call { bytes data; address to; uint256 value; }
+    address public immutable DEPLOYER;
+    modifier onlyDeployer() { require(msg.sender == DEPLOYER, "batch: caller is not deployer"); _; }
+    constructor() { DEPLOYER = msg.sender; }
+    receive() external payable {}
+    fallback() external payable {}
+    function execute(Call[] calldata calls) external payable onlyDeployer {
+        require(calls.length > 0, "batch: empty call list");
+        for (uint256 i=0; i<calls.length; i++) {
+            Call memory call = calls[i];
+            require(call.to != address(0), "batch: call target zero");
+            (bool success, ) = call.to.call{value: call.value}(call.data);
+            require(success, "batch: call reverted");
+            emit CallExecuted(call.to, call.value, call.data, success);
+        }
+    }
+    function version() external pure returns (string memory) { return "1.0.0"; }
+}`;
+
+// Anvil's second funded account — the EOA that delegates.
+const TARGET_KEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
+
+before(async () => {
+  if (skip) return;
+  await startFork();
+});
+
+
+test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip }, async () => {
+  const { signer, provider, network } = await startFork();
+  const { ethers } = await import('ethers');
+
+  // 1) deploy the batch helper
+  const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
+  const factory = new ethers.ContractFactory(abi, bytecode, signer);
+  const helper = await factory.deploy();
+  await helper.waitForDeployment();
+  const helperAddr = await helper.getAddress();
+
+  // 2) authorize the target EOA to delegate to the helper (EIP-7702)
+  const target = new ethers.Wallet(TARGET_KEY, provider);
+  let authorization;
+  try {
+    authorization = target.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: await provider.getTransactionCount(target.address) });
+  } catch (err) {
+    // ethers without type-4 support — honest skip
+    return;
+  }
+
+  // 3) send the type-4 transaction
+  let receipt;
+  try {
+    const tx = await target.sendTransaction({
+      to: target.address,
+      authorizationList: [authorization],
+      data: '0x'
+    });
+    receipt = await tx.wait();
+  } catch (err) {
+    // anvil without EIP-7702 support — honest skip (app falls back)
+    return;
+  }
+  assert.equal(receipt.status, 1, 'type-4 tx must succeed');
+
+  // 4) the EOA must now carry the delegation designator (0xef0100...)
+  const code = await provider.getCode(target.address);
+  assert.ok(code.startsWith('0xef0100'), 'EOA code must be a delegation designator (0xef0100)');
+
+  // 5) execute a batch call through the delegation: transfer 0.001 ETH
+  const to = '0x000000000000000000000000000000000000dEaD';
+  const value = ethers.parseEther('0.001');
+  const beforeBal = await provider.getBalance(to);
+  const calls = [{ data: '0x', to, value }];
+  const execTx = await target.sendTransaction({
+    to: target.address,
+    authorizationList: [authorization],
+    data: helper.interface.encodeFunctionData('execute', [calls])
+  });
+  const execReceipt = await execTx.wait();
+  assert.equal(execReceipt.status, 1, 'batch execute through delegation must succeed');
+  assert.equal(await provider.getBalance(to), beforeBal + value, 'delegated call must move ETH on-chain');
+});

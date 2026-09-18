@@ -635,6 +635,92 @@ function bindPasswordToggle(btnId, inputId) {
   });
 }
 
+// ── revoke EIP-7702 delegation (from Tools card) ──
+async function checkDelegation() {
+  const addr = $('#revokeTarget')?.value.trim() || get('address');
+  if (!wallet.isValidAddress(addr)) return toast('Invalid address', 'error');
+  const net = getNetworkById(get('networkId'));
+  const status = $('#revokeStatus');
+  const text = $('#revokeStatusText');
+  status?.classList.remove('hidden');
+  try {
+    const provider = await getProvider(net.chainId);
+    const delegate = await getDelegation(provider, addr);
+    if (delegate) {
+      status.className = 'delegate-status delegated';
+      text.innerHTML = `Delegated to <span class="addr">${escapeHtml(delegate)}</span>`;
+    } else {
+      status.className = 'delegate-status eoa';
+      text.textContent = 'Plain EOA (no delegation) — nothing to revoke.';
+    }
+  } catch {
+    status.className = 'delegate-status eoa';
+    text.textContent = 'Cannot check (RPC error)';
+  }
+}
+
+export async function revokeDelegation() {
+  const target = $('#revokeTarget')?.value.trim() || get('address');
+  if (!wallet.isValidAddress(target)) return toast('Invalid address', 'error');
+  const key = $('#revokeKey')?.value.trim();
+
+  const net = getNetworkById(get('networkId'));
+  const provider = await getProvider(net.chainId);
+  set('provider', provider);
+
+  let signer;
+  if (target.toLowerCase() === (get('address') || '').toLowerCase()) {
+    signer = get('signer').connect(provider);
+  } else if (!key || !/^0x[a-fA-F0-9]{64}$/.test(key)) {
+    return toast('Target is not the active wallet — provide its private key', 'error');
+  } else {
+    signer = new ethers.Wallet(key, provider);
+  }
+
+  const delegate = await getDelegation(provider, target);
+  if (!delegate) return toast('No active delegation on this address — nothing to revoke.', 'info');
+
+  const ok = await confirmTx({
+    title: 'Revoke EIP-7702 Delegation',
+    rows: [
+      { k: 'Target', v: target },
+      { k: 'Current delegation', v: delegate },
+      { k: 'Action', v: 'Revoke (back to plain EOA)' }
+    ],
+    confirmText: 'Revoke', danger: true, requireType: 'REVOKE'
+  });
+  if (!ok) return;
+
+  const btn = $('#btnRevokeDelegation');
+  if (btn) { btn.disabled = true; btn.textContent = 'Revoking…'; }
+  try {
+    const nonce = await provider.getTransactionCount(target);
+    const authorization = signer.authorizeSync({ chainId: net.chainId, address: EIP7702.ZERO_ADDRESS, nonce });
+    const feeData = await provider.getFeeData();
+    const tx = await signer.sendTransaction({
+      to: target,
+      authorizationList: [authorization],
+      maxFeePerGas: feeData.maxFeePerGas,
+      maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
+    });
+    addActivity({ hash: tx.hash, type: 'eip7702-revoke', status: 'pending', ts: Date.now(), detail: `revoke → ${target}` });
+    toast('Revoke tx sent! ⚡', 'info');
+    const { receipt, timedOut } = await waitForReceipt(tx);
+    if (timedOut) {
+      toast(`Tx ${tx.hash.slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
+    addActivity({ hash: tx.hash, type: 'eip7702-revoke', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `revoke → ${target}` });
+    toast(receipt.status === 1 ? 'Delegation revoked! ✅' : 'Revoke failed!', receipt.status === 1 ? 'success' : 'error');
+    checkDelegation();
+    emit('refresh');
+  } catch (e) {
+    toast(e?.message || String(e), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Revoke delegation'; }
+  }
+}
+
 // ── bind all events ──
 export function bindEip7702ToolsEvents() {
   // Batch
@@ -647,6 +733,10 @@ export function bindEip7702ToolsEvents() {
 
   // Claim
   $('#btnEip7702ClaimExec').addEventListener('click', executeClaim);
+
+  // Revoke delegation (Tools card)
+  $('#btnCheckDelegation')?.addEventListener('click', checkDelegation);
+  $('#btnRevokeDelegation')?.addEventListener('click', revokeDelegation);
 
   // Password toggles
   bindPasswordToggle('#btnRescueKeyToggle', '#eip7702RescueSponsorKey');

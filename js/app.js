@@ -21,6 +21,7 @@ import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
 import { bindEip7702Events, loadEip7702 } from './eip7702.js';
 import { bindEip7702ToolsEvents } from './eip7702-tools.js';
 import { bindDeployEvents } from './deploy.js';
+import { bindMiningEvents } from './mining-ui.js';
 import { loadNfts } from './nft.js';
 import { t, setLang, applyTranslations } from './i18n.js';
 
@@ -1046,6 +1047,7 @@ function bindViews() {
   bindEip7702Events();
   bindEip7702ToolsEvents();
   bindDeployEvents();
+  bindMiningEvents();
 
   $('#approvalMode').addEventListener('change', () => {
     $('#approvalCustomWrap').classList.toggle('hidden', $('#approvalMode').value !== 'custom');

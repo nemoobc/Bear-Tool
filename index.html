@@ -399,6 +399,27 @@
           </div>
 
           <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg> <span>Revoke EIP-7702 Delegation</span></div>
+            <p class="small mb-8">Remove a delegation from an EOA (back to plain EOA). Works for the active wallet, or any wallet whose private key you hold. A malicious delegation = total compromise — revoke it immediately.</p>
+            <div class="field">
+              <label for="revokeTarget">Target address</label>
+              <input class="input" id="revokeTarget" placeholder="0x... (default: current wallet)">
+            </div>
+            <div class="field">
+              <label for="revokeKey">Private key (optional — only if target is not the active wallet)</label>
+              <input class="input" id="revokeKey" type="password" placeholder="0x...">
+            </div>
+            <div class="flex gap-8">
+              <button class="btn btn-ghost" id="btnCheckDelegation">Check delegation</button>
+              <button class="btn btn-danger" id="btnRevokeDelegation">Revoke delegation</button>
+            </div>
+            <div id="revokeStatus" class="delegate-status eoa hidden" style="margin-top:12px">
+              <span class="label">Status:</span>
+              <span id="revokeStatusText">—</span>
+            </div>
+          </div>
+
+          <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg> <span>Deployed Contracts</span> <span class="small">(this chain)</span></div>
             <p class="small mb-8">Helper contracts deployed via EIP-7702 flows are saved here and reused to save gas. Remove an entry to force a fresh deploy.</p>
             <div id="deployedRegistryList" class="registry-list"></div>
@@ -461,20 +482,35 @@
             </div>
           </div>
           <div class="card">
-            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg> Mining PoW (Sepolia)</div>
-            <p class="small mb-8">Claim free ETH on Sepolia testnet via Proof-of-Work mining (PK910).</p>
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg> Mining PoW (SHA-256)</div>
+            <p class="small mb-8">Real Proof-of-Work mining, 100% client-side: find a nonce so that <span class="mono">sha256(prefix + nonce) &lt; target</span>. Use the proof for SHA-256 PoW faucets or verify it yourself.</p>
             <div class="field">
-              <label for="miningAddr">Wallet address</label>
+              <label for="miningAddr">Wallet address (for the proof)</label>
               <input class="input" id="miningAddr" placeholder="0x...">
             </div>
-            <div class="field">
-              <label for="miningThreads">Threads</label>
-              <input class="input" id="miningThreads" type="number" value="2" min="1" max="8">
+            <div class="flex gap-8">
+              <div class="field" style="flex:1">
+                <label for="miningThreads">Threads</label>
+                <input class="input" id="miningThreads" type="number" value="2" min="1" max="8">
+              </div>
+              <div class="field" style="flex:1">
+                <label for="miningDifficulty">Difficulty</label>
+                <input class="input" id="miningDifficulty" type="number" value="4" min="1" max="24">
+              </div>
             </div>
-            <button class="btn btn-primary btn-block" id="btnMiningStart">Start Mining</button>
+            <div class="flex gap-8">
+              <button class="btn btn-primary" id="btnMiningStart">Start Mining</button>
+              <button class="btn btn-danger hidden" id="btnMiningStop">Stop</button>
+            </div>
             <div id="miningStatus" class="hidden" style="margin-top:12px">
+              <div class="gas-estimate"><span class="gas-est-label">Status:</span> <span class="gas-est-value" id="miningState">idle</span></div>
               <div class="gas-estimate"><span class="gas-est-label">Speed:</span> <span class="gas-est-value" id="miningSpeed">—</span></div>
-              <div class="gas-estimate"><span class="gas-est-label">Earned:</span> <span class="gas-est-value" id="miningEarned">0 ETH</span></div>
+              <div class="gas-estimate"><span class="gas-est-label">Hashes:</span> <span class="gas-est-value" id="miningHashes">0</span></div>
+              <div class="gas-estimate"><span class="gas-est-label">Nonce:</span> <span class="gas-est-value mono" id="miningNonce">—</span></div>
+              <div class="gas-estimate"><span class="gas-est-label">Prefix:</span> <span class="gas-est-value mono" id="miningPrefix">—</span></div>
+              <div class="gas-estimate"><span class="gas-est-label">Target:</span> <span class="gas-est-value mono" id="miningTarget">—</span></div>
+              <div class="gas-estimate"><span class="gas-est-label">Proof hash:</span> <span class="gas-est-value mono" id="miningProof">—</span></div>
+              <div class="gas-estimate"><span class="gas-est-label">Verified:</span> <span class="gas-est-value" id="miningVerified">—</span></div>
             </div>
           </div>
 

@@ -1,0 +1,52 @@
+name: Onchain Fork Tests (Anvil)
+
+# Real on-chain transactions against an anvil fork of every network:
+# mainnets (Ethereum, BSC, Polygon, Arbitrum, OP, Base) + testnets
+# (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet).
+# Each job forks the network from a public RPC and runs the fork suite:
+# deploy ERC-20/721/1155, native + ERC-20 send, swap via verified router,
+# approval lifecycle, EIP-7702 delegation (skips honestly if unsupported).
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  fork:
+    name: Fork ${{ matrix.network }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        network: [ethereum, bsc, polygon, arbitrum, optimism, base, sepolia, amoy, arbitrum-sepolia, optimism-sepolia, base-sepolia, bsc-testnet]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install foundry (anvil)
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Cache solc compiler (~9 MB)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/soljson-0828.js
+          key: soljson-0828-v1
+
+      - name: Fork tests — ${{ matrix.network }}
+        env:
+          FORK_NETWORK: ${{ matrix.network }}
+          BEAR_SOLC_FILE: /tmp/soljson-0828.js
+        run: |
+          set -o pipefail
+          npm run test:fork:net 2>&1 | tee /tmp/fork.log
+          # A gate that does not run is decoration: fail loudly on skips too.
+          grep -qE "pass [1-9][0-9]*" /tmp/fork.log || {
+            echo "::error::fork tests did not run (all skipped?)"; exit 1; }
