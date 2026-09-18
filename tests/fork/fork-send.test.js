@@ -19,8 +19,14 @@ after(async () => {
 
 test('fork: send native ETH — balances move on-chain', { skip }, async () => {
   const { signer, provider } = await startFork();
-  const to = '0x000000000000000000000000000000000000dEaD';
+  // Fresh address: no base state on the forked chain, so anvil's
+  // eth_getBalance reflects the locally-mined transfer. (0xdEaD has a
+  // mainnet balance that anvil returns from the REMOTE base state,
+  // ignoring fork txs — foundry-rs/foundry#4700.)
+  const { ethers } = await import('ethers');
+  const to = ethers.Wallet.createRandom().address;
   const beforeBal = await provider.getBalance(to);
+  assert.equal(beforeBal, 0n, 'fresh address must start at zero');
   const amount = 1000000000000000n; // 0.001
 
   const tx = await signer.sendTransaction({ to, value: amount });
