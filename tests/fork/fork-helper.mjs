@@ -75,7 +75,11 @@ function hasAnvil() {
 export async function startFork() {
   if (provider) return { provider, signer, network };
   network = resolveNetwork();
-  const port = Number(process.env.FORK_PORT || 8545);
+  // Unique port per process: node --test runs each file in its own process,
+  // and a shared port lets a later file REUSE a dirty anvil (nonces already
+  // consumed) — the probe finds the port alive and skips a fresh start.
+  // pid % 1000 keeps ports in 8545..9544, no collisions on a runner.
+  const port = Number(process.env.FORK_PORT || (8545 + (process.pid % 1000)));
 
   // If something is already listening on the port, assume anvil is up (CI reuse).
   const alive = await new Promise((resolve) => {
@@ -116,7 +120,11 @@ export async function startFork() {
 
   const { ethers } = await import('ethers');
   provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`);
-  signer = new ethers.Wallet(ANVIL_KEY, provider);
+  // NonceManager tracks the nonce LOCALLY (query once, increment per send).
+  // Anvil's "pending" nonce on a fork is base + txpool and IGNORES mined
+  // txs, so a fresh query after a mined tx returns a stale low nonce →
+  // "nonce too low" on the very next send. NonceManager sidesteps that.
+  signer = new ethers.NonceManager(new ethers.Wallet(ANVIL_KEY, provider));
   return { provider, signer, network };
 }
 

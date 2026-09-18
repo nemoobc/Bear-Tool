@@ -88,13 +88,20 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   assert.ok(code.startsWith('0xef0100'), 'EOA code must be a delegation designator (0xef0100)');
 
   // 5) execute a batch call through the delegation: transfer 0.001 ETH
+  //    Build a FRESH authorization (account nonce incremented by the type-4 tx)
   const to = '0x000000000000000000000000000000000000dEaD';
   const value = ethers.parseEther('0.001');
   const beforeBal = await provider.getBalance(to);
   const calls = [{ data: '0x', to, value }];
+  let auth2;
+  try {
+    auth2 = target.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: await provider.getTransactionCount(target.address) });
+  } catch {
+    return; // ethers without type-4 support
+  }
   const execTx = await target.sendTransaction({
     to: target.address,
-    authorizationList: [authorization],
+    authorizationList: [auth2],
     data: helper.interface.encodeFunctionData('execute', [calls])
   });
   const execReceipt = await execTx.wait();

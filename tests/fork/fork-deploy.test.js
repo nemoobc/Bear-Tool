@@ -46,7 +46,8 @@ test('fork: deploy ERC-721 → mint + ownerOf', { skip }, async () => {
   const nft = await deployErc721(signer);
   const addr = await nft.getAddress();
 
-  const tx = await nft.safeMint(ANVIL_ACCOUNT, 1n);
+  // template mints with auto-incrementing id (mint(address), no id param)
+  const tx = await nft.mint(ANVIL_ACCOUNT);
   const receipt = await tx.wait();
   assert.equal(receipt.status, 1, 'mint must succeed on-chain');
   assert.equal(await nft.ownerOf(1n), ANVIL_ACCOUNT, 'token 1 must belong to the minter');
@@ -58,7 +59,8 @@ test('fork: deploy ERC-1155 → mint + balanceOf', { skip }, async () => {
   const { signer } = await startFork();
   const multi = await deployErc1155(signer);
 
-  const tx = await multi.mint(ANVIL_ACCOUNT, 7n, 42n, '0x');
+  // template mint signature is mint(address,uint256,uint256) — no data param
+  const tx = await multi.mint(ANVIL_ACCOUNT, 7n, 42n);
   const receipt = await tx.wait();
   assert.equal(receipt.status, 1, 'mint must succeed on-chain');
   assert.equal(await multi.balanceOf(ANVIL_ACCOUNT, 7n), 42n, 'balance must be 42 for token id 7');
