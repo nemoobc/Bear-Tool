@@ -216,21 +216,32 @@ export async function doSend() {
   await runTx('send', $('#btnSend'), async () => {
     const provider = get('provider');
     const signer = get('signer').connect(provider);
-    const feeData = await provider.getFeeData();
+    const feeData = await withTimeout(provider.getFeeData(), RPC_TIMEOUT_MS, 'getFeeData');
     const gasPrice = gasSpeed === 'slow' ? feeData.gasPrice * 90n / 100n
       : gasSpeed === 'fast' ? feeData.gasPrice * 120n / 100n
       : feeData.gasPrice;
 
     let tx;
     if (tokenSel === 'native') {
-      tx = await signer.sendTransaction({
+      const p = provider;
+      const pr = withTimeout(signer.sendTransaction({
         to, value: ethers.parseEther(amt),
         maxFeePerGas: feeData.maxFeePerGas || gasPrice,
         maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || gasPrice
-      });
+      }), BROADCAST_TIMEOUT_MS, 'broadcast');
+      tx = await (await pr).wait ? pr : await pr;
+      // wait: sendTransaction already resolves to the tx (not a promise-wrapped tx)
+      tx = await pr;
     } else {
       const c = new ethers.Contract(t.address, ERC20_ABI, signer);
-      tx = await c.transfer(to, ethers.parseUnits(amt, t.decimals));
+      tx = await withTimeout(c.transfer(to, ethers.parseUnits(amt, t.decimals)), BROADCAST_TIMEOUT_MS, 'broadcast');
+    }
+    // A broadcast that times out must NOT leave the button spinning forever:
+    // the hash may still land — track it on the explorer. Button released,
+    // pending activity left "pending" (honest), never a false "confirmed".
+    if (!tx?.hash) {
+      toast('Broadcast unconfirmed — check the explorer or try again.', 'info');
+      return;
     }
     toast('Transaction sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'send', status: 'pending', ts: Date.now(), detail: `${amt} ${t.symbol} → ${wallet.shortAddress(to)}`, to });
