@@ -14,6 +14,7 @@ import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPasswo
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity } from './state.js';
 import { fetchAllPrices, fetchPriceHistory } from './price.js';
+import { waitForReceipt } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
 import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
@@ -104,13 +105,26 @@ function bindNav() {
   // sidebar nav
   $all('.nav-item').forEach(item => {
     item.addEventListener('click', () => {
-      switchView(item.dataset.view);
+      const view = item.dataset.view;
+      // Swap and Bridge share one nav button: first click opens Swap,
+      // clicking the button again while already on Swap offers the choice.
+      if (view === 'swap' && $('#view-swap')?.classList.contains('active')) {
+        showSwapBridgeChooser();
+        return;
+      }
+      switchView(view);
     });
   });
   // mobile bottom nav
   $all('.mobile-nav-item').forEach(item => {
     item.addEventListener('click', () => {
-      switchView(item.dataset.view);
+      const view = item.dataset.view;
+      // same one-button Swap/Bridge pattern — Bridge is otherwise unreachable
+      if (view === 'swap' && $('#view-swap')?.classList.contains('active')) {
+        showSwapBridgeChooser();
+        return;
+      }
+      switchView(view);
     });
   });
   // dashboard quick actions
@@ -124,13 +138,38 @@ function bindNav() {
 function switchView(view) {
   $all('.nav-item').forEach(i => i.classList.remove('active'));
   $all('.mobile-nav-item').forEach(i => i.classList.remove('active'));
-  const sidebarItem = $(`.nav-item[data-view="${view}"]`);
-  const mobileItem = $(`.mobile-nav-item[data-view="${view}"]`);
+  // Bridge lives behind the Swap nav button, so Swap stays highlighted there.
+  const navView = view === 'bridge' ? 'swap' : view;
+  const sidebarItem = $(`.nav-item[data-view="${navView}"]`);
+  const mobileItem = $(`.mobile-nav-item[data-view="${navView}"]`);
   if (sidebarItem) sidebarItem.classList.add('active');
   if (mobileItem) mobileItem.classList.add('active');
   $all('.view').forEach(v => v.classList.remove('active'));
   $('#view-' + view).classList.add('active');
   refreshView(view);
+}
+
+// Second click on the Swap nav item — pick between same-chain swap and bridge.
+function showSwapBridgeChooser() {
+  openModal(`
+    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <div class="tx-confirm">
+      <img src="assets/bear.svg" alt="Bear Tool">
+      <div class="question">Swap or Bridge?</div>
+    </div>
+    <div class="quick-actions" style="grid-template-columns:1fr 1fr">
+      <button class="quick-action-btn" id="chooseSwap">
+        <span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
+        <span class="qa-label">Swap</span>
+      </button>
+      <button class="quick-action-btn" id="chooseBridge">
+        <span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg></span>
+        <span class="qa-label">Bridge</span>
+      </button>
+    </div>
+  `);
+  $('#chooseSwap').onclick = () => { closeModal(); switchView('swap'); };
+  $('#chooseBridge').onclick = () => { closeModal(); switchView('bridge'); };
 }
 
 function refreshView(view) {
@@ -589,7 +628,10 @@ async function loadDashboard() {
   if (!get('unlocked')) return;
   const net = getNetworkById(get('networkId'));
   const addr = get('address');
-  $('#balanceSub').textContent = `${net.name} · ${wallet.shortAddress(addr)}`;
+  // Network name only — the wallet address is shown once, in the
+  // walletStatus row below (next to its copy button). Showing it in both
+  // places was a visible duplicate.
+  $('#balanceSub').textContent = net.name;
 
   // ── wallet status ──
   const statusDot = document.querySelector('.status-dot');
@@ -611,16 +653,22 @@ async function loadDashboard() {
       balance: balance.toString(), usd: null
     };
     const tokens = [native];
+    // List every popular token for the chain — including ones the user holds
+    // 0 of — so the dashboard is a usable coin list, not an empty screen for
+    // a fresh wallet. Balance is filled from the chain; failures fall back to 0.
     const popular = POPULAR_TOKENS[net.chainId] || [];
-    await Promise.allSettled(popular.map(async (t) => {
-      try {
-        const c = new ethers.Contract(t.address, ERC20_ABI, provider);
-        const bal = await c.balanceOf(get('address'));
-        if (bal > 0n) {
-          tokens.push({ address: t.address, symbol: t.symbol, decimals: t.decimals, balance: bal.toString(), usd: null });
-        }
-      } catch {}
+    const results = await Promise.allSettled(popular.map(async (t) => {
+      const c = new ethers.Contract(t.address, ERC20_ABI, provider);
+      const bal = await c.balanceOf(get('address'));
+      return { address: t.address, symbol: t.symbol, decimals: t.decimals, balance: bal.toString(), usd: null };
     }));
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') tokens.push(r.value);
+      else tokens.push({
+        address: popular[i].address, symbol: popular[i].symbol,
+        decimals: popular[i].decimals, balance: '0', usd: null
+      });
+    });
     set('tokens', tokens);
     // USD prices (CoinGecko → DexScreener → cache)
     try {
@@ -1041,7 +1089,11 @@ function renderApprovals(approvals, scannedFrom = null) {
       const c = new ethers.Contract(a.token.address, ERC20_ABI, signer);
       const tx = await c.approve(a.spender, 0);
       toast('Revoke tx sent!', 'info');
-      await tx.wait();
+      const { timedOut } = await waitForReceipt(tx);
+      if (timedOut) {
+        toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+        return;
+      }
       toast('Approval revoked! 🎉', 'success');
       scanApprovals();
     } catch (e) { toast('Revoke failed: ' + e.message, 'error'); }

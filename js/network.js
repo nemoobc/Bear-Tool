@@ -9,6 +9,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { fetchAllPrices } from './price.js';
+import { withTimeout, RPC_TIMEOUT_MS } from './safetx.js';
 
 export const NETWORKS = [
   {
@@ -252,21 +253,31 @@ export function getNetwork(chainId) {
 }
 
 export function getNetworkById(id) {
-  return getAllNetworks().find(n => n.id === id);
+  const found = getAllNetworks().find(n => n.id === id);
+  if (found) return found;
+  // A stale/unknown saved networkId must not turn every feature into
+  // "Cannot read properties of undefined (reading 'chainId')".
+  console.warn('[BearTool] unknown networkId "' + id + '" — falling back to ethereum');
+  return getAllNetworks().find(n => n.id === 'ethereum') || NETWORKS[0];
 }
 
 // try RPCs in order, return first working provider
 export async function getProvider(chainId) {
   const net = getNetwork(chainId);
   if (!net) throw new Error('Unknown network chainId ' + chainId);
+  const failures = [];
   for (const url of net.rpc) {
     try {
       const p = new ethers.JsonRpcProvider(url, Number(chainId), { staticNetwork: true });
-      await p.getBlockNumber();
+      // Bounded probe: an endpoint that accepts the connection but never
+      // answers would otherwise hang here forever, leaving the UI spinning.
+      await withTimeout(p.getBlockNumber(), RPC_TIMEOUT_MS, url);
       return p;
-    } catch { /* try next */ }
+    } catch (e) {
+      failures.push(`${url} (${e?.message || e})`);
+    }
   }
-  throw new Error('All RPCs failed for ' + net.name);
+  throw new Error(`All RPCs failed for ${net.name} — ` + failures.join('; '));
 }
 
 // detect EIP-7702 delegation: returns delegate address or null
@@ -284,11 +295,11 @@ export async function getDelegation(provider, address) {
 export async function getGasPrice(provider) {
   if (!provider) return 0n;
   try {
-    const hex = await provider.send('eth_gasPrice', []);
+    const hex = await withTimeout(provider.send('eth_gasPrice', []), RPC_TIMEOUT_MS, 'eth_gasPrice');
     return BigInt(hex);
   } catch {
     try {
-      const feeData = await provider.getFeeData();
+      const feeData = await withTimeout(provider.getFeeData(), RPC_TIMEOUT_MS, 'getFeeData');
       return feeData.gasPrice || 0n;
     } catch { return 0n; }
   }

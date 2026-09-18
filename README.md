@@ -15,9 +15,9 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 | 🐻 **Wallet** | Create (12-word seed) / import (seed or private key), PBKDF2-310k + AES-GCM encrypted keystore in localStorage, multi-account (m/44'/60'/0'/0/i), auto-lock, export secret |
 | 🌐 **Networks** | 12 EVM networks: 6 mainnet (Ethereum, BSC, Polygon, Arbitrum, OP, Base) + 6 testnet (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet), RPC fallback chain, custom network + custom RPC |
 | 🪙 **Assets** | Native + 19 popular ERC-20 balances (USDT, USDC, DAI, WETH, WBTC, LINK, UNI, AAVE, SHIB, MATIC, ARB, OP, PEPE, CRV, SNX, SUSHI, COMP, MKR, LDO) |
-| ✈️ **Send** | Native + ERC-20, gas speed (slow/normal/fast), live preview, address validation + poisoning detection |
-| 🔄 **Swap** | 0x API quotes (fallback simulated), slippage control, flip |
-| 🌉 **Bridge** | LI.FI quotes (fallback simulated), all chains |
+| ✈️ **Send** | Native + ERC-20, gas speed (slow/normal/fast), live preview + est. gas, paste button, address validation + poisoning detection |
+| 🔄 **Swap** | 0x API quotes (fallback simulated), slippage control, flip — the Swap nav button is also the Bridge entry (tap it twice to choose) |
+| 🌉 **Bridge** | LI.FI quotes (fallback simulated), all chains — reaches `#view-bridge` from the Swap chooser, no separate nav item |
 | ⚡ **EIP-7702** | Delegate to implementation (chainId 0 = all chains, replay warning), revoke, batch atomic call, rescue atomic, claim + forward airdrop |
 | 🔐 **Approvals** | Scan popular/custom token approvals, detect UNLIMITED, revoke to 0 |
 | 🧙 **Deploy** | Wizard for ERC-20 / ERC-721 / ERC-1155 |

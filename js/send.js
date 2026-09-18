@@ -6,7 +6,7 @@
 
 import { $, toast, confirmTx, fmtAmount, escapeHtml } from './ui.js';
 import { get, addActivity, requireUnlock, emit } from './state.js';
-import { runTx } from './safetx.js';
+import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById, getGasPrice, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import * as wallet from './wallet.js';
 
@@ -38,6 +38,31 @@ export function bindSendEvents() {
   });
   $('#sendAmount').addEventListener('input', updateSendPreview);
   $('#sendTo').addEventListener('input', updateSendPreview);
+  $('#sendToken')?.addEventListener('change', () => { updateSendTokenBalance(); updateSendPreview(); });
+  // The paste button was in the markup from the start but never wired —
+  // tapping it did nothing at all.
+  $('#btnSendPaste')?.addEventListener('click', async () => {
+    try {
+      const text = (await navigator.clipboard.readText() || '').trim();
+      if (!text) return toast('Clipboard is empty', 'info');
+      $('#sendTo').value = text;
+      updateSendPreview();
+    } catch {
+      // Clipboard read needs permission + a secure context (works on the
+      // https Pages deploy). Fall back to a manual paste.
+      $('#sendTo').focus();
+      toast('Clipboard blocked — press and hold to paste', 'info');
+    }
+  });
+}
+
+// balance of the currently selected token, shown next to the dropdown
+function updateSendTokenBalance() {
+  const el = $('#sendTokenBalance');
+  if (!el) return;
+  const sel = $('#sendToken')?.value;
+  const t = (get('tokens') || []).find(x => (x.address || 'native') === sel);
+  el.textContent = t ? fmtAmount(t.balance, t.decimals) : '';
 }
 
 export function loadSendTokens() {
@@ -46,6 +71,7 @@ export function loadSendTokens() {
   sel.innerHTML = get('tokens').map(t =>
     `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)} (${escapeHtml(fmtAmount(t.balance, t.decimals))})</option>`
   ).join('');
+  updateSendTokenBalance();
 }
 
 // live preview + gas estimate (best effort)
@@ -54,10 +80,15 @@ export async function updateSendPreview() {
   const amt = $('#sendAmount')?.value || '';
   const preview = $('#sendPreview');
   if (!preview) return;
-  if (!to || !amt) { preview.classList.add('hidden'); return; }
-  if (!wallet.isValidAddress(to)) {
-    preview.innerHTML = '⚠️ Invalid address';
-    preview.classList.remove('hidden');
+  const gasValue = $('#gasEstValue'), gasUsd = $('#gasEstUsd');
+  if (!to || !amt || !wallet.isValidAddress(to)) {
+    preview.classList.add('hidden');
+    if (gasValue) gasValue.textContent = '—';
+    if (gasUsd) gasUsd.textContent = '';
+    if (to && amt && !wallet.isValidAddress(to)) {
+      preview.innerHTML = '⚠️ Invalid address';
+      preview.classList.remove('hidden');
+    }
     return;
   }
   const tokenSel = $('#sendToken').value;
@@ -72,6 +103,10 @@ export async function updateSendPreview() {
       const usdText = nativeUsd ? ` ($${(parseFloat(gasEth) * nativeUsd).toFixed(2)})` : '';
       const net = getNetworkById(get('networkId'));
       gasLine = `<div class="small">Gas: ~${escapeHtml(gasEth)} ${escapeHtml(net?.symbol || '')}${escapeHtml(usdText)}</div>`;
+      // The "Est. gas" row exists in the markup but was never written to, so
+      // it sat on "—" forever and made the Send screen look stuck.
+      if (gasValue) gasValue.textContent = `${gasEth} ${net?.symbol || ''}`.trim();
+      if (gasUsd) gasUsd.textContent = nativeUsd ? `$${(parseFloat(gasEth) * nativeUsd).toFixed(2)}` : '';
     }
   } catch { /* gas preview is optional */ }
   preview.innerHTML = `Sending <b>${escapeHtml(amt)}</b> to <span class="mono">${escapeHtml(wallet.shortAddress(to))}</span>${gasLine}`;
@@ -199,7 +234,13 @@ export async function doSend() {
     }
     toast('Transaction sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'send', status: 'pending', ts: Date.now(), detail: `${amt} ${t.symbol} → ${wallet.shortAddress(to)}`, to });
-    const receipt = await tx.wait();
+    const { receipt, timedOut } = await waitForReceipt(tx);
+    if (timedOut) {
+      // Sent but not confirmed in time. The pending activity entry is left as
+      // "pending" (honest) and the button is released — never spin forever.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
     addActivity({ hash: tx.hash, type: 'send', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${amt} ${t.symbol} → ${wallet.shortAddress(to)}`, to });
     toast(receipt.status === 1 ? 'Transaction confirmed! 🎉' : 'Transaction failed!', receipt.status === 1 ? 'success' : 'error');
     emit('refresh');

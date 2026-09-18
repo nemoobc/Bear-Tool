@@ -23,7 +23,7 @@
 
 import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx } from './safetx.js';
+import { runTx, waitForReceipt } from './safetx.js';
 import { getAllNetworks, getNetworkById } from './network.js';
 import { t } from './i18n.js';
 
@@ -295,7 +295,13 @@ export async function doBridgeExec() {
     const tx = await connected.sendTransaction({ to, data, value, chainId });
     toast('Bridge tx sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'bridge', status: 'pending', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}` });
-    const receipt = await tx.wait();
+    const { receipt, timedOut } = await waitForReceipt(tx);
+    if (timedOut) {
+      // Sent but not confirmed in time. The pending activity entry is left as
+      // "pending" (honest) and the button is released — never spin forever.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
     addActivity({ hash: tx.hash, type: 'bridge', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}` });
     toast(receipt.status === 1 ? 'Bridge confirmed! 🎉' : 'Bridge failed!', receipt.status === 1 ? 'success' : 'error');
     emit('refresh');

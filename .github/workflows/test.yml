@@ -7,6 +7,31 @@ on:
     branches: [master]
 
 jobs:
+  unit-tests:
+    name: Unit & Regression Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: JS syntax check
+        run: |
+          for f in js/*.js; do node --check "$f" || exit 1; done
+          echo "✓ All JS files parse"
+
+      - name: Run npm test (tests/*.test.js)
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "=== Unit + regression suite ==="
+          npm test 2>&1 | tee /tmp/npm-test.log
+          # Fail loudly: a gate that does not run is decoration.
+          grep -q "fail 0" /tmp/npm-test.log || {
+            echo "::error::npm test reported failures"; exit 1; }
+
   static-analysis:
     name: Static Analysis
     runs-on: ubuntu-latest
@@ -45,7 +70,7 @@ jobs:
               'importBtn','unlockPw','cnSave','wCreate','createPw','unlockBtn',
               'clearBtn','cnChainId','cnName','createBtn','addAccBtn','seedConfirm','addNetBtn',
               'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart',
-              'netSearchInput','netListMainnet','netListTestnet'
+              'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge'
           }
           missing = []
           for f in ['js/swap.js','js/bridge.js','js/send.js','js/app.js']:
@@ -166,10 +191,43 @@ jobs:
             }
           });
 
-          test('sidebar has 10 nav items', async ({ page }) => {
+          test('sidebar has 9 nav items (Bridge shares the Swap button)', async ({ page }) => {
             await skipIntro(page);
             const items = page.locator('.nav-item');
-            await expect(items).toHaveCount(10);
+            await expect(items).toHaveCount(9);
+          });
+
+          test('swap nav button is the single Swap/Bridge entry (second click chooses)', async ({ page }) => {
+            await skipIntro(page);
+            // no separate Bridge nav item any more
+            await expect(page.locator('.nav-item[data-view="bridge"]')).toHaveCount(0);
+            const swapBtn = page.locator('.nav-item[data-view="swap"]');
+            await swapBtn.click();
+            await expect(page.locator('#view-swap')).toHaveClass(/active/);
+            // clicking again while on Swap offers the choice
+            await swapBtn.click();
+            await expect(page.locator('#chooseBridge')).toBeVisible();
+            await expect(page.locator('#chooseSwap')).toBeVisible();
+            await page.locator('#chooseBridge').click();
+            await expect(page.locator('#view-bridge')).toHaveClass(/active/);
+            // Swap button keeps the highlight while Bridge is open
+            await expect(swapBtn).toHaveClass(/active/);
+          });
+
+          test('password inputs span the full width of their field', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="deploy"]').click();
+            await expect(page.locator('#view-deploy')).toHaveClass(/active/);
+            for (const sel of ['#eip7702RescueSponsorKey', '#eip7702ClaimSponsorKey']) {
+              const input = page.locator(sel);
+              await expect(input).toBeVisible();
+              const widths = await input.evaluate((el) => {
+                const field = el.closest('.field') || el.parentElement;
+                return { input: el.getBoundingClientRect().width, field: field.getBoundingClientRect().width };
+              });
+              expect(widths.field).toBeGreaterThan(0);
+              expect(widths.input).toBeGreaterThanOrEqual(widths.field * 0.9);
+            }
           });
 
           test('mobile nav has 5 items', async ({ page }) => {

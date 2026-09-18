@@ -61,3 +61,54 @@ test('dashboard: chart awaits are guarded against a closed/reopened modal', () =
   assert.match(app, /if \(!canvas\.isConnected \|\| document\.getElementById\('tokenPriceChart'\) !== canvas\) return;/,
     'stale canvas writes must bail out after awaiting history');
 });
+
+// ── Home coin list + duplicate address + Swap/Bridge nav ──────────────────
+const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const swap = fs.readFileSync(new URL('../js/swap.js', import.meta.url), 'utf8');
+const css = fs.readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
+
+test('dashboard: home shows popular coins even with a 0 balance', () => {
+  const load = app.slice(app.indexOf('async function loadDashboard'), app.indexOf('async function loadDashboard') + 4000);
+  // every popular token is pushed, not only the ones with bal > 0
+  assert.doesNotMatch(load, /if \(bal > 0n\)/, 'zero-balance tokens must still be listed');
+  assert.match(load, /results\.forEach\(\(r, i\) =>/, 'settled results must all be added');
+  assert.match(load, /balance: '0', usd: null/, 'failed balance reads fall back to 0');
+});
+
+test('dashboard: swap offers popular tokens, not only the ones the user holds', () => {
+  assert.match(swap, /for \(const p of \(POPULAR_TOKENS\[net\?\.chainId\] \|\| \[\]\)\)/,
+    'swap list must fall back to the chain popular tokens');
+  assert.match(swap, /tokens\.unshift\(\{/, 'native gas token must always be selectable');
+});
+
+test('swap: change-listeners are rebound, not stacked, on every view switch', () => {
+  assert.match(swap, /if \(from\._bearBalanceHandler\) from\.removeEventListener\('change', from\._bearBalanceHandler\);/,
+    'previous handler must be removed before adding a new one');
+  assert.match(swap, /to\._bearBalanceHandler = updateBalance;/);
+});
+
+test('home: the wallet address is shown once, not twice', () => {
+  assert.match(app, /\$\('#balanceSub'\)\.textContent = net\.name;/,
+    'balanceSub must be the network name only');
+  assert.doesNotMatch(app, /balanceSub'\)\.textContent = `\$\{net\.name\} · \$\{/,
+    'address must not be duplicated into balanceSub');
+});
+
+test('nav: Bridge shares the Swap button (one entry, second click chooses)', () => {
+  assert.doesNotMatch(html, /class="nav-item[^"]*" data-view="bridge"/,
+    'separate Bridge sidebar item must be gone');
+  assert.match(html, /class="nav-item nav-item-highlight" data-view="swap"/, 'Swap item stays');
+  assert.match(html, /id="view-bridge"/, 'Bridge view must still exist');
+  assert.match(app, /if \(view === 'swap' && \$\('#view-swap'\)\?\.classList\.contains\('active'\)\) \{\s*showSwapBridgeChooser\(\);/,
+    're-clicking Swap must open the chooser');
+  assert.match(app, /function showSwapBridgeChooser\(\)/);
+  assert.match(app, /const navView = view === 'bridge' \? 'swap' : view;/,
+    'Swap stays highlighted while Bridge is open');
+});
+
+test('password fields span the full width of their field', () => {
+  const block = css.slice(css.indexOf('.password-wrap .input'), css.indexOf('.password-wrap .input') + 400);
+  assert.match(block, /width: 100%/, 'password input must be full width');
+  assert.match(block, /flex: 1 1 100%/, 'must not be shrinkable by the toggle button');
+  assert.doesNotMatch(block, /font-size: 0\.85rem/, 'password text must match other inputs');
+});

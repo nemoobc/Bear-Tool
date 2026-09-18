@@ -7,7 +7,7 @@
 
 import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx } from './safetx.js';
+import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById, ERC20_ABI } from './network.js';
 
 const { ethers } = globalThis;
@@ -133,13 +133,35 @@ export function bindSwapEvents() {
 export function loadSwapTokens() {
   const from = $('#swapFrom'), to = $('#swapTo');
   if (!from || !to) return;
-  const tokens = get('tokens');
+  const net = getNetworkById(get('networkId'));
+
+  // Offer the chain's popular tokens plus anything the user holds. Previously
+  // this listed ONLY held tokens, so a wallet holding just ETH got a
+  // single-option dropdown and swapping was impossible.
+  const held = get('tokens') || [];
+  const tokens = [...held];
+  const seen = new Set(held.map(t => (t.address || 'native').toLowerCase()));
+  for (const p of (POPULAR_TOKENS[net?.chainId] || [])) {
+    if (!seen.has(p.address.toLowerCase())) {
+      tokens.push({ address: p.address, symbol: p.symbol, decimals: p.decimals, balance: '0', usd: null });
+      seen.add(p.address.toLowerCase());
+    }
+  }
+  // native gas token must always be selectable
+  if (!tokens.some(t => !t.address)) {
+    tokens.unshift({
+      address: null, symbol: net?.symbol || 'Native',
+      decimals: net?.decimals ?? 18, balance: '0', usd: null
+    });
+  }
+
   const opts = tokens.map(t =>
     `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)}</option>`
   ).join('');
   from.innerHTML = opts;
   to.innerHTML = opts;
   if (from.options.length > 1) to.selectedIndex = 1;
+
   // update balance displays
   const updateBalance = () => {
     const ft = tokens.find(x => (x.address || 'native') === from.value);
@@ -148,6 +170,11 @@ export function loadSwapTokens() {
     if (fb && ft) fb.textContent = `Balance: ${parseFloat(ethers.formatUnits(ft.balance, ft.decimals)).toFixed(4)}`;
     if (tb && tt) tb.textContent = `Balance: ${parseFloat(ethers.formatUnits(tt.balance, tt.decimals)).toFixed(4)}`;
   };
+  // re-binding on every view switch used to stack duplicate listeners
+  if (from._bearBalanceHandler) from.removeEventListener('change', from._bearBalanceHandler);
+  if (to._bearBalanceHandler) to.removeEventListener('change', to._bearBalanceHandler);
+  from._bearBalanceHandler = updateBalance;
+  to._bearBalanceHandler = updateBalance;
   from.addEventListener('change', updateBalance);
   to.addEventListener('change', updateBalance);
   updateBalance();
@@ -311,7 +338,11 @@ export async function doSwap() {
       if (allowance < amountWei) {
         toast('Approving token...', 'info');
         const txApprove = await c.approve(router, ethers.MaxUint256);
-        await txApprove.wait();
+        const { timedOut: approveTimedOut } = await waitForReceipt(txApprove, { timeoutMs: 90000, label: 'approve confirmation' });
+        if (approveTimedOut) {
+          toast('Approve sent but not confirmed in time. Re-open Swap and try again once it lands.', 'info');
+          return;
+        }
       }
     }
 
@@ -323,7 +354,13 @@ export async function doSwap() {
     });
     toast('Swap tx sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'swap', status: 'pending', ts: Date.now(), detail: `${amt} ${from} → ${to}` });
-    const receipt = await tx.wait();
+    const { receipt, timedOut } = await waitForReceipt(tx);
+    if (timedOut) {
+      // Sent but not confirmed in time. The pending activity entry is left as
+      // "pending" (honest) and the button is released — never spin forever.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
     addActivity({ hash: tx.hash, type: 'swap', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${amt} ${from} → ${to}` });
     toast(receipt.status === 1 ? 'Swap confirmed! 🎉' : 'Swap failed!', receipt.status === 1 ? 'success' : 'error');
     emit('refresh');

@@ -12,6 +12,40 @@ export function isTxPending(key) {
   return pending.has(key);
 }
 
+// ── timeouts ──
+// Nothing in a wallet should spin forever. A black-holed RPC socket or a
+// dropped/replaced transaction used to leave the button spinning with no
+// error and no way out — the "send cuma muter-muter" report.
+export const RPC_TIMEOUT_MS = 8000;
+export const CONFIRM_TIMEOUT_MS = 120000;
+
+export function withTimeout(promise, ms, label = 'operation') {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const err = new Error(`${label} timed out after ${Math.round(ms / 1000)}s`);
+        err.code = 'BEAR_TIMEOUT';
+        reject(err);
+      }, ms);
+    })
+  ]);
+}
+
+// Wait for a receipt, but never forever. Callers get an explicit "timedOut"
+// signal so they can tell the user to track the hash instead of hanging.
+export async function waitForReceipt(tx, { timeoutMs = CONFIRM_TIMEOUT_MS, label = 'confirmation' } = {}) {
+  const hash = tx?.hash;
+  try {
+    const receipt = await withTimeout(tx.wait(), timeoutMs, label);
+    return { receipt, hash, timedOut: false };
+  } catch (e) {
+    if (e?.code === 'BEAR_TIMEOUT') return { receipt: null, hash, timedOut: true };
+    throw e;
+  }
+}
+
 // double-submit guard: blocks re-entry while a tx with the same key runs
 export async function safeSend(key, fn) {
   if (pending.has(key)) {

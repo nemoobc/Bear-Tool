@@ -7,7 +7,7 @@
 
 import { $, toast, confirmTx, escapeHtml } from './ui.js';
 import { get, addActivity, requireUnlock, emit } from './state.js';
-import { runTx } from './safetx.js';
+import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
 import * as wallet from './wallet.js';
 import { renderDeployedRegistry } from './eip7702-tools.js';
@@ -107,7 +107,13 @@ export async function doEip7702(action) {
     });
     toast(action === 'delegate' ? 'Delegation tx sent! ⚡' : 'Revoke tx sent! ⚡', 'info');
     addActivity({ hash: tx.hash, type: 'eip7702-' + action, status: 'pending', ts: Date.now(), detail: impl });
-    const receipt = await tx.wait();
+    const { receipt, timedOut } = await waitForReceipt(tx);
+    if (timedOut) {
+      // Sent but not confirmed in time. The pending activity entry is left as
+      // "pending" (honest) and the button is released — never spin forever.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
     addActivity({ hash: tx.hash, type: 'eip7702-' + action, status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: impl });
     toast(receipt.status === 1 ? 'Done! 🎉' : 'Failed!', receipt.status === 1 ? 'success' : 'error');
     loadEip7702();

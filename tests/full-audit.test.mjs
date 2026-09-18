@@ -71,11 +71,13 @@ describe('2. HTML STRUCTURE', () => {
     log(`✓ All 10 views found`);
   });
 
-  it('all 10 nav items have role=button', () => {
+  it('all 9 nav items have role=button', () => {
     const navItems = html.match(/data-view="[^"]+"/g) || [];
-    // data-view appears in sidebar (10) + mobile nav (10) = 20+ but unique views = 10
+    // Bridge shares the Swap nav button, so there are 9 unique sidebar views
+    // (bridge still exists as a view, reachable from the Swap chooser).
     const uniqueViews = new Set(navItems.map(m => m.match(/data-view="([^"]+)"/)[1]));
-    assert.ok(uniqueViews.size >= 10, `Expected >= 10 unique views, got ${uniqueViews.size}`);
+    assert.ok(uniqueViews.size >= 8, `Expected >= 8 unique views, got ${uniqueViews.size}`);
+    assert.ok(uniqueViews.has('swap'), 'swap view must stay reachable from the nav');
     const withRole = (html.match(/data-view="[^"]+"\s+role="button"/g) || []).length;
     log(`✓ ${withRole} nav items with role=button (unique views: ${uniqueViews.size})`);
   });
@@ -129,7 +131,7 @@ describe('2. HTML STRUCTURE', () => {
     const tabindexCount = (html.match(/tabindex/g) || []).length;
     log(`✓ aria-label: ${ariaCount}, tabindex: ${tabindexCount}`);
     assert.ok(ariaCount >= 3, 'Expected at least 3 aria-labels');
-    assert.ok(tabindexCount >= 10, 'Expected at least 10 tabindex (nav items)');
+    assert.ok(tabindexCount >= 9, `Expected at least 9 tabindex (nav items), got ${tabindexCount}`);
   });
 });
 

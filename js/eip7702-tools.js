@@ -6,7 +6,7 @@
 
 import { $, toast, confirmTx, escapeHtml } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx } from './safetx.js';
+import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
 import * as wallet from './wallet.js';
 import { saveDeployed, findDeployed, listDeployed, removeDeployed } from './registry.js';
@@ -303,7 +303,13 @@ async function executeBatch() {
 
     addActivity({ hash: tx.hash, type: 'eip7702-batch', status: 'pending', ts: Date.now(), detail: `${valid.length} calls via batch` });
     toast('Batch tx sent! ⚡', 'info');
-    const receipt = await tx.wait();
+    const { receipt, timedOut } = await waitForReceipt(tx);
+    if (timedOut) {
+      // Sent but not confirmed in time. The pending activity entry is left as
+      // "pending" (honest) and the button is released — never spin forever.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
     addActivity({ hash: tx.hash, type: 'eip7702-batch', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${valid.length} calls` });
     toast(receipt.status === 1 ? 'Batch executed! 🎉' : 'Batch failed!', receipt.status === 1 ? 'success' : 'error');
     renderDeployedRegistry();
@@ -350,6 +356,10 @@ async function executeRescue() {
   await runTx('eip7702-rescue', $('#btnEip7702RescueExec'), async () => {
     const provider = await getProvider(net.chainId);
     const chainId = Number(net.chainId);
+    // Gas sponsor must exist in BOTH branches (reuse and fresh deploy) and is
+    // used again at delegateAndExecute. Declared in the `else` branch it was
+    // out of scope at that call → ReferenceError on every rescue.
+    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
 
     // Reuse an existing rescue contract for the same (safe, target) pair
     let rescueContract;
@@ -360,7 +370,6 @@ async function executeRescue() {
       toast('Reusing rescue contract: ' + wallet.shortAddress(existing.address), 'info');
     } else {
       toast('Compiling rescue contract...', 'info');
-      const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
       const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
       rescueContract = await deployContract(sponsorSigner, abi, bytecode, [safe, target]);
       const rescueAddr = await rescueContract.getAddress();
@@ -398,7 +407,13 @@ async function executeRescue() {
 
     addActivity({ hash: tx.hash, type: 'eip7702-rescue', status: 'pending', ts: Date.now(), detail: `Rescue ${type} → ${wallet.shortAddress(safe)}` });
     toast('Rescue tx sent! ⚡', 'info');
-    const receipt = await tx.wait();
+    const { receipt, timedOut } = await waitForReceipt(tx);
+    if (timedOut) {
+      // Sent but not confirmed in time. The pending activity entry is left as
+      // "pending" (honest) and the button is released — never spin forever.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
     addActivity({ hash: tx.hash, type: 'eip7702-rescue', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `Rescue ${type}` });
     toast(receipt.status === 1 ? 'Assets rescued! 🎉' : 'Rescue failed!', receipt.status === 1 ? 'success' : 'error');
     renderDeployedRegistry();
@@ -438,6 +453,9 @@ async function executeClaim() {
     const provider = await getProvider(net.chainId);
     const chainId = Number(net.chainId);
     const targetAddress = get('address');
+    // Same fix as executeRescue: the sponsor payer is needed in both the
+    // reuse and the deploy branch AND at delegateAndExecute.
+    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
 
     // Reuse an existing claimer contract for this wallet (gas savings)
     let claimerContract;
@@ -448,7 +466,6 @@ async function executeClaim() {
       toast('Reusing claimer contract: ' + wallet.shortAddress(existing.address), 'info');
     } else {
       toast('Compiling airdrop claimer contract...', 'info');
-      const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
       const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
       claimerContract = await deployContract(sponsorSigner, abi, bytecode, [targetAddress]);
       const claimerAddr = await claimerContract.getAddress();
@@ -478,7 +495,13 @@ async function executeClaim() {
 
     addActivity({ hash: tx.hash, type: 'eip7702-claim', status: 'pending', ts: Date.now(), detail: `Claim airdrop → ${wallet.shortAddress(safe)}` });
     toast('Claim tx sent! ⚡', 'info');
-    const receipt = await tx.wait();
+    const { receipt, timedOut } = await waitForReceipt(tx);
+    if (timedOut) {
+      // Sent but not confirmed in time. The pending activity entry is left as
+      // "pending" (honest) and the button is released — never spin forever.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
     addActivity({ hash: tx.hash, type: 'eip7702-claim', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: 'Airdrop claim' });
     toast(receipt.status === 1 ? 'Airdrop claimed + forwarded! 🎉' : 'Claim failed!', receipt.status === 1 ? 'success' : 'error');
     renderDeployedRegistry();
