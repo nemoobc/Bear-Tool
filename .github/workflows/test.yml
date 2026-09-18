@@ -75,7 +75,8 @@ jobs:
               'importBtn','unlockPw','cnSave','wCreate','createPw','unlockBtn',
               'clearBtn','cnChainId','cnName','createBtn','addAccBtn','seedConfirm','addNetBtn',
               'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart',
-              'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge'
+              'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge',
+              'createName','importName'
           }
           missing = []
           for f in ['js/swap.js','js/bridge.js','js/send.js','js/app.js']:
