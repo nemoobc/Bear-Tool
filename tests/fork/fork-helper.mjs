@@ -120,6 +120,11 @@ export async function startFork() {
 
   const { ethers } = await import('ethers');
   provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`);
+  // Anvil fork quirk (foundry-rs/foundry#4700): eth_getBalance at "latest"
+  // can return the balance at the REMOTE (base) block for accounts that
+  // exist in the forked state, ignoring locally-mined txs. Mining an empty
+  // block advances the local head past the remote block so reads use it.
+  await provider.send('anvil_mine', [1]).catch(() => {});
   // NonceManager tracks the nonce LOCALLY (query once, increment per send).
   // Anvil's "pending" nonce on a fork is base + txpool and IGNORES mined
   // txs, so a fresh query after a mined tx returns a stale low nonce →

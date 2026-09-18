@@ -59,10 +59,13 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   const helperAddr = await helper.getAddress();
 
   // 2) authorize the target EOA to delegate to the helper (EIP-7702)
-  const target = new ethers.Wallet(TARGET_KEY, provider);
+  //    NonceManager: anvil's "pending" nonce on a fork ignores mined txs,
+  //    so a raw Wallet would reuse nonce 4918 for the second type-4 tx.
+  const targetWallet = new ethers.Wallet(TARGET_KEY, provider);
+  const target = new ethers.NonceManager(targetWallet);
   let authorization;
   try {
-    authorization = target.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: await provider.getTransactionCount(target.address) });
+    authorization = targetWallet.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: await target.getNonce('pending') });
   } catch (err) {
     // ethers without type-4 support — honest skip
     return;
@@ -95,7 +98,7 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   const calls = [{ data: '0x', to, value }];
   let auth2;
   try {
-    auth2 = target.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: await provider.getTransactionCount(target.address) });
+    auth2 = targetWallet.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: await target.getNonce('pending') });
   } catch {
     return; // ethers without type-4 support
   }
