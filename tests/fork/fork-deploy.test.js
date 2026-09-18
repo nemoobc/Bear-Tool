@@ -1,15 +1,20 @@
 // Bear Tool — fork-deploy.test.js
 // Deploy ERC-20 / ERC-721 / ERC-1155 on an anvil fork of the network and
 // verify real on-chain state: totalSupply, ownerOf, balanceOf, transfer.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, deployErc20, deployErc721, deployErc1155, forkSkipReason, ANVIL_ACCOUNT } from './fork-helper.mjs';
+import { startFork, deployErc20, deployErc721, deployErc1155, forkSkipReason, ANVIL_ACCOUNT, stopFork } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
 before(async () => {
   if (skip) return;
   await startFork();
+});
+
+after(async () => {
+  if (skip) return;
+  await stopFork();
 });
 
 

@@ -1,14 +1,19 @@
 // Bear Tool — fork-send.test.js
 // Send native + ERC-20 on an anvil fork: balances must actually move.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, deployErc20, forkSkipReason, ANVIL_ACCOUNT } from './fork-helper.mjs';
+import { startFork, deployErc20, forkSkipReason, ANVIL_ACCOUNT, stopFork } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
 before(async () => {
   if (skip) return;
   await startFork();
+});
+
+after(async () => {
+  if (skip) return;
+  await stopFork();
 });
 
 

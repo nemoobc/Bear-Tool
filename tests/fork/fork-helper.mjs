@@ -20,6 +20,12 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// contracts.js reads `ethers` from globalThis (browser-style). The fork
+// tests run in Node, so expose the real ethers BEFORE any helper uses it —
+// otherwise buildDeployPlan throws TypeError and every fork test fails.
+const { ethers } = await import('ethers');
+globalThis.ethers = ethers;
+
 // ── network table: public RPC per network (publicnode, free, stable) ──
 export const FORK_NETWORKS = {
   ethereum:          { chainId: 1,      rpc: 'https://ethereum-rpc.publicnode.com',          type: 'mainnet' },
@@ -89,6 +95,10 @@ export async function startFork() {
       '--silent',
       '--chain-id', String(network.chainId)
     ], { stdio: 'ignore' });
+    // Do not let the anvil child keep the Node process alive after the
+    // tests finish (pass OR fail) — otherwise CI hangs until timeout.
+    anvilProcess.unref();
+    process.on('exit', () => { if (anvilProcess) { try { anvilProcess.kill('SIGKILL'); } catch {} } });
     // wait for the RPC to answer
     const deadline = Date.now() + 60000;
     for (;;) {

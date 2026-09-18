@@ -3,9 +3,9 @@
 // target EOA to delegate to it, then execute a batch call through the
 // delegation. Anvil versions without type-4 support skip with an honest
 // reason — the app still falls back to the non-7702 path.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, compileSource, forkSkipReason, ANVIL_ACCOUNT, ANVIL_KEY } from './fork-helper.mjs';
+import { startFork, compileSource, forkSkipReason, ANVIL_ACCOUNT, ANVIL_KEY, stopFork } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -39,6 +39,11 @@ const TARGET_KEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b
 before(async () => {
   if (skip) return;
   await startFork();
+});
+
+after(async () => {
+  if (skip) return;
+  await stopFork();
 });
 
 

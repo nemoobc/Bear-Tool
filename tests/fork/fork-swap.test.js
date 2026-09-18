@@ -2,9 +2,9 @@
 // Real swap on an anvil fork via the verified V2 router of each network that
 // has one with liquidity (Ethereum Uniswap V2, BSC PancakeSwap, Polygon
 // Quickswap). Networks without a V2 router skip with an honest reason.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, forkSkipReason, KNOWN_TOKENS, ANVIL_ACCOUNT } from './fork-helper.mjs';
+import { startFork, forkSkipReason, KNOWN_TOKENS, ANVIL_ACCOUNT, stopFork } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -23,6 +23,11 @@ const V2_ABI = [
 before(async () => {
   if (skip) return;
   await startFork();
+});
+
+after(async () => {
+  if (skip) return;
+  await stopFork();
 });
 
 

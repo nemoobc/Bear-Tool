@@ -1,9 +1,9 @@
 // Bear Tool — fork-approval.test.js
 // Approval lifecycle on an anvil fork: approve → allowance, unlimited
 // approval detection, revoke → allowance back to 0.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, deployErc20, forkSkipReason, ANVIL_ACCOUNT } from './fork-helper.mjs';
+import { startFork, deployErc20, forkSkipReason, ANVIL_ACCOUNT, stopFork } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 const SPENDER = '0x000000000000000000000000000000000000dEaD';
@@ -11,6 +11,11 @@ const SPENDER = '0x000000000000000000000000000000000000dEaD';
 before(async () => {
   if (skip) return;
   await startFork();
+});
+
+after(async () => {
+  if (skip) return;
+  await stopFork();
 });
 
 
