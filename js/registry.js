@@ -10,10 +10,11 @@
 const { ethers } = globalThis;
 
 const REGISTRY_KEY = 'bear.deployedContracts';
-const TYPES = ['batch', 'rescue', 'airdrop', 'proxy', 'revoker'];
+// 'token' = contracts deployed by the Deploy wizard (ERC-20/721/1155)
+const TYPES = ['batch', 'rescue', 'airdrop', 'proxy', 'revoker', 'token'];
 
 function emptyRegistry() {
-  return { batch: [], rescue: [], airdrop: [], proxy: [], revoker: [] };
+  return { batch: [], rescue: [], airdrop: [], proxy: [], revoker: [], token: [] };
 }
 
 export function isValidAddress(a) {

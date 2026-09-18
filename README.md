@@ -16,8 +16,8 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 | 🌐 **Networks** | 12 EVM networks: 6 mainnet (Ethereum, BSC, Polygon, Arbitrum, OP, Base) + 6 testnet (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet), RPC fallback chain, custom network + custom RPC |
 | 🪙 **Assets** | Native + 19 popular ERC-20 balances (USDT, USDC, DAI, WETH, WBTC, LINK, UNI, AAVE, SHIB, MATIC, ARB, OP, PEPE, CRV, SNX, SUSHI, COMP, MKR, LDO) |
 | ✈️ **Send** | Native + ERC-20, gas speed (slow/normal/fast), live preview + est. gas, paste button, address validation + poisoning detection |
-| 🔄 **Swap** | 0x API quotes (fallback simulated), slippage control, flip — the Swap nav button is also the Bridge entry (tap it twice to choose) |
-| 🌉 **Bridge** | LI.FI quotes (fallback simulated), all chains — reaches `#view-bridge` from the Swap chooser, no separate nav item |
+| 🔄 **Swap** | Real quotes only — auto-route KyberSwap → Uniswap V3 → Uniswap V2 (on-chain verified routers), slippage control, flip. No simulation: no route = honest error. The Swap nav button is also the Bridge entry (tap it twice to choose) |
+| 🌉 **Bridge** | LI.FI quotes (real API, fetch timeout), native-only fail-closed, all chains — reaches `#view-bridge` from the Swap chooser, no separate nav item |
 | ⚡ **EIP-7702** | Delegate to implementation (chainId 0 = all chains, replay warning), revoke, batch atomic call, rescue atomic, claim + forward airdrop |
 | 🔐 **Approvals** | Scan popular/custom token approvals, detect UNLIMITED, revoke to 0 |
 | 🧙 **Deploy** | Wizard for ERC-20 / ERC-721 / ERC-1155 |
@@ -64,8 +64,8 @@ Bear-Tool/
 │   ├── price.js        # CoinGecko + DexScreener price cache
 │   ├── safetx.js       # double-submit lock + error boundary + button loading
 │   ├── send.js         # send view: preview, gas estimate, poisoning warnings
-│   ├── swap.js         # swap view: 0x quote (simulated fallback)
-│   ├── bridge.js       # bridge view: LI.FI quote (simulated fallback)
+│   ├── swap.js         # swap view: auto-route KyberSwap → Uniswap V3 → V2 (real quotes only)
+│   ├── bridge.js       # bridge view: LI.FI quote (real API, no simulation)
 │   ├── eip7702.js      # delegate/revoke (chainId guard), batch, rescue, claim
 │   ├── deploy.js       # deploy wizard (honest stub)
 │   ├── nft.js          # NFT gallery (best-effort enumeration)

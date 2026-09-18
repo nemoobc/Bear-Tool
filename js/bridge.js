@@ -1,8 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — bridge.js
 // Bridge view: NATIVE-token bridging only (fail closed).
-// LI.FI quote (best effort) with honest simulated fallback,
-// context-bound quote validation, guarded execution path.
+// LI.FI quote (real API, fetch timeout) — NO simulated fallback:
+// a failed quote is an honest error, never a fake route.
+// Context-bound quote validation, guarded execution path.
 //
 // Security contract (bridge.test.js is the executable spec):
 //   1. Native only — ERC-20 selection is rejected loudly, never
@@ -32,6 +33,17 @@ const { ethers } = globalThis;
 // Monotonic sequence for quote requests — lets in-flight responses
 // detect "a newer quote was requested" and discard themselves.
 let quoteSeq = 0;
+
+// ── fetch with timeout (AbortController) ──
+async function fetchWithTimeout(url, opts = {}, ms = 15000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // ── address / chain helpers (shared by quote validation + exec guard) ──
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -65,8 +77,23 @@ function saneExecAddress(addr) {
 }
 
 export function bindBridgeEvents() {
-  $('#btnBridgeQuote').addEventListener('click', doBridge);
+  // AUTO-ROUTE: quote refreshes automatically on any input change.
+  // No manual "Get Route" button — the route is always live.
+  const debouncedQuote = debounce(doBridge, 600);
+  const el = (sel) => document.querySelector(sel);
+  ['#bridgeFromChain', '#bridgeToChain', '#bridgeToken', '#bridgeAmount'].forEach(sel => {
+    const node = el(sel);
+    if (node) {
+      node.addEventListener('change', debouncedQuote);
+      node.addEventListener('input', debouncedQuote);
+    }
+  });
   $('#btnBridgeExec').addEventListener('click', doBridgeExec);
+}
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
 export function loadBridgeChains() {
@@ -167,12 +194,12 @@ export async function doBridge() {
     // request is in flight (e.g. a quote that sneaked in during the
     // confirm dialog). Cleared again right before the fetch.
     set('bridgeQuote', null);
-    // LI.FI quote (best effort) — fallback simulated ONLY on network failure.
+    // LI.FI quote (real API) — honest error on failure, never simulated.
     // fromToken/toToken = 0x0 (native on both sides; no ERC-20 in scope);
     // toAddress pinned explicitly so the response destination is exact.
     const NATIVE = ZERO_ADDRESS;
     const url = `https://li.quest/v1/quote?fromChain=${fromNet.chainId}&toChain=${toNet.chainId}&fromToken=${NATIVE}&toToken=${NATIVE}&fromAmount=${amountSmallest}&fromAddress=${encodeURIComponent(userAddr)}&toAddress=${encodeURIComponent(userAddr)}`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     // this request was superseded while awaiting — ignore entirely
     if (seq !== quoteSeq) return;
     if (res.ok) {
@@ -222,15 +249,15 @@ export async function doBridge() {
       execBtn.classList.remove('hidden');
     } else {
       if (seq !== quoteSeq) return;
-      set('bridgeQuote', { simulated: true });
-      box.innerHTML = `<div class="simulated-banner">⚠️ SIMULATED route — no real bridge will happen. Connect LI.FI API for live routes.</div>
-        Simulated route: ${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)} (${escapeHtml(amt)} tokens)`;
+      set('bridgeQuote', null);
+      box.innerHTML = `<div class="quote-error">⚠️ No route available — no bridge will happen. (LI.FI HTTP ${res.status})</div>
+        <div class="quote-error-detail">${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)} (${escapeHtml(amt)} ${escapeHtml(fromNet.symbol || '')})</div>`;
     }
   } catch (e) {
     if (seq !== quoteSeq) return;
-    set('bridgeQuote', { simulated: true });
-    box.innerHTML = `<div class="simulated-banner">⚠️ SIMULATED — no real bridge. (${escapeHtml(e?.message || 'network error')})</div>
-      Simulated route: ${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)}`;
+    set('bridgeQuote', null);
+    box.innerHTML = `<div class="quote-error">⚠️ No route available — no bridge will happen. (${escapeHtml(e?.message || 'network error')})</div>
+      <div class="quote-error-detail">${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)}</div>`;
   }
 }
 

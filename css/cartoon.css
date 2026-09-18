@@ -639,12 +639,19 @@ body::before {
   overflow-y: auto;
   padding: 24px;
 }
-.modal-full {
-  width: 100%;
-  max-width: 100%;
-  padding: 32px 24px;
+/* Create/import wallet sheet. `wide` is applied to #modalBox itself — the old
+   nested `<div class="modal-full">` sat INSIDE `.modal`, so it only stacked
+   extra padding and squeezed the password fields to about two thirds width. */
+.modal.modal-wide { max-width: 640px; }
+@media (max-width: 768px) {
+  .modal.modal-wide {
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    box-shadow: none;
+  }
 }
-.modal-full .btn-lg { margin-top: 16px; }
 @keyframes modal-in { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .modal h2 { font-size: 1.3rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .modal-close {
@@ -1365,6 +1372,21 @@ body::before {
 }
 .deploy-preview-icon { font-size: 1.5rem; }
 .deploy-card { display: flex; flex-direction: column; gap: var(--sp-12); }
+/* deploy result / progress box — every state is announced here, never a bare toast */
+.deploy-status {
+  margin-top: var(--sp-12);
+  padding: var(--sp-12);
+  background: var(--cream);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.deploy-status.ok { border-color: var(--ok, #2e7d32); }
+.deploy-status.warn { border-color: var(--warn, #b26a00); }
+.deploy-status.error { border-color: var(--danger, #c62828); }
+.deploy-status .mono { font-family: var(--font-mono, monospace); }
 
 /* activity timeline */
 .activity-timeline {
@@ -1856,7 +1878,7 @@ body::before {
 .theme-dark .toast { background: var(--white); }
 .theme-dark .warn-box { background: rgba(255,201,60,0.15); }
 .theme-dark .danger-box { background: rgba(255,107,107,0.15); }
-.theme-dark .simulated-banner { background: rgba(255,201,60,0.2); }
+.theme-dark .quote-error { background: rgba(255,107,107,0.15); }
 
 /* ═══════════ MOBILE BOTTOM NAV ═══════════ */
 .mobile-nav {
@@ -1962,15 +1984,22 @@ body::before {
 }
 @keyframes btn-spin { to { transform: rotate(360deg); } }
 
-/* ── simulated banner (honest fallback label) ── */
-.simulated-banner {
-  background: var(--honey);
+/* ── quote error (honest no-route label) ── */
+.quote-error {
+  background: var(--danger, #ff6b6b);
+  color: #fff;
   border: var(--border);
   border-radius: var(--radius);
   padding: 8px 12px;
   font-size: 0.8rem;
   font-weight: 700;
   margin-bottom: 8px;
+}
+.quote-error-detail {
+  font-size: 0.75rem;
+  opacity: 0.85;
+  margin-top: 4px;
+  word-break: break-word;
 }
 
 /* ── delegate status ── */
@@ -2126,6 +2155,34 @@ body::before {
   border-radius: 12px;
   background: var(--white);
 }
+/* helper-contract status (step 1 of batch/rescue/claim) */
+.helper-required {
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: var(--cream);
+  margin-left: auto;
+}
+.helper-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  background: var(--white);
+  margin-bottom: 8px;
+}
+.helper-row.ok { border-color: var(--ok, #2e7d32); }
+.helper-row.missing { border-color: var(--warn, #b26a00); }
+.helper-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.helper-name { font-weight: 800; }
+.helper-state { font-size: 0.75rem; margin-left: auto; }
+.helper-row .mono { font-family: var(--font-mono, monospace); word-break: break-all; }
 .registry-item .reg-type {
   font-size: 0.68rem;
   font-weight: 800;

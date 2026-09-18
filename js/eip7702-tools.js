@@ -10,6 +10,7 @@ import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
 import * as wallet from './wallet.js';
 import { saveDeployed, findDeployed, listDeployed, removeDeployed } from './registry.js';
+import { compileContract } from './solc.js';
 
 const { ethers } = globalThis;
 
@@ -81,62 +82,23 @@ contract airdropClaimer {
     function version() external pure returns (string memory) { return "1.1.0"; }
 }`;
 
-// ── solc.js lazy loader ──
-let solcInstance = null;
-let solcLoading = false;
-
-function ensureSolcLoaded() {
-  return new Promise((resolve, reject) => {
-    if (solcInstance) return resolve(solcInstance);
-    if (solcLoading) {
-      const check = setInterval(() => {
-        if (solcInstance) { clearInterval(check); resolve(solcInstance); }
-      }, 200);
-      return;
-    }
-    solcLoading = true;
-    toast('Loading Solidity compiler (~8MB, one-time)...', 'info');
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/solc@0.8.28/solc.js';
-    script.onload = () => {
-      solcInstance = globalThis.solc;
-      solcLoading = false;
-      toast('Solidity compiler ready!', 'success');
-      resolve(solcInstance);
-    };
-    script.onerror = () => {
-      solcLoading = false;
-      reject(new Error('Failed to load solc.js from CDN'));
-    };
-    document.head.appendChild(script);
-  });
-}
-
 // ── compile a Solidity source → { abi, bytecode } ──
+// The compiler lives in solc.js. It used to be loaded straight from the CDN's
+// NODE build of solc, which no browser can execute — every compile here died.
 async function compileSource(source, contractName) {
-  const solc = await ensureSolcLoaded();
-  const input = {
-    language: 'Solidity',
-    sources: { [contractName + '.sol']: { content: source } },
-    settings: {
-      outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object'] } }
-    }
-  };
-  const output = JSON.parse(solc.compile(JSON.stringify(input)));
-  if (output.errors) {
-    const errs = output.errors.filter(e => e.severity === 'error');
-    if (errs.length) throw new Error('Compile error: ' + errs[0].formattedMessage);
-  }
-  const contract = output.contracts?.[contractName + '.sol']?.[contractName];
-  if (!contract?.evm?.bytecode?.object) throw new Error('No bytecode for ' + contractName);
-  return { abi: contract.abi, bytecode: '0x' + contract.evm.bytecode.object };
+  return compileContract(source, contractName, { onStatus: (m) => toast(m, 'info') });
 }
 
-// ── deploy a compiled contract ──
+// ── deploy a compiled contract (BOUNDED wait — never spins forever) ──
 async function deployContract(signer, abi, bytecode, constructorArgs = []) {
   const factory = new ethers.ContractFactory(abi, bytecode, signer);
   const contract = await factory.deploy(...constructorArgs);
-  await contract.waitForDeployment();
+  const tx = contract.deploymentTransaction();
+  const { receipt, timedOut } = await waitForReceipt(tx);
+  if (timedOut) {
+    throw new Error(`Helper deploy TX ${String(tx?.hash || '').slice(0, 12)}… is still unconfirmed. Check the explorer before retrying.`);
+  }
+  if (receipt && receipt.status !== 1) throw new Error('Helper contract deploy reverted');
   return contract;
 }
 
@@ -282,6 +244,8 @@ async function executeBatch() {
       const batchAddr = await batchContract.getAddress();
       saveDeployed('batch', batchAddr, { chainId, deployer: get('address'), abi });
       toast('Batch contract deployed: ' + wallet.shortAddress(batchAddr), 'success');
+      renderHelperStatus();
+      renderDeployedRegistry();
     }
     const batchAddr = await batchContract.getAddress();
 
@@ -509,6 +473,78 @@ async function executeClaim() {
   });
 }
 
+// ── helper-contract status: step 1 of every flow ──
+// Batch/Rescue/Claim all need a helper contract on this chain. This card says
+// out loud whether it exists, where, and lets the user deploy it up front
+// instead of discovering the requirement when the action fails.
+export function renderHelperStatus() {
+  const list = $('#helperStatusList');
+  if (!list) return;
+  const net = getNetworkById(get('networkId'));
+  const chainId = Number(net?.chainId || 0);
+
+  const row = (label, ok, detail, action) => `
+    <div class="helper-row ${ok ? 'ok' : 'missing'}">
+      <div class="helper-head">
+        <span class="helper-name">${escapeHtml(label)}</span>
+        <span class="helper-state">${ok ? '✅ deployed' : '❌ not deployed'}</span>
+      </div>
+      <div class="small">${detail}</div>
+      ${action}
+    </div>`;
+
+  const batch = findDeployed('batch', chainId);
+  const rescue = listDeployed('rescue', chainId);
+  const airdrop = listDeployed('airdrop', chainId);
+  const short = (a) => (a ? escapeHtml(wallet.shortAddress(a)) : '—');
+
+  list.innerHTML = [
+    row('Batch Call', !!batch,
+      batch
+        ? `Recorded at <span class="mono">${short(batch.address)}</span> · re-checked on-chain before reuse.`
+        : 'No batch helper on this chain yet. It takes no constructor arguments, so you can deploy it now.',
+      `<button class="btn btn-sm ${batch ? 'btn-ghost' : 'btn-primary'}" id="btnDeployBatchHelper">${batch ? 'Deploy another' : 'Deploy batch helper'}</button>`),
+    row('Rescue Atomic', rescue.length > 0,
+      rescue.length
+        ? `Bound to your inputs: ${rescue.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
+        : 'Deployed automatically on the first run — its constructor takes your locked wallet + SAFE address.',
+      ''),
+    row('Claim Airdrop', airdrop.length > 0,
+      airdrop.length
+        ? `Bound to your inputs: ${airdrop.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
+        : 'Deployed automatically on the first run — its constructor takes the locked wallet as rescuer.',
+      '')
+  ].join('');
+
+  $('#btnDeployBatchHelper')?.addEventListener('click', deployBatchHelper);
+}
+
+// Explicit "deploy the helper first" action for Batch (no constructor args).
+export async function deployBatchHelper() {
+  if (!get('unlocked')) { requireUnlock(); return; }
+  const net = getNetworkById(get('networkId'));
+  const btn = $('#btnDeployBatchHelper');
+  const label = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Deploying…'; }
+  try {
+    const provider = get('provider') || await getProvider(net.chainId);
+    set('provider', provider);
+    const signer = get('signer').connect(provider);
+    const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
+    const contract = await deployContract(signer, abi, bytecode);
+    const addr = await contract.getAddress();
+    saveDeployed('batch', addr, { chainId: Number(net.chainId), deployer: get('address'), abi });
+    addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `batch → ${addr}` });
+    toast('Batch helper deployed: ' + wallet.shortAddress(addr), 'success');
+    renderHelperStatus();
+    renderDeployedRegistry();
+  } catch (e) {
+    toast(e?.message || String(e), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label || 'Deploy batch helper'; }
+  }
+}
+
 // ── deployed-contract registry UI ──
 export function renderDeployedRegistry() {
   const list = $('#deployedRegistryList');
@@ -532,6 +568,7 @@ export function renderDeployedRegistry() {
       const item = all[Number(btn.dataset.regRemove)];
       if (!item) return;
       removeDeployed(item.type, item.address, chainId);
+      renderHelperStatus();
       renderDeployedRegistry();
       toast('Removed from registry', 'info');
     });
@@ -567,6 +604,7 @@ export function bindEip7702ToolsEvents() {
   bindPasswordToggle('#btnRescueKeyToggle', '#eip7702RescueSponsorKey');
   bindPasswordToggle('#btnClaimKeyToggle', '#eip7702ClaimSponsorKey');
 
-  // Registry list (delegated remove buttons re-render themselves)
+  // Helper status (step 1) + registry list
+  renderHelperStatus();
   renderDeployedRegistry();
 }

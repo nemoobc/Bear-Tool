@@ -1,8 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — swap.js
-// Swap & Bridge view: token select, flip, quote (KyberSwap +
-// Uniswap V2/V3 Router), slippage wired, approve + execute path.
-// Honest simulated fallback when chain unsupported or offline.
+// Swap & Bridge view: token select, flip, auto-route quote
+// (KyberSwap → Uniswap V3 → Uniswap V2), slippage wired,
+// approve + execute path. NO simulated fallback — every quote is
+// a real on-chain/API route or an honest error.
 // ═══════════════════════════════════════════════════════════════
 
 import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
@@ -35,9 +36,16 @@ const UNISWAP_V3_ROUTER = {
   137: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Polygon
   42161: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Arbitrum
 };
+// Uniswap V3 QuoterV2 — deterministic CREATE2 address, same on every chain.
+// (Verified on-chain: code present on 1/10/137/42161/8453; Sepolia has none
+// and is rejected by the runtime code guard → honest error.)
 const UNISWAP_QUOTER_V3 = {
-  1: '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6',
-  11155111: '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6',
+  1: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  10: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  137: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  42161: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  8453: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  11155111: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
 };
 
 // Uniswap V2 Router ABI (minimal)
@@ -55,6 +63,18 @@ const UNISWAP_V3_ABI = [
   'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) calldata params) external payable returns (uint256 amountOut)',
   'function exactInput(tuple(bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum) calldata params) external payable returns (uint256 amountOut)',
 ];
+
+// chainId → native wrapped token (used for V3 native substitution)
+const CHAIN_WETH = {
+  1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // Ethereum WETH
+  5: '0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6', // Goerli WETH
+  10: '0x4200000000000000000000000000000000000006', // OP WETH
+  56: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // BSC WBNB
+  137: '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270', // Polygon WMATIC
+  8453: '0x4200000000000000000000000000000000000006', // Base WETH
+  42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum WETH
+  11155111: '0xfFf997675846FbDE638e6Be6E0Cee9B40AC2EF02', // Sepolia WETH
+};
 
 // ── Extended popular tokens ──
 export const POPULAR_TOKENS = {
@@ -162,13 +182,16 @@ export function loadSwapTokens() {
   to.innerHTML = opts;
   if (from.options.length > 1) to.selectedIndex = 1;
 
-  // update balance displays
+  // update balance displays + auto-route quote on token change
   const updateBalance = () => {
     const ft = tokens.find(x => (x.address || 'native') === from.value);
     const tt = tokens.find(x => (x.address || 'native') === to.value);
     const fb = $('#swapFromBalance'), tb = $('#swapToBalance');
     if (fb && ft) fb.textContent = `Balance: ${parseFloat(ethers.formatUnits(ft.balance, ft.decimals)).toFixed(4)}`;
     if (tb && tt) tb.textContent = `Balance: ${parseFloat(ethers.formatUnits(tt.balance, tt.decimals)).toFixed(4)}`;
+    // auto-route: refresh quote when tokens change (if amount > 0)
+    const amt = $('#swapFromAmount')?.value;
+    if (amt && parseFloat(amt) > 0) getSwapQuote();
   };
   // re-binding on every view switch used to stack duplicate listeners
   if (from._bearBalanceHandler) from.removeEventListener('change', from._bearBalanceHandler);
@@ -183,9 +206,8 @@ export function loadSwapTokens() {
 export function flipSwap() {
   const from = $('#swapFrom'), to = $('#swapTo');
   const tmp = from.value; from.value = to.value; to.value = tmp;
-  $('#swapFromAmount').value = '';
-  $('#swapToAmount').value = '';
-  $('#swapQuote').classList.add('hidden');
+  // refresh balances (which also triggers auto-quote if amount > 0)
+  from.dispatchEvent(new Event('change'));
 }
 
 function debounce(fn, ms) {
@@ -193,10 +215,21 @@ function debounce(fn, ms) {
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
+// ── fetch with timeout (AbortController) ──
+async function fetchWithTimeout(url, opts = {}, ms = 15000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── KyberSwap: fetch routes (quote) ──
 async function kyberQuote(slug, tokenIn, tokenOut, amountIn) {
   const url = `${KYBER_API}/${slug}/api/v1/routes?tokenIn=${tokenIn}&tokenOut=${tokenOut}&amountIn=${amountIn}`;
-  const res = await fetch(url, { headers: { 'x-client-id': CLIENT_ID } });
+  const res = await fetchWithTimeout(url, { headers: { 'x-client-id': CLIENT_ID } });
   if (!res.ok) throw new Error(`KyberSwap quote HTTP ${res.status}`);
   const json = await res.json();
   if (!json.data?.routeSummary) throw new Error('KyberSwap: empty route');
@@ -206,7 +239,7 @@ async function kyberQuote(slug, tokenIn, tokenOut, amountIn) {
 // ── KyberSwap: build transaction data ──
 async function kyberBuild(slug, routeSummary, sender, recipient, slippageBps) {
   const url = `${KYBER_API}/${slug}/api/v1/route/build`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-client-id': CLIENT_ID },
     body: JSON.stringify({
@@ -222,14 +255,8 @@ async function kyberBuild(slug, routeSummary, sender, recipient, slippageBps) {
   return json.data; // { data (calldata), routerAddress (address) }
 }
 
-// ── simulated fallback (honest, labeled) ──
-function simulatedQuote(amt, sellSymbol, buySymbol) {
-  const rate = 1 + (Math.random() - 0.5) * 0.02;
-  const out = parseFloat(amt) * rate;
-  return { simulated: true, rate, out, sellSymbol, buySymbol };
-}
-
-// ── get quote (KyberSwap → simulated fallback) ──
+// ── get quote — AUTO-ROUTE: KyberSwap → Uniswap V3 → Uniswap V2 ──
+// Every returned quote is REAL (API or on-chain). No simulation.
 export async function getSwapQuote() {
   const amt = $('#swapFromAmount').value;
   if (!amt || parseFloat(amt) <= 0) return;
@@ -246,58 +273,92 @@ export async function getSwapQuote() {
   const sellSymbol = from === 'native' ? net.symbol : (tokenInfo(from)?.symbol ?? '???');
   const buySymbol = to === 'native' ? net.symbol : (tokenInfo(to)?.symbol ?? '???');
   const toDecimals = to === 'native' ? 18 : (tokenInfo(to)?.decimals ?? 18);
-
-  const slug = KYBER_CHAIN_SLUG[net.chainId];
-  if (!slug) {
-    const sim = simulatedQuote(amt, sellSymbol, buySymbol);
-    $('#swapToAmount').value = sim.out.toFixed(6);
-    set('swapQuote', sim);
-    quoteBox.innerHTML =
-      `<div class="simulated-banner">⚠️ SIMULATED — no real swap will happen. Chain not supported by KyberSwap.</div>` +
-      `Simulated: 1 ${escapeHtml(sellSymbol)} ≈ ${sim.rate.toFixed(6)} ${escapeHtml(buySymbol)}`;
-    return;
-  }
+  const fromDecimals = from === 'native' ? 18 : (tokenInfo(from)?.decimals ?? 18);
 
   const tokenIn = from === 'native' ? NATIVE_SENTINEL : from;
   const tokenOut = to === 'native' ? NATIVE_SENTINEL : to;
-  // amount must respect the SELL token's decimals (ERC-20 ≠ 18)
-  const fromDecimals = from === 'native' ? 18 : (tokenInfo(from)?.decimals ?? 18);
   const amountInWei = ethers.parseUnits(amt, fromDecimals).toString();
-  const key = cacheKey(slug, tokenIn, tokenOut, amountInWei);
-  const now = Date.now();
+  const slippageBps = Math.round(parseFloat(slippage) * 100);
+  const userAddr = get('address');
 
-  try {
-    let quoteData;
-    if (quoteCache.key === key && now - quoteCache.ts < CACHE_TTL) {
-      quoteData = quoteCache.data;
-    } else {
-      quoteData = await kyberQuote(slug, tokenIn, tokenOut, amountInWei);
-      quoteCache = { key, data: quoteData, ts: now };
+  const errors = [];
+  // 1. KyberSwap (aggregator — best price, multi-DEX)
+  const slug = KYBER_CHAIN_SLUG[net.chainId];
+  if (slug) {
+    try {
+      const key = cacheKey(slug, tokenIn, tokenOut, amountInWei);
+      const now = Date.now();
+      let quoteData;
+      if (quoteCache.key === key && now - quoteCache.ts < CACHE_TTL) {
+        quoteData = quoteCache.data;
+      } else {
+        quoteData = await kyberQuote(slug, tokenIn, tokenOut, amountInWei);
+        quoteCache = { key, data: quoteData, ts: now };
+      }
+      const built = await kyberBuild(slug, quoteData.routeSummary, userAddr, userAddr, slippageBps);
+      const outAmount = BigInt(quoteData.routeSummary.amountOut ?? '0');
+      const outFormatted = ethers.formatUnits(outAmount, toDecimals);
+      const rate = parseFloat(outFormatted) / parseFloat(amt);
+      set('swapQuote', { simulated: false, source: 'KyberSwap', built, routerAddress: built.routerAddress });
+      $('#swapToAmount').value = outFormatted;
+      quoteBox.innerHTML =
+        `Route: <b>KyberSwap</b> · Rate: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
+        `Slippage: ${escapeHtml(slippage)}%`;
+      return;
+    } catch (e) {
+      errors.push(`KyberSwap: ${e.message}`);
     }
+  } else {
+    errors.push('KyberSwap: chain not supported');
+  }
 
-    const userAddr = get('address');
-    const slippageBps = Math.round(parseFloat(slippage) * 100);
-    const built = await kyberBuild(slug, quoteData.routeSummary, userAddr, userAddr, slippageBps);
-
-    const outAmount = BigInt(quoteData.routeSummary.amountOut ?? '0');
-    const outFormatted = ethers.formatUnits(outAmount, toDecimals);
+  // 2. Uniswap V3 (on-chain quote via Quoter)
+  try {
+    const v3 = await uniswapV3Quote(net.chainId, tokenIn, tokenOut, amountInWei);
+    const outFormatted = ethers.formatUnits(v3.amountOut, toDecimals);
     const rate = parseFloat(outFormatted) / parseFloat(amt);
-
-    set('swapQuote', { simulated: false, built });
-
+    const amountOutMin = (v3.amountOut * (10000n - BigInt(slippageBps))) / 10000n;
+    set('swapQuote', {
+      simulated: false, source: 'Uniswap V3',
+      uniswap: { kind: 'v3', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin, fee: v3.fee, router: v3.router },
+      amountOut: v3.amountOut,
+    });
     $('#swapToAmount').value = outFormatted;
     quoteBox.innerHTML =
-      `Rate: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
+      `Route: <b>Uniswap V3</b> · Rate: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
       `Slippage: ${escapeHtml(slippage)}%`;
+    return;
   } catch (e) {
-    console.warn('[BearTool] KyberSwap quote failed:', e.message);
-    const sim = simulatedQuote(amt, sellSymbol, buySymbol);
-    $('#swapToAmount').value = sim.out.toFixed(6);
-    set('swapQuote', sim);
-    quoteBox.innerHTML =
-      `<div class="simulated-banner">⚠️ SIMULATED — no real swap will happen. ${escapeHtml(e.message)}</div>` +
-      `Simulated: 1 ${escapeHtml(sellSymbol)} ≈ ${sim.rate.toFixed(6)} ${escapeHtml(buySymbol)}`;
+    errors.push(`Uniswap V3: ${e.message}`);
   }
+
+  // 3. Uniswap V2 (on-chain quote via getAmountsOut)
+  try {
+    const v2 = await uniswapV2Quote(net.chainId, tokenIn, tokenOut, amountInWei);
+    const outAmount = v2.amounts[v2.amounts.length - 1];
+    const outFormatted = ethers.formatUnits(outAmount, toDecimals);
+    const rate = parseFloat(outFormatted) / parseFloat(amt);
+    const amountOutMin = (outAmount * (10000n - BigInt(slippageBps))) / 10000n;
+    set('swapQuote', {
+      simulated: false, source: 'Uniswap V2',
+      uniswap: { kind: 'v2', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin, router: v2.router },
+      amountOut,
+    });
+    $('#swapToAmount').value = outFormatted;
+    quoteBox.innerHTML =
+      `Route: <b>Uniswap V2</b> · Rate: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
+      `Slippage: ${escapeHtml(slippage)}%`;
+    return;
+  } catch (e) {
+    errors.push(`Uniswap V2: ${e.message}`);
+  }
+
+  // 4. No real route — honest error, never a fake number.
+  set('swapQuote', null);
+  $('#swapToAmount').value = '';
+  quoteBox.innerHTML =
+    `<div class="quote-error">⚠️ No route available on ${escapeHtml(net.name)} — no swap will happen.</div>` +
+    `<div class="quote-error-detail">${escapeHtml(errors.join(' · '))}</div>`;
 }
 
 // ── execute swap ──
@@ -313,26 +374,26 @@ export async function doSwap() {
   if (net.type === 'mainnet') {
     const ok = await confirmTx({
       title: 'MAINNET SWAP!',
-      rows: [{ k: 'From', v: `${amt} ${from}` }, { k: 'To', v: to }, { k: 'Network', v: net.name }],
+      rows: [{ k: 'From', v: `${amt} ${from}` }, { k: 'To', v: to }, { k: 'Network', v: net.name }, { k: 'Route', v: quote.source || '?' }],
       confirmText: 'Swap', danger: true, requireType: 'YA'
     });
     if (!ok) return;
   }
 
-  if (quote.simulated) {
-    return toast('⚠️ SIMULATED — no real swap will happen. Chain not supported or API offline.', 'info');
+  if (!quote || quote.simulated || (!quote.built && !quote.uniswap)) {
+    return toast('No valid quote — get a route first.', 'error');
   }
 
   await runTx('swap', $('#btnSwap'), async () => {
     const provider = get('provider');
     const signer = get('signer').connect(provider);
     const userAddr = get('address');
-    const router = quote.built.routerAddress;
 
-    // ERC-20 approve if needed
+    // ERC-20 approve if needed (shared by all routes)
     if (from !== 'native') {
       const fromDecimals = tokenInfo(from)?.decimals ?? 18;
       const amountWei = ethers.parseUnits(amt, fromDecimals);
+      const router = quote.built ? quote.built.routerAddress : quote.uniswap.router;
       const c = new ethers.Contract(from, ERC20_ABI, signer);
       const allowance = await c.allowance(userAddr, router);
       if (allowance < amountWei) {
@@ -346,12 +407,21 @@ export async function doSwap() {
       }
     }
 
-    // execute swap transaction
-    const tx = await signer.sendTransaction({
-      to: router,
-      data: quote.built.data,
-      value: from === 'native' ? ethers.parseEther(amt) : 0n,
-    });
+    let tx;
+    if (quote.built) {
+      // KyberSwap aggregator route
+      tx = await signer.sendTransaction({
+        to: quote.built.routerAddress,
+        data: quote.built.data,
+        value: from === 'native' ? ethers.parseEther(amt) : 0n,
+      });
+    } else if (quote.uniswap.kind === 'v3') {
+      const u = quote.uniswap;
+      tx = await uniswapV3Swap(signer, u.chainId, u.tokenIn, u.tokenOut, u.amountIn, u.amountOutMin, userAddr, u.fee);
+    } else {
+      const u = quote.uniswap;
+      tx = await uniswapV2Swap(signer, u.chainId, u.tokenIn, u.tokenOut, u.amountIn, u.amountOutMin, userAddr);
+    }
     toast('Swap tx sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'swap', status: 'pending', ts: Date.now(), detail: `${amt} ${from} → ${to}` });
     const { receipt, timedOut } = await waitForReceipt(tx);
@@ -372,36 +442,55 @@ export async function doSwap() {
 // ═══════════════════════════════════════════════════════════════
 
 // ── Uniswap V2: getAmountsOut quote ──
+// Honest guard: the router must have code on this chain, else it is
+// skipped (a hardcoded address with no contract must never be used).
 export async function uniswapV2Quote(chainId, tokenIn, tokenOut, amountIn) {
   const routerAddr = UNISWAP_V2_ROUTER[chainId];
   if (!routerAddr) throw new Error('Uniswap V2 not available on this chain');
   const provider = get('provider');
+  const code = await provider.getCode(routerAddr);
+  if (!code || code === '0x') throw new Error('Uniswap V2 router has no code on this chain');
   const router = new ethers.Contract(routerAddr, UNISWAP_V2_ABI, provider);
-  const path = [tokenIn === NATIVE_SENTINEL ? await router.WETH() : tokenIn,
-                 tokenOut === NATIVE_SENTINEL ? await router.WETH() : tokenOut];
+  const weth = await router.WETH();
+  const path = [tokenIn === NATIVE_SENTINEL ? weth : tokenIn,
+                 tokenOut === NATIVE_SENTINEL ? weth : tokenOut];
   const amounts = await router.getAmountsOut(amountIn, path);
   return { amounts, router: routerAddr, path };
 }
 
 // ── Uniswap V3: exactInputSingle quote (via provider call) ──
+// Tries common fee tiers (3000 → 500 → 10000) until one quotes.
 export async function uniswapV3Quote(chainId, tokenIn, tokenOut, amountIn, fee = 3000) {
   const quoterAddr = UNISWAP_QUOTER_V3[chainId];
   if (!quoterAddr) throw new Error('Uniswap V3 Quoter not available on this chain');
   const provider = get('provider');
+  const code = await provider.getCode(quoterAddr);
+  if (!code || code === '0x') throw new Error('Uniswap V3 Quoter has no code on this chain');
   // QuoterV2 ABI (minimal for quoteExactInputSingle)
   const quoterABI = [
     'function quoteExactInputSingle(tuple(address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96) params) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
   ];
   const quoter = new ethers.Contract(quoterAddr, quoterABI, provider);
-  const params = {
-    tokenIn: tokenIn === NATIVE_SENTINEL ? '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' : tokenIn,
-    tokenOut: tokenOut === NATIVE_SENTINEL ? '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' : tokenOut,
-    amountIn,
-    fee,
-    sqrtPriceLimitX96: 0,
-  };
-  const result = await quoter.quoteExactInputSingle(params);
-  return { amountOut: result.amountOut, router: UNISWAP_V3_ROUTER[chainId] };
+  const weth = CHAIN_WETH[chainId];
+  if (!weth) throw new Error('Uniswap V3: no native token mapping for this chain');
+  const fees = [fee, 500, 10000, 100];
+  let lastErr;
+  for (const f of fees) {
+    try {
+      const params = {
+        tokenIn: tokenIn === NATIVE_SENTINEL ? weth : tokenIn,
+        tokenOut: tokenOut === NATIVE_SENTINEL ? weth : tokenOut,
+        amountIn,
+        fee: f,
+        sqrtPriceLimitX96: 0,
+      };
+      const result = await quoter.quoteExactInputSingle(params);
+      return { amountOut: result.amountOut, router: UNISWAP_V3_ROUTER[chainId], fee: f };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('Uniswap V3: no pool for any fee tier');
 }
 
 // ── Uniswap V2: execute swap ──
@@ -425,9 +514,11 @@ export async function uniswapV2Swap(signer, chainId, tokenIn, tokenOut, amountIn
 export async function uniswapV3Swap(signer, chainId, tokenIn, tokenOut, amountIn, amountOutMin, to, fee = 3000) {
   const routerAddr = UNISWAP_V3_ROUTER[chainId];
   const router = new ethers.Contract(routerAddr, UNISWAP_V3_ABI, signer);
+  const weth = CHAIN_WETH[chainId];
+  if (!weth) throw new Error('Uniswap V3: no native token mapping for this chain');
   const params = {
-    tokenIn: tokenIn === NATIVE_SENTINEL ? '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' : tokenIn,
-    tokenOut: tokenOut === NATIVE_SENTINEL ? '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' : tokenOut,
+    tokenIn: tokenIn === NATIVE_SENTINEL ? weth : tokenIn,
+    tokenOut: tokenOut === NATIVE_SENTINEL ? weth : tokenOut,
     fee,
     recipient: to,
     amountIn,
@@ -440,36 +531,40 @@ export async function uniswapV3Swap(signer, chainId, tokenIn, tokenOut, amountIn
   return router.exactInputSingle(params);
 }
 
-// ── Multi-router quote: try KyberSwap → Uniswap V3 → Uniswap V2 → simulated ──
+// ── Multi-router quote: KyberSwap → Uniswap V3 → Uniswap V2 ──
+// Returns the best REAL quote or throws — never a simulation.
 export async function getBestQuote(chainId, tokenIn, tokenOut, amountIn) {
   const slug = KYBER_CHAIN_SLUG[chainId];
+  const errors = [];
   // 1. Try KyberSwap
   if (slug) {
     try {
       const kyber = await kyberQuote(slug, tokenIn, tokenOut, amountIn);
       return { source: 'KyberSwap', data: kyber, simulated: false };
-    } catch {}
+    } catch (e) { errors.push(`KyberSwap: ${e.message}`); }
+  } else {
+    errors.push('KyberSwap: chain not supported');
   }
   // 2. Try Uniswap V3
   try {
     const v3 = await uniswapV3Quote(chainId, tokenIn, tokenOut, amountIn);
     return { source: 'Uniswap V3', data: v3, simulated: false };
-  } catch {}
+  } catch (e) { errors.push(`Uniswap V3: ${e.message}`); }
   // 3. Try Uniswap V2
   try {
     const v2 = await uniswapV2Quote(chainId, tokenIn, tokenOut, amountIn);
     const outAmount = v2.amounts[v2.amounts.length - 1];
     return { source: 'Uniswap V2', data: { ...v2, amountOut: outAmount }, simulated: false };
-  } catch {}
-  // 4. Simulated fallback
-  return { source: 'Simulated', data: null, simulated: true };
+  } catch (e) { errors.push(`Uniswap V2: ${e.message}`); }
+  // 4. No real route — honest failure.
+  throw new Error(`No route available: ${errors.join(' · ')}`);
 }
 
-// ── get supported DEXes for a chain ──
+// ── get supported DEXes for a chain (real only) ──
 export function getSupportedDEXes(chainId) {
   const dexes = [];
   if (KYBER_CHAIN_SLUG[chainId]) dexes.push('KyberSwap');
   if (UNISWAP_V3_ROUTER[chainId]) dexes.push('Uniswap V3');
   if (UNISWAP_V2_ROUTER[chainId]) dexes.push('Uniswap V2');
-  return dexes.length ? dexes : ['Simulated'];
+  return dexes;
 }

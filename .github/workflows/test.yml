@@ -27,6 +27,8 @@ jobs:
 
       - name: Run npm test (tests/*.test.js)
         shell: bash
+        env:
+          BEAR_SOLC: '1'
         run: |
           set -o pipefail
           echo "=== Unit + regression suite ==="

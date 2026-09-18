@@ -124,14 +124,11 @@
             <div class="wallet-status" id="walletStatus">
               <span class="status-dot disconnected"></span>
               <span class="status-text">Disconnected</span>
-              <button class="copy-btn" id="copyAddress" data-copy="" title="Copy address" style="display:none">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              </button>
             </div>
           </div>
           <div class="quick-actions" id="quickActions">
             <button class="quick-action-btn" data-view="send"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span><span class="qa-label">Send</span></button>
-            <button class="quick-action-btn" data-view="swap"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span><span class="qa-label">Swap</span></button>
+            <button class="quick-action-btn" id="quickReceive"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="3" x2="12" y2="15"/><polyline points="7 10 12 15 17 10"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></span><span class="qa-label">Receive</span></button>
             <button class="quick-action-btn" data-view="nft"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span><span class="qa-label">NFT</span></button>
             <button class="quick-action-btn" data-view="deploy"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span><span class="qa-label">Tools</span></button>
           </div>
@@ -315,7 +312,6 @@
                 <label for="bridgeAmount">Amount</label>
                 <input class="input" id="bridgeAmount" type="number" placeholder="0.0" min="0" step="any">
               </div>
-              <button class="btn btn-primary btn-block" id="btnBridgeQuote">Get Route</button>
               <div id="bridgeRoute" class="bridge-route hidden"></div>
               <button class="btn btn-success btn-block btn-lg hidden" id="btnBridgeExec">Execute Bridge</button>
               <div id="bridgeQuote" class="quote-box hidden"></div>
@@ -329,6 +325,11 @@
 
         <!-- EIP-7702 -->
         <section class="view" id="view-eip7702">
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg> Helper Contracts <span class="helper-required">step 1</span></div>
+            <p class="small mb-8">Batch Call, Rescue and Claim Airdrop all run through a helper contract that must exist on this chain first. Deploy it here (Batch), or let the flow deploy it for you — it is <strong>reused</strong> on later runs instead of redeployed.</p>
+            <div id="helperStatusList"><p class="small text-center">Checking deployed helpers…</p></div>
+          </div>
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> <span data-i18n="nav.eip7702">EIP-7702</span> — Smart EOA</div>
             <div id="delegateStatus" class="delegate-status eoa">
@@ -461,6 +462,7 @@
               </div>
               <div id="deployExtra"></div>
               <button class="btn btn-primary btn-block btn-lg" id="btnDeploy">Deploy Contract</button>
+              <div id="deployStatus" class="deploy-status hidden"></div>
             </div>
           </div>
           <div class="card">

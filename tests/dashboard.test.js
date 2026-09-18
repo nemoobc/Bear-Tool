@@ -112,3 +112,30 @@ test('password fields span the full width of their field', () => {
   assert.match(block, /flex: 1 1 100%/, 'must not be shrinkable by the toggle button');
   assert.doesNotMatch(block, /font-size: 0\.85rem/, 'password text must match other inputs');
 });
+
+test('home: address + copy button are gone — Receive owns the address', () => {
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const dash = html.slice(html.indexOf('id="view-dashboard"'), html.indexOf('id="view-send"'));
+  assert.doesNotMatch(dash, /copyAddress/, 'copy-address button must be gone from home');
+  assert.doesNotMatch(dash, /data-copy=/, 'home must not carry a copy payload');
+  assert.match(dash, /id="quickReceive"/, 'Receive shortcut must be on home');
+  assert.doesNotMatch(dash, /data-view="swap"/, 'Swap shortcut must be replaced by Receive');
+  // and the dashboard renderer must not fill statusText with the address
+  assert.doesNotMatch(app, /statusText\.textContent = wallet\.shortAddress/, 'home status must not print the address');
+});
+
+test('create/import sheets are full width (wide modal, no nested .modal-full trap)', () => {
+  const css = fs.readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
+  assert.match(css, /\.modal\.modal-wide \{ max-width: 640px; \}/, 'wide mode must widen #modalBox itself');
+  assert.match(css, /@media \(max-width: 768px\) \{\s*\.modal\.modal-wide \{\s*max-width: 100%;/, 'wide modal must go edge-to-edge on phones');
+  assert.match(app, /`,\s*\{\s*wide:\s*true\s*\}\)/, 'password sheets must open in wide mode');
+  assert.doesNotMatch(app, /class="modal-full"/, 'the nested double-padding trap must not come back');
+});
+
+test('wallet name field: create/import forms collect a name, auto-named when blank', () => {
+  assert.match(app, /id="createName"/, 'create form needs a name field');
+  assert.match(app, /id="importName"/, 'import form needs a name field');
+  assert.match(app, /wallet\.createWallet\(p1, \$\('#createName'\)\.value\)/, 'name must be passed to createWallet');
+  assert.match(app, /wallet\.importWallet\(secret, pw, \$\('#importName'\)\.value\)/, 'name must be passed to importWallet');
+  assert.match(app, /a\.name \|\| `Account \$\{i \+ 1\}`/, 'account list must prefer the saved name');
+});

@@ -86,18 +86,31 @@ export function getActiveAccountIndex() {
 }
 
 // ── create / import ──
-export async function createWallet(password) {
+// Wallet names are non-secret labels. Auto-naming walks "Wallet",
+// "Wallet 1", "Wallet 2", … and skips anything already taken.
+export function nextAccountName(accounts = [], base = 'Wallet') {
+  const taken = new Set((accounts || []).map(a => (a?.name || '').trim().toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let i = 1; i < 100000; i++) {
+    const candidate = `${base} ${i}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+  return `${base} ${Date.now()}`;
+}
+
+export async function createWallet(password, name) {
   const wallet = ethers.Wallet.createRandom();
   const mnemonic = wallet.mnemonic.phrase;
   const keystore = await encryptData(mnemonic, password);
   saveKeystore(keystore);
-  const accounts = [{ address: wallet.address, path: "m/44'/60'/0'/0/0" }];
+  const label = (name || '').trim() || nextAccountName([]);
+  const accounts = [{ address: wallet.address, path: "m/44'/60'/0'/0/0", name: label }];
   saveAccounts(accounts);
   setActiveAccount(0);
-  return { address: wallet.address, mnemonic };
+  return { address: wallet.address, mnemonic, name: label };
 }
 
-export async function importWallet(input, password) {
+export async function importWallet(input, password, name) {
   let wallet;
   const trimmed = input.trim();
   if (trimmed.split(/\s+/).length >= 12) {
@@ -111,10 +124,11 @@ export async function importWallet(input, password) {
   }
   const keystore = await encryptData(trimmed, password);
   saveKeystore(keystore);
-  const accounts = [{ address: wallet.address, path: 'imported' }];
+  const label = (name || '').trim() || nextAccountName([]);
+  const accounts = [{ address: wallet.address, path: 'imported', name: label }];
   saveAccounts(accounts);
   setActiveAccount(0);
-  return { address: wallet.address };
+  return { address: wallet.address, name: label };
 }
 
 // unlock: decrypt keystore, return signer for active account
@@ -139,7 +153,7 @@ export async function unlockWallet(password) {
 }
 
 // derive additional account from seed
-export async function deriveNextAccount(password) {
+export async function deriveNextAccount(password, name) {
   const keystore = getKeystore();
   if (!keystore) throw new Error('No wallet found.');
   const secret = await decryptData(keystore, password);
@@ -148,7 +162,8 @@ export async function deriveNextAccount(password) {
   const hd = ethers.HDNodeWallet.fromPhrase(secret, undefined, "m/44'/60'/0'/0");
   const path = `m/44'/60'/0'/0/${nextIdx}`;
   const derived = hd.derivePath(String(nextIdx));
-  accounts.push({ address: derived.address, path });
+  const label = (name || '').trim() || nextAccountName(accounts);
+  accounts.push({ address: derived.address, path, name: label });
   saveAccounts(accounts);
   return derived.address;
 }

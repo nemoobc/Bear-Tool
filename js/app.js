@@ -31,7 +31,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   setUnlockHandler(showUnlockModal);
   on('refresh', () => {
-    if (!get('unlocked')) return;
+    if (!get('address')) return;
     loadDashboard();
     if ($('#view-activity').classList.contains('active')) renderActivity();
   });
@@ -39,10 +39,28 @@ window.addEventListener('DOMContentLoaded', () => {
   bindTopbar();
   bindViews();
   initTheme();
-  runIntro(() => {
-    if (wallet.getKeystore()) showUnlockModal();
+
+  // A refresh must not dump the user back into the password box. The address
+  // is not a secret (it is already public on-chain), so restore it and render
+  // the app read-only. The password is only needed to SIGN — every signing
+  // path already calls requireUnlock(). The decrypted key is never persisted.
+  const restored = restoreReadOnlyAccount();
+  const boot = () => {
+    if (restored) { updateTopbar(); loadDashboard(); }
+    else if (wallet.getKeystore()) showUnlockModal();
     else showWelcomeModal();
-  });
+  };
+  // The 5s logo intro is a first-impression flourish, not a refresh tax.
+  let seen = false;
+  try { seen = sessionStorage.getItem('bear.introSeen') === '1'; } catch { /* private mode */ }
+  if (seen) {
+    const intro = document.getElementById('intro');
+    intro?.remove();
+    boot();
+  } else {
+    try { sessionStorage.setItem('bear.introSeen', '1'); } catch { /* ignore */ }
+    runIntro(boot);
+  }
   window.addEventListener('unhandledrejection', (e) => {
     console.error('[BearTool] unhandled rejection:', e.reason);
     toast('Unexpected error: ' + (e.reason?.message || 'unknown'), 'error');
@@ -133,6 +151,11 @@ function bindNav() {
       if (btn.dataset.view) switchView(btn.dataset.view);
     });
   });
+  // Receive replaced the Swap shortcut on home — the address + copy live here.
+  $('#quickReceive')?.addEventListener('click', () => {
+    const net = getNetworkById(get('networkId'));
+    showReceiveModal(get('address'), net?.symbol || '');
+  });
 }
 
 function switchView(view) {
@@ -173,7 +196,7 @@ function showSwapBridgeChooser() {
 }
 
 function refreshView(view) {
-  if (!get('unlocked')) return;
+  if (!get('address')) return;
   if (view === 'dashboard') loadDashboard();
   if (view === 'send') loadSendTokens();
   if (view === 'swap') loadSwapTokens();
@@ -207,7 +230,20 @@ function updateTopbar() {
   const oldDot = pill.querySelector('.dot');
   if (oldDot) oldDot.remove();
   $('#networkName').textContent = net?.name || '?';
-  $('#accountShort').textContent = get('address') ? wallet.shortAddress(get('address')) : 'Not connected';
+  // Prefer the wallet name the user set at create/import time; fall back to the
+  // short address for legacy accounts saved before names existed.
+  const addr = get('address');
+  let label = '';
+  if (addr) {
+    let name = '';
+    try {
+      const accounts = wallet.getAccounts() || [];
+      name = accounts[wallet.getActiveAccountIndex()]?.name || '';
+    } catch { /* storage unavailable */ }
+    label = name || wallet.shortAddress(addr);
+    if (!get('unlocked')) label = '🔒 ' + label;
+  }
+  $('#accountShort').textContent = label || 'Not connected';
 }
 
 // ── welcome / unlock modals ──
@@ -247,7 +283,7 @@ function showUnlockModal() {
       </div>
       <button class="btn btn-primary btn-block" id="unlockBtn">${escapeHtml(t('unlock.button'))}</button>
     </div>
-  `);
+  `, { wide: true });
   const pw = $('#unlockPw');
   pw.focus();
   const doUnlock = async () => {
@@ -272,26 +308,28 @@ function showUnlockModal() {
 
 function showCreateModal() {
   openModal(`
-    <div class="modal-full">
-      <h2>🐻 Create Wallet</h2>
-      <div class="field">
-        <label for="createPw">Password (min 8 chars)</label>
-        <input class="input" id="createPw" type="password" placeholder="••••••••">
-      </div>
-      <div class="field">
-        <label for="createPw2">Repeat password</label>
-        <input class="input" id="createPw2" type="password" placeholder="••••••••">
-      </div>
-      <div class="danger-box">⚠️ You will see your seed phrase ONCE. Write it down. Anyone with it controls your funds.</div>
-      <button class="btn btn-primary btn-block btn-lg" id="createBtn">Create</button>
+    <h2>🐻 Create Wallet</h2>
+    <div class="field">
+      <label for="createName">Wallet name (optional)</label>
+      <input class="input" id="createName" type="text" placeholder="Wallet" maxlength="40">
     </div>
-  `);
+    <div class="field">
+      <label for="createPw">Password (min 8 chars)</label>
+      <input class="input" id="createPw" type="password" placeholder="••••••••">
+    </div>
+    <div class="field">
+      <label for="createPw2">Repeat password</label>
+      <input class="input" id="createPw2" type="password" placeholder="••••••••">
+    </div>
+    <div class="danger-box">⚠️ You will see your seed phrase ONCE. Write it down. Anyone with it controls your funds.</div>
+    <button class="btn btn-primary btn-block btn-lg" id="createBtn">Create</button>
+  `, { wide: true });
   $('#createBtn').onclick = async () => {
     const p1 = $('#createPw').value, p2 = $('#createPw2').value;
     if (p1.length < 8) return toast('Password too short (min 8)', 'error');
     if (p1 !== p2) return toast('Passwords do not match', 'error');
     try {
-      const res = await wallet.createWallet(p1);
+      const res = await wallet.createWallet(p1, $('#createName').value);
       $('#createPw').value = ''; $('#createPw2').value = '';
       showSeedPhrase(res.mnemonic, res.address);
     } catch (e) { toast('Error: ' + e.message, 'error'); }
@@ -364,27 +402,29 @@ function showSeedPhrase(mnemonic, address) {
 
 function showImportModal() {
   openModal(`
-    <div class="modal-full">
-      <h2>📥 Import Wallet</h2>
-      <div class="field">
-        <label for="importSecret">Seed phrase (12/24 words) or private key</label>
-        <textarea class="textarea" id="importSecret" placeholder="word1 word2 ..."></textarea>
-      </div>
-      <div class="field">
-        <label for="importPw">New password</label>
-        <input class="input" id="importPw" type="password" placeholder="••••••••">
-      </div>
-      <div class="danger-box">⚠️ Never import a seed phrase on a website you don't trust. This tool is 100% client-side.</div>
-      <button class="btn btn-primary btn-block btn-lg" id="importBtn">Import</button>
+    <h2>📥 Import Wallet</h2>
+    <div class="field">
+      <label for="importName">Wallet name (optional)</label>
+      <input class="input" id="importName" type="text" placeholder="Wallet" maxlength="40">
     </div>
-  `);
+    <div class="field">
+      <label for="importSecret">Seed phrase (12/24 words) or private key</label>
+      <textarea class="textarea" id="importSecret" placeholder="word1 word2 ..."></textarea>
+    </div>
+    <div class="field">
+      <label for="importPw">New password</label>
+      <input class="input" id="importPw" type="password" placeholder="••••••••">
+    </div>
+    <div class="danger-box">⚠️ Never import a seed phrase on a website you don't trust. This tool is 100% client-side.</div>
+    <button class="btn btn-primary btn-block btn-lg" id="importBtn">Import</button>
+  `, { wide: true });
   $('#importBtn').onclick = async () => {
     const secret = $('#importSecret').value.trim();
     const pw = $('#importPw').value;
     if (!secret) return toast('Enter seed phrase or private key', 'error');
     if (pw.length < 8) return toast('Password too short (min 8)', 'error');
     try {
-      const res = await wallet.importWallet(secret, pw);
+      const res = await wallet.importWallet(secret, pw, $('#importName').value);
       set('signer', new ethers.Wallet(secret.startsWith('0x') ? secret : ethers.Wallet.fromPhrase(secret).privateKey));
       set('address', res.address);
       set('unlocked', true);
@@ -507,7 +547,7 @@ function showNetworkModal() {
     closeModal();
     toast('Network switched', 'success');
     updateTopbar();
-    if (get('unlocked')) loadDashboard();
+    if (get('address')) loadDashboard();
   }));
 }
 
@@ -569,7 +609,7 @@ function showAccountModal() {
       <div class="asset-row ${i === idx ? 'active' : ''}" data-acc="${i}">
         <div class="asset-icon">🐻</div>
         <div class="asset-info">
-          <div class="asset-name">Account ${i + 1} ${i === idx ? '(active)' : ''}</div>
+          <div class="asset-name">${escapeHtml(a.name || `Account ${i + 1}`)} ${i === idx ? '(active)' : ''}</div>
           <div class="mono">${escapeHtml(a.address)}</div>
         </div>
       </div>`).join('')}
@@ -624,22 +664,35 @@ function showAccountModal() {
 }
 
 // ── dashboard ──
+// Restore the active account address (public, non-secret) from the saved
+// account list so a refresh lands on a usable read-only app instead of the
+// password prompt. Returns null when there is nothing to restore.
+function restoreReadOnlyAccount() {
+  try {
+    if (!wallet.getKeystore()) return null;
+    const accounts = wallet.getAccounts();
+    if (!Array.isArray(accounts) || !accounts.length) return null;
+    const idx = wallet.getActiveAccountIndex();
+    const addr = accounts[idx]?.address || accounts[0]?.address;
+    if (!addr || !wallet.isValidAddress(addr)) return null;
+    set('address', addr);
+    return addr;
+  } catch { return null; }
+}
+
 async function loadDashboard() {
-  if (!get('unlocked')) return;
+  if (!get('address')) return;
   const net = getNetworkById(get('networkId'));
-  const addr = get('address');
-  // Network name only — the wallet address is shown once, in the
-  // walletStatus row below (next to its copy button). Showing it in both
-  // places was a visible duplicate.
+  // Network name only. The wallet address lives in the Receive modal — it is
+  // not shown (or copyable) from the home screen any more.
   $('#balanceSub').textContent = net.name;
 
   // ── wallet status ──
   const statusDot = document.querySelector('.status-dot');
   const statusText = document.querySelector('.status-text');
-  const copyBtn = document.getElementById('copyAddress');
-  if (statusDot) { statusDot.className = 'status-dot connected'; }
-  if (statusText) { statusText.textContent = wallet.shortAddress(addr); }
-  if (copyBtn) { copyBtn.dataset.copy = addr; copyBtn.style.display = ''; }
+  const unlocked = !!get('unlocked');
+  if (statusDot) { statusDot.className = 'status-dot ' + (unlocked ? 'connected' : 'disconnected'); }
+  if (statusText) { statusText.textContent = unlocked ? 'Connected' : 'Locked · tap account to unlock'; }
 
   const assetList = $('#assetList');
   if (!assetList) return;
@@ -992,7 +1045,8 @@ function bindViews() {
 
 // ── approval manager ──
 async function scanApprovals() {
-  if (!get('unlocked')) { showUnlockModal(); return; }
+  // Read-only: allowances are public chain data and need no signature.
+  if (!get('address')) { showUnlockModal(); return; }
   const mode = $('#approvalMode')?.value;
   const net = getNetworkById(get('networkId'));
   const list = $('#approvalList');
@@ -1084,6 +1138,7 @@ function renderApprovals(approvals, scannedFrom = null) {
       confirmText: 'Revoke', danger: true
     });
     if (!ok) return;
+    if (!get('unlocked')) { requireUnlock(); return; }
     try {
       const signer = get('signer').connect(get('provider'));
       const c = new ethers.Contract(a.token.address, ERC20_ABI, signer);

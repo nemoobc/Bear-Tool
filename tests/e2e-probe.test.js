@@ -140,13 +140,13 @@ test('E2E-probe: KyberSwap quote API returns real route (ETH→USDC, mainnet)', 
   console.log('  KyberSwap: amountOut =', json.data.routeSummary.amountOut, '| router =', json.data.routerAddress);
 });
 
-test('E2E-probe: LI.FI quote API — current bridge.js call (no fromAddress) fails → simulated fallback', async () => {
-  // exact URL built by bridge.js doBridge()
-  const url = 'https://li.quest/v1/quote?fromChain=1&toChain=10&fromToken=0x0000000000000000000000000000000000000000&toToken=0x0000000000000000000000000000000000000000&fromAmount=1000000000000000000';
+test('E2E-probe: LI.FI quote API — bridge.js sends fromAddress (real route, no simulation)', async () => {
+  // exact URL built by bridge.js doBridge() (fromAddress + toAddress pinned)
+  const url = 'https://li.quest/v1/quote?fromChain=1&toChain=10&fromToken=0x0000000000000000000000000000000000000000&toToken=0x0000000000000000000000000000000000000000&fromAmount=1000000000000000000&fromAddress=0x0000000000000000000000000000000000000001&toAddress=0x0000000000000000000000000000000000000001';
   const res = await httpGet(url);
-  assert.equal(res.status, 400, 'LI.FI requires fromAddress — bridge.js omits it');
+  assert.equal(res.status, 200, 'LI.FI requires fromAddress — bridge.js now sends it');
   const json = JSON.parse(res.text);
-  console.log('  LI.FI without fromAddress:', json.message);
+  console.log('  LI.FI with fromAddress:', json.tool, '| fromToken.symbol =', json.action?.fromToken?.symbol);
 });
 
 test('E2E-probe: LI.FI quote API works when fromAddress is added', async () => {
@@ -157,8 +157,6 @@ test('E2E-probe: LI.FI quote API works when fromAddress is added', async () => {
   // LI.FI /quote returns a single route object (not {routes:[...]})
   assert.ok(json.id && json.tool, 'route object present');
   console.log('  LI.FI with fromAddress: tool =', json.tool, '| action.fromToken.symbol =', json.action?.fromToken?.symbol);
-  // bridge.js reads q.routes?.[0] — this shape mismatch means even a 200 falls to simulated
-  console.log('  bridge.js reads q.routes?.[0] → SHAPE MISMATCH (routes undefined) → simulated fallback');
 });
 
 test('E2E-probe: CoinGecko native price API works (dashboard USD)', async () => {
@@ -184,6 +182,24 @@ test('E2E-probe: swap quote encodes amount in SELL token decimals', async () => 
   const body = swapJs.slice(i, swapJs.indexOf('}', swapJs.indexOf('amountInWei')));
   assert.ok(body.includes('parseUnits(amt, fromDecimals)'), 'quote amount must use fromDecimals');
   assert.ok(!body.includes('parseEther(amt)'), 'parseEther(amt) is wrong for ERC-20 with decimals≠18');
+});
+
+test('E2E-probe: swap & bridge have NO simulated fallback (real routes or honest error)', async () => {
+  const swapJs = (await import('node:fs')).readFileSync(new URL('../js/swap.js', import.meta.url), 'utf8');
+  const bridgeJs = (await import('node:fs')).readFileSync(new URL('../js/bridge.js', import.meta.url), 'utf8');
+  // No fake-rate generator, no simulated banner, no Math.random amounts
+  assert.ok(!swapJs.includes('simulatedQuote'), 'swap must not contain a simulated quote generator');
+  assert.ok(!swapJs.includes('Math.random'), 'swap must not fabricate rates');
+  assert.ok(!swapJs.includes('simulated-banner'), 'swap must not render a simulated banner');
+  assert.ok(!bridgeJs.includes('simulated-banner'), 'bridge must not render a simulated banner');
+  assert.ok(!bridgeJs.includes('set(\'bridgeQuote\', { simulated: true })'), 'bridge must never bind a simulated quote');
+  // Real routes only: KyberSwap → Uniswap V3 → Uniswap V2, then honest error
+  assert.ok(swapJs.includes('No route available'), 'swap must end with an honest no-route error');
+  assert.ok(bridgeJs.includes('No route available'), 'bridge must end with an honest no-route error');
+  // Auto-route: quote refreshes on input change without a manual button
+  assert.ok(swapJs.includes('AUTO-ROUTE'), 'swap must auto-route');
+  assert.ok(bridgeJs.includes('AUTO-ROUTE'), 'bridge must auto-route');
+  assert.ok(!bridgeJs.includes('btnBridgeQuote'), 'bridge must not depend on a Get Route button');
 });
 
 test('E2E-probe: bridge is native-only, context-bound, fail-closed (supersedes old ERC-20 token contract)', async () => {
@@ -271,7 +287,9 @@ test('E2E-probe: every $(\'#id\') reference across ALL js files exists in index.
     'importBtn','unlockPw','cnSave','wCreate','createPw','unlockBtn',
     'clearBtn','cnChainId','cnName','createBtn','addAccBtn','seedConfirm','addNetBtn',
     'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart',
-    'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge'
+    'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge',
+    'createName','importName','deploySupply','deployDecimals','deployBaseUri',
+    'btnDeployBatchHelper','deployStatus','helperStatusList'
   ]);
   const dir = path.resolve(new URL('../js/', import.meta.url).pathname);
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));

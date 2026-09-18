@@ -43,11 +43,12 @@ function getFocusable(box) {
     .filter(el => el.offsetParent !== null && !el.classList.contains('modal-close'));
 }
 
-export function openModal(html, { fullscreen = false } = {}) {
+export function openModal(html, { fullscreen = false, wide = false } = {}) {
   const overlay = $('#modalOverlay');
   const box = $('#modalBox');
   if (!overlay || !box) return null; // no modal shell in this DOM
   box.classList.toggle('welcome-screen', fullscreen);
+  box.classList.toggle('modal-wide', wide);
   overlay.classList.toggle('welcome-screen', fullscreen);
   box.innerHTML = html;
   // aria-labelledby → first heading (WCAG 4.1.2)
@@ -75,7 +76,7 @@ export function closeModal() {
   const overlay = $('#modalOverlay');
   if (!overlay) return;
   overlay.classList.remove('open', 'welcome-screen');
-  $('#modalBox')?.classList.remove('welcome-screen');
+  $('#modalBox')?.classList.remove('welcome-screen', 'modal-wide');
   document.body.style.overflow = '';
   // restore focus to opener (WCAG 2.4.3)
   if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus();

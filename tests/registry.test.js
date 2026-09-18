@@ -112,7 +112,7 @@ test('registry: clearRegistry empties everything', () => {
   registry.saveDeployed('rescue', B, { chainId: 137 });
   registry.clearRegistry();
   const reg = registry.loadRegistry();
-  for (const type of ['batch', 'rescue', 'airdrop', 'proxy', 'revoker']) {
+  for (const type of ['batch', 'rescue', 'airdrop', 'proxy', 'revoker', 'token']) {
     assert.equal(reg[type].length, 0, type + ' must be empty');
   }
 });
@@ -120,7 +120,7 @@ test('registry: clearRegistry empties everything', () => {
 test('registry: corrupt / non-object data falls back to empty registry', () => {
   store.clear();
   store.set('bear.deployedContracts', '{not json');
-  assert.deepEqual(registry.loadRegistry(), { batch: [], rescue: [], airdrop: [], proxy: [], revoker: [] });
+  assert.deepEqual(registry.loadRegistry(), { batch: [], rescue: [], airdrop: [], proxy: [], revoker: [], token: [] });
   store.set('bear.deployedContracts', JSON.stringify({ batch: [{ address: '0xbad', chainId: 1 }, { address: A, chainId: 'x' }] }));
   const reg = registry.loadRegistry();
   assert.equal(reg.batch.length, 0, 'invalid entries dropped');

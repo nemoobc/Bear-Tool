@@ -102,3 +102,32 @@ test('clearKeystore: wipes all wallet data', async () => {
   assert.equal(wallet.getKeystore(), null);
   assert.equal(wallet.getAccounts().length, 0);
 });
+test('nextAccountName: walks Wallet, Wallet 1, Wallet 2 …', () => {
+  assert.equal(wallet.nextAccountName([]), 'Wallet');
+  assert.equal(wallet.nextAccountName([{ name: 'Wallet' }]), 'Wallet 1');
+  assert.equal(wallet.nextAccountName([{ name: 'Wallet' }, { name: 'Wallet 1' }]), 'Wallet 2');
+  assert.equal(wallet.nextAccountName([{ name: 'WALLET' }]), 'Wallet 1', 'dedupe must be case-insensitive');
+  assert.equal(wallet.nextAccountName([], 'Main'), 'Main', 'custom base name');
+  assert.equal(wallet.nextAccountName([{ name: 'Main' }], 'Main'), 'Main 1');
+});
+
+test('createWallet/importWallet: store the given name, default to Wallet', async () => {
+  store.clear();
+  await wallet.createWallet('password123', '  Trading  ');
+  assert.equal(wallet.getAccounts()[0].name, 'Trading', 'name must be trimmed and kept');
+  store.clear();
+  await wallet.createWallet('password123');
+  assert.equal(wallet.getAccounts()[0].name, 'Wallet', 'blank name must auto-resolve');
+  store.clear();
+  const w = ethers.Wallet.createRandom();
+  await wallet.importWallet(w.privateKey, 'password123', 'Cold');
+  assert.equal(wallet.getAccounts()[0].name, 'Cold');
+});
+
+test('deriveNextAccount: auto-names each new account', async () => {
+  store.clear();
+  await wallet.createWallet('password123');
+  await wallet.deriveNextAccount('password123');
+  await wallet.deriveNextAccount('password123');
+  assert.deepEqual(wallet.getAccounts().map(a => a.name), ['Wallet', 'Wallet 1', 'Wallet 2']);
+});

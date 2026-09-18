@@ -271,15 +271,14 @@ test('doBridge: valid native response binds context + tx (real call, mocked fetc
   assert.equal(reqUrl.searchParams.get('toToken'), NATIVE_HEX);
 });
 
-test('doBridge: malformed response field (fromAmount inflated) lands simulated, no quote bound', async (t) => {
+test('doBridge: malformed response field (fromAmount inflated) rejected, no quote bound', async (t) => {
   const { fetchMock } = setupQuote(t);
   const bad = validResponse();
   bad.action.fromAmount = '900000000000000000';
   fetchMock.mock.mockImplementation(async () => ({ ok: true, json: async () => bad }));
   await bridge.doBridge();
   const q = state.get('bridgeQuote');
-  assert.equal(q.simulated, true, 'must fall back to simulated');
-  assert.equal(q.context, undefined, 'no context may bind for malformed quote');
+  assert.equal(q, null, 'malformed quote must never bind');
 });
 
 test('doBridge: wrong destination (attacker toAddress) rejected', async (t) => {
@@ -289,8 +288,7 @@ test('doBridge: wrong destination (attacker toAddress) rejected', async (t) => {
   fetchMock.mock.mockImplementation(async () => ({ ok: true, json: async () => bad }));
   await bridge.doBridge();
   const q = state.get('bridgeQuote');
-  assert.equal(q.simulated, true, 'toAddress mismatch must never bind');
-  assert.equal(q.context, undefined);
+  assert.equal(q, null, 'toAddress mismatch must never bind');
 });
 
 test('doBridge: missing toAddress in response rejected (explicit match required)', async (t) => {
@@ -299,7 +297,7 @@ test('doBridge: missing toAddress in response rejected (explicit match required)
   delete bad.action.toAddress;
   fetchMock.mock.mockImplementation(async () => ({ ok: true, json: async () => bad }));
   await bridge.doBridge();
-  assert.equal(state.get('bridgeQuote').simulated, true);
+  assert.equal(state.get('bridgeQuote'), null);
 });
 
 test('doBridge: non-hex calldata rejected (regex, not just prefix)', async (t) => {
@@ -308,7 +306,7 @@ test('doBridge: non-hex calldata rejected (regex, not just prefix)', async (t) =
   bad.transactionRequest.data = '0xZZnot-hex!!';
   fetchMock.mock.mockImplementation(async () => ({ ok: true, json: async () => bad }));
   await bridge.doBridge();
-  assert.equal(state.get('bridgeQuote').simulated, true, 'non-hex calldata must never bind');
+  assert.equal(state.get('bridgeQuote'), null, 'non-hex calldata must never bind');
 });
 
 test('doBridge: old request race — late stale response cannot overwrite newer quote', async (t) => {
