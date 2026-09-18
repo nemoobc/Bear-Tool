@@ -5,7 +5,7 @@
 // limitation message when an indexer is required.
 // ═══════════════════════════════════════════════════════════════
 
-import { $, escapeHtml, fmtAmount } from './ui.js';
+import { $, escapeHtml } from './ui.js';
 import { get } from './state.js';
 import { getNetworkById, ERC721_ABI } from './network.js';
 
@@ -96,7 +96,7 @@ export async function loadNfts() {
           <div class="meta">${escapeHtml(nft.name)}<br><span class="small">${escapeHtml(nft.collection)}</span></div>
         </div>`).join('');
     } else {
-      grid.innerHTML = `<p class="small text-center">No NFTs found on this network. Full gallery needs an indexer (Alchemy/QuickNode). Native balance: ${escapeHtml(fmtAmount(await provider.getBalance(get('address')), net.decimals))} ${escapeHtml(net.symbol)}</p>`;
+      grid.innerHTML = '<p class="small text-center">Not Found</p>';
     }
   } catch {
     grid.innerHTML = '<p class="small text-center">NFT gallery unavailable on this network.</p>';

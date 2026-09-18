@@ -57,6 +57,22 @@ test('addCustomNetwork + removeCustomNetwork roundtrip', () => {
   assert.equal(net.getAllNetworks().length, before);
 });
 
+test('getAllNetworks: testnet mode OFF hides testnets, ON shows them', async () => {
+  const { get, set } = await import('../js/state.js');
+  // default settings have testnet: true
+  set('settings', { ...get('settings'), testnet: true });
+  const all = net.getAllNetworks();
+  assert.ok(all.some(n => n.type === 'testnet'), 'testnet mode ON must include testnets');
+  assert.ok(all.some(n => n.type === 'mainnet'), 'testnet mode ON must include mainnets');
+  // turn testnet OFF
+  set('settings', { ...get('settings'), testnet: false });
+  const filtered = net.getAllNetworks();
+  assert.ok(!filtered.some(n => n.type === 'testnet'), 'testnet mode OFF must hide testnets');
+  assert.ok(filtered.some(n => n.type === 'mainnet'), 'testnet mode OFF must keep mainnets');
+  // restore default
+  set('settings', { ...get('settings'), testnet: true });
+});
+
 test('EIP7702 constants correct', () => {
   assert.equal(net.EIP7702.MAGIC, '0x05');
   assert.equal(net.EIP7702.DELEGATION_PREFIX, '0xef0100');

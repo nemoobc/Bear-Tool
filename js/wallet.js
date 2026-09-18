@@ -8,6 +8,10 @@
 const KEYSTORE_KEY = 'bear.keystore';
 const ACCOUNTS_KEY = 'bear.accounts';
 const ACTIVE_KEY = 'bear.activeAccount';
+// Session secret lives in sessionStorage (per-tab): a page refresh keeps the
+// wallet unlocked, closing the tab wipes it. The encrypted keystore in
+// localStorage is the durable source of truth.
+const SESSION_KEY = 'bear.session';
 
 // PBKDF2 + AES-GCM encryption (Web Crypto API)
 async function deriveKey(password, salt) {
@@ -136,6 +140,19 @@ export async function unlockWallet(password) {
   const keystore = getKeystore();
   if (!keystore) throw new Error('No wallet found. Create or import one first.');
   const secret = await decryptData(keystore, password);
+  return signerFromSecret(secret);
+}
+
+// unlock + return the decrypted secret so the caller can persist the session
+export async function unlockSession(password) {
+  const keystore = getKeystore();
+  if (!keystore) throw new Error('No wallet found. Create or import one first.');
+  const secret = await decryptData(keystore, password);
+  return { signer: signerFromSecret(secret), secret };
+}
+
+// derive the active-account signer from a raw secret (seed phrase or key)
+export function signerFromSecret(secret) {
   const idx = getActiveAccountIndex();
   const accounts = getAccounts();
   if (!accounts[idx]) throw new Error('Account not found.');
@@ -150,6 +167,17 @@ export async function unlockWallet(password) {
     wallet = hd.derivePath(String(idx));
   }
   return wallet;
+}
+
+// ── session persistence (refresh keeps wallet unlocked) ──
+export function saveSession(secret) {
+  try { sessionStorage.setItem(SESSION_KEY, secret); } catch { /* private mode */ }
+}
+export function getSession() {
+  try { return sessionStorage.getItem(SESSION_KEY); } catch { return null; }
+}
+export function clearSession() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
 }
 
 // derive additional account from seed

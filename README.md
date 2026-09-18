@@ -12,16 +12,16 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 
 | Area | What it does |
 |---|---|
-| 🐻 **Wallet** | Create (12-word seed) / import (seed or private key), PBKDF2-310k + AES-GCM encrypted keystore in localStorage, multi-account (m/44'/60'/0'/0/i), auto-lock, export secret |
-| 🌐 **Networks** | 12 EVM networks: 6 mainnet (Ethereum, BSC, Polygon, Arbitrum, OP, Base) + 6 testnet (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet), RPC fallback chain, custom network + custom RPC |
+| 🐻 **Wallet** | Create (12-word seed) / import (seed or private key) with optional wallet name (auto-names Wallet, Wallet 1, …), PBKDF2-310k + AES-GCM encrypted keystore in localStorage, multi-account (m/44'/60'/0'/0/i), auto-lock, export secret. Refresh keeps the wallet unlocked (sessionStorage); closing the tab locks it again |
+| 🌐 **Networks** | 12 EVM networks: 6 mainnet (Ethereum, BSC, Polygon, Arbitrum, OP, Base) + 6 testnet (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet), RPC fallback chain, custom network + custom RPC. Settings → **Testnet mode** toggle hides testnets |
 | 🪙 **Assets** | Native + 19 popular ERC-20 balances (USDT, USDC, DAI, WETH, WBTC, LINK, UNI, AAVE, SHIB, MATIC, ARB, OP, PEPE, CRV, SNX, SUSHI, COMP, MKR, LDO) |
 | ✈️ **Send** | Native + ERC-20, gas speed (slow/normal/fast), live preview + est. gas, paste button, address validation + poisoning detection |
-| 🔄 **Swap** | Real quotes only — auto-route KyberSwap → Uniswap V3 → Uniswap V2 (on-chain verified routers), slippage control, flip. No simulation: no route = honest error. The Swap nav button is also the Bridge entry (tap it twice to choose) |
+| 🔄 **Swap** | Real quotes only — auto-route KyberSwap → Uniswap V3 → Uniswap V2 (on-chain verified routers, incl. Sepolia V2), slippage control, flip. No simulation: no route = honest error. The Swap nav button is also the Bridge entry (tap it twice to choose) |
 | 🌉 **Bridge** | LI.FI quotes (real API, fetch timeout), native-only fail-closed, all chains — reaches `#view-bridge` from the Swap chooser, no separate nav item |
-| ⚡ **EIP-7702** | Delegate to implementation (chainId 0 = all chains, replay warning), revoke, batch atomic call, rescue atomic, claim + forward airdrop |
+| ⚡ **EIP-7702** | Delegate to implementation (chainId 0 = all chains, replay warning), revoke, batch atomic call, rescue atomic, claim + forward airdrop. Batch/Rescue/Claim each require deploying their helper contract first (step 1 in the Tools view) — no silent auto-deploy |
 | 🔐 **Approvals** | Scan popular/custom token approvals, detect UNLIMITED, revoke to 0 |
-| 🧙 **Deploy** | Wizard for ERC-20 / ERC-721 / ERC-1155 |
-| 📜 **Activity** | Local tx history with explorer links |
+| 🧙 **Deploy** | Wizard for ERC-20 / ERC-721 / ERC-1155 — real in-browser solc compile (CDN fallback if the primary mirror is blocked) |
+| 📜 **Activity** | Local tx history with explorer links (sidebar item next to Dashboard) |
 | 🎨 **Theme** | Full cartoon: chunky borders, soft shadows, 5s skippable logo intro, spinning bear loader |
 
 ---
@@ -46,7 +46,7 @@ npm install   # devDependency: ethers (for tests only)
 npm run verify
 ```
 
-`verify` = syntax check all JS + 22 unit tests (network data, custom networks, EIP-7702 delegation detection, wallet create/import/encrypt/decrypt/derive, address poisoning).
+`verify` = syntax check all JS + 144 unit tests (network data, custom networks, testnet toggle, EIP-7702 delegation detection, wallet create/import/encrypt/decrypt/derive, session persist, address poisoning, nav/status UI invariants, Sepolia swap constants).
 
 ## 📁 Structure
 

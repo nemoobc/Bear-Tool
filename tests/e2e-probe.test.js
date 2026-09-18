@@ -289,7 +289,8 @@ test('E2E-probe: every $(\'#id\') reference across ALL js files exists in index.
     'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart',
     'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge',
     'createName','importName','deploySupply','deployDecimals','deployBaseUri',
-    'btnDeployBatchHelper','deployStatus','helperStatusList'
+    'btnDeployBatchHelper','btnDeployRescueHelper','btnDeployAirdropClaimer',
+    'deployStatus','helperStatusList'
   ]);
   const dir = path.resolve(new URL('../js/', import.meta.url).pathname);
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));

@@ -11,6 +11,14 @@ globalThis.localStorage = {
   removeItem: (k) => store.delete(k)
 };
 
+// mock sessionStorage (browser-only API)
+const session = new Map();
+globalThis.sessionStorage = {
+  getItem: (k) => session.has(k) ? session.get(k) : null,
+  setItem: (k, v) => session.set(k, String(v)),
+  removeItem: (k) => session.delete(k)
+};
+
 // load real ethers and expose as global (wallet.js uses global `ethers`)
 const { ethers } = await import('ethers');
 globalThis.ethers = ethers;
@@ -63,9 +71,26 @@ test('importWallet: invalid input throws', async () => {
 
 test('unlockWallet: roundtrip create → unlock → same address', async () => {
   store.clear();
-  const created = await wallet.createWallet('password123');
+  const res = await wallet.createWallet('password123');
   const signer = await wallet.unlockWallet('password123');
-  assert.equal(signer.address.toLowerCase(), created.address.toLowerCase());
+  assert.equal(signer.address, res.address);
+});
+
+test('session: saveSession/getSession/clearSession roundtrip', async () => {
+  session.clear();
+  const res = await wallet.createWallet('password123');
+  wallet.saveSession(res.mnemonic);
+  assert.equal(wallet.getSession(), res.mnemonic);
+  wallet.clearSession();
+  assert.equal(wallet.getSession(), null);
+});
+
+test('signerFromSecret: derives the same address as unlockWallet', async () => {
+  store.clear();
+  const res = await wallet.createWallet('password123');
+  const signer = await wallet.unlockWallet('password123');
+  const fromSecret = wallet.signerFromSecret(res.mnemonic);
+  assert.equal(fromSecret.address, signer.address);
 });
 
 test('deriveNextAccount: derives m/44/60/0/0/1', async () => {

@@ -1842,6 +1842,41 @@ body::before {
 .theme-btn:hover { background: var(--cream); }
 .theme-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); }
 
+/* ── toggle switch (settings) ── */
+.switch-label { display: inline-block; }
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 26px;
+  vertical-align: middle;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--ink-soft);
+  border-radius: 999px;
+  transition: background 0.2s;
+}
+.switch .slider::before {
+  content: '';
+  position: absolute;
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  top: 3px;
+  background: var(--white);
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.switch input:checked + .slider { background: var(--mint); }
+.switch input:checked + .slider::before { transform: translateX(22px); }
+
+/* dropdown options must never be clipped by a parent container */
+.view, .card, .field { overflow: visible; }
+
 /* ═══════════ DARK MODE ═══════════ */
 .theme-dark {
   --cream: #1a1a2e;

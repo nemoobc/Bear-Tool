@@ -46,6 +46,21 @@ window.addEventListener('DOMContentLoaded', () => {
   // path already calls requireUnlock(). The decrypted key is never persisted.
   const restored = restoreReadOnlyAccount();
   const boot = () => {
+    // Session secret (sessionStorage) survives a refresh: restore the signer
+    // and stay unlocked. Closing the tab wipes it → back to the password box.
+    const sessionSecret = wallet.getSession();
+    if (sessionSecret) {
+      try {
+        const signer = wallet.signerFromSecret(sessionSecret);
+        set('signer', signer);
+        set('address', signer.address);
+        set('unlocked', true);
+        updateTopbar();
+        loadDashboard();
+        startAutoLock();
+        return;
+      } catch { wallet.clearSession(); }
+    }
     if (restored) { updateTopbar(); loadDashboard(); }
     else if (wallet.getKeystore()) showUnlockModal();
     else showWelcomeModal();
@@ -288,10 +303,11 @@ function showUnlockModal() {
   pw.focus();
   const doUnlock = async () => {
     try {
-      const signer = await wallet.unlockWallet(pw.value);
+      const { signer, secret } = await wallet.unlockSession(pw.value);
       set('signer', signer);
       set('address', signer.address);
       set('unlocked', true);
+      wallet.saveSession(secret);
       pw.value = '';
       closeModal();
       toast('Wallet unlocked! 🐻', 'success');
@@ -392,6 +408,7 @@ function showSeedPhrase(mnemonic, address) {
     set('signer', ethers.Wallet.fromPhrase(mnemonic));
     set('address', address);
     set('unlocked', true);
+    wallet.saveSession(mnemonic);
     closeModal();
     toast('Wallet created! 🐻', 'success');
     updateTopbar();
@@ -428,6 +445,7 @@ function showImportModal() {
       set('signer', new ethers.Wallet(secret.startsWith('0x') ? secret : ethers.Wallet.fromPhrase(secret).privateKey));
       set('address', res.address);
       set('unlocked', true);
+      wallet.saveSession(secret);
       $('#importSecret').value = ''; $('#importPw').value = '';
       closeModal();
       toast('Wallet imported! 🐻', 'success');
@@ -445,6 +463,7 @@ function startAutoLock() {
   lockTimer = setTimeout(() => {
     set('unlocked', false);
     set('signer', null);
+    wallet.clearSession();
     toast('Auto-locked 🔒', 'info');
     showUnlockModal();
   }, get('settings').autoLock * 60 * 1000);
@@ -657,6 +676,7 @@ function showAccountModal() {
   };
   $('#lockBtn').onclick = () => {
     set('unlocked', false); set('signer', null);
+    wallet.clearSession();
     closeModal();
     toast('Locked 🔒', 'info');
     showUnlockModal();
@@ -686,13 +706,6 @@ async function loadDashboard() {
   // Network name only. The wallet address lives in the Receive modal — it is
   // not shown (or copyable) from the home screen any more.
   $('#balanceSub').textContent = net.name;
-
-  // ── wallet status ──
-  const statusDot = document.querySelector('.status-dot');
-  const statusText = document.querySelector('.status-text');
-  const unlocked = !!get('unlocked');
-  if (statusDot) { statusDot.className = 'status-dot ' + (unlocked ? 'connected' : 'disconnected'); }
-  if (statusText) { statusText.textContent = unlocked ? 'Connected' : 'Locked · tap account to unlock'; }
 
   const assetList = $('#assetList');
   if (!assetList) return;
@@ -1041,6 +1054,8 @@ function bindViews() {
 
   $('#btnSaveSettings').addEventListener('click', saveSettingsHandler);
   $('#btnClearData').addEventListener('click', clearAllData);
+  const testnetEl = $('#setTestnet');
+  if (testnetEl) testnetEl.checked = get('settings').testnet !== false;
 }
 
 // ── approval manager ──
@@ -1207,6 +1222,8 @@ function saveSettingsHandler() {
   settings.currency = $('#setCurrency').value;
   settings.lang = $('#setLang').value;
   settings.autoLock = Number($('#setAutoLock').value) || 5;
+  const testnetEl = $('#setTestnet');
+  if (testnetEl) settings.testnet = testnetEl.checked;
   const rpc = $('#setRpc').value.trim();
   if (rpc) {
     if (!/^https:\/\//.test(rpc)) return toast('Custom RPC must be an https:// URL', 'error');
@@ -1221,6 +1238,16 @@ function saveSettingsHandler() {
   setLang(settings.lang);
   toast('Settings saved! 🐻', 'success');
   startAutoLock();
+  // testnet toggle: if the active network is a testnet and testnets are now
+  // hidden, fall back to Ethereum so the app never sits on an invisible chain.
+  if (!settings.testnet) {
+    const activeNet = getNetworkById(get('networkId'));
+    if (activeNet?.type === 'testnet') {
+      set('networkId', 'ethereum');
+      updateTopbar();
+      if (get('address')) loadDashboard();
+    }
+  }
 }
 
 function clearAllData() {
@@ -1235,6 +1262,7 @@ function clearAllData() {
   `);
   $('#clearBtn').onclick = () => {
     wallet.clearKeystore();
+    wallet.clearSession();
     localStorage.removeItem('bear.settings');
     localStorage.removeItem('bear.activity');
     localStorage.removeItem('bear.customNetworks');

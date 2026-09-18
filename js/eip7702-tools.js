@@ -230,23 +230,16 @@ async function executeBatch() {
     const signer = get('signer').connect(provider);
     const chainId = Number(net.chainId);
 
-    // Reuse an existing batch contract deployed by this wallet (gas savings)
-    let batchContract;
+    // Batch helper must be deployed first (step 1 in the helper status card).
+    // No silent auto-deploy here: the user explicitly deploys it up front.
     const existing = await findUsableDeployed('batch', chainId, item =>
       item.deployer?.toLowerCase() === get('address').toLowerCase(), provider);
-    if (existing) {
-      batchContract = new ethers.Contract(existing.address, existing.abi, signer);
-      toast('Reusing batch contract: ' + wallet.shortAddress(existing.address), 'info');
-    } else {
-      toast('Compiling batch contract...', 'info');
-      const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
-      batchContract = await deployContract(signer, abi, bytecode);
-      const batchAddr = await batchContract.getAddress();
-      saveDeployed('batch', batchAddr, { chainId, deployer: get('address'), abi });
-      toast('Batch contract deployed: ' + wallet.shortAddress(batchAddr), 'success');
-      renderHelperStatus();
-      renderDeployedRegistry();
+    if (!existing) {
+      toast('Deploy the batch helper first (step 1 above)', 'error');
+      return;
     }
+    const batchContract = new ethers.Contract(existing.address, existing.abi, signer);
+    toast('Reusing batch contract: ' + wallet.shortAddress(existing.address), 'info');
     const batchAddr = await batchContract.getAddress();
 
     // Encode execute() calldata
@@ -325,21 +318,16 @@ async function executeRescue() {
     // out of scope at that call → ReferenceError on every rescue.
     const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
 
-    // Reuse an existing rescue contract for the same (safe, target) pair
-    let rescueContract;
+    // Rescue helper must be deployed first (step 1 in the helper status card).
+    // No silent auto-deploy here: the user explicitly deploys it up front.
     const existing = await findUsableDeployed('rescue', chainId, item =>
       item.safe?.toLowerCase() === safe.toLowerCase() && item.target?.toLowerCase() === target.toLowerCase(), provider);
-    if (existing) {
-      rescueContract = new ethers.Contract(existing.address, existing.abi, provider);
-      toast('Reusing rescue contract: ' + wallet.shortAddress(existing.address), 'info');
-    } else {
-      toast('Compiling rescue contract...', 'info');
-      const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
-      rescueContract = await deployContract(sponsorSigner, abi, bytecode, [safe, target]);
-      const rescueAddr = await rescueContract.getAddress();
-      saveDeployed('rescue', rescueAddr, { chainId, safe, target, abi });
-      toast('Rescue contract deployed: ' + wallet.shortAddress(rescueAddr), 'success');
+    if (!existing) {
+      toast('Deploy the rescue helper first (step 1 above)', 'error');
+      return;
     }
+    const rescueContract = new ethers.Contract(existing.address, existing.abi, provider);
+    toast('Reusing rescue contract: ' + wallet.shortAddress(existing.address), 'info');
     const rescueAddr = await rescueContract.getAddress();
 
     // Build calldata based on token type
@@ -421,21 +409,16 @@ async function executeClaim() {
     // reuse and the deploy branch AND at delegateAndExecute.
     const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
 
-    // Reuse an existing claimer contract for this wallet (gas savings)
-    let claimerContract;
+    // Airdrop claimer must be deployed first (step 1 in the helper status card).
+    // No silent auto-deploy here: the user explicitly deploys it up front.
     const existing = await findUsableDeployed('airdrop', chainId, item =>
       item.target?.toLowerCase() === targetAddress.toLowerCase(), provider);
-    if (existing) {
-      claimerContract = new ethers.Contract(existing.address, existing.abi, provider);
-      toast('Reusing claimer contract: ' + wallet.shortAddress(existing.address), 'info');
-    } else {
-      toast('Compiling airdrop claimer contract...', 'info');
-      const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
-      claimerContract = await deployContract(sponsorSigner, abi, bytecode, [targetAddress]);
-      const claimerAddr = await claimerContract.getAddress();
-      saveDeployed('airdrop', claimerAddr, { chainId, target: targetAddress, abi });
-      toast('Claimer contract deployed: ' + wallet.shortAddress(claimerAddr), 'success');
+    if (!existing) {
+      toast('Deploy the airdrop claimer first (step 1 above)', 'error');
+      return;
     }
+    const claimerContract = new ethers.Contract(existing.address, existing.abi, provider);
+    toast('Reusing claimer contract: ' + wallet.shortAddress(existing.address), 'info');
     const claimerAddr = await claimerContract.getAddress();
 
     // Encode claimAndForward() calldata
@@ -507,16 +490,18 @@ export function renderHelperStatus() {
     row('Rescue Atomic', rescue.length > 0,
       rescue.length
         ? `Bound to your inputs: ${rescue.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
-        : 'Deployed automatically on the first run — its constructor takes your locked wallet + SAFE address.',
-      ''),
+        : 'Deploy it first — its constructor takes your locked wallet + SAFE address from the form below.',
+      `<button class="btn btn-sm ${rescue.length ? 'btn-ghost' : 'btn-primary'}" id="btnDeployRescueHelper">${rescue.length ? 'Deploy another' : 'Deploy rescue helper'}</button>`),
     row('Claim Airdrop', airdrop.length > 0,
       airdrop.length
         ? `Bound to your inputs: ${airdrop.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
-        : 'Deployed automatically on the first run — its constructor takes the locked wallet as rescuer.',
-      '')
+        : 'Deploy it first — its constructor takes the locked wallet as rescuer.',
+      `<button class="btn btn-sm ${airdrop.length ? 'btn-ghost' : 'btn-primary'}" id="btnDeployAirdropClaimer">${airdrop.length ? 'Deploy another' : 'Deploy airdrop claimer'}</button>`)
   ].join('');
 
   $('#btnDeployBatchHelper')?.addEventListener('click', deployBatchHelper);
+  $('#btnDeployRescueHelper')?.addEventListener('click', deployRescueHelper);
+  $('#btnDeployAirdropClaimer')?.addEventListener('click', deployAirdropClaimer);
 }
 
 // Explicit "deploy the helper first" action for Batch (no constructor args).
@@ -542,6 +527,69 @@ export async function deployBatchHelper() {
     toast(e?.message || String(e), 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = label || 'Deploy batch helper'; }
+  }
+}
+
+// Explicit "deploy the helper first" action for Rescue (constructor: safe, target).
+export async function deployRescueHelper() {
+  if (!get('unlocked')) { requireUnlock(); return; }
+  const target = $('#eip7702RescueTarget').value.trim();
+  const safe = $('#eip7702RescueSafe').value.trim();
+  const sponsorKey = $('#eip7702RescueSponsorKey').value.trim();
+  if (!wallet.isValidAddress(target)) return toast('Fill a valid locked wallet address first', 'error');
+  if (!wallet.isValidAddress(safe)) return toast('Fill a valid SAFE address first', 'error');
+  if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+
+  const net = getNetworkById(get('networkId'));
+  const btn = $('#btnDeployRescueHelper');
+  const label = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Deploying…'; }
+  try {
+    const provider = get('provider') || await getProvider(net.chainId);
+    set('provider', provider);
+    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+    const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
+    const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, target]);
+    const addr = await contract.getAddress();
+    saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, abi });
+    addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
+    toast('Rescue helper deployed: ' + wallet.shortAddress(addr), 'success');
+    renderHelperStatus();
+    renderDeployedRegistry();
+  } catch (e) {
+    toast(e?.message || String(e), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label || 'Deploy rescue helper'; }
+  }
+}
+
+// Explicit "deploy the helper first" action for Claim Airdrop (constructor: rescuer).
+export async function deployAirdropClaimer() {
+  if (!get('unlocked')) { requireUnlock(); return; }
+  const sponsorKey = $('#eip7702ClaimSponsorKey').value.trim();
+  if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+
+  const net = getNetworkById(get('networkId'));
+  const btn = $('#btnDeployAirdropClaimer');
+  const label = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Deploying…'; }
+  try {
+    const provider = get('provider') || await getProvider(net.chainId);
+    set('provider', provider);
+    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+    const targetAddress = get('address');
+    const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
+    const contract = await deployContract(sponsorSigner, abi, bytecode, [targetAddress]);
+    const addr = await contract.getAddress();
+    saveDeployed('airdrop', addr, { chainId: Number(net.chainId), target: targetAddress, abi });
+    addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `airdrop → ${addr}` });
+    toast('Airdrop claimer deployed: ' + wallet.shortAddress(addr), 'success');
+    renderHelperStatus();
+    renderDeployedRegistry();
+  } catch (e) {
+    toast(e?.message || String(e), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label || 'Deploy airdrop claimer'; }
   }
 }
 

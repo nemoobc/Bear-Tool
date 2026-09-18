@@ -16,7 +16,7 @@ const state = {
   bridgeQuote: null,
   batch: [],           // [{target, data, value}]
   approvals: [],
-  settings: { currency: 'usd', lang: 'en', autoLock: 5, rpc: '' }
+  settings: { currency: 'usd', lang: 'en', autoLock: 5, rpc: '', testnet: true }
 };
 
 const listeners = new Map();

@@ -23,7 +23,7 @@ const CACHE_TTL = 30_000;
 const UNISWAP_V2_ROUTER = {
   1: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Ethereum
   5: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Goerli
-  11155111: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Sepolia
+  11155111: '0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3', // Sepolia (V2Router02 — different address from mainnet!)
   10: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Optimism
   137: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Polygon
   42161: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Arbitrum
@@ -45,7 +45,6 @@ const UNISWAP_QUOTER_V3 = {
   137: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
   42161: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
   8453: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
-  11155111: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
 };
 
 // Uniswap V2 Router ABI (minimal)
@@ -73,7 +72,7 @@ const CHAIN_WETH = {
   137: '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270', // Polygon WMATIC
   8453: '0x4200000000000000000000000000000000000006', // Base WETH
   42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum WETH
-  11155111: '0xfFf997675846FbDE638e6Be6E0Cee9B40AC2EF02', // Sepolia WETH
+  11155111: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14', // Sepolia WETH (verified on-chain via router.WETH())
 };
 
 // ── Extended popular tokens ──
@@ -92,11 +91,10 @@ export const POPULAR_TOKENS = {
     { address: '0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0', symbol: 'wstETH', decimals: 18 },
     { address: '0x9e1028F5F1D5eDE59748FFceE5532509976840E0', symbol: 'FRAX', decimals: 18 },
   ],
-  11155111: [ // Sepolia
-    { address: '0xfFf997675846FbDE638e6Be6E0Cee9B40AC2EF02', symbol: 'WETH', decimals: 18 },
-    { address: '0x1c7D4B196Cb0C7B01d0686A7A22546cDa02c4e42', symbol: 'USDC', decimals: 6 },
-    { address: '0x7169AE3C7586262Ad1AF40B0541bD20043442c3E', symbol: 'USDT', decimals: 6 },
-    { address: '0x739ca6D71365a08f584c8FC4e1029045Fa8ABC4B', symbol: 'WETH', decimals: 18 },
+11155111: [ // Sepolia
+    { address: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14', symbol: 'WETH', decimals: 18 },
+    { address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', symbol: 'USDC', decimals: 6 },
+    { address: '0x779877A7B0D9E8603169DdbD7836e478b4624789', symbol: 'LINK', decimals: 18 },
   ],
   42161: [ // Arbitrum
     { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', decimals: 18 },

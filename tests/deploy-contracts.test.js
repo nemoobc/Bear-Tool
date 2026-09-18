@@ -27,6 +27,8 @@ test('deploy: solc loader uses the BROWSER build (soljson), never the Node CLI',
   assert.doesNotMatch(solcJs.SOLC_URL, /\/solc\.js$/, 'solc.js is the Node CLI wrapper and breaks in a browser');
   assert.match(solcJs.SOLC_URL, /solc@0\.8\.28\//, 'compiler version must be pinned');
   assert.match(solcJs.SOLC_URL, /^https:\/\/cdn\.jsdelivr\.net\//, 'CDN must be allow-listed by the CSP');
+  assert.ok(Array.isArray(solcJs.SOLC_FALLBACK_URLS) && solcJs.SOLC_FALLBACK_URLS.length > 0, 'a fallback CDN must exist so a blocked primary does not look like a compile error');
+  assert.ok(solcJs.SOLC_FALLBACK_URLS.every(u => /^https:\/\/unpkg\.com\//.test(u)), 'fallback CDN must be allow-listed by the CSP');
   assert.match(solcJs.SOLC_VERSION, /^0\.8\.\d+$/, 'version constant must be a 0.8.x release');
 });
 
@@ -135,9 +137,19 @@ test('tools: "deploy the helper first" is explicit, real, and bounded', () => {
   assert.ok(view.indexOf('id="helperStatusList"') < view.indexOf('id="eip7702BatchList"'), 'step 1 must come before the batch queue');
   // explicit up-front deploy + the fixed compiler
   assert.match(tools, /export async function deployBatchHelper\(\)/, 'user must be able to deploy the helper up front');
+  assert.match(tools, /export async function deployRescueHelper\(\)/, 'rescue helper must be deployable up front');
+  assert.match(tools, /export async function deployAirdropClaimer\(\)/, 'airdrop claimer must be deployable up front');
   assert.match(tools, /import \{ compileContract \} from '\.\/solc\.js'/, 'helper compile must use the fixed solc loader');
   assert.doesNotMatch(tools, /solc@0\.8\.28\/solc\.js/, 'the Node solc build must never be loaded again');
   assert.doesNotMatch(tools, /ensureSolcLoaded/, 'the broken loader must be gone');
+  // every flow REQUIRES the helper to be deployed first — no silent auto-deploy
+  assert.match(tools, /Deploy the batch helper first/, 'batch exec must demand a pre-deployed helper');
+  assert.match(tools, /Deploy the rescue helper first/, 'rescue exec must demand a pre-deployed helper');
+  assert.match(tools, /Deploy the airdrop claimer first/, 'claim exec must demand a pre-deployed helper');
+  assert.doesNotMatch(tools, /Compiling batch contract\.\.\./, 'batch exec must not auto-deploy');
+  assert.doesNotMatch(tools, /Compiling rescue contract\.\.\./, 'rescue exec must not auto-deploy');
+  assert.doesNotMatch(tools, /Compiling airdrop claimer contract\.\.\./, 'claim exec must not auto-deploy');
+  assert.doesNotMatch(tools, /Deployed automatically on the first run/, 'status card must not promise auto-deploy');
   // a helper deploy must never spin forever
   const fn = tools.slice(tools.indexOf('async function deployContract'), tools.indexOf('// ── EIP-7702: delegate'));
   assert.match(fn, /waitForReceipt\(/, 'helper deploy must be bounded by waitForReceipt');

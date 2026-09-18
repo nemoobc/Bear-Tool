@@ -10,6 +10,7 @@
 
 import { fetchAllPrices } from './price.js';
 import { withTimeout, RPC_TIMEOUT_MS } from './safetx.js';
+import { get } from './state.js';
 
 export const NETWORKS = [
   {
@@ -245,7 +246,11 @@ export function removeCustomNetwork(id) {
 }
 
 export function getAllNetworks() {
-  return [...NETWORKS, ...getCustomNetworks()];
+  const all = [...NETWORKS, ...getCustomNetworks()];
+  // Settings → Testnet mode OFF hides every testnet from choosers.
+  const settings = get('settings') || {};
+  if (settings.testnet === false) return all.filter(n => n.type !== 'testnet');
+  return all;
 }
 
 export function getNetwork(chainId) {

@@ -12,6 +12,10 @@
 
 export const SOLC_VERSION = '0.8.28';
 export const SOLC_URL = `https://cdn.jsdelivr.net/npm/solc@${SOLC_VERSION}/soljson.js`;
+// Mirrors tried in order when the primary CDN fails (all allow-listed by the CSP).
+export const SOLC_FALLBACK_URLS = [
+  `https://unpkg.com/solc@${SOLC_VERSION}/soljson.js`
+];
 const LOAD_TIMEOUT_MS = 120000;
 const READY_POLL_MS = 100;
 
@@ -37,28 +41,43 @@ function waitForRuntime(deadline) {
   });
 }
 
+function loadScript(url) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = url;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to download the Solidity compiler from ' + url));
+    document.head.appendChild(script);
+  });
+}
+
 // Load + start the wasm compiler. Cached for the session; a rejection clears
-// the cache so the user can simply tap Deploy again.
+// the cache so the user can simply tap Deploy again. Tries the primary CDN
+// first, then each mirror — a blocked/slow CDN must not look like a compile error.
 export function loadCompiler({ onStatus } = {}) {
   if (compilerPromise) return compilerPromise;
   compilerPromise = (async () => {
     // Some bundlers/tests provide a ready solc-js object.
     if (typeof globalThis.solc?.compile === 'function') return globalThis.solc;
     if (typeof document === 'undefined') throw new Error('Cannot load the Solidity compiler without a DOM');
-    onStatus?.(`Loading Solidity compiler ${SOLC_VERSION} (~9 MB, first run only)…`);
-    await new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = SOLC_URL;
-      script.async = true;
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Failed to download the Solidity compiler from ' + SOLC_URL));
-      document.head.appendChild(script);
-    });
-    const M = await waitForRuntime(Date.now() + LOAD_TIMEOUT_MS);
-    const compile = M.cwrap('solidity_compile', 'string', ['string', 'number']);
-    if (typeof compile !== 'function') throw new Error('Solidity compiler loaded but exposed no solidity_compile()');
-    onStatus?.('Solidity compiler ready.');
-    return { compile: (json) => compile(json, 1), version: () => SOLC_VERSION };
+    const urls = [SOLC_URL, ...SOLC_FALLBACK_URLS];
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        onStatus?.(`Loading Solidity compiler ${SOLC_VERSION} (~9 MB, first run only)…`);
+        await loadScript(url);
+        const M = await waitForRuntime(Date.now() + LOAD_TIMEOUT_MS);
+        const compile = M.cwrap('solidity_compile', 'string', ['string', 'number']);
+        if (typeof compile !== 'function') throw new Error('Solidity compiler loaded but exposed no solidity_compile()');
+        onStatus?.('Solidity compiler ready.');
+        return { compile: (json) => compile(json, 1), version: () => SOLC_VERSION };
+      } catch (e) {
+        lastErr = e;
+        onStatus?.(`Compiler download failed — trying a mirror…`);
+      }
+    }
+    throw lastErr || new Error('Failed to load the Solidity compiler');
   })();
   compilerPromise.catch(() => { compilerPromise = null; });
   return compilerPromise;
