@@ -1,9 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — theme.js
-// Intro logo animation (exactly 5s, reduced-motion aware)
+// Intro logo animation (2.5s, reduced-motion aware)
 // + mascot helpers.
 // Original implementation — no copying.
 // ═══════════════════════════════════════════════════════════════
+
+// Intro duration. Was 5s — too long for a first-impression flourish, so it
+// was cut to 2.5s. Tests assert this value (tests/e2e-probe.test.js).
+export const INTRO_MS = 2500;
 
 export function runIntro(onDone) {
   const intro = document.getElementById('intro');
@@ -31,19 +35,19 @@ export function runIntro(onDone) {
   // skip on click anywhere on intro
   if (intro) intro.addEventListener('click', () => finish(true));
 
-  // letter-by-letter title (phase 3: 2-3s)
+  // letter-by-letter title (phase 3: 0.8-1.6s)
   const text = 'BEAR TOOL';
   if (!title) return; // no intro title in this DOM — animation is optional
   title.innerHTML = '';
   [...text].forEach((ch, i) => {
     const span = document.createElement('span');
     span.textContent = ch === ' ' ? '\u00A0' : ch;
-    span.style.animationDelay = (2 + i * 0.08) + 's';
+    span.style.animationDelay = (0.8 + i * 0.06) + 's';
     title.appendChild(span);
   });
 
-  // exact 5s timer → fade out
-  setTimeout(() => finish(false), 5000);
+  // exact 2.5s timer → fade out
+  setTimeout(() => finish(false), INTRO_MS);
 }
 
 // mascot reaction helper: swap bear image expression

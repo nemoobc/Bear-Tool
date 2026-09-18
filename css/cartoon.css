@@ -183,7 +183,7 @@ body::before {
   animation:
     intro-bounce 1s cubic-bezier(.34,1.56,.64,1) both,
     intro-float 1.6s ease-in-out 1s infinite,
-    intro-pop 0.5s cubic-bezier(.34,1.56,.64,1) 4s forwards;
+    intro-pop 0.5s cubic-bezier(.34,1.56,.64,1) 2s forwards;
 }
 @keyframes intro-bounce {
   0%   { transform: scale(0) rotate(-20deg); opacity: 0; }
@@ -204,7 +204,7 @@ body::before {
 .intro-logo .eye {
   transform-box: fill-box;
   transform-origin: center;
-  animation: intro-blink 0.15s ease 2.2s 2;
+  animation: intro-blink 0.15s ease 1.2s 2;
 }
 @keyframes intro-blink {
   0%, 100% { transform: scaleY(1); }
@@ -220,9 +220,9 @@ body::before {
   z-index: 2;
   animation: intro-sparkle 0.7s ease both;
 }
-.intro-sparkle-1 { top: 6%; left: 8%; animation-delay: 1.2s; }
-.intro-sparkle-2 { top: 12%; right: 6%; animation-delay: 1.5s; }
-.intro-sparkle-3 { bottom: 8%; left: 18%; animation-delay: 1.8s; }
+.intro-sparkle-1 { top: 6%; left: 8%; animation-delay: 0.6s; }
+.intro-sparkle-2 { top: 12%; right: 6%; animation-delay: 0.75s; }
+.intro-sparkle-3 { bottom: 8%; left: 18%; animation-delay: 0.9s; }
 @keyframes intro-sparkle {
   0%   { transform: scale(0) rotate(0deg); opacity: 0; }
   40%  { transform: scale(1.3) rotate(20deg); opacity: 1; }
@@ -254,13 +254,13 @@ body::before {
   border-top: var(--border);
   z-index: 10000;
   opacity: 0;
-  animation: intro-progress-in 0.3s ease 3s both;
+  animation: intro-progress-in 0.3s ease 1.5s both;
 }
 .intro-progress .fill {
   height: 100%;
   width: 60%;
   background: linear-gradient(90deg, var(--honey), var(--orange));
-  animation: intro-fill 2s linear 3s forwards;
+  animation: intro-fill 1s linear 1.5s forwards;
 }
 @keyframes intro-progress-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes intro-fill { to { width: 100%; } }
@@ -272,7 +272,7 @@ body::before {
   border-radius: 50%;
   background: radial-gradient(circle, rgba(255,201,60,.55) 0%, rgba(255,138,61,.25) 45%, transparent 70%);
   opacity: 0;
-  animation: intro-splash 0.6s ease 4s both;
+  animation: intro-splash 0.6s ease 2s both;
 }
 @keyframes intro-splash {
   0%   { transform: scale(0.4); opacity: 0; }
@@ -319,16 +319,38 @@ body::before {
 .spinner-label { font-weight: 700; font-size: 0.9rem; }
 .spinner-count { font-weight: 700; font-size: 0.8rem; color: var(--ink-soft); }
 
-.spinner-dots { display: flex; gap: 6px; }
+.spinner-dots { display: inline-flex; align-items: center; gap: 5px; }
 .spinner-dots span {
-  width: 10px; height: 10px;
+  width: 8px; height: 8px;
   border-radius: 50%;
   background: var(--orange);
-  animation: dot-bounce 0.9s ease infinite;
+  animation: dot-bounce 1s cubic-bezier(.28,.84,.42,1) infinite;
 }
-.spinner-dots span:nth-child(2) { animation-delay: 0.15s; background: var(--sky); }
-.spinner-dots span:nth-child(3) { animation-delay: 0.3s; background: var(--grape); }
-@keyframes dot-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+.spinner-dots span:nth-child(2) { animation-delay: 0.12s; background: var(--sky); }
+.spinner-dots span:nth-child(3) { animation-delay: 0.24s; background: var(--grape); }
+@keyframes dot-bounce {
+  0%, 100% { transform: translateY(0) scale(1); opacity: .55; }
+  50% { transform: translateY(-6px) scale(1.2); opacity: 1; }
+}
+
+/* Receive modal QR code (qrcode-generator SVG) */
+.receive-qr svg {
+  width: 180px;
+  height: 180px;
+  border-radius: 12px;
+  background: var(--white);
+  border: 2px solid var(--ink);
+  padding: 8px;
+}
+
+/* CoinGecko auto-detected token logos (asset list) */
+.token-logo-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
 
 .spinner-honey {
   display: inline-block;

@@ -598,7 +598,7 @@
         <section class="view" id="view-activity">
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> <span data-i18n="nav.activity">Activity</span></div>
-            <div class="activity-timeline" id="activityList"><div class="empty-state"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><p>No transactions yet</p><p class="sub">Send, swap, bridge or deploy to see activity here</p></div></div>
+            <div class="activity-timeline" id="activityList"><div class="empty-state"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><p>No transactions yet</p></div></div>
           </div>
         </section>
 
@@ -645,8 +645,16 @@
               </div>
             </div>
             <div class="field">
-              <label for="setAutoLock">Auto-lock (minutes)</label>
-              <input class="input" id="setAutoLock" type="number" value="5" min="1" max="60">
+              <label for="setAutoLock">Auto-lock</label>
+              <select class="select" id="setAutoLock">
+                <option value="1">1 minute</option>
+                <option value="5" selected>5 minutes</option>
+                <option value="10">10 minutes</option>
+                <option value="15">15 minutes</option>
+                <option value="30">30 minutes</option>
+                <option value="60">1 hour</option>
+                <option value="0">Never</option>
+              </select>
             </div>
             <div class="field">
               <label class="switch-label" for="setTestnet">Testnet mode</label>
@@ -697,6 +705,8 @@
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.14.0/dist/ethers.umd.min.js"
     integrity="sha384-34QHxjpmrckLfsLBqjRCEfb9y2fUhFwOPXGgAcnStQq185tj8/hY8VB6UY94pSUm"
     crossorigin="anonymous"></script>
+  <!-- qrcode-generator v1.4.4 (vendored, MIT) — Receive QR code -->
+  <script src="js/vendor/qrcode.min.js"></script>
   <!-- app modules -->
   <script type="module" src="js/app.js"></script>
 </body>

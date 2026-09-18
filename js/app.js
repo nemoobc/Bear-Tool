@@ -47,11 +47,25 @@ window.addEventListener('DOMContentLoaded', () => {
   // path already calls requireUnlock(). The decrypted key is never persisted.
   const restored = restoreReadOnlyAccount();
   const boot = () => {
-    // Session secret (sessionStorage) survives a refresh: restore the signer
-    // and stay unlocked. Closing the tab wipes it → back to the password box.
+    // Session secret survives a refresh (sessionStorage) and a tab reopen
+    // (localStorage fallback, within the auto-lock window): restore the signer
+    // and stay unlocked. Lock / auto-lock clears both copies.
     const sessionSecret = wallet.getSession();
     if (sessionSecret) {
       try {
+        // A true refresh keeps the sessionStorage copy (always fresh). A
+        // tab-reopen restore comes from localStorage — only trust it within
+        // the auto-lock window, so closing the tab can't leave the wallet
+        // unlocked forever. "Never" (0) falls back to a 24h cap.
+        if (!wallet.hasSessionStorage()) {
+          const ts = wallet.getSessionTs();
+          const minutes = get('settings').autoLock;
+          const maxAge = (minutes > 0 ? minutes : 24 * 60) * 60 * 1000;
+          if (ts && Date.now() - ts > maxAge) {
+            wallet.clearSession();
+            throw new Error('Session expired');
+          }
+        }
         const signer = wallet.signerFromSecret(sessionSecret);
         set('signer', signer);
         set('address', signer.address);
@@ -375,6 +389,7 @@ function showSeedPhrase(mnemonic, address) {
     <div class="card" style="box-shadow:none;background:var(--cream)">
       <div class="mono" style="font-size:1.1rem;line-height:2">${words.map((w, i) => `<b>${i + 1}.</b> ${escapeHtml(w)}`).join(' ')}</div>
     </div>
+    <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(mnemonic)}">📋 Copy seed phrase</button>
     <div class="field">
       <label>Select word #1 to confirm</label>
       <div class="seed-choices" id="seedChoices">
@@ -461,13 +476,15 @@ function showImportModal() {
 let lockTimer = null;
 function startAutoLock() {
   clearTimeout(lockTimer);
+  const minutes = get('settings').autoLock;
+  if (!(minutes > 0)) return; // 0 = Never auto-lock
   lockTimer = setTimeout(() => {
     set('unlocked', false);
     set('signer', null);
     wallet.clearSession();
     toast('Auto-locked 🔒', 'info');
     showUnlockModal();
-  }, get('settings').autoLock * 60 * 1000);
+  }, minutes * 60 * 1000);
 }
 function resetLock() {
   if (get('unlocked')) startAutoLock();
@@ -746,6 +763,12 @@ async function loadDashboard() {
       });
     } catch {}
     renderAssets(tokens);
+    // Auto-detect logos from CoinGecko for tokens outside the manual map,
+    // then re-render once — but only if this is still the active token list
+    // (a network switch may have replaced it while the fetch was in flight).
+    ensureTokenLogos(tokens).then(() => {
+      if (window._assetTokens === tokens) renderAssets(tokens);
+    });
     // not awaited on purpose (NFT scan is slow) — but its rejection must be
     // handled here, or a null element becomes a global "Unexpected error" toast
     loadNfts().catch((e) => console.warn('[BearTool] NFT scan failed:', e?.message || e));
@@ -765,6 +788,55 @@ function holdingUsd(t) {
   catch { amt = 0; }
   if (!Number.isFinite(amt)) amt = 0;
   return amt * t.usd;
+}
+
+// ── CoinGecko token logos (auto-detect, cached 24h) ──
+// The manual SVG map covers the popular tokens; anything else asks CoinGecko
+// search once per symbol and caches the result so the list stays fast.
+const LOGO_CACHE_KEY = 'bear.logoCache';
+const LOGO_TTL = 24 * 60 * 60 * 1000;
+const MANUAL_LOGO_SYMS = new Set(['eth', 'ether', 'usdc', 'usdt', 'dai', 'wbtc', 'link', 'uni', 'aave', 'reth', 'cbeth', 'wsteth', 'frax']);
+
+function loadLogoCache() {
+  try { return JSON.parse(localStorage.getItem(LOGO_CACHE_KEY) || '{}'); }
+  catch { return {}; }
+}
+function saveLogoCache(cache) {
+  try { localStorage.setItem(LOGO_CACHE_KEY, JSON.stringify(cache)); } catch {}
+}
+function getCachedLogo(sym) {
+  const e = loadLogoCache()[(sym || '').toLowerCase()];
+  return e && Date.now() - e.ts < LOGO_TTL ? e.url : null;
+}
+function cacheLogo(sym, url) {
+  const c = loadLogoCache();
+  c[(sym || '').toLowerCase()] = { url, ts: Date.now() };
+  saveLogoCache(c);
+}
+async function fetchCoinGeckoLogo(sym) {
+  const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(sym)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const coins = Array.isArray(data?.coins) ? data.coins : [];
+    const hit = coins.find(c => (c.symbol || '').toLowerCase() === String(sym).toLowerCase() && c.large);
+    return hit?.large || null;
+  } catch { return null; }
+  finally { clearTimeout(timer); }
+}
+// Fetch + cache logos for tokens not covered by the manual SVG map.
+// Never throws — logo failures just leave the default SVG in place.
+async function ensureTokenLogos(tokens) {
+  const missing = (tokens || []).filter(t =>
+    t.symbol && !MANUAL_LOGO_SYMS.has(t.symbol.toLowerCase()) && !getCachedLogo(t.symbol)
+  );
+  await Promise.allSettled(missing.map(async (t) => {
+    const url = await fetchCoinGeckoLogo(t.symbol);
+    if (url) cacheLogo(t.symbol, url);
+  }));
 }
 
 function renderAssets(tokens) {
@@ -810,6 +882,8 @@ function renderAssets(tokens) {
     if (s === 'cbeth') return tokenLogos.cbeth(i);
     if (s === 'wsteth') return tokenLogos.wsteth(i);
     if (s === 'frax') return tokenLogos.frax(i);
+    const cached = getCachedLogo(sym);
+    if (cached) return `<img class="token-logo-img" data-idx="${i}" src="${escapeHtml(cached)}" alt="" loading="lazy">`;
     return tokenLogos.default(i);
   };
   // Store tokens for filtering
@@ -832,6 +906,13 @@ function renderAssets(tokens) {
   if (filtered.length === 0) {
     assetList.innerHTML = '<p class="small text-center">No tokens match your search.</p>';
   }
+  // CoinGecko images can 404/expire — fall back to the default SVG quietly.
+  $all('.token-logo-img').forEach(img => {
+    img.addEventListener('error', () => {
+      const i = Number(img.dataset.idx || 0);
+      img.outerHTML = tokenLogos.default(i);
+    });
+  });
   // Click handlers
   $all('.asset-clickable').forEach(el => {
     el.addEventListener('click', () => showTokenActions(el));
@@ -934,13 +1015,24 @@ function getLogoSVG(sym) {
 }
 
 function showReceiveModal(address, symbol) {
+  const addr = address || get('address');
+  let qrSvg = '';
+  try {
+    if (typeof qrcode === 'function') {
+      const qr = qrcode(0, 'M');
+      qr.addData(addr);
+      qr.make();
+      qrSvg = qr.createSvgTag(4, 8);
+    }
+  } catch { /* QR unavailable — address is still shown below */ }
   openModal(`
     <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
     <h2>Receive ${escapeHtml(symbol)}</h2>
+    ${qrSvg ? `<div class="receive-qr text-center mb-16" role="img" aria-label="QR code for ${escapeHtml(symbol)}">${qrSvg}</div>` : ''}
     <div class="text-center mb-16">
-      <div class="mono" style="font-size:0.85rem;word-break:break-all;padding:12px;background:var(--cream);border-radius:10px;border:2px solid var(--ink)">${escapeHtml(address || get('address'))}</div>
+      <div class="mono" style="font-size:0.85rem;word-break:break-all;padding:12px;background:var(--cream);border-radius:10px;border:2px solid var(--ink)">${escapeHtml(addr)}</div>
     </div>
-    <button class="copy-btn btn btn-primary btn-block" data-copy="${escapeHtml(address || get('address'))}">Copy Address</button>
+    <button class="copy-btn btn btn-primary btn-block" data-copy="${escapeHtml(addr)}">Copy Address</button>
   `);
 }
 
@@ -1058,6 +1150,9 @@ function bindViews() {
   $('#btnClearData').addEventListener('click', clearAllData);
   const testnetEl = $('#setTestnet');
   if (testnetEl) testnetEl.checked = get('settings').testnet !== false;
+  // Auto-lock is a dropdown now — reflect the saved value (not the HTML default)
+  const autoLockEl = $('#setAutoLock');
+  if (autoLockEl) autoLockEl.value = String(get('settings').autoLock ?? 5);
 }
 
 // ── approval manager ──
@@ -1181,7 +1276,6 @@ function renderActivity() {
     list.innerHTML = `<div class="empty-state">
       <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       <p>No transactions yet</p>
-      <p class="sub">Send, swap, bridge or deploy to see activity here</p>
     </div>`;
     return;
   }
@@ -1223,7 +1317,8 @@ function saveSettingsHandler() {
   const settings = get('settings');
   settings.currency = $('#setCurrency').value;
   settings.lang = $('#setLang').value;
-  settings.autoLock = Number($('#setAutoLock').value) || 5;
+  const rawAutoLock = Number($('#setAutoLock').value);
+  settings.autoLock = Number.isFinite(rawAutoLock) ? rawAutoLock : 5;
   const testnetEl = $('#setTestnet');
   if (testnetEl) settings.testnet = testnetEl.checked;
   const rpc = $('#setRpc').value.trim();

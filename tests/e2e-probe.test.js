@@ -87,8 +87,8 @@ test('E2E-probe: import 12-word mnemonic → address + balance display path', as
   console.log('  balance display: requires live RPC (dashboard) — see report');
 });
 
-// ── 2. Intro 5s + skip ──
-test('E2E-probe: intro 5s timer + skip wiring', () => {
+// ── 2. Intro timer + skip ──
+test('E2E-probe: intro timer + skip wiring', () => {
   let done = false;
   const intro = makeEl();
   const skip = makeEl();
@@ -96,11 +96,12 @@ test('E2E-probe: intro 5s timer + skip wiring', () => {
   const logo = makeEl();
   document.getElementById = (id) => id === 'intro' ? intro : id === 'introSkip' ? skip : id === 'introTitle' ? title : id === 'introLogo' ? logo : makeEl();
   theme.runIntro(() => { done = true; });
-  assert.equal(done, false, 'intro must not finish before 5s');
+  assert.equal(done, false, 'intro must not finish synchronously');
+  assert.equal(theme.INTRO_MS, 2500, 'intro must be 2.5s (was 5s — too long for a first-impression flourish)');
   // simulate skip click
   const skipHandler = skip.addEventListener.mock?.calls?.[0]?.[1];
   // (addEventListener is stubbed; skip path verified by code review: click → finish)
-  console.log('  intro: 5s setTimeout + skip click handler present (code review)');
+  console.log('  intro: 2.5s setTimeout + skip click handler present (code review)');
 });
 
 // ── 3. Send double-submit lock ──

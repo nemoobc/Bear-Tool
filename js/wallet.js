@@ -170,14 +170,42 @@ export function signerFromSecret(secret) {
 }
 
 // ── session persistence (refresh keeps wallet unlocked) ──
+// The secret is written to sessionStorage (per-tab, survives refresh) AND to
+// localStorage with a timestamp. The localStorage copy lets a closed-and-
+// reopened tab come back unlocked — but only within the auto-lock window
+// (checked in app.js boot), so closing the tab can never leave the wallet
+// unlocked forever. Lock / auto-lock clears both copies.
+const SESSION_LS_KEY = 'bear.session.ls';
 export function saveSession(secret) {
   try { sessionStorage.setItem(SESSION_KEY, secret); } catch { /* private mode */ }
+  try { localStorage.setItem(SESSION_LS_KEY, JSON.stringify({ s: secret, ts: Date.now() })); } catch { /* private mode */ }
 }
 export function getSession() {
-  try { return sessionStorage.getItem(SESSION_KEY); } catch { return null; }
+  try {
+    const ss = sessionStorage.getItem(SESSION_KEY);
+    if (ss) return ss;
+  } catch { /* ignore */ }
+  try {
+    const ls = JSON.parse(localStorage.getItem(SESSION_LS_KEY) || 'null');
+    if (ls && ls.s) return ls.s;
+  } catch { /* ignore */ }
+  return null;
+}
+// Timestamp of the localStorage copy (null when absent). Used by app.js boot
+// to reject tab-reopen restores older than the auto-lock window.
+export function getSessionTs() {
+  try {
+    const ls = JSON.parse(localStorage.getItem(SESSION_LS_KEY) || 'null');
+    return ls && typeof ls.ts === 'number' ? ls.ts : null;
+  } catch { return null; }
+}
+// True when the sessionStorage copy exists (a true refresh keeps it fresh).
+export function hasSessionStorage() {
+  try { return sessionStorage.getItem(SESSION_KEY) !== null; } catch { return false; }
 }
 export function clearSession() {
   try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  try { localStorage.removeItem(SESSION_LS_KEY); } catch { /* ignore */ }
 }
 
 // derive additional account from seed

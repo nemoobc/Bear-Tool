@@ -85,6 +85,21 @@ test('session: saveSession/getSession/clearSession roundtrip', async () => {
   assert.equal(wallet.getSession(), null);
 });
 
+test('session: localStorage fallback restores a closed tab (within window)', async () => {
+  session.clear();
+  store.clear();
+  const res = await wallet.createWallet('password123');
+  wallet.saveSession(res.mnemonic);
+  // simulate tab close: sessionStorage wiped, localStorage survives
+  session.clear();
+  assert.equal(wallet.hasSessionStorage(), false, 'sessionStorage copy must be gone after tab close');
+  assert.equal(wallet.getSession(), res.mnemonic, 'localStorage copy must restore the session');
+  assert.ok(wallet.getSessionTs() > 0, 'localStorage copy must carry a timestamp');
+  wallet.clearSession();
+  assert.equal(wallet.getSession(), null, 'clearSession must wipe the localStorage copy too');
+  assert.equal(wallet.getSessionTs(), null);
+});
+
 test('signerFromSecret: derives the same address as unlockWallet', async () => {
   store.clear();
   const res = await wallet.createWallet('password123');
