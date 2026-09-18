@@ -30,9 +30,18 @@ test('fork: send native ETH — balances move on-chain', { skip }, async () => {
   const amount = 1000000000000000n; // 0.001
 
   const tx = await signer.sendTransaction({ to, value: amount });
-  const receipt = await tx.wait();
-  assert.equal(receipt.status, 1, 'native send must succeed');
-  assert.equal(await provider.getBalance(to), beforeBal + amount, 'recipient balance must increase by the exact amount');
+  // Poll the balance instead of tx.wait(): anvil's receipt lookup for a
+  // local tx can fall through to the remote RPC (mem/mod.rs
+  // transaction_receipt → fork.transaction_receipt), and publicnode 403s
+  // eth_getTransactionReceipt (archive restriction) on some networks.
+  // The balance change IS the assertion — it proves the transfer landed.
+  const deadline = Date.now() + 30000;
+  let afterBal = await provider.getBalance(to);
+  while (afterBal !== beforeBal + amount && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500));
+    afterBal = await provider.getBalance(to);
+  }
+  assert.equal(afterBal, beforeBal + amount, 'recipient balance must increase by the exact amount');
 });
 
 test('fork: send ERC-20 — balances move on-chain', { skip }, async () => {
