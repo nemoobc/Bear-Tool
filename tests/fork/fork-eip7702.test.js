@@ -75,7 +75,7 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   let receipt;
   try {
     const tx = await target.sendTransaction({
-      to: target.address,
+      to: targetWallet.address,
       authorizationList: [authorization],
       data: '0x'
     });
@@ -87,14 +87,17 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   assert.equal(receipt.status, 1, 'type-4 tx must succeed');
 
   // 4) the EOA must now carry the delegation designator (0xef0100...)
-  const code = await provider.getCode(target.address);
+  const code = await provider.getCode(targetWallet.address);
   assert.ok(code.startsWith('0xef0100'), 'EOA code must be a delegation designator (0xef0100)');
 
   // 5) execute a batch call through the delegation: transfer 0.001 ETH
   //    Build a FRESH authorization (account nonce incremented by the type-4 tx)
-  const to = '0x000000000000000000000000000000000000dEaD';
+  //    Fresh recipient: no base state on the forked chain, so anvil's
+  //    eth_getBalance reflects the locally-mined transfer (#4700).
+  const to = ethers.Wallet.createRandom().address;
   const value = ethers.parseEther('0.001');
   const beforeBal = await provider.getBalance(to);
+  assert.equal(beforeBal, 0n, 'fresh address must start at zero');
   const calls = [{ data: '0x', to, value }];
   let auth2;
   try {
@@ -103,7 +106,7 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
     return; // ethers without type-4 support
   }
   const execTx = await target.sendTransaction({
-    to: target.address,
+    to: targetWallet.address,
     authorizationList: [auth2],
     data: helper.interface.encodeFunctionData('execute', [calls])
   });

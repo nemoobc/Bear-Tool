@@ -104,7 +104,7 @@ export async function startFork() {
     anvilProcess.unref();
     process.on('exit', () => { if (anvilProcess) { try { anvilProcess.kill('SIGKILL'); } catch {} } });
     // wait for the RPC to answer
-    const deadline = Date.now() + 60000;
+    const deadline = Date.now() + 120000;
     for (;;) {
       const ok = await new Promise((resolve) => {
         const p = spawn('node', ['-e', `
