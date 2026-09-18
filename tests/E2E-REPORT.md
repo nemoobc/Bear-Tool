@@ -33,6 +33,36 @@
 
 ---
 
+## 0b. UPDATE 2026-09-18 — FORK ON-CHAIN (ANVIL) SEMUA NETWORK
+
+**Metode**: anvil 1.8.3 (`--hardfork prague`) fork dari RPC publik, test nyata on-chain: deploy ERC-20/721/1155, approval/revoke, send native + ERC-20, swap ETH→stable via verified V2 router, EIP-7702 delegation batch-call.
+
+| Network | Hasil |
+|---|---|
+| ethereum | **10/10 PASS** |
+| bsc | **10/10 PASS** |
+| polygon | **10/10 PASS** |
+| arbitrum | **10/10 PASS** |
+| optimism | **10/10 PASS** |
+| base | **10/10 PASS** |
+| sepolia | **10/10 PASS** |
+| amoy | **10/10 PASS** |
+| arbitrum-sepolia | **10/10 PASS** |
+| optimism-sepolia | **10/10 PASS** |
+| base-sepolia | **10/10 PASS** |
+| bsc-testnet | **10/10 PASS** |
+| **TOTAL** | **120/120 PASS** |
+
+**Fix harness yang diperlukan** (bug test, bukan app):
+- **NonceManager** — nonce serial; anvil fork state bisa lag → dua tx nonce sama ("nonce too low").
+- **EIP-7702**: (a) anvil hanya mengeksekusi delegation saat tx membawa authorizationList FRESH (auth + eksekusi satu tx); (b) paksa `type: 4` + fee fields eksplisit — di chain legacy-fee (BSC) ethers v6 populate type-0 dan diam-diam buang authorizationList; (c) track nonce target lokal (query bisa stale); (d) poll balance — anvil `eth_getBalance` bisa lag satu block (foundry#4700).
+- **RPC**: publicnode 403 `eth_getTransactionReceipt` (archive) di bsc/arbitrum/optimism/base → ganti endpoint resmi; `rpc-amoy.polygon.technology` mati → publicnode amoy.
+- **ERC-721/1155**: template `mint(address)` / `mint(to,id,value)` (bukan safeMint/4-arg).
+
+**Cara jalan**: `CI=1 FORK_NETWORK=<nama> node --test --test-concurrency=1 tests/fork/*.test.js` (butuh foundry/anvil).
+
+---
+
 ## 1. GATE UNIT TEST — `npm run verify`
 
 | Item | Hasil |

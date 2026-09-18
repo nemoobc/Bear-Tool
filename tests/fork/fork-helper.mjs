@@ -37,7 +37,7 @@ export const FORK_NETWORKS = {
   optimism:          { chainId: 10,     rpc: 'https://mainnet.optimism.io',                  type: 'mainnet' },
   base:              { chainId: 8453,   rpc: 'https://mainnet.base.org',                     type: 'mainnet' },
   sepolia:           { chainId: 11155111, rpc: 'https://ethereum-sepolia-rpc.publicnode.com', type: 'testnet' },
-  amoy:              { chainId: 80002,  rpc: 'https://rpc-amoy.polygon.technology',          type: 'testnet' },
+  amoy:              { chainId: 80002,  rpc: 'https://polygon-amoy-bor-rpc.publicnode.com',  type: 'testnet' },
   'arbitrum-sepolia': { chainId: 421614, rpc: 'https://sepolia-rollup.arbitrum.io/rpc',      type: 'testnet' },
   'optimism-sepolia': { chainId: 11155420, rpc: 'https://sepolia.optimism.io',               type: 'testnet' },
   'base-sepolia':     { chainId: 84532, rpc: 'https://sepolia.base.org',                     type: 'testnet' },

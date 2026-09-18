@@ -59,10 +59,15 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   const helperAddr = await helper.getAddress();
 
   // 2) authorize the target EOA to delegate to the helper (EIP-7702)
+  //    Track the target nonce LOCALLY: anvil's fork state can lag, so a
+  //    fresh getTransactionCount after a mined type-4 tx sometimes returns
+  //    the SAME stale nonce → the second authorization is invalid and anvil
+  //    silently skips it (delegation never executes).
   const target = new ethers.Wallet(TARGET_KEY, provider);
+  let targetNonce = await provider.getTransactionCount(target.address);
   let authorization;
   try {
-    authorization = target.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: await provider.getTransactionCount(target.address) });
+    authorization = target.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: targetNonce++ });
   } catch (err) {
     // ethers without type-4 support — honest skip
     return;
@@ -94,11 +99,14 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   // NOTE: anvil only executes the delegation when the tx carries a fresh
   // authorizationList (auth applied + executed in the same tx); a delegation
   // set by an earlier tx is stored but not executed on a later plain tx.
-  const to = '0x000000000000000000000000000000000000dEaD';
+  // Fresh recipient: no base state on the forked chain, so anvil's
+  // eth_getBalance reflects the locally-mined transfer (#4700).
+  const to = ethers.Wallet.createRandom().address;
   const value = ethers.parseEther('0.001');
   const beforeBal = await provider.getBalance(to);
+  assert.equal(beforeBal, 0n, 'fresh address must start at zero');
   const calls = [{ data: '0x', to, value }];
-  const auth2 = target.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: await provider.getTransactionCount(target.address) });
+  const auth2 = target.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: targetNonce++ });
   // Force type-4 explicitly: on chains where fee data is legacy (e.g. BSC)
   // ethers v6 would otherwise populate a type-0 tx and silently drop the
   // authorizationList, so the delegation never executes.
@@ -114,5 +122,14 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   });
   const execReceipt = await execTx.wait();
   assert.equal(execReceipt.status, 1, 'batch execute through delegation must succeed');
-  assert.equal(await provider.getBalance(to), beforeBal + value, 'delegated call must move ETH on-chain');
+  // Poll the balance instead of a single read: anvil's fork state can lag
+  // one block behind, so eth_getBalance may briefly return the pre-tx value
+  // even after the receipt exists (same pattern as fork-send.test.js).
+  const deadline = Date.now() + 30000;
+  let afterBal = await provider.getBalance(to);
+  while (afterBal !== beforeBal + value && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500));
+    afterBal = await provider.getBalance(to);
+  }
+  assert.equal(afterBal, beforeBal + value, 'delegated call must move ETH on-chain');
 });
