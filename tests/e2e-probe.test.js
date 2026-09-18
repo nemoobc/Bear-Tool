@@ -49,6 +49,19 @@ function httpGet(url) {
   });
 }
 
+// External APIs (KyberSwap/LI.FI/CoinGecko) rate-limit under CI load (503).
+// Retry with backoff so a transient 503 does not fail the gate; a persistent
+// 503 after all attempts is a real outage and still fails loudly.
+async function httpGetRetry(url, attempts = 3, delayMs = 2000) {
+  let last;
+  for (let i = 0; i < attempts; i++) {
+    last = await httpGet(url);
+    if (last.status !== 503 && last.status !== 429) return last;
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+  }
+  return last;
+}
+
 const wallet = await import('../js/wallet.js');
 const state = await import('../js/state.js');
 const i18n = await import('../js/i18n.js');
@@ -132,7 +145,7 @@ test('E2E-probe: i18n toggle EN → ID changes labels', () => {
 // ── 6. Real API probes (KyberSwap / LI.FI / CoinGecko) ──
 test('E2E-probe: KyberSwap quote API returns real route (ETH→USDC, mainnet)', async () => {
   const url = 'https://aggregator-api.kyberswap.com/ethereum/api/v1/routes?tokenIn=0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE&tokenOut=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48&amountIn=1000000000000000000';
-  const res = await httpGet(url);
+  const res = await httpGetRetry(url);
   assert.equal(res.status, 200);
   const json = JSON.parse(res.text);
   assert.equal(json.code, 0);
@@ -143,7 +156,7 @@ test('E2E-probe: KyberSwap quote API returns real route (ETH→USDC, mainnet)', 
 test('E2E-probe: LI.FI quote API — bridge.js sends fromAddress (real route, no simulation)', async () => {
   // exact URL built by bridge.js doBridge() (fromAddress + toAddress pinned)
   const url = 'https://li.quest/v1/quote?fromChain=1&toChain=10&fromToken=0x0000000000000000000000000000000000000000&toToken=0x0000000000000000000000000000000000000000&fromAmount=1000000000000000000&fromAddress=0x0000000000000000000000000000000000000001&toAddress=0x0000000000000000000000000000000000000001';
-  const res = await httpGet(url);
+  const res = await httpGetRetry(url);
   assert.equal(res.status, 200, 'LI.FI requires fromAddress — bridge.js now sends it');
   const json = JSON.parse(res.text);
   console.log('  LI.FI with fromAddress:', json.tool, '| fromToken.symbol =', json.action?.fromToken?.symbol);
@@ -151,7 +164,7 @@ test('E2E-probe: LI.FI quote API — bridge.js sends fromAddress (real route, no
 
 test('E2E-probe: LI.FI quote API works when fromAddress is added', async () => {
   const url = 'https://li.quest/v1/quote?fromChain=1&toChain=10&fromToken=0x0000000000000000000000000000000000000000&toToken=0x0000000000000000000000000000000000000000&fromAmount=1000000000000000000&fromAddress=0x0000000000000000000000000000000000000001';
-  const res = await httpGet(url);
+  const res = await httpGetRetry(url);
   assert.equal(res.status, 200);
   const json = JSON.parse(res.text);
   // LI.FI /quote returns a single route object (not {routes:[...]})
@@ -160,7 +173,7 @@ test('E2E-probe: LI.FI quote API works when fromAddress is added', async () => {
 });
 
 test('E2E-probe: CoinGecko native price API works (dashboard USD)', async () => {
-  const res = await httpGet('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+  const res = await httpGetRetry('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
   assert.equal(res.status, 200);
   const json = JSON.parse(res.text);
   assert.ok(json.ethereum?.usd > 0);
