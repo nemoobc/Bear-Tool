@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- SECURITY: X-Frame-Options & friends are enforced by the nginx HTTP response header (add_header X-Frame-Options SAMEORIGIN). Do NOT add them as <meta> tags here: browsers ignore meta XFO and log a console warning. -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bear Tool — The Cartoon Wallet That Means Business</title>
   <meta name="description" content="Bear Tool — self-custody crypto wallet, all EVM networks mainnet & testnet, EIP-7702 suite. 100% client-side.">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.ethers.io https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: blob:; connect-src 'self' https: wss:; font-src 'self' data: https://fonts.gstatic.com;">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="X-Frame-Options" content="DENY">
   <meta http-equiv="Referrer-Policy" content="no-referrer">
   <link rel="icon" href="assets/bear.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -117,7 +117,8 @@
 
         <!-- DASHBOARD -->
         <section class="view active" id="view-dashboard">
-          <div class="balance-hero">
+          <div class="balance-hero" id="balanceHeroWrap">
+        <div class="hero-sparkline" id="heroSparkWrap"><canvas id="heroSpark" width="220" height="44" aria-hidden="true"></canvas><div id="coinPricePanel" class="coin-price-panel"></div></div>
             <div class="wallet-name" id="homeWalletName"></div>
             <div class="total" id="totalBalance">$0.00</div>
             <div class="sub" id="balanceSub">Not connected</div>
@@ -384,7 +385,30 @@
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> <span data-i18n="eip7702.rescue">Rescue Atomic</span></div>
             <p class="small mb-8">Rescue ETH/ERC20/ERC721 from a locked wallet. Deploy rescue contract once, target signs authorization, sponsor pays gas.</p>
             <div class="field">
-              <label for="rescueTarget">Locked wallet address</label>
+              <div class="field">
+              <label for="rescueType">Asset type</label>
+              <select class="input" id="rescueType">
+                <option value="eth" selected>ETH</option>
+                <option value="erc20">ERC-20</option>
+                <option value="erc721">ERC-721</option>
+              </select>
+            </div>
+            <div class="field hidden" id="rescueTokenWrap">
+              <label for="rescueTokenAddr">Token address</label>
+              <input class="input" id="rescueTokenAddr" placeholder="0x...">
+            </div>
+            <div class="field hidden" id="rescueTokenIdWrap">
+              <label for="rescueTokenId">Token ID</label>
+              <input class="input" id="rescueTokenId" placeholder="0 or id">
+            </div>
+            <div class="field">
+              <label for="rescueSponsorKey">Sponsor private key</label>
+              <div class="input-group">
+                <input class="input" type="password" id="rescueSponsorKey" placeholder="0x..." autocomplete="off">
+                <button type="button" class="btn btn-ghost btn-sm" id="btnRescueKeyToggle" aria-label="Show sponsor key"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+              </div>
+            </div>
+            <label for="rescueTarget">Locked wallet address</label>
               <input class="input" id="rescueTarget" placeholder="0x...">
             </div>
             <div class="field">
@@ -397,12 +421,27 @@
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg> <span data-i18n="eip7702.claim">Claim Airdrop</span></div>
             <div class="field">
+              <label for="claimContract">Claim contract address</label>
+              <input class="input" id="claimContract" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="claimData">Claim data (hex)</label>
+              <input class="input" id="claimData" placeholder="0x...">
+            </div>
+            <div class="field">
               <label for="claimToken">Token address</label>
               <input class="input" id="claimToken" placeholder="0x...">
             </div>
             <div class="field">
               <label for="claimSafe">Forward to SAFE</label>
               <input class="input" id="claimSafe" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="claimSponsorKey">Sponsor private key</label>
+              <div class="input-group">
+                <input class="input" type="password" id="claimSponsorKey" placeholder="0x..." autocomplete="off">
+                <button type="button" class="btn btn-ghost btn-sm" id="btnClaimKeyToggle" aria-label="Show sponsor key"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+              </div>
             </div>
             <button class="btn btn-success btn-block" id="btnClaim">Claim + Forward</button>
           </div>

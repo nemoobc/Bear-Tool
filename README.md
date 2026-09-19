@@ -50,7 +50,7 @@ npm install   # devDependency: ethers (for tests only)
 npm run verify
 ```
 
-`verify` = syntax check all JS + 144 unit tests (network data, custom networks, testnet toggle, EIP-7702 delegation detection, wallet create/import/encrypt/decrypt/derive, session persist, address poisoning, nav/status UI invariants, Sepolia swap constants).
+`verify` = syntax check all JS + 341 unit tests (network data, custom networks, testnet toggle, EIP-7702 delegation detection, wallet create/import/encrypt/decrypt/derive, session persist, address poisoning, nav/status UI invariants, Sepolia swap constants).
 
 ## 📁 Structure
 

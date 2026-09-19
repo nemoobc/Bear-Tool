@@ -172,7 +172,7 @@ async function findUsableDeployed(type, chainId, predicate, provider) {
 let batchCalls = [];
 
 function renderBatchList() {
-  const list = $('#eip7702BatchList');
+  const list = $('#batchList');
   if (!list) return;
   if (!batchCalls.length) {
     list.innerHTML = '<p class="small text-center">No calls yet. Add one below.</p>';
@@ -225,7 +225,7 @@ async function executeBatch() {
     if (!ok) return;
   }
 
-  await runTx('eip7702-batch', $('#btnEip7702BatchExec'), async () => {
+  await runTx('eip7702-batch', $('#btnBatchExecute'), async () => {
     const provider = get('provider');
     const signer = get('signer').connect(provider);
     const chainId = Number(net.chainId);
@@ -276,19 +276,19 @@ async function executeBatch() {
 
 // ── rescue atomic ──
 function toggleRescueFields() {
-  const type = $('#eip7702RescueType').value;
-  $('#eip7702RescueTokenWrap').classList.toggle('hidden', type === 'eth');
-  $('#eip7702RescueTokenIdWrap').classList.toggle('hidden', type !== 'erc721');
+  const type = $('#rescueType').value;
+  $('#rescueTokenWrap').classList.toggle('hidden', type === 'eth');
+  $('#rescueTokenIdWrap').classList.toggle('hidden', type !== 'erc721');
 }
 
 async function executeRescue() {
   if (!get('unlocked')) { requireUnlock(); return; }
-  const target = $('#eip7702RescueTarget').value.trim();
-  const safe = $('#eip7702RescueSafe').value.trim();
-  const type = $('#eip7702RescueType').value;
-  const tokenAddr = $('#eip7702RescueTokenAddr').value.trim();
-  const tokenIds = $('#eip7702RescueTokenId').value.trim();
-  const sponsorKey = $('#eip7702RescueSponsorKey').value.trim();
+  const target = $('#rescueTarget').value.trim();
+  const safe = $('#rescueSafe').value.trim();
+  const type = $('#rescueType').value;
+  const tokenAddr = $('#rescueTokenAddr').value.trim();
+  const tokenIds = $('#rescueTokenId').value.trim();
+  const sponsorKey = $('#rescueSponsorKey').value.trim();
 
   if (!wallet.isValidAddress(target)) return toast('Invalid locked wallet address', 'error');
   if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
@@ -310,7 +310,7 @@ async function executeRescue() {
     if (!ok) return;
   }
 
-  await runTx('eip7702-rescue', $('#btnEip7702RescueExec'), async () => {
+  await runTx('eip7702-rescue', $('#btnRescue'), async () => {
     const provider = await getProvider(net.chainId);
     const chainId = Number(net.chainId);
     // Gas sponsor must exist in BOTH branches (reuse and fresh deploy) and is
@@ -376,11 +376,11 @@ async function executeRescue() {
 // ── claim airdrop ──
 async function executeClaim() {
   if (!get('unlocked')) { requireUnlock(); return; }
-  const contractAddr = $('#eip7702ClaimContract').value.trim();
-  const claimData = $('#eip7702ClaimData').value.trim();
-  const tokenAddr = $('#eip7702ClaimToken').value.trim();
-  const safe = $('#eip7702ClaimSafe').value.trim();
-  const sponsorKey = $('#eip7702ClaimSponsorKey').value.trim();
+  const contractAddr = $('#claimContract').value.trim();
+  const claimData = $('#claimData').value.trim();
+  const tokenAddr = $('#claimToken').value.trim();
+  const safe = $('#claimSafe').value.trim();
+  const sponsorKey = $('#claimSponsorKey').value.trim();
 
   if (!wallet.isValidAddress(contractAddr)) return toast('Invalid airdrop contract address', 'error');
   if (!claimData || !claimData.startsWith('0x')) return toast('Invalid claim calldata (must start with 0x)', 'error');
@@ -401,7 +401,7 @@ async function executeClaim() {
     if (!ok) return;
   }
 
-  await runTx('eip7702-claim', $('#btnEip7702ClaimExec'), async () => {
+  await runTx('eip7702-claim', $('#btnClaim'), async () => {
     const provider = await getProvider(net.chainId);
     const chainId = Number(net.chainId);
     const targetAddress = get('address');
@@ -532,9 +532,9 @@ export async function deployBatchHelper() {
 // Explicit "deploy the helper first" action for Rescue (constructor: safe, target).
 export async function deployRescueHelper() {
   if (!get('unlocked')) { requireUnlock(); return; }
-  const target = $('#eip7702RescueTarget').value.trim();
-  const safe = $('#eip7702RescueSafe').value.trim();
-  const sponsorKey = $('#eip7702RescueSponsorKey').value.trim();
+  const target = $('#rescueTarget').value.trim();
+  const safe = $('#rescueSafe').value.trim();
+  const sponsorKey = $('#rescueSponsorKey').value.trim();
   if (!wallet.isValidAddress(target)) return toast('Fill a valid locked wallet address first', 'error');
   if (!wallet.isValidAddress(safe)) return toast('Fill a valid SAFE address first', 'error');
   if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
@@ -564,7 +564,7 @@ export async function deployRescueHelper() {
 // Explicit "deploy the helper first" action for Claim Airdrop (constructor: rescuer).
 export async function deployAirdropClaimer() {
   if (!get('unlocked')) { requireUnlock(); return; }
-  const sponsorKey = $('#eip7702ClaimSponsorKey').value.trim();
+  const sponsorKey = $('#claimSponsorKey').value.trim();
   if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
 
   const net = getNetworkById(get('networkId'));
@@ -721,23 +721,23 @@ export async function revokeDelegation() {
 // ── bind all events ──
 export function bindEip7702ToolsEvents() {
   // Batch (view-deploy only if batch elements exist)
-  $('#btnEip7702BatchAdd')?.addEventListener('click', addBatchItem);
-  $('#btnEip7702BatchExec')?.addEventListener('click', executeBatch);
+  $('#btnBatchAdd')?.addEventListener('click', addBatchItem);
+  $('#btnBatchExecute')?.addEventListener('click', executeBatch);
 
   // Rescue
-  $('#eip7702RescueType')?.addEventListener('change', toggleRescueFields);
-  $('#btnEip7702RescueExec')?.addEventListener('click', executeRescue);
+  $('#rescueType')?.addEventListener('change', toggleRescueFields);
+  $('#btnRescue')?.addEventListener('click', executeRescue);
 
   // Claim
-  $('#btnEip7702ClaimExec')?.addEventListener('click', executeClaim);
+  $('#btnClaim')?.addEventListener('click', executeClaim);
 
   // Revoke delegation (Tools card)
   $('#btnCheckDelegation')?.addEventListener('click', checkDelegation);
   $('#btnRevokeDelegation')?.addEventListener('click', revokeDelegation);
 
   // Password toggles
-  bindPasswordToggle('#btnRescueKeyToggle', '#eip7702RescueSponsorKey');
-  bindPasswordToggle('#btnClaimKeyToggle', '#eip7702ClaimSponsorKey');
+  bindPasswordToggle('#btnRescueKeyToggle', '#rescueSponsorKey');
+  bindPasswordToggle('#btnClaimKeyToggle', '#claimSponsorKey');
 
   // Helper status (step 1) + registry list
   renderHelperStatus();
