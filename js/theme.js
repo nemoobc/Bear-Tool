@@ -1,13 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — theme.js
-// Intro logo animation (2.5s, reduced-motion aware)
+// Intro logo animation (1.5s, reduced-motion aware)
 // + mascot helpers.
 // Original implementation — no copying.
 // ═══════════════════════════════════════════════════════════════
 
-// Intro duration. Was 5s — too long for a first-impression flourish, so it
-// was cut to 2.5s. Tests assert this value (tests/e2e-probe.test.js).
-export const INTRO_MS = 2500;
+// Intro duration. 1.5s — fast enough to not annoy, slow enough to see logo.
+export const INTRO_MS = 1500;
 
 export function runIntro(onDone) {
   const intro = document.getElementById('intro');
@@ -17,36 +16,46 @@ export function runIntro(onDone) {
   const finish = (instant) => {
     if (finished) return;
     finished = true;
-    if (!intro || !intro.parentNode) return; // already removed (e.g. CI skipIntro)
+    if (!intro || !intro.parentNode) { if (onDone) onDone(); return; }
     if (instant) {
       intro.classList.add('hidden');
     } else {
-      intro.classList.add('intro-fade'); // 0.4s fade (CSS transition)
+      intro.classList.add('intro-fade');
       setTimeout(() => { if (intro.parentNode) intro.classList.add('hidden'); }, 400);
     }
     if (onDone) onDone();
   };
 
-  // reduced motion: skip the whole animation, still call onDone
+  // ABSOLUTE SAFETY: no matter what, call onDone within 2s
+  const safetyTimer = setTimeout(() => finish(false), 2000);
+
+  // reduced motion: skip everything immediately
   const prefersReduced = typeof matchMedia !== 'undefined' &&
     matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (prefersReduced) return finish(true);
+  if (prefersReduced) { clearTimeout(safetyTimer); return finish(true); }
 
-  // skip on click anywhere on intro
-  if (intro) intro.addEventListener('click', () => finish(true));
+  // skip on click/touch/keyboard anywhere on intro
+  if (intro) {
+    intro.addEventListener('click', () => { clearTimeout(safetyTimer); finish(true); });
+    intro.addEventListener('touchstart', () => { clearTimeout(safetyTimer); finish(true); }, { once: true });
+    intro.setAttribute('tabindex', '0');
+    intro.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { clearTimeout(safetyTimer); finish(true); }
+    });
+  }
 
-  // letter-by-letter title (phase 3: 0.8-1.6s)
+  // letter-by-letter title
   const text = 'BEAR TOOL';
-  if (!title) return; // no intro title in this DOM — animation is optional
-  title.innerHTML = '';
-  [...text].forEach((ch, i) => {
-    const span = document.createElement('span');
-    span.textContent = ch === ' ' ? '\u00A0' : ch;
-    span.style.animationDelay = (0.8 + i * 0.06) + 's';
-    title.appendChild(span);
-  });
+  if (title) {
+    title.innerHTML = '';
+    [...text].forEach((ch, i) => {
+      const span = document.createElement('span');
+      span.textContent = ch === ' ' ? '\u00A0' : ch;
+      span.style.animationDelay = (0.8 + i * 0.06) + 's';
+      title.appendChild(span);
+    });
+  }
 
-  // exact 2.5s timer → fade out
   setTimeout(() => finish(false), INTRO_MS);
 }
 

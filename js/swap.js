@@ -10,6 +10,7 @@ import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById, ERC20_ABI } from './network.js';
+import { SWAP_ROUTERS, getSwapRoutersForChain, getBestSwapRouter, CHAIN_NAMES } from './routers.js';
 
 const { ethers } = globalThis;
 
@@ -18,6 +19,12 @@ const KYBER_API = 'https://aggregator-api.kyberswap.com';
 const CLIENT_ID = 'bear-tool';
 const NATIVE_SENTINEL = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const CACHE_TTL = 30_000;
+
+// ── 1inch Aggregator API ──
+const ONEINCH_API = 'https://api.1inch.dev/swap/v6.0';
+
+// ── ParaSwap API ──
+const PARASWAP_API = 'https://api.paraswap.io';
 
 // ── Uniswap Router V2/V3 constants ──
 const UNISWAP_V2_ROUTER = {
@@ -253,7 +260,69 @@ async function kyberBuild(slug, routeSummary, sender, recipient, slippageBps) {
   return json.data; // { data (calldata), routerAddress (address) }
 }
 
-// ── get quote — AUTO-ROUTE: KyberSwap → Uniswap V3 → Uniswap V2 ──
+// ── 1inch: fetch swap quote ──
+async function oneinchQuote(chainId, tokenIn, tokenOut, amountIn) {
+  const url = `${ONEINCH_API}/${chainId}/quote?src=${tokenIn}&dst=${tokenOut}&amount=${amountIn}`;
+  const res = await fetchWithTimeout(url, { headers: { 'Authorization': 'Bearer ' + (globalThis.__ONEINCH_API_KEY || '') } });
+  if (!res.ok) throw new Error(`1inch quote HTTP ${res.status}`);
+  const json = await res.json();
+  if (!json.dstAmount) throw new Error('1inch: empty quote');
+  return json; // { dstAmount, srcToken, dstToken, protocols }
+}
+
+// ── 1inch: build swap transaction ──
+async function oneinchBuild(chainId, tokenIn, tokenOut, amountIn, fromAddr, slippageBps) {
+  const slippagePct = slippageBps / 100;
+  const url = `${ONEINCH_API}/${chainId}/swap?src=${tokenIn}&dst=${tokenOut}&amount=${amountIn}&from=${fromAddr}&slippage=${slippagePct}&disableEstimate=true`;
+  const res = await fetchWithTimeout(url, { headers: { 'Authorization': 'Bearer ' + (globalThis.__ONEINCH_API_KEY || '') } });
+  if (!res.ok) throw new Error(`1inch swap HTTP ${res.status}`);
+  const json = await res.json();
+  if (!json.tx) throw new Error('1inch: empty tx');
+  return { data: json.tx.data, routerAddress: json.tx.to, amountOut: json.dstAmount };
+}
+
+// ── ParaSwap: fetch swap quote + build ──
+async function paraswapQuote(chainId, tokenIn, tokenOut, amountIn, fromAddr, slippageBps) {
+  // tokenIn/Out: use NATIVE_SENTINEL for native
+  const srcToken = tokenIn === NATIVE_SENTINEL ? '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' : tokenIn;
+  const dstToken = tokenOut === NATIVE_SENTINEL ? '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' : tokenOut;
+  const url = `${PARASWAP_API}/prices/${chainId}/${srcToken}/${dstToken}/${amountIn}?side=SELL&slippage=${slippageBps / 100}`;
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error(`ParaSwap quote HTTP ${res.status}`);
+  const json = await res.json();
+  if (!json.priceRoute?.destAmount) throw new Error('ParaSwap: empty quote');
+  // Now build tx
+  const buildUrl = `${PARASWAP_API}/transactions/${chainId}`;
+  const buildRes = await fetchWithTimeout(buildUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      srcToken, dstToken, srcAmount: amountIn, destAmount: json.priceRoute.destAmount,
+      userAddress: fromAddr, slippage: slippageBps / 100,
+      priceRoute: json.priceRoute, side: 'SELL',
+    }),
+  });
+  if (!buildRes.ok) throw new Error(`ParaSwap build HTTP ${buildRes.status}`);
+  const tx = await buildRes.json();
+  return { data: tx.data, routerAddress: tx.to, amountOut: BigInt(json.priceRoute.destAmount) };
+}
+
+// ── SushiSwap: on-chain quote via getAmountsOut (Uniswap V2 compatible) ──
+async function sushiswapQuote(chainId, tokenIn, tokenOut, amountIn) {
+  const routerAddr = SWAP_ROUTERS.find(r => r.id === 'sushiswap')?.router?.[chainId];
+  if (!routerAddr) throw new Error('SushiSwap not available on this chain');
+  const provider = get('provider');
+  const code = await provider.getCode(routerAddr);
+  if (!code || code === '0x') throw new Error('SushiSwap router has no code on this chain');
+  const router = new ethers.Contract(routerAddr, UNISWAP_V2_ABI, provider);
+  const weth = CHAIN_WETH[chainId];
+  if (!weth) throw new Error('SushiSwap: no WETH mapping for this chain');
+  const path = [tokenIn === NATIVE_SENTINEL ? weth : tokenIn, tokenOut === NATIVE_SENTINEL ? weth : tokenOut];
+  const amounts = await router.getAmountsOut(amountIn, path);
+  return { amounts, router: routerAddr, path };
+}
+
+// ── get quote — AUTO-ROUTE: KyberSwap → 1inch → ParaSwap → SushiSwap → Uni V3 → Uni V2 ──
 // Every returned quote is REAL (API or on-chain). No simulation.
 export async function getSwapQuote() {
   const amt = $('#swapFromAmount').value;
