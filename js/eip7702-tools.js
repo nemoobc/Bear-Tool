@@ -720,16 +720,16 @@ export async function revokeDelegation() {
 
 // ── bind all events ──
 export function bindEip7702ToolsEvents() {
-  // Batch
-  $('#btnEip7702BatchAdd').addEventListener('click', addBatchItem);
-  $('#btnEip7702BatchExec').addEventListener('click', executeBatch);
+  // Batch (view-deploy only if batch elements exist)
+  $('#btnEip7702BatchAdd')?.addEventListener('click', addBatchItem);
+  $('#btnEip7702BatchExec')?.addEventListener('click', executeBatch);
 
   // Rescue
-  $('#eip7702RescueType').addEventListener('change', toggleRescueFields);
-  $('#btnEip7702RescueExec').addEventListener('click', executeRescue);
+  $('#eip7702RescueType')?.addEventListener('change', toggleRescueFields);
+  $('#btnEip7702RescueExec')?.addEventListener('click', executeRescue);
 
   // Claim
-  $('#btnEip7702ClaimExec').addEventListener('click', executeClaim);
+  $('#btnEip7702ClaimExec')?.addEventListener('click', executeClaim);
 
   // Revoke delegation (Tools card)
   $('#btnCheckDelegation')?.addEventListener('click', checkDelegation);

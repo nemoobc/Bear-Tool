@@ -1594,9 +1594,12 @@ body::before {
 /* ═══════════ ASSET SEARCH ═══════════ */
 .asset-search {
   margin-bottom: var(--sp-12);
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 .asset-search .input {
-  width: 100%;
+  flex: 1;
   padding: var(--sp-8) var(--sp-12);
   border: 2px solid var(--ink);
   border-radius: 10px;

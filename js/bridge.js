@@ -186,15 +186,8 @@ export async function doBridge() {
     amountSmallest
   });
   set('bridgeQuote', null);
-
-  if (fromNet.type === 'mainnet' || toNet.type === 'mainnet') {
-    const ok = await confirmTx({
-      title: 'BRIDGE ON MAINNET!',
-      rows: [{ k: 'From', v: `${fromNet.name} (${fromNet.chainId})` }, { k: 'To', v: `${toNet.name} (${toNet.chainId})` }, { k: 'Amount', v: `${amt} ${fromNet.symbol || ''}` }],
-      confirmText: 'Get Route', danger: true, requireType: 'YA'
-    });
-    if (!ok) return;   // confirm cancelled — nothing to do; next request gets a fresh seq
-  }
+  // No confirmTx here — this is auto-QUOTE only. Safety confirmation
+  // happens at EXECUTION time (doBridgeExec), not at quote time.
 
   const box = $('#bridgeQuote');
   const routeBox = $('#bridgeRoute');
@@ -309,6 +302,16 @@ export async function doBridgeExec() {
   const activeNet = getNetworkById(get('networkId'));
   if (!activeNet || activeNet.id !== context.networkId) return toast(t('bridge.wrong_active_chain'), 'error');
   if (!sameChainId(activeNet.chainId, context.chainId)) return toast(t('bridge.wrong_active_chain'), 'error');
+
+  // Mainnet safety confirmation at EXECUTION time (not quote time)
+  if (fromNet.type === 'mainnet' || toNet.type === 'mainnet') {
+    const ok = await confirmTx({
+      title: 'EXECUTE BRIDGE ON MAINNET!',
+      rows: [{ k: 'From', v: `${fromNet.name} (${fromNet.chainId})` }, { k: 'To', v: `${toNet.name} (${toNet.chainId})` }, { k: 'Amount', v: `${context.amount} ${context.tokenSymbol || ''}` }],
+      confirmText: 'Execute Bridge', danger: true, requireType: 'YA'
+    });
+    if (!ok) return;
+  }
 
   // Quote-bound immutable tx details (never re-read the API payload).
   const { to, data, value, chainId } = boundTxChecks(boundTx, context);

@@ -212,18 +212,33 @@ export async function fetchPriceHistory({ address, chainId }) {
 
   try {
     const res = await fetchWithTimeout(url, 12000);
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error('CoinGecko ' + res.status);
     const data = await res.json();
     const raw = (data.prices || [])
       .map(p => p[1])
       .filter(v => typeof v === 'number' && Number.isFinite(v));
-    if (raw.length < 2) return [];
+    if (raw.length < 2) throw new Error('No data');
     // evenly spaced sample (~30 points), always keeping first + latest
     const target = Math.min(30, raw.length);
     const sampled = Array.from({ length: target }, (_, k) => raw[Math.round(k * (raw.length - 1) / (target - 1))]);
     historyCache.set(key, { data: sampled, ts: Date.now() });
     return sampled;
   } catch {
+    // DexScreener fallback for chart data
+    try {
+      if (!address) return [];
+      const dsUrl = `https://api.dexscreener.com/tokens/v1/${chainId}/${address}`;
+      const dsRes = await fetchWithTimeout(dsUrl, 8000);
+      if (!dsRes.ok) return [];
+      const dsData = await dsRes.json();
+      const pair = Array.isArray(dsData) ? dsData[0] : dsData;
+      const history = pair?.priceHistory || pair?.h24 || [];
+      if (Array.isArray(history) && history.length >= 2) {
+        const sampled = Array.from({ length: Math.min(30, history.length) }, (_, k) => history[Math.round(k * (history.length - 1) / (Math.min(30, history.length) - 1))]);
+        historyCache.set(key, { data: sampled, ts: Date.now() });
+        return sampled;
+      }
+    } catch { /* fallback failed */ }
     return [];
   }
 }

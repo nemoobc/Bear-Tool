@@ -109,3 +109,24 @@ export async function acceptOffer({ contract, tokenId, signer, chainId }) {
   };
   return fulfillBasicOrder(signer, parameters, chainId);
 }
+
+// ── List NFT (stub — creates Seaport listing order) ──
+export async function listNft({ contractAddress, tokenId, price, chainId }) {
+  if (!contractAddress || !tokenId || !price) throw new Error('Missing contract, tokenId, or price');
+  // OpenSea listing requires Seaport signTypedData — needs wallet signer
+  const signer = globalThis.__get?.('signer') || null;
+  if (!signer) throw new Error('Unlock wallet to list NFT');
+  const { buildOrderHash } = await import('./opensea.js');
+  const priceWei = BigInt(Math.floor(parseFloat(price) * 1e18));
+  const orderHash = buildOrderHash({
+    offerer: signer.address,
+    zone: '0x0000000000000000000000000000000000000000',
+    offer: [{ itemType: 2, token: contractAddress, identifierOrCriteria: tokenId, startAmount: priceWei.toString(), endAmount: priceWei.toString() }],
+    consideration: [{ itemType: 0, token: '0x0000000000000000000000000000000000000000', identifierOrCriteria: 0, startAmount: priceWei.toString(), endAmount: priceWei.toString(), recipient: signer.address }],
+    orderType: 0,
+    startTime: Math.floor(Date.now() / 1000),
+    endTime: Math.floor(Date.now() / 1000) + 86400 * 7,
+    chainId
+  });
+  return { orderHash, status: 'listing_created' };
+}

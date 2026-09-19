@@ -339,9 +339,9 @@ test('doBridge: old request race — late stale response cannot overwrite newer 
   assert.equal(q?.context?.amount, '0.6');
 });
 
-test('doBridge: old unbound quote cleared before confirmTx await (state cleared pre-await)', async (t) => {
+test('doBridge: auto-quote fetches immediately without confirmTx (safety at exec time)', async (t) => {
   const { fetchMock } = setupQuote(t);
-  // mainnet chain → confirmTx path exercises the pre-await clear
+  // mainnet chain → auto-quote path (no confirmTx in doBridge, only in doBridgeExec)
   document.querySelector('#bridgeFromChain').value = 'ethereum';
   state.set('networkId', 'ethereum');
   let fetchCalled = false;
@@ -349,14 +349,7 @@ test('doBridge: old unbound quote cleared before confirmTx await (state cleared 
     fetchCalled = true;
     return { ok: true, json: async () => validResponse({ fromChainId: 1 }) };
   });
-  const pending = bridge.doBridge();
-  await new Promise(r => setImmediate(r));
-  assert.equal(state.get('bridgeQuote'), null, 'old quote must already be gone while confirmTx is pending');
-  assert.equal(fetchCalled, false, 'no fetch before user confirms');
-  state.set('bridgeQuote', { simulated: true }); // something sneaks in during confirm — must be cleared
-  const yes = document.querySelector('#confirmYes');
-  yes.onclick();
-  await pending;
-  assert.equal(fetchCalled, true, 'after confirm, fetch proceeds');
-  assert.equal(state.get('bridgeQuote')?.context?.fromChainId, 1);
+  await bridge.doBridge();
+  assert.equal(fetchCalled, true, 'fetch proceeds immediately (no confirm needed for quote)');
+  assert.ok(state.get('bridgeQuote')?.context, 'quote context is set');
 });

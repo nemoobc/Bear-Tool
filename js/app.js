@@ -25,7 +25,7 @@ import { loadNfts } from './nft.js';
 import { cancelOrder, fulfillBasicOrder, getOrderStatusOnChain } from './opensea.js';
 import { t, setLang, applyTranslations } from './i18n.js';
 import { renderDapps, POPULAR_DAPPS } from './dapps.js';
-import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers } from './opensea-api.js';
+import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers, cancelListing, listNft } from './opensea-api.js';
 
 const { ethers } = globalThis;
 
@@ -105,6 +105,36 @@ window.addEventListener('DOMContentLoaded', () => {
   // ── token search ──
   document.getElementById('tokenSearchInput')?.addEventListener('input', () => {
     if (window._assetTokens) renderAssets(window._assetTokens);
+  });
+
+  // ── custom token add ──
+  document.getElementById('btnAddCustomToken')?.addEventListener('click', () => {
+    openModal(`
+      <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+      <h2>Add Custom Token</h2>
+      <div class="field"><label for="customTokenAddr">Contract Address</label><input class="input" id="customTokenAddr" placeholder="0x..."></div>
+      <div class="field"><label for="customTokenChain">Chain ID</label><input class="input" id="customTokenChain" type="number" value="${get('networkId') ? (getNetworkById(get('networkId'))?.chainId || 1) : 1}"></div>
+      <button class="btn btn-primary btn-block" id="btnConfirmAddToken">Add Token</button>
+    `);
+    document.getElementById('btnConfirmAddToken')?.addEventListener('click', async () => {
+      const addr = document.getElementById('customTokenAddr')?.value?.trim();
+      const chainId = parseInt(document.getElementById('customTokenChain')?.value) || 1;
+      if (!addr || !addr.startsWith('0x') || addr.length !== 42) return toast('Invalid contract address', 'error');
+      const provider = get('provider');
+      if (!provider) return toast('Wallet not ready', 'error');
+      try {
+        const ERC20 = ['function symbol() view returns (string)', 'function decimals() view returns (uint8)', 'function balanceOf(address) view returns (uint256)'];
+        const contract = new ethers.Contract(addr, ERC20, provider);
+        const [sym, dec, bal] = await Promise.all([contract.symbol(), contract.decimals(), contract.balanceOf(get('address') || ethers.ZeroAddress)]);
+        const tokens = get('tokens') || [];
+        if (tokens.some(t => t.address?.toLowerCase() === addr.toLowerCase())) return toast('Token already added', 'info');
+        tokens.push({ address: addr, symbol: sym, decimals: Number(dec), balance: bal.toString(), chainId, usd: null });
+        set('tokens', tokens);
+        closeModal();
+        toast(`✅ ${sym} added!`, 'success');
+        if (window._assetTokens) renderAssets(tokens);
+      } catch (e) { toast('Failed to fetch token: ' + (e?.message || 'unknown'), 'error'); }
+    });
   });
 
   // ── offline detection ──
@@ -249,29 +279,59 @@ function refreshView(view) {
   if (view === 'eip7702') loadEip7702();
   if (view === 'activity') renderActivity();
   if (view === 'dapps') renderDapps($('#dappsContainer'));
-  if (view === 'nft') { loadNfts(); bindOpenSeaPanel(); }
+  if (view === 'deploy') { bindOpenSeaPanel(); }
 }
 
 // ── OpenSea panel (WL check + Accept Top Offer + Coin Price) ──
 function bindOpenSeaPanel() {
   if (window._osPanelBound) return;
   window._osPanelBound = true;
+  const status = () => $('#openSeaStatus');
+  // Check WL
   $('#btnCheckWL')?.addEventListener('click', async () => {
     const addr = get('address');
-    const status = $('#openSeaStatus');
-    if (!addr || !status) return;
-    status.textContent = 'Checking WL...';
+    if (!addr || !status()) return;
+    status().textContent = 'Checking WL...';
     try {
       const result = await checkWL({ collection: 'boredapeyachtclub', address: addr });
-      status.textContent = result.eligible ? '✅ Whitelisted! Mint available.' : '❌ Not whitelisted.';
-    } catch { status.textContent = '⚠️ WL check failed.'; }
+      status().textContent = result.eligible ? '✅ Whitelisted! Mint available.' : '❌ Not whitelisted.';
+    } catch { status().textContent = '⚠️ WL check failed.'; }
   });
+  // List NFT
+  $('#btnOpenSeaList')?.addEventListener('click', async () => {
+    const s = status(); if (!s) return;
+    const contract = $('#openSeaContract')?.value?.trim();
+    const tokenId = $('#openSeaTokenId')?.value?.trim();
+    const price = $('#openSeaPrice')?.value?.trim();
+    if (!contract || !tokenId || !price) return s.textContent = 'Fill contract, token ID, and price.';
+    s.textContent = 'Listing...';
+    try {
+      const net = getNetworkById(get('networkId'));
+      await listNft({ contractAddress: contract, tokenId, price, chainId: net?.chainId || 1 });
+      s.textContent = '✅ Listing submitted!';
+    } catch (e) { s.textContent = '⚠️ ' + (e?.message || 'List failed'); }
+  });
+  // Cancel listing
+  $('#btnOpenSeaCancel')?.addEventListener('click', async () => {
+    const s = status(); if (!s) return;
+    const contract = $('#openSeaContract')?.value?.trim();
+    const tokenId = $('#openSeaTokenId')?.value?.trim();
+    if (!contract || !tokenId) return s.textContent = 'Fill contract and token ID to cancel.';
+    s.textContent = 'Cancelling...';
+    try {
+      const net = getNetworkById(get('networkId'));
+      await cancelListing({ contractAddress: contract, tokenId, chainId: net?.chainId || 1 });
+      s.textContent = '✅ Listing cancelled!';
+    } catch (e) { s.textContent = '⚠️ ' + (e?.message || 'Cancel failed'); }
+  });
+  // Accept top offer
   $('#btnAcceptTopOffer')?.addEventListener('click', async () => {
-    const status = $('#openSeaStatus');
-    if (!status) return;
-    status.textContent = 'Finding top offer...';
-    // Use first NFT from wallet for demo
-    status.textContent = 'Top offer feature ready — select NFT first.';
+    const s = status(); if (!s) return;
+    s.textContent = 'Finding top offer...';
+    try {
+      const result = await getHighestOffer({ collection: 'boredapeyachtclub' });
+      s.textContent = result?.price ? `Top offer: $${result.price} — ready to accept.` : 'No active offers found.';
+    } catch { s.textContent = '⚠️ Could not fetch offers.'; }
   });
 }
 

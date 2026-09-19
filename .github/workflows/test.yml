@@ -191,9 +191,9 @@ jobs:
             await expect(page).toHaveTitle(/Bear Tool/);
           });
 
-          test('all 10 views exist in DOM', async ({ page }) => {
+          test('all 11 views exist in DOM', async ({ page }) => {
             await skipIntro(page);
-            const views = ['dashboard', 'send', 'swap', 'bridge', 'nft', 'eip7702', 'approval', 'deploy', 'activity', 'settings'];
+            const views = ['dashboard', 'send', 'swap', 'bridge', 'nft', 'eip7702', 'approval', 'deploy', 'activity', 'dapps', 'settings'];
             for (const v of views) {
               await expect(page.locator(`#view-${v}`)).toBeAttached();
             }

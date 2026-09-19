@@ -131,8 +131,8 @@ test('app.js: has bindOpenSeaPanel function', () => {
   assert.match(appSrc, /function\s+bindOpenSeaPanel/);
 });
 
-test('app.js: refreshView calls bindOpenSeaPanel for nft view', () => {
-  assert.match(appSrc, /view\s*===\s*'nft'[\s\S]*bindOpenSeaPanel/);
+test('app.js: refreshView calls bindOpenSeaPanel for deploy view', () => {
+  assert.match(appSrc, /view\s*===\s*'deploy'[\s\S]*bindOpenSeaPanel/);
 });
 
 // ── INTEGRATION: all modules load without circular deps ──

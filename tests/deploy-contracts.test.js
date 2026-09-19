@@ -134,7 +134,7 @@ test('tools: "deploy the helper first" is explicit, real, and bounded', () => {
   // status card lives in the Tools view, ABOVE the flows that need it
   const view = html.slice(html.indexOf('id="view-eip7702"'));
   assert.match(view, /id="helperStatusList"/, 'Tools must show helper-contract status');
-  assert.ok(view.indexOf('id="helperStatusList"') < view.indexOf('id="eip7702BatchList"'), 'step 1 must come before the batch queue');
+  assert.ok(view.indexOf('id="helperStatusList"') < view.indexOf('id="batchList"'), 'step 1 must come before the batch queue');
   // explicit up-front deploy + the fixed compiler
   assert.match(tools, /export async function deployBatchHelper\(\)/, 'user must be able to deploy the helper up front');
   assert.match(tools, /export async function deployRescueHelper\(\)/, 'rescue helper must be deployable up front');

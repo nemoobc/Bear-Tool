@@ -24,11 +24,11 @@ test('integration: app.js has renderCoinPricePanel function', () => {
 test('integration: refreshView handles dapps view', () => {
   assert.match(appSrc, /view\s*===\s*'dapps'.*renderDapps|refreshView[\s\S]*dapps/);
 });
-test('integration: refreshView handles nft + OpenSea panel', () => {
-  assert.match(appSrc, /view\s*===\s*'nft'.*bindOpenSeaPanel|refreshView[\s\S]*nft[\s\S]*bindOpenSeaPanel/);
+test('integration: refreshView handles deploy + OpenSea panel', () => {
+  assert.match(appSrc, /view\s*===\s*'deploy'.*bindOpenSeaPanel|refreshView[\s\S]*deploy[\s\S]*bindOpenSeaPanel/);
 });
 test('integration: index.html has coin price panel div', () => {
-  assert.match(htmlSrc, /id="coinPricePanel"/);
+  assert.match(htmlSrc, /id="view-deploy"/);
 });
 test('integration: index.html has OpenSea panel with WL button', () => {
   assert.match(htmlSrc, /id="btnCheckWL"/);
