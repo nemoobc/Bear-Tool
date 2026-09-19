@@ -322,7 +322,7 @@ async function sushiswapQuote(chainId, tokenIn, tokenOut, amountIn) {
   return { amounts, router: routerAddr, path };
 }
 
-// ── get quote — AUTO-ROUTE: KyberSwap → 1inch → ParaSwap → SushiSwap → Uni V3 → Uni V2 ──
+// ── get quote — AUTO-ROUTE or user-selected router ──
 // Every returned quote is REAL (API or on-chain). No simulation.
 export async function getSwapQuote() {
   const amt = $('#swapFromAmount').value;
@@ -348,79 +348,94 @@ export async function getSwapQuote() {
   const slippageBps = Math.round(parseFloat(slippage) * 100);
   const userAddr = get('address');
 
+  // Check user-selected router (or 'auto' = try all)
+  const selectedRouter = $('#swapRouterSelect')?.value || 'auto';
   const errors = [];
-  // 1. KyberSwap (aggregator — best price, multi-DEX)
-  const slug = KYBER_CHAIN_SLUG[net.chainId];
-  if (slug) {
-    try {
-      const key = cacheKey(slug, tokenIn, tokenOut, amountInWei);
-      const now = Date.now();
-      let quoteData;
-      if (quoteCache.key === key && now - quoteCache.ts < CACHE_TTL) {
-        quoteData = quoteCache.data;
-      } else {
-        quoteData = await kyberQuote(slug, tokenIn, tokenOut, amountInWei);
-        quoteCache = { key, data: quoteData, ts: now };
+
+  // Helper: try a specific router
+  async function tryRouter(id) {
+    switch (id) {
+      case 'kyberswap': {
+        const slug = KYBER_CHAIN_SLUG[net.chainId];
+        if (!slug) throw new Error('chain not supported');
+        const key = cacheKey(slug, tokenIn, tokenOut, amountInWei);
+        const now = Date.now();
+        let quoteData;
+        if (quoteCache.key === key && now - quoteCache.ts < CACHE_TTL) {
+          quoteData = quoteCache.data;
+        } else {
+          quoteData = await kyberQuote(slug, tokenIn, tokenOut, amountInWei);
+          quoteCache = { key, data: quoteData, ts: now };
+        }
+        const built = await kyberBuild(slug, quoteData.routeSummary, userAddr, userAddr, slippageBps);
+        const outAmount = BigInt(quoteData.routeSummary.amountOut ?? '0');
+        return { source: 'KyberSwap', built, routerAddress: built.routerAddress, outAmount };
       }
-      const built = await kyberBuild(slug, quoteData.routeSummary, userAddr, userAddr, slippageBps);
-      const outAmount = BigInt(quoteData.routeSummary.amountOut ?? '0');
-      const outFormatted = ethers.formatUnits(outAmount, toDecimals);
-      const rate = parseFloat(outFormatted) / parseFloat(amt);
-      set('swapQuote', { simulated: false, source: 'KyberSwap', built, routerAddress: built.routerAddress });
-      $('#swapToAmount').value = outFormatted;
-      quoteBox.innerHTML =
-        `Route: <b>KyberSwap</b> · Rate: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
-        `Slippage: ${escapeHtml(slippage)}%`;
-      return;
-    } catch (e) {
-      errors.push(`KyberSwap: ${e.message}`);
+      case '1inch': {
+        if (!globalThis.__ONEINCH_API_KEY) throw new Error('no API key');
+        const built = await oneinchBuild(net.chainId, tokenIn, tokenOut, amountInWei, userAddr, slippageBps);
+        return { source: '1inch', built: { data: built.data, routerAddress: built.routerAddress }, outAmount: BigInt(built.amountOut) };
+      }
+      case 'paraswap': {
+        const result = await paraswapQuote(net.chainId, tokenIn, tokenOut, amountInWei, userAddr, slippageBps);
+        return { source: 'ParaSwap', built: { data: result.data, routerAddress: result.routerAddress }, outAmount: result.amountOut };
+      }
+      case 'sushiswap': {
+        const v2 = await sushiswapQuote(net.chainId, tokenIn, tokenOut, amountInWei);
+        const outAmount = v2.amounts[v2.amounts.length - 1];
+        return { source: 'SushiSwap', uniswap: { kind: 'v2', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin: (outAmount * (10000n - BigInt(slippageBps))) / 10000n, router: v2.router }, outAmount };
+      }
+      case 'uniswap_v3': {
+        const v3 = await uniswapV3Quote(net.chainId, tokenIn, tokenOut, amountInWei);
+        return { source: 'Uniswap V3', uniswap: { kind: 'v3', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin: (v3.amountOut * (10000n - BigInt(slippageBps))) / 10000n, fee: v3.fee, router: v3.router }, outAmount: v3.amountOut };
+      }
+      case 'uniswap_v2': {
+        const v2 = await uniswapV2Quote(net.chainId, tokenIn, tokenOut, amountInWei);
+        const outAmount = v2.amounts[v2.amounts.length - 1];
+        return { source: 'Uniswap V2', uniswap: { kind: 'v2', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin: (outAmount * (10000n - BigInt(slippageBps))) / 10000n, router: v2.router }, outAmount };
+      }
+      default: throw new Error('unknown router: ' + id);
     }
-  } else {
-    errors.push('KyberSwap: chain not supported');
   }
 
-  // 2. Uniswap V3 (on-chain quote via Quoter)
-  try {
-    const v3 = await uniswapV3Quote(net.chainId, tokenIn, tokenOut, amountInWei);
-    const outFormatted = ethers.formatUnits(v3.amountOut, toDecimals);
+  // Show result from a successful quote
+  function showResult(result) {
+    const outFormatted = ethers.formatUnits(result.outAmount, toDecimals);
     const rate = parseFloat(outFormatted) / parseFloat(amt);
-    const amountOutMin = (v3.amountOut * (10000n - BigInt(slippageBps))) / 10000n;
-    set('swapQuote', {
-      simulated: false, source: 'Uniswap V3',
-      uniswap: { kind: 'v3', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin, fee: v3.fee, router: v3.router },
-      amountOut: v3.amountOut,
-    });
+    const quoteData = { simulated: false, ...result };
+    delete quoteData.outAmount;
+    set('swapQuote', quoteData);
     $('#swapToAmount').value = outFormatted;
     quoteBox.innerHTML =
-      `Route: <b>Uniswap V3</b> · Rate: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
+      `Route: <b>${escapeHtml(result.source)}</b> · Rate: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
       `Slippage: ${escapeHtml(slippage)}%`;
-    return;
-  } catch (e) {
-    errors.push(`Uniswap V3: ${e.message}`);
   }
 
-  // 3. Uniswap V2 (on-chain quote via getAmountsOut)
-  try {
-    const v2 = await uniswapV2Quote(net.chainId, tokenIn, tokenOut, amountInWei);
-    const outAmount = v2.amounts[v2.amounts.length - 1];
-    const outFormatted = ethers.formatUnits(outAmount, toDecimals);
-    const rate = parseFloat(outFormatted) / parseFloat(amt);
-    const amountOutMin = (outAmount * (10000n - BigInt(slippageBps))) / 10000n;
-    set('swapQuote', {
-      simulated: false, source: 'Uniswap V2',
-      uniswap: { kind: 'v2', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin, router: v2.router },
-      amountOut,
-    });
-    $('#swapToAmount').value = outFormatted;
-    quoteBox.innerHTML =
-      `Route: <b>Uniswap V2</b> · Rate: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
-      `Slippage: ${escapeHtml(slippage)}%`;
-    return;
-  } catch (e) {
-    errors.push(`Uniswap V2: ${e.message}`);
+  // If user selected a specific router, try ONLY that one
+  if (selectedRouter !== 'auto') {
+    try {
+      const result = await tryRouter(selectedRouter);
+      return showResult(result);
+    } catch (e) {
+      set('swapQuote', null);
+      $('#swapToAmount').value = '';
+      quoteBox.innerHTML = `<div class="quote-error">⚠️ ${escapeHtml(selectedRouter)} failed: ${escapeHtml(e.message)}</div>`;
+      return;
+    }
   }
 
-  // 4. No real route — honest error, never a fake number.
+  // AUTO mode: try all routers in priority order
+  const routerOrder = ['kyberswap', '1inch', 'paraswap', 'sushiswap', 'uniswap_v3', 'uniswap_v2'];
+  for (const id of routerOrder) {
+    try {
+      const result = await tryRouter(id);
+      return showResult(result);
+    } catch (e) {
+      errors.push(`${id}: ${e.message}`);
+    }
+  }
+
+  // No real route — honest error.
   set('swapQuote', null);
   $('#swapToAmount').value = '';
   quoteBox.innerHTML =
