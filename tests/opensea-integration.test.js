@@ -18,8 +18,8 @@ test('integration: app.js imports dapps module', () => {
 test('integration: app.js has bindOpenSeaPanel function', () => {
   assert.match(appSrc, /function\s+bindOpenSeaPanel/);
 });
-test('integration: app.js has renderCoinPricePanel function', () => {
-  assert.match(appSrc, /function\s+renderCoinPricePanel/);
+test('integration: app.js has renderAssets function', () => {
+  assert.match(appSrc, /function\s+renderAssets/);
 });
 test('integration: refreshView handles dapps view', () => {
   assert.match(appSrc, /view\s*===\s*'dapps'.*renderDapps|refreshView[\s\S]*dapps/);
@@ -39,8 +39,8 @@ test('integration: index.html has Accept Top Offer button', () => {
 test('integration: index.html has OpenSea status display', () => {
   assert.match(htmlSrc, /id="openSeaStatus"/);
 });
-test('integration: loadDashboard calls renderCoinPricePanel', () => {
-  assert.match(appSrc, /renderCoinPricePanel\(\)/);
+test('integration: loadDashboard calls renderAssets', () => {
+  assert.match(appSrc, /renderAssets\(tokens\)/);
 });
 test('integration: no API key hardcoded in app.js (HUKUM 9)', () => {
   assert.ok(!appSrc.match(/qYSDUOSxp6/), 'API key must NOT be in app.js');

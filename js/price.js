@@ -188,6 +188,50 @@ export async function fetchAllPrices(tokens, chainId) {
   return result;
 }
 
+// ── OHLC candlestick data for token chart ───────────────────
+// CoinGecko OHLC: days=1 → 5min candles, days=7 → 1h candles.
+// Returns [{ time, open, high, low, close }] or [] when unavailable.
+export async function fetchOHLC({ address, chainId, days = 1 }) {
+  const platform = COINGECKO_PLATFORMS[chainId];
+  const nativeId = NATIVE_COIN_IDS[chainId];
+  const key = `ohlc:${address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`}:${days}`;
+
+  const hit = historyCache.get(key);
+  if (hit && Date.now() - hit.ts < HISTORY_TTL) return hit.data;
+
+  let url = null;
+  if (address && platform) {
+    url = `https://api.coingecko.com/api/v3/coins/${platform}/contract/${String(address).toLowerCase()}/ohlc?vs_currency=usd&days=${days}`;
+  } else if (!address && nativeId) {
+    url = `https://api.coingecko.com/api/v3/coins/${nativeId}/ohlc?vs_currency=usd&days=${days}`;
+  }
+  if (!url) return [];
+
+  try {
+    const res = await fetchWithTimeout(url, 12000);
+    if (!res.ok) throw new Error('CoinGecko OHLC ' + res.status);
+    const data = await res.json();
+    // CoinGecko OHLC format: [[timestamp, open, high, low, close], ...]
+    const candles = (Array.isArray(data) ? data : [])
+      .map(d => ({ time: d[0], open: d[1], high: d[2], low: d[3], close: d[4] }))
+      .filter(c => [c.open, c.high, c.low, c.close].every(v => typeof v === 'number' && Number.isFinite(v)));
+    if (candles.length < 2) throw new Error('No OHLC data');
+    historyCache.set(key, { data: candles, ts: Date.now() });
+    return candles;
+  } catch {
+    // Fallback: convert price history to pseudo-candles
+    try {
+      const prices = await fetchPriceHistory({ address, chainId });
+      if (prices.length < 2) return [];
+      const candles = prices.map((p, i) => {
+        const next = prices[i + 1] || p;
+        return { time: Date.now() - (prices.length - i) * 300000, open: p, high: Math.max(p, next), low: Math.min(p, next), close: next };
+      });
+      return candles.slice(0, -1);
+    } catch { return []; }
+  }
+}
+
 // ── 24h price history for the token mini-chart ──────────────────
 // CoinGecko keyless market_chart, cached 5 min. Returns a number[]
 // (oldest → newest, downsampled to ~30 points) or [] when unavailable.

@@ -214,6 +214,22 @@ export async function doSend() {
     if (!ok) return;
   }
 
+  // sign confirmation — show full tx details before signing
+  const signOk = await confirmTx({
+    title: '✍️ SIGN TRANSACTION',
+    rows: [
+      { k: 'Network', v: net.name },
+      { k: 'Token', v: t.symbol },
+      { k: 'Amount', v: `${amt} ${t.symbol}` },
+      { k: 'To', v: wallet.shortAddress(to) },
+      { k: 'Gas speed', v: gasSpeed }
+    ],
+    confirmText: 'Sign & Send',
+    cancelText: 'Cancel Sign',
+    danger: false
+  });
+  if (!signOk) return toast('Transaction cancelled', 'info');
+
   await runTx('send', $('#btnSend'), async () => {
     const provider = get('provider');
     const signer = get('signer');

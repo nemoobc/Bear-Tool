@@ -13,7 +13,7 @@ import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPasswo
          fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue } from './ui.js';
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity } from './state.js';
-import { fetchAllPrices, fetchPriceHistory } from './price.js';
+import { fetchAllPrices, fetchPriceHistory, fetchOHLC } from './price.js';
 import { waitForReceipt } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
@@ -1073,7 +1073,14 @@ function showTokenActions(el) {
       </div>
     </div>
     <div class="token-modal-chart" id="tokenChart">
-      <canvas id="tokenPriceChart" width="300" height="100"></canvas>
+      <div class="chart-timeframes" id="chartTimeframes">
+        <button class="chart-tf-btn active" data-tf="5m">5m</button>
+        <button class="chart-tf-btn" data-tf="1h">1h</button>
+        <button class="chart-tf-btn" data-tf="24h">24h</button>
+        <button class="chart-tf-btn" data-tf="7d">7d</button>
+      </div>
+      <canvas id="tokenPriceChart" width="340" height="160"></canvas>
+      <div class="chart-price-label" id="chartPriceLabel"></div>
     </div>
     <div class="token-modal-actions">
       <button class="token-action-btn" id="tokenSend">
@@ -1103,7 +1110,16 @@ function showTokenActions(el) {
   window._tokenModalAddress = address;
 
   // Draw mini chart from real 24h history
-  drawMiniChart({ symbol, address });
+  drawMiniChart({ symbol, address, timeframe: '24h' });
+
+  // Timeframe buttons
+  document.querySelectorAll('.chart-tf-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.chart-tf-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      drawMiniChart({ symbol, address, timeframe: btn.dataset.tf });
+    });
+  });
 
   // Action handlers
   $('#tokenSend').onclick = () => { closeModal(); switchView('send'); };
@@ -1166,25 +1182,31 @@ function showReceiveModal(address, symbol) {
   `);
 }
 
-// Real 24h price history (CoinGecko keyless, 5-min cache).
-// The previous version generated a fresh random walk on every open, so the
-// chart was different each time and never matched the displayed price.
-async function drawMiniChart({ symbol, address }) {
+// ── Candlestick chart with timeframe support ────────────────
+// Draws OHLC candles (5m, 1h, 24h, 7d) on canvas.
+// Uses CoinGecko OHLC endpoint, falls back to pseudo-candles from price history.
+const CHART_TF_DAYS = { '5m': 1, '1h': 1, '24h': 1, '7d': 7 };
+
+async function drawMiniChart({ symbol, address, timeframe = '24h' }) {
   const canvas = document.getElementById('tokenPriceChart');
   if (!canvas) return;
   const w = canvas.width;
   const h = canvas.height;
+  const pad = { top: 12, bottom: 20, left: 4, right: 4 };
+  const chartW = w - pad.left - pad.right;
+  const chartH = h - pad.top - pad.bottom;
+
   const paintBase = () => {
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#FFF8F0';
     ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = '#E8E0D8';
     ctx.lineWidth = 0.5;
-    for (let i = 0; i < 4; i++) {
-      const y = (h / 4) * i + 10;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + (chartH / 4) * i;
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(w - pad.right, y);
       ctx.stroke();
     }
   };
@@ -1197,68 +1219,99 @@ async function drawMiniChart({ symbol, address }) {
     ctx.fillText(msg, w / 2, h / 2);
   };
 
-  paintMessage('Loading 24h chart…');
+  paintMessage(`Loading ${timeframe} chart…`);
 
-  let data = [];
+  const days = CHART_TF_DAYS[timeframe] || 1;
+  let candles = [];
   try {
     const chainId = getNetworkById(get('networkId'))?.chainId;
-    data = await fetchPriceHistory({ address, chainId });
-  } catch { data = []; }
+    candles = await fetchOHLC({ address, chainId, days });
+  } catch { candles = []; }
 
-  // modal may have been closed/reopened while we awaited
   if (!canvas.isConnected || document.getElementById('tokenPriceChart') !== canvas) return;
 
-  if (!Array.isArray(data) || data.length < 2) {
-    paintMessage('No 24h chart data');
+  if (!candles.length || candles.length < 2) {
+    paintMessage(`No ${timeframe} data`);
     return;
   }
 
-  const points = data.length;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const step = w / (points - 1);
-  const ctx = canvas.getContext('2d');
+  // Limit candles for readability (max ~60)
+  const maxCandles = 60;
+  const step2 = Math.max(1, Math.floor(candles.length / maxCandles));
+  const display = candles.filter((_, i) => i % step2 === 0 || i === candles.length - 1);
 
+  const allHigh = Math.max(...display.map(c => c.high));
+  const allLow = Math.min(...display.map(c => c.low));
+  const range = allHigh - allLow || 1;
+  const candleW = Math.max(2, (chartW / display.length) - 1);
+  const gap = chartW / display.length;
+
+  const ctx = canvas.getContext('2d');
   paintBase();
 
-  // Line
-  const gradient = ctx.createLinearGradient(0, 0, 0, h);
-  gradient.addColorStop(0, '#FF6B35');
-  gradient.addColorStop(1, '#FF8A3D');
+  // Price labels (high / mid / low)
+  ctx.fillStyle = '#8A8178';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'right';
+  const fmtPrice = (v) => v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toFixed(6);
+  ctx.fillText(fmtPrice(allHigh), w - 2, pad.top + 8);
+  ctx.fillText(fmtPrice(allLow), w - 2, h - pad.bottom - 2);
+  ctx.fillText(fmtPrice((allHigh + allLow) / 2), w - 2, pad.top + chartH / 2 + 4);
 
-  ctx.beginPath();
-  ctx.strokeStyle = gradient;
-  ctx.lineWidth = 2.5;
-  ctx.lineJoin = 'round';
-  data.forEach((val, i) => {
-    const x = i * step;
-    const y = h - ((val - min) / range) * (h - 20) - 10;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+  // Draw candles
+  display.forEach((c, i) => {
+    const x = pad.left + i * gap + gap / 2;
+    const isUp = c.close >= c.open;
+    const color = isUp ? '#22C55E' : '#EF4444';
+    const wickX = Math.round(x);
+    const bodyTop = pad.top + chartH - ((Math.max(c.open, c.close) - allLow) / range) * chartH;
+    const bodyBot = pad.top + chartH - ((Math.min(c.open, c.close) - allLow) / range) * chartH;
+    const wickTop = pad.top + chartH - ((c.high - allLow) / range) * chartH;
+    const wickBot = pad.top + chartH - ((c.low - allLow) / range) * chartH;
+
+    // Wick
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.moveTo(wickX, wickTop);
+    ctx.lineTo(wickX, wickBot);
+    ctx.stroke();
+
+    // Body
+    const bodyH = Math.max(1, bodyBot - bodyTop);
+    ctx.fillStyle = color;
+    ctx.fillRect(Math.round(x - candleW / 2), Math.round(bodyTop), Math.round(candleW), Math.round(bodyH));
   });
-  ctx.stroke();
 
-  // Fill under line
-  const lastX = (points - 1) * step;
-  const lastY = h - ((data[data.length - 1] - min) / range) * (h - 20) - 10;
-  ctx.lineTo(lastX, h);
-  ctx.lineTo(0, h);
-  ctx.closePath();
-  const fillGrad = ctx.createLinearGradient(0, 0, 0, h);
-  fillGrad.addColorStop(0, 'rgba(255,107,53,0.3)');
-  fillGrad.addColorStop(1, 'rgba(255,107,53,0.02)');
-  ctx.fillStyle = fillGrad;
-  ctx.fill();
+  // Current price line (dashed)
+  const last = display[display.length - 1];
+  const lastY = pad.top + chartH - ((last.close - allLow) / range) * chartH;
+  ctx.setLineDash([4, 3]);
+  ctx.strokeStyle = '#FF6B35';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, lastY);
+  ctx.lineTo(w - pad.right, lastY);
+  ctx.stroke();
+  ctx.setLineDash([]);
 
   // Current price dot
   ctx.beginPath();
-  ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+  ctx.arc(w - pad.right, lastY, 3, 0, Math.PI * 2);
   ctx.fillStyle = '#FF6B35';
   ctx.fill();
   ctx.strokeStyle = '#FFF8F0';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1.5;
   ctx.stroke();
+
+  // Price label overlay
+  const label = document.getElementById('chartPriceLabel');
+  if (label) {
+    const pctChange = display.length >= 2 ? ((last.close - display[0].open) / display[0].open * 100) : 0;
+    const sign = pctChange >= 0 ? '+' : '';
+    label.textContent = `${fmtPrice(last.close)} (${sign}${pctChange.toFixed(2)}%)`;
+    label.style.color = pctChange >= 0 ? '#22C55E' : '#EF4444';
+  }
 }
 
 // ── view wiring ──

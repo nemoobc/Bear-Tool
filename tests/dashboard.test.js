@@ -48,13 +48,14 @@ test('dashboard: token modal separates holding value from unit price', () => {
 
 test('dashboard: mini chart renders real 24h history (no random walk)', () => {
   assert.doesNotMatch(app, /Generate fake price data/, 'random-walk generator must be gone');
-  assert.match(app, /async function drawMiniChart\(\{ symbol, address \}\)/);
-  assert.match(app, /fetchPriceHistory\(\{ address, chainId \}\)/,
-    'chart must source real history');
-  assert.match(app, /paintMessage\('No 24h chart data'\)/,
+  assert.match(app, /async function drawMiniChart\(\{ symbol, address, timeframe/);
+  assert.match(app, /fetchOHLC\(\{ address, chainId, days \}\)/,
+    'chart must source real OHLC data');
+  assert.match(app, /paintMessage\(`No \$\{timeframe\} data`\)/,
     'must show an honest empty state instead of invented data');
   // and the data source itself is exported by price.js
   assert.match(price, /export async function fetchPriceHistory/);
+  assert.match(price, /export async function fetchOHLC/);
 });
 
 test('dashboard: chart awaits are guarded against a closed/reopened modal', () => {

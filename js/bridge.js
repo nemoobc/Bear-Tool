@@ -313,6 +313,22 @@ export async function doBridgeExec() {
     if (!ok) return;
   }
 
+  // sign confirmation — show full bridge details before signing
+  const signOk = await confirmTx({
+    title: '✍️ SIGN BRIDGE',
+    rows: [
+      { k: 'From chain', v: `${fromNet.name} (${fromNet.chainId})` },
+      { k: 'To chain', v: `${toNet.name} (${toNet.chainId})` },
+      { k: 'Amount', v: `${context.amount} ${context.tokenSymbol || ''}` },
+      { k: 'Router', v: context.router || 'Auto' },
+      { k: 'Est. time', v: '~2-10 min' }
+    ],
+    confirmText: 'Sign & Bridge',
+    cancelText: 'Cancel Sign',
+    danger: false
+  });
+  if (!signOk) return toast('Bridge cancelled', 'info');
+
   // Quote-bound immutable tx details (never re-read the API payload).
   const { to, data, value, chainId } = boundTxChecks(boundTx, context);
 

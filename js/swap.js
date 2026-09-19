@@ -462,6 +462,22 @@ export async function doSwap() {
     if (!ok) return;
   }
 
+  // sign confirmation — show full swap details before signing
+  const signOk = await confirmTx({
+    title: '✍️ SIGN SWAP',
+    rows: [
+      { k: 'Network', v: net.name },
+      { k: 'From', v: `${amt} ${from}` },
+      { k: 'To', v: `→ ${to}` },
+      { k: 'Router', v: quote.source || 'Auto' },
+      { k: 'Slippage', v: `${get('slippage') || 0.5}%` }
+    ],
+    confirmText: 'Sign & Swap',
+    cancelText: 'Cancel Sign',
+    danger: false
+  });
+  if (!signOk) return toast('Swap cancelled', 'info');
+
   if (!quote || quote.simulated || (!quote.built && !quote.uniswap)) {
     return toast('No valid quote — get a route first.', 'error');
   }

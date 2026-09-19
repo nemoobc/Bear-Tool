@@ -1672,6 +1672,40 @@ body::before {
   width: 100%;
   height: auto;
 }
+.chart-timeframes {
+  display: flex;
+  gap: 4px;
+  padding: 8px 8px 0;
+  background: #FFF8F0;
+}
+.chart-tf-btn {
+  flex: 1;
+  padding: 4px 0;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  background: var(--cream);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.chart-tf-btn:hover {
+  background: #FFE8D0;
+}
+.chart-tf-btn.active {
+  background: var(--ink);
+  color: var(--cream);
+}
+.chart-price-label {
+  text-align: center;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 4px 8px 8px;
+  background: #FFF8F0;
+}
 .token-modal-actions {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

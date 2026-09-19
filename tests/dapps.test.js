@@ -29,8 +29,11 @@ test('dapps: includes Aave', () => {
 test('dapps: includes OpenSea', () => {
   assert.match(dappsSrc, /OpenSea/);
 });
-test('dapps: iframe sandbox for security', () => {
-  assert.match(dappsSrc, /sandbox="allow-scripts/);
+test('dapps: uses window.open for CORS compatibility', () => {
+  assert.match(dappsSrc, /window\.open/);
+});
+test('dapps: no iframe (blocked by CORS/CSP)', () => {
+  assert.ok(!dappsSrc.includes('dappFrame'), 'iframe removed — use window.open');
 });
 test('dapps: index.html has DApps nav item', () => {
   assert.match(htmlSrc, /data-view="dapps"/);
