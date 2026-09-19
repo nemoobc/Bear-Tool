@@ -105,8 +105,6 @@ export function buildOrderHash(order, chainId) {
 // ── On-chain actions (real transactions — uniform dots via runTx,
 //    consistent with send/swap/bridge — HUKUM 1, HUKUM 9). ──
 
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-const ZERO_HASH = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
 /**
  * eth_call to Seaport.getOrderStatus(orderHash) — honest view.
