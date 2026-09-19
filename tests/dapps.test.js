@@ -29,11 +29,16 @@ test('dapps: includes Aave', () => {
 test('dapps: includes OpenSea', () => {
   assert.match(dappsSrc, /OpenSea/);
 });
-test('dapps: uses window.open for CORS compatibility', () => {
-  assert.match(dappsSrc, /window\.open/);
+test('dapps: has in-app browser (iframe overlay)', () => {
+  assert.match(dappsSrc, /openDappBrowser/, 'must have openDappBrowser function');
+  assert.match(dappsSrc, /dapp-browser-overlay/, 'must create overlay');
+  assert.match(dappsSrc, /iframe/, 'must use iframe for in-app browsing');
 });
-test('dapps: no iframe (blocked by CORS/CSP)', () => {
-  assert.ok(!dappsSrc.includes('dappFrame'), 'iframe removed — use window.open');
+test('dapps: has external tab fallback', () => {
+  assert.match(dappsSrc, /window\.open/, 'external button opens new tab');
+});
+test('dapps: no old standalone dappFrame id', () => {
+  assert.ok(!dappsSrc.includes('id="dappFrame"'), 'old dappFrame removed');
 });
 test('dapps: index.html has DApps nav item', () => {
   assert.match(htmlSrc, /data-view="dapps"/);
