@@ -587,18 +587,20 @@ body::before {
 /* ═══════════ BALANCE / DASHBOARD ═══════════ */
 .balance-hero {
   text-align: center;
-  padding: 12px 14px;
+  padding: 8px 12px;
   background: linear-gradient(135deg, var(--honey), var(--orange));
   border: var(--border-thick);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
-.balance-hero .total { font-size: 1.3rem; font-weight: 700; }
-.balance-hero .sub { font-size: 0.75rem; font-weight: 600; color: var(--ink); }
-.hero-spark { display: flex; justify-content: center; padding: 4px 0 8px; }
-.hero-spark svg { width: 160px; height: 36px; }
-.hero-sparkline { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0 8px; }
+.balance-hero .wallet-name { font-size: 0.65rem; font-weight: 600; opacity: 0.7; margin-bottom: 2px; }
+.balance-hero .total { font-size: 1.1rem; font-weight: 700; line-height: 1.2; }
+.balance-hero .sub { font-size: 0.65rem; font-weight: 600; color: var(--ink); }
+.hero-spark { display: flex; justify-content: center; padding: 2px 0 4px; }
+.hero-spark svg { width: 140px; height: 28px; }
+.hero-sparkline { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 0 4px; }
+.hero-sparkline canvas { width: 140px; height: 28px; }
 
 .asset-row {
   display: flex;
@@ -2033,7 +2035,7 @@ body::before {
   .topbar-logo img { width: 32px; height: 32px; }
   .topbar-logo h1 { font-size: 1.1rem; }
   .network-pill span.label, .account-pill span.label { display: none; }
-  .balance-hero .total { font-size: 1.1rem; }
+  .balance-hero .total { font-size: 0.95rem; }
   .card { padding: var(--sp-16); }
   .btn-lg { padding: 14px 24px; font-size: 1rem; }
 }
@@ -2340,6 +2342,82 @@ body::before {
 .dapp-category { font-size: 10px; opacity: 0.6; }
 .dapp-frame { width: 100%; border-radius: 12px; overflow: hidden; border: 2px solid var(--border, #ddd); }
 .dapp-frame iframe { width: 100%; height: 70vh; border: none; background: #fff; }
+
+/* ── In-App Browser Overlay ── */
+.dapp-browser-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.dapp-browser-overlay.open { opacity: 1; pointer-events: auto; }
+.dapp-browser-shell {
+  width: 94vw; max-width: 900px;
+  height: 88vh;
+  display: flex; flex-direction: column;
+  border-radius: 16px; overflow: hidden;
+  border: 3px solid var(--ink, #2D2B29);
+  background: var(--cream, #FFF8F0);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.3);
+}
+.dapp-browser-toolbar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 8px;
+  background: var(--ink, #2D2B29);
+  color: var(--cream, #FFF8F0);
+  min-height: 40px;
+}
+.dapp-browser-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border: none; border-radius: 8px;
+  background: transparent; color: var(--cream, #FFF8F0);
+  cursor: pointer; transition: background 0.15s;
+}
+.dapp-browser-btn:hover { background: rgba(255,255,255,0.15); }
+.dapp-browser-close:hover { background: #EF4444; }
+.dapp-browser-title {
+  flex: 1; text-align: center;
+  font-family: 'Fredoka', sans-serif; font-size: 0.8rem; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 0 6px;
+}
+.dapp-browser-url-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  background: #F3F0EB; border-bottom: 2px solid var(--ink, #2D2B29);
+  font-size: 11px; color: #8A8178;
+}
+.dapp-browser-url-text {
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: monospace;
+}
+.dapp-browser-frame-wrap {
+  flex: 1; position: relative; overflow: hidden;
+  background: #fff;
+}
+.dapp-browser-frame {
+  width: 100%; height: 100%; border: none; background: #fff;
+}
+.dapp-browser-loading {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  background: var(--cream, #FFF8F0);
+  font-family: 'Fredoka', sans-serif; font-size: 0.85rem; color: var(--ink);
+}
+.dapp-browser-spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--ink, #2D2B29);
+  border-top-color: var(--orange, #FF8C42);
+  border-radius: 50%;
+  animation: dapp-spin 0.8s linear infinite;
+}
+@keyframes dapp-spin { to { transform: rotate(360deg); } }
+@media (max-width: 768px) {
+  .dapp-browser-shell { width: 100vw; height: 100vh; max-width: 100%; border-radius: 0; border: none; }
+  .dapp-browser-toolbar { padding: 8px; }
+  .dapp-browser-title { font-size: 0.75rem; }
+}
 
 /* ── OpenSea Panel (NFT view) ── */
 .opensea-panel { margin-bottom: 12px; padding: 10px; border-radius: 12px; background: var(--bg-card, #f5f5f0); border: 2px solid var(--border, #ddd); }
