@@ -6,11 +6,12 @@
 
 import { $, toast, confirmTx, fmtAmount, escapeHtml } from './ui.js';
 import { get, addActivity, requireUnlock, emit } from './state.js';
-import { runTx, waitForReceipt } from './safetx.js';
+import { runTx, waitForReceipt, withTimeout, RPC_TIMEOUT_MS } from './safetx.js';
 import { getNetworkById, getGasPrice, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import * as wallet from './wallet.js';
 
 const { ethers } = globalThis;
+const BROADCAST_TIMEOUT_MS = 15000; // 15s for broadcast
 
 export function bindSendEvents() {
   $('#btnSend').addEventListener('click', doSend);

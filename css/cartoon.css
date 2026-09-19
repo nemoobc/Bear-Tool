@@ -587,15 +587,15 @@ body::before {
 /* ═══════════ BALANCE / DASHBOARD ═══════════ */
 .balance-hero {
   text-align: center;
-  padding: 30px 20px;
+  padding: 18px 16px;
   background: linear-gradient(135deg, var(--honey), var(--orange));
   border: var(--border-thick);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   margin-bottom: 16px;
 }
-.balance-hero .total { font-size: 2.4rem; font-weight: 700; }
-.balance-hero .sub { font-size: 0.9rem; font-weight: 600; color: var(--ink); }
+.balance-hero .total { font-size: 1.8rem; font-weight: 700; }
+.balance-hero .sub { font-size: 0.85rem; font-weight: 600; color: var(--ink); }
 .hero-spark { display: flex; justify-content: center; padding: 6px 0 14px; }
 .hero-spark svg { width: 200px; height: 44px; }
 .hero-sparkline { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 0 14px; }

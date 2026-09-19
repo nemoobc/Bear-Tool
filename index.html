@@ -579,6 +579,81 @@
               <div id="deployStatus" class="deploy-status hidden"></div>
             </div>
           </div>
+
+          <!-- ═══════════ BATCH CALL ═══════════ -->
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg> <span data-i18n="eip7702.batch">Batch Call</span> (atomic)</div>
+            <div class="batch-queue" id="batchList2"></div>
+            <button class="btn btn-ghost mb-8" id="btnBatchAdd2">+ Add action</button>
+            <button class="btn btn-primary btn-block" id="btnBatchExecute2">Execute Batch</button>
+          </div>
+
+          <!-- ═══════════ RESCUE ATOMIC ═══════════ -->
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> <span data-i18n="eip7702.rescue">Rescue Atomic</span></div>
+            <p class="small mb-8">Rescue ETH/ERC20/ERC721 from a locked wallet. Deploy rescue contract once, target signs authorization, sponsor pays gas.</p>
+            <div class="field">
+              <label for="rescueType2">Asset type</label>
+              <select class="input" id="rescueType2">
+                <option value="eth" selected>ETH</option>
+                <option value="erc20">ERC-20</option>
+                <option value="erc721">ERC-721</option>
+              </select>
+            </div>
+            <div class="field hidden" id="rescueTokenWrap2">
+              <label for="rescueTokenAddr2">Token address</label>
+              <input class="input" id="rescueTokenAddr2" placeholder="0x...">
+            </div>
+            <div class="field hidden" id="rescueTokenIdWrap2">
+              <label for="rescueTokenId2">Token ID</label>
+              <input class="input" id="rescueTokenId2" placeholder="0 or id">
+            </div>
+            <div class="field">
+              <label for="rescueSponsorKey2">Sponsor private key</label>
+              <div class="input-group">
+                <input class="input" type="password" id="rescueSponsorKey2" placeholder="0x..." autocomplete="off">
+                <button type="button" class="btn btn-ghost btn-sm" id="btnRescueKeyToggle2" aria-label="Show sponsor key"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="rescueTarget2">Locked wallet address</label>
+              <input class="input" id="rescueTarget2" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="rescueSafe2">SAFE destination address</label>
+              <input class="input" id="rescueSafe2" placeholder="0x...">
+            </div>
+            <button class="btn btn-secondary btn-block" id="btnRescue2">Rescue Assets</button>
+          </div>
+
+          <!-- ═══════════ CLAIM AIRDROP ═══════════ -->
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg> <span data-i18n="eip7702.claim">Claim Airdrop</span></div>
+            <div class="field">
+              <label for="claimContract2">Claim contract address</label>
+              <input class="input" id="claimContract2" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="claimData2">Claim data (hex)</label>
+              <input class="input" id="claimData2" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="claimToken2">Token address</label>
+              <input class="input" id="claimToken2" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="claimSafe2">Forward to SAFE</label>
+              <input class="input" id="claimSafe2" placeholder="0x...">
+            </div>
+            <div class="field">
+              <label for="claimSponsorKey2">Sponsor private key</label>
+              <div class="input-group">
+                <input class="input" type="password" id="claimSponsorKey2" placeholder="0x..." autocomplete="off">
+                <button type="button" class="btn btn-ghost btn-sm" id="btnClaimKeyToggle2" aria-label="Show sponsor key"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+              </div>
+            </div>
+            <button class="btn btn-success btn-block" id="btnClaim2">Claim + Forward</button>
+          </div>
         </section>
 
         <!-- ACTIVITY -->
