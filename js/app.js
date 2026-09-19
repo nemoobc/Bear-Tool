@@ -469,18 +469,22 @@ function showCreateModal() {
 
 function showSeedPhrase(mnemonic, address) {
   const words = mnemonic.split(' ');
-  // Pick 3 random words for verification, one is correct
-  const correctIdx = Math.floor(Math.random() * 3);
-  const correctWord = words[0]; // Always verify word #1
+  // Pick 3 random word indices for verification
+  const indices = [];
+  while (indices.length < 3) {
+    const r = Math.floor(Math.random() * words.length);
+    if (!indices.includes(r)) indices.push(r);
+  }
+  // One of the 3 is the "question" — user must pick the correct word
+  const qIdx = indices[Math.floor(Math.random() * 3)];
+  const correctWord = words[qIdx];
   const distractors = [];
-  const allWords = [...words];
   while (distractors.length < 2) {
-    const w = allWords[Math.floor(Math.random() * allWords.length)];
+    const w = words[Math.floor(Math.random() * words.length)];
     if (w !== correctWord && !distractors.includes(w)) distractors.push(w);
   }
-  // Build choices array
   const choices = [...distractors];
-  choices.splice(correctIdx, 0, correctWord);
+  choices.splice(Math.floor(Math.random() * 3), 0, correctWord);
 
   openModal(`
     <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
@@ -491,7 +495,7 @@ function showSeedPhrase(mnemonic, address) {
     </div>
     <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(mnemonic)}">📋 Copy seed phrase</button>
     <div class="field">
-      <label>Select word #1 to confirm</label>
+      <label>Select word #${qIdx + 1} to confirm</label>
       <div class="seed-choices" id="seedChoices">
         ${choices.map((w, i) => `<button class="btn btn-ghost seed-choice-btn" data-word="${escapeHtml(w)}" data-idx="${i}">${escapeHtml(w)}</button>`).join('')}
       </div>
@@ -788,6 +792,7 @@ function showAccountModal() {
         <h2>📤 Your Secret</h2>
         <div class="danger-box">Never share this. Anyone with it controls your funds.</div>
         <div class="card" style="box-shadow:none"><div class="mono">${escapeHtml(secret)}</div></div>
+        <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(secret)}">📋 Copy</button>
         <button class="btn btn-primary btn-block" onclick="document.getElementById('modalOverlay').classList.remove('open')">Close</button>
       `);
     } catch { toast('Wrong password', 'error'); }

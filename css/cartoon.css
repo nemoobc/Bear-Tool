@@ -587,7 +587,7 @@ body::before {
 /* ═══════════ BALANCE / DASHBOARD ═══════════ */
 .balance-hero {
   text-align: center;
-  padding: 24px 28px;
+  padding: 28px 32px;
   background: linear-gradient(135deg, var(--honey), var(--orange));
   border: var(--border-thick);
   border-radius: var(--radius-lg);
@@ -1499,7 +1499,7 @@ body::before {
   justify-content: center;
 }
 .copy-btn:hover { color: var(--ink); }
-.copy-btn.copied { color: var(--mint); }
+.copy-btn.copied { color: var(--ink); background: var(--mint); border-radius: 6px; }
 
 /* ═══════════ WALLET STATUS ═══════════ */
 .wallet-status {
