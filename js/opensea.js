@@ -10,8 +10,9 @@
 //     (uniform dots, consistent with send/swap/bridge — HUKUM 1).
 // NO simulated fallback, no fake "listed", no pretend order.
 
-import { $, toast, escapeHtml, runTx } from './ui.js';
+import { $, toast, escapeHtml } from './ui.js';
 import { get } from './state.js';
+import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById } from './network.js';
 import { SEAPORT_BY_CHAIN, SEAPORT_ABI } from './seaport-abi.js';
 
@@ -145,8 +146,6 @@ function statusLabel({ isValidated, isCancelled, totalFilled, totalSize }) {
 export async function cancelOrder(btn, orderHashes, chainId) {
   const seaportAddr = SEAPORT_BY_CHAIN[chainId];
   if (!seaportAddr) throw new Error('OpenSea: Seaport 1.5 not deployed on this chain');
-  const runTx = (await import('./safetx.js')).runTx;
-  const get = (await import('./state.js')).get;
   const signer = get('signer');
   if (!signer) throw new Error('OpenSea: wallet locked');
 
@@ -166,8 +165,6 @@ export async function cancelOrder(btn, orderHashes, chainId) {
 export async function fulfillBasicOrder(btn, parameters, chainId) {
   const seaportAddr = SEAPORT_BY_CHAIN[chainId];
   if (!seaportAddr) throw new Error('OpenSea: Seaport 1.5 not deployed on this chain');
-  const runTx = (await import('./safetx.js')).runTx;
-  const get = (await import('./state.js')).get;
   const signer = get('signer');
   if (!signer) throw new Error('OpenSea: wallet locked');
 
