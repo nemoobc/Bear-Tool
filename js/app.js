@@ -335,38 +335,6 @@ function bindOpenSeaPanel() {
   });
 }
 
-// ── Coin Price Panel (hero) ──
-function renderCoinPricePanel() {
-  const panel = $('#coinPricePanel');
-  if (!panel) return;
-  const coins = [
-    { sym: 'ETH', name: 'Ethereum', color: '#627EEA' },
-    { sym: 'BTC', name: 'Bitcoin', color: '#F7931A' },
-    { sym: 'SOL', name: 'Solana', color: '#9945FF' }
-  ];
-  panel.innerHTML = `<div class="coin-slider">${coins.map((c, i) => `
-    <div class="coin-chip${i === 0 ? ' active' : ''}" data-sym="${c.sym}" style="--coin-color:${c.color}">
-      <span class="coin-dot" style="background:${c.color}"></span>
-      <span>${c.sym}</span>
-      <span class="coin-price-val" id="cp_${c.sym}">...</span>
-    </div>`).join('')}</div>`;
-  // Fetch prices
-  coins.forEach(async (c) => {
-    try {
-      const data = await fetchPriceHistory({ address: null, chainId: 1 });
-      const el = panel.querySelector('#cp_' + c.sym);
-      if (el && data?.length) el.textContent = '$' + data[data.length - 1].toFixed(2);
-    } catch { /* silent */ }
-  });
-  // Click to switch coin
-  panel.querySelectorAll('.coin-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      panel.querySelectorAll('.coin-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-    });
-  });
-}
-
 // ── topbar ──
 function bindTopbar() {
   $('#btnHome').addEventListener('click', () => {
@@ -916,8 +884,7 @@ async function loadDashboard() {
     // not awaited on purpose (NFT scan is slow) — but its rejection must be
     // handled here, or a null element becomes a global "Unexpected error" toast
     loadNfts().catch((e) => console.warn('[BearTool] NFT scan failed:', e?.message || e));
-    // M5-HERO: coin price panel with slider (ETH/BTC/SOL)
-    renderCoinPricePanel();
+    // M5-HERO: coin price panel removed per user request
   } catch (e) {
     assetList.innerHTML = `<p class="small text-center">Error: ${escapeHtml(e.message)}</p>`;
   }
