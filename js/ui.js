@@ -282,15 +282,16 @@ export function fmtAmount(wei, decimals = 18, max) {
     const v = ethers.formatUnits(wei, decimals);
     const num = parseFloat(v);
     if (isNaN(num)) return '0.00';
+    // Zero always shows 2 decimals for visual consistency in the coin list
+    if (num === 0) return '0.00';
     // Auto precision: big numbers = fewer decimals, small numbers = more
     if (max === undefined) {
-      if (num === 0) max = 2;
-      else if (num >= 1000) max = 2;
+      if (num >= 1000) max = 2;
       else if (num >= 1) max = 4;
       else if (num >= 0.001) max = 6;
       else max = 8;
     }
-    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: max });
+    return num.toLocaleString('en-US', { maximumFractionDigits: max });
   } catch { return '0.00'; }
 }
 
