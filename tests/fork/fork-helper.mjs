@@ -91,30 +91,41 @@ export async function startFork() {
     if (!(await hasAnvil())) {
       throw new Error('anvil not installed — fork tests need foundry (CI installs it; locally run `npm run test:fork` only in CI)');
     }
-    anvilProcess = spawn('anvil', [
-      '--fork-url', network.rpc,
-      '--port', String(port),
-      '--silent',
-      '--chain-id', String(network.chainId),
-      '--hardfork', 'prague'
-    ], { stdio: 'ignore' });
-    // Do not let the anvil child keep the Node process alive after the
-    // tests finish (pass OR fail) — otherwise CI hangs until timeout.
-    anvilProcess.unref();
-    process.on('exit', () => { if (anvilProcess) { try { anvilProcess.kill('SIGKILL'); } catch {} } });
-    // wait for the RPC to answer
-    const deadline = Date.now() + 60000;
-    for (;;) {
-      const ok = await new Promise((resolve) => {
-        const p = spawn('node', ['-e', `
-          fetch('http://127.0.0.1:${port}').then(r => process.exit(0)).catch(() => process.exit(1));
-        `], { stdio: 'ignore' });
-        p.on('exit', (code) => resolve(code === 0));
-      });
-      if (ok) break;
-      if (Date.now() > deadline) throw new Error('anvil did not start in time');
-      await new Promise(r => setTimeout(r, 500));
+    // Retry loop: publicnode RPCs can be slow/rate-limited (polygon flakes
+    // "anvil did not start in time"). A fresh anvil process often initializes
+    // faster than waiting on a stuck one, so kill and retry up to 3 attempts.
+    let started = false;
+    for (let attempt = 1; attempt <= 3 && !started; attempt++) {
+      anvilProcess = spawn('anvil', [
+        '--fork-url', network.rpc,
+        '--port', String(port),
+        '--silent',
+        '--chain-id', String(network.chainId),
+        '--hardfork', 'prague'
+      ], { stdio: 'ignore' });
+      // Do not let the anvil child keep the Node process alive after the
+      // tests finish (pass OR fail) — otherwise CI hangs until timeout.
+      anvilProcess.unref();
+      process.on('exit', () => { if (anvilProcess) { try { anvilProcess.kill('SIGKILL'); } catch {} } });
+      // wait for the RPC to answer
+      const deadline = Date.now() + 60000;
+      for (;;) {
+        const ok = await new Promise((resolve) => {
+          const p = spawn('node', ['-e', `
+            fetch('http://127.0.0.1:${port}').then(r => process.exit(0)).catch(() => process.exit(1));
+          `], { stdio: 'ignore' });
+          p.on('exit', (code) => resolve(code === 0));
+        });
+        if (ok) { started = true; break; }
+        if (Date.now() > deadline) break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (!started) {
+        try { anvilProcess.kill('SIGKILL'); } catch {}
+        anvilProcess = null;
+      }
     }
+    if (!started) throw new Error('anvil did not start in time');
   }
 
   const { ethers } = await import('ethers');
