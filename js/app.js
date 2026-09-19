@@ -185,6 +185,11 @@ function loadSettings() {
     const s = JSON.parse(localStorage.getItem('bear.settings') || '{}');
     set('settings', { ...get('settings'), ...s });
   } catch {}
+  // Restore persisted network selection (saved when user switches networks)
+  try {
+    const saved = localStorage.getItem('bear.networkId');
+    if (saved) set('networkId', saved);
+  } catch {}
   setLang(get('settings').lang || 'en');
   applyTranslations();
 }
@@ -685,6 +690,7 @@ function showNetworkModal() {
   $('#addNetBtn').onclick = showAddNetworkModal;
   $all('[data-net]').forEach(el => el.addEventListener('click', () => {
     set('networkId', el.dataset.net);
+    localStorage.setItem('bear.networkId', el.dataset.net);
     closeModal();
     toast('Network switched', 'success');
     updateTopbar();
