@@ -6,7 +6,7 @@
 // ever deployed, which is what "deploy gabisa" was.)
 // ═══════════════════════════════════════════════════════════════
 
-import { $, toast, confirmTx, escapeHtml } from './ui.js';
+import { $, toast, confirmTx, escapeHtml, setBtnDots } from './ui.js';
 import { get, requireUnlock, addActivity, emit } from './state.js';
 import { getNetworkById, getProvider, getGasPrice } from './network.js';
 import { waitForReceipt } from './safetx.js';
@@ -82,7 +82,7 @@ export async function doDeploy() {
   }
 
   const net = getNetworkById(get('networkId'));
-  if (btn) { btn.disabled = true; btn.textContent = 'Compiling…'; }
+  if (btn) setBtnDots(btn, true, 'Compiling');
   setDeployStatus(`Compiling ${std.contract} with solc… (first run downloads ~9 MB)`);
 
   try {
@@ -95,7 +95,7 @@ export async function doDeploy() {
     setDeployStatus(`Compiled ${std.contract} in ${seconds}s · bytecode ${sizeKb} KB`, 'ok');
     for (const w of compiled.warnings.slice(0, 3)) console.warn('[BearTool deploy] solc warning:', w);
 
-    if (btn) btn.textContent = 'Estimating gas…';
+    if (btn) setBtnDots(btn, true, 'Estimating gas');
     const provider = await getProvider(net.chainId);
     const signer = get('signer');
     if (!signer) { requireUnlock(); return; }
@@ -123,7 +123,7 @@ export async function doDeploy() {
     });
     if (!ok) { setDeployStatus('Deploy cancelled.'); return; }
 
-    if (btn) btn.textContent = 'Deploying…';
+    if (btn) setBtnDots(btn, true, 'Deploying');
     const contract = await factory.deploy(...plan.args);
     const tx = contract.deploymentTransaction();
     addActivity({
@@ -165,6 +165,6 @@ export async function doDeploy() {
     setDeployStatus(escapeHtml(msg), 'error');
     toast(msg, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Deploy Contract'; }
+    if (btn) setBtnDots(btn, false);
   }
 }

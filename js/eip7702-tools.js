@@ -4,7 +4,7 @@
 // Loads solc.js lazily from CDN for on-chain contract compilation.
 // ═══════════════════════════════════════════════════════════════
 
-import { $, toast, confirmTx, escapeHtml } from './ui.js';
+import { $, toast, confirmTx, escapeHtml, setBtnDots } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
@@ -509,8 +509,7 @@ export async function deployBatchHelper() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const net = getNetworkById(get('networkId'));
   const btn = $('#btnDeployBatchHelper');
-  const label = btn?.textContent;
-  if (btn) { btn.disabled = true; btn.textContent = 'Deploying…'; }
+  setBtnDots(btn, true, 'Deploying');
   try {
     const provider = get('provider') || await getProvider(net.chainId);
     set('provider', provider);
@@ -526,7 +525,7 @@ export async function deployBatchHelper() {
   } catch (e) {
     toast(e?.message || String(e), 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = label || 'Deploy batch helper'; }
+    setBtnDots(btn, false);
   }
 }
 
@@ -542,8 +541,7 @@ export async function deployRescueHelper() {
 
   const net = getNetworkById(get('networkId'));
   const btn = $('#btnDeployRescueHelper');
-  const label = btn?.textContent;
-  if (btn) { btn.disabled = true; btn.textContent = 'Deploying…'; }
+  setBtnDots(btn, true, 'Deploying');
   try {
     const provider = get('provider') || await getProvider(net.chainId);
     set('provider', provider);
@@ -559,7 +557,7 @@ export async function deployRescueHelper() {
   } catch (e) {
     toast(e?.message || String(e), 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = label || 'Deploy rescue helper'; }
+    setBtnDots(btn, false);
   }
 }
 
@@ -571,8 +569,7 @@ export async function deployAirdropClaimer() {
 
   const net = getNetworkById(get('networkId'));
   const btn = $('#btnDeployAirdropClaimer');
-  const label = btn?.textContent;
-  if (btn) { btn.disabled = true; btn.textContent = 'Deploying…'; }
+  setBtnDots(btn, true, 'Deploying');
   try {
     const provider = get('provider') || await getProvider(net.chainId);
     set('provider', provider);
@@ -589,7 +586,7 @@ export async function deployAirdropClaimer() {
   } catch (e) {
     toast(e?.message || String(e), 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = label || 'Deploy airdrop claimer'; }
+    setBtnDots(btn, false);
   }
 }
 
@@ -692,7 +689,7 @@ export async function revokeDelegation() {
   if (!ok) return;
 
   const btn = $('#btnRevokeDelegation');
-  if (btn) { btn.disabled = true; btn.textContent = 'Revoking…'; }
+  if (btn) setBtnDots(btn, true, 'Revoking');
   try {
     const nonce = await provider.getTransactionCount(target);
     const authorization = signer.authorizeSync({ chainId: net.chainId, address: EIP7702.ZERO_ADDRESS, nonce });

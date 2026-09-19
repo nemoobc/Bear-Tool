@@ -214,9 +214,6 @@ export async function doSend() {
   }
 
   await runTx('send', $('#btnSend'), async () => {
-    const provider = get('provider');
-    const signer = get('signer').connect(provider);
-    const feeData = await withTimeout(provider.getFeeData(), RPC_TIMEOUT_MS, 'getFeeData');
     const gasPrice = gasSpeed === 'slow' ? feeData.gasPrice * 90n / 100n
       : gasSpeed === 'fast' ? feeData.gasPrice * 120n / 100n
       : feeData.gasPrice;

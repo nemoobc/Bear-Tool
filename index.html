@@ -118,8 +118,10 @@
         <!-- DASHBOARD -->
         <section class="view active" id="view-dashboard">
           <div class="balance-hero">
+            <div class="wallet-name" id="homeWalletName"></div>
             <div class="total" id="totalBalance">$0.00</div>
             <div class="sub" id="balanceSub">Not connected</div>
+            <div class="hero-spark" id="heroSpark"></div>
           </div>
           <div class="quick-actions" id="quickActions">
             <button class="quick-action-btn" data-view="send"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span><span class="qa-label">Send</span></button>
@@ -481,39 +483,6 @@
               <div id="deployStatus" class="deploy-status hidden"></div>
             </div>
           </div>
-          <div class="card">
-            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg> Mining PoW (SHA-256)</div>
-            <p class="small mb-8">Real Proof-of-Work mining, 100% client-side: find a nonce so that <span class="mono">sha256(prefix + nonce) &lt; target</span>. Use the proof for SHA-256 PoW faucets or verify it yourself.</p>
-            <div class="field">
-              <label for="miningAddr">Wallet address (for the proof)</label>
-              <input class="input" id="miningAddr" placeholder="0x...">
-            </div>
-            <div class="flex gap-8">
-              <div class="field" style="flex:1">
-                <label for="miningThreads">Threads</label>
-                <input class="input" id="miningThreads" type="number" value="2" min="1" max="8">
-              </div>
-              <div class="field" style="flex:1">
-                <label for="miningDifficulty">Difficulty</label>
-                <input class="input" id="miningDifficulty" type="number" value="4" min="1" max="24">
-              </div>
-            </div>
-            <div class="flex gap-8">
-              <button class="btn btn-primary" id="btnMiningStart">Start Mining</button>
-              <button class="btn btn-danger hidden" id="btnMiningStop">Stop</button>
-            </div>
-            <div id="miningStatus" class="hidden" style="margin-top:12px">
-              <div class="gas-estimate"><span class="gas-est-label">Status:</span> <span class="gas-est-value" id="miningState">idle</span></div>
-              <div class="gas-estimate"><span class="gas-est-label">Speed:</span> <span class="gas-est-value" id="miningSpeed">—</span></div>
-              <div class="gas-estimate"><span class="gas-est-label">Hashes:</span> <span class="gas-est-value" id="miningHashes">0</span></div>
-              <div class="gas-estimate"><span class="gas-est-label">Nonce:</span> <span class="gas-est-value mono" id="miningNonce">—</span></div>
-              <div class="gas-estimate"><span class="gas-est-label">Prefix:</span> <span class="gas-est-value mono" id="miningPrefix">—</span></div>
-              <div class="gas-estimate"><span class="gas-est-label">Target:</span> <span class="gas-est-value mono" id="miningTarget">—</span></div>
-              <div class="gas-estimate"><span class="gas-est-label">Proof hash:</span> <span class="gas-est-value mono" id="miningProof">—</span></div>
-              <div class="gas-estimate"><span class="gas-est-label">Verified:</span> <span class="gas-est-value" id="miningVerified">—</span></div>
-            </div>
-          </div>
-
           <!-- ═══════════ BATCH CALL ═══════════ -->
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg> Batch Call</div>

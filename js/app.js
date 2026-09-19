@@ -21,7 +21,6 @@ import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
 import { bindEip7702Events, loadEip7702 } from './eip7702.js';
 import { bindEip7702ToolsEvents } from './eip7702-tools.js';
 import { bindDeployEvents } from './deploy.js';
-import { bindMiningEvents } from './mining-ui.js';
 import { loadNfts } from './nft.js';
 import { t, setLang, applyTranslations } from './i18n.js';
 
@@ -726,9 +725,21 @@ async function loadDashboard() {
   // not shown (or copyable) from the home screen any more.
   $('#balanceSub').textContent = net.name;
 
+  // Wallet name above the balance hero — the home screen's "whose box is
+  // this?" label. Reads the account list (non-secret) — no address shown.
+  try {
+    const accounts = wallet.getAccounts() || [];
+    const idx = wallet.getActiveAccountIndex();
+    const acct = accounts[idx] || {};
+    $('#homeWalletName').textContent = (acct.name || 'Account').trim();
+  } catch { /* name is cosmetic — skip */ }
+
   const assetList = $('#assetList');
   if (!assetList) return;
   assetList.innerHTML = spinner(64, 'Loading assets...');
+  // 24h price sparkline for the native asset — CoinGecko auto-pair
+  // (native → auto chain id), cached by fetchPriceHistory. Cosmetic only.
+  renderHeroSpark(net).catch(() => { /* cosmetic — never blocks */ });
   try {
     const provider = await getProvider(net.chainId);
     set('provider', provider);
@@ -1140,7 +1151,6 @@ function bindViews() {
   bindEip7702Events();
   bindEip7702ToolsEvents();
   bindDeployEvents();
-  bindMiningEvents();
 
   $('#approvalMode').addEventListener('change', () => {
     $('#approvalCustomWrap').classList.toggle('hidden', $('#approvalMode').value !== 'custom');
@@ -1437,3 +1447,27 @@ function initAddressBook() {
 // init activity
 loadActivity();
 initAddressBook();
+// Hero sparkline — 24h native price from CoinGecko, auto-paired to the
+// chain's native coin id (no manual symbol→id map to maintain). Cosmetic:
+// an empty canvas or a missing element must never block the dashboard.
+async function renderHeroSpark(net) {
+  const canvas = $('#heroSpark');
+  if (!canvas || !net) return;
+  const history = await fetchPriceHistory({ address: null, chainId: net.chainId });
+  if (!Array.isArray(history) || history.length < 2) return;
+  const w = canvas.clientWidth || 200;
+  const h = 40;
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const range = (max - min) || 1;
+  const step = w / (history.length - 1);
+  const points = history.map((v, i) => {
+    const x = (i * step).toFixed(1);
+    const y = (h - 2 - ((v - min) / range) * (h - 6)).toFixed(1);
+    return `${x},${y}`;
+  }).join(' ');
+  const last = history[history.length - 1];
+  const first = history[0];
+  const up = last >= first;
+  canvas.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" width="100%" height="${h}" role="img" aria-label="24h price trend"><polyline points="${points}" fill="none" stroke="${up ? '#1B8F4E' : '#D64545'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}

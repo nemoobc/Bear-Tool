@@ -4,7 +4,7 @@
 // safe sendTransaction wrapper with button loading state.
 // ═══════════════════════════════════════════════════════════════
 
-import { toast, setBtnLoading } from './ui.js';
+import { toast, setBtnLoading, setBtnDots } from './ui.js';
 
 const pending = new Set();
 
@@ -73,14 +73,17 @@ export function withErrorBoundary(fn, context = 'operation') {
   };
 }
 
-// combined: lock + button loading + error boundary — the one to use for tx buttons
-export async function runTx(key, btn, fn, { loadingLabel = 'Processing...' } = {}) {
+// combined: lock + button loading (dots) + error boundary — the one to use for tx buttons
+export async function runTx(key, btn, fn, { loadingLabel = 'Processing...', dots = true } = {}) {
   if (pending.has(key)) {
     toast('Transaction already in progress...', 'info');
     return null;
   }
   pending.add(key);
-  if (btn) setBtnLoading(btn, true, loadingLabel);
+  if (btn) {
+    if (dots) setBtnDots(btn, true, loadingLabel);
+    else setBtnLoading(btn, true, loadingLabel);
+  }
   try {
     return await fn();
   } catch (e) {

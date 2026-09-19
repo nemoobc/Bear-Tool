@@ -179,6 +179,26 @@ export function setBtnLoading(btn, loading, label = 'Loading...') {
   }
 }
 
+// ── button loading state with animated THREE DOTS (tools/deploy wizard) ──
+// Same double-submit lock as setBtnLoading, but shows the bouncing dots
+// (spinner-dots) instead of a ring — matches the "titik tiga" loading style.
+export function setBtnDots(btn, loading, label = '') {
+  if (!btn) return;
+  if (loading) {
+    if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.innerHTML = `<span class="spinner-dots" aria-hidden="true"><span></span><span></span><span></span></span>${label ? ' ' + escapeHtml(label) : ''}`;
+  } else {
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    if (btn.dataset.origHtml) {
+      btn.innerHTML = btn.dataset.origHtml;
+      delete btn.dataset.origHtml;
+    }
+  }
+}
+
 // ── animated number counter (respects prefers-reduced-motion) ──
 export function animateValue(el, target, { duration = 800, formatter = v => v } = {}) {
   if (!el) return;
