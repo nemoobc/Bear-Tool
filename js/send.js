@@ -235,37 +235,62 @@ export async function doSend() {
     const provider = get('provider');
     const signer = get('signer');
     if (!provider || !signer) return toast('Wallet not ready', 'error');
-    const feeData = await provider.getFeeData();
+
+    // Validate amount strictly before any ethers call
+    const trimmedAmt = String(amt).trim();
+    const parsedAmt = parseFloat(trimmedAmt);
+    if (!Number.isFinite(parsedAmt) || parsedAmt <= 0) {
+      return toast('Invalid amount', 'error');
+    }
+
+    let feeData;
+    try {
+      feeData = await provider.getFeeData();
+    } catch (e) {
+      return toast(`Gas estimation failed: ${e.message}`, 'error');
+    }
+
     // gasPrice can be null on some L2s — fallback to maxFeePerGas
     const baseFee = feeData.gasPrice || feeData.maxFeePerGas || 0n;
     const gasPrice = gasSpeed === 'slow' ? baseFee * 90n / 100n
       : gasSpeed === 'fast' ? baseFee * 120n / 100n
       : baseFee;
 
-    // Validate amount before parsing
-    const parsedAmt = parseFloat(amt);
-    if (!Number.isFinite(parsedAmt) || parsedAmt <= 0) {
-      return toast('Invalid amount', 'error');
-    }
-
     let tx;
     if (tokenSel === 'native') {
+      // Parse amount safely
+      let value;
+      try {
+        value = ethers.parseEther(trimmedAmt);
+      } catch (e) {
+        return toast(`Invalid amount: ${e.message}`, 'error');
+      }
       // Check balance vs amount + gas
-      const bal = await provider.getBalance(signer.address);
-      const value = ethers.parseEther(amt);
-      const gasLimit = 21000n;
-      const gasCost = gasLimit * baseFee;
-      if (value + gasCost > bal) {
-        return toast('Insufficient balance for amount + gas', 'error');
+      try {
+        const bal = await provider.getBalance(signer.address);
+        const gasLimit = 21000n;
+        const gasCost = gasLimit * baseFee;
+        if (value + gasCost > bal) {
+          return toast('Insufficient balance for amount + gas', 'error');
+        }
+      } catch (e) {
+        // Balance check failed — proceed anyway (RPC might be down)
       }
       tx = await withTimeout(signer.sendTransaction({
         to, value,
-        maxFeePerGas: feeData.maxFeePerGas || gasPrice,
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || gasPrice
+        maxFeePerGas: feeData.maxFeePerGas || gasPrice || undefined,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || gasPrice || undefined
       }), BROADCAST_TIMEOUT_MS, 'broadcast');
     } else {
+      // Parse ERC-20 amount safely
+      let value;
+      try {
+        value = ethers.parseUnits(trimmedAmt, t.decimals);
+      } catch (e) {
+        return toast(`Invalid amount: ${e.message}`, 'error');
+      }
       const c = new ethers.Contract(t.address, ERC20_ABI, signer);
-      tx = await withTimeout(c.transfer(to, ethers.parseUnits(amt, t.decimals)), BROADCAST_TIMEOUT_MS, 'broadcast');
+      tx = await withTimeout(c.transfer(to, value), BROADCAST_TIMEOUT_MS, 'broadcast');
     }
     // A broadcast that times out must NOT leave the button spinning forever:
     // the hash may still land — track it on the explorer. Button released,
