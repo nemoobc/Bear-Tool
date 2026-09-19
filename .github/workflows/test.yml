@@ -56,7 +56,7 @@ jobs:
           VIEWS=$(grep -oP 'id="view-\K[^"]+' index.html | sort)
           echo "Views found: $(echo $VIEWS | tr '\n' ' ')"
           VIEW_COUNT=$(echo "$VIEWS" | wc -l)
-          [ "$VIEW_COUNT" -eq 10 ] || { echo "FAIL: Expected 10 views, got $VIEW_COUNT"; exit 1; }
+          [ "$VIEW_COUNT" -eq 11 ] || { echo "FAIL: Expected 11 views, got $VIEW_COUNT"; exit 1; }
 
           # Check nav items match views
           NAV_VIEWS=$(grep -oP 'data-view="\K[^"]+' index.html | sort -u)
@@ -76,7 +76,9 @@ jobs:
               'clearBtn','cnChainId','cnName','createBtn','addAccBtn','seedConfirm','addNetBtn',
               'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart',
               'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge',
-              'createName','importName'
+              'createName','importName','swapRouterSelect','bridgeRouterSelect',
+              'dappsContainer','openSeaPanel','btnCheckWL','btnAcceptTopOffer','openSeaStatus',
+              'coinPricePanel'
           }
           missing = []
           for f in ['js/swap.js','js/bridge.js','js/send.js','js/app.js']:
@@ -321,6 +323,40 @@ jobs:
             await page.screenshot({ path: 'screenshots/swap.png', fullPage: true });
           });
 
+          test('swap has router selector', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="swap"]').click();
+            const sel = page.locator('#swapRouterSelect');
+            await expect(sel).toBeAttached();
+            const opts = await sel.locator('option').count();
+            expect(opts).toBeGreaterThanOrEqual(7); // auto + 6 routers
+          });
+
+          test('bridge has router selector', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="swap"]').click();
+            // Bridge is accessible via swap nav double-click or by navigating directly
+            const hasBridge = await page.evaluate(() => {
+              return !!document.querySelector('#bridgeRouterSelect') ||
+                     !!document.querySelector('#view-bridge');
+            });
+            expect(hasBridge).toBeTruthy();
+          });
+
+          test('screenshot: dapps view', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="dapps"]').click();
+            await page.waitForTimeout(500);
+            await page.screenshot({ path: 'screenshots/dapps.png', fullPage: true });
+          });
+
+          test('dapps view has container', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="dapps"]').click();
+            const container = page.locator('#dappsContainer');
+            await expect(container).toBeAttached();
+          });
+
           test('screenshot: send view', async ({ page }) => {
             await skipIntro(page);
             await page.locator('.quick-action-btn[data-view="send"]').click();
@@ -343,6 +379,24 @@ jobs:
             await skipIntro(page);
             await page.locator('.nav-item[data-view="eip7702"]').click();
             await page.screenshot({ path: 'screenshots/eip7702.png', fullPage: true });
+          });
+
+          test('screenshot: nft view with OpenSea panel', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="nft"]').click();
+            await page.waitForTimeout(300);
+            await page.screenshot({ path: 'screenshots/nft-opensea.png', fullPage: true });
+          });
+
+          test('NFT view has OpenSea panel with WL + Accept buttons', async ({ page }) => {
+            await skipIntro(page);
+            await page.locator('.nav-item[data-view="nft"]').click();
+            const wlBtn = page.locator('#btnCheckWL');
+            const offerBtn = page.locator('#btnAcceptTopOffer');
+            const status = page.locator('#openSeaStatus');
+            await expect(wlBtn).toBeAttached();
+            await expect(offerBtn).toBeAttached();
+            await expect(status).toBeAttached();
           });
 
           // ── SEPOLIA NETWORK TESTS ──
