@@ -3,3 +3,4 @@ node_modules/
 .DS_Storeprobe-build.mjs
 logs2.zip
 job-logs.txt
+.env

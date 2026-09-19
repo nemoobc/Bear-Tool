@@ -94,6 +94,11 @@ export async function loadNfts() {
         <div class="nft-card">
           ${nft.image ? `<img src="${escapeHtml(nft.image)}" alt="${escapeHtml(nft.name)}" loading="lazy" onerror="this.style.display='none'">` : '<div class="nft-card" style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:2rem">🐻</div>'}
           <div class="meta">${escapeHtml(nft.name)}<br><span class="small">${escapeHtml(nft.collection)}</span></div>
+          <div class="openSea-actions">
+            <button class="btn-small" data-opensea="list" data-token="${nft.contractAddress}" data-id="${nft.tokenId}">List</button>
+            <button class="btn-small" data-opensea="cancel" data-token="${nft.contractAddress}" data-id="${nft.tokenId}">Cancel</button>
+            <button class="btn-small" data-opensea="fulfill" data-token="${nft.contractAddress}" data-id="${nft.tokenId}">Fulfill</button>
+          </div>
         </div>`).join('');
     } else {
       grid.innerHTML = '<p class="small text-center">Not Found</p>';

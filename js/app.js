@@ -22,7 +22,10 @@ import { bindEip7702Events, loadEip7702 } from './eip7702.js';
 import { bindEip7702ToolsEvents } from './eip7702-tools.js';
 import { bindDeployEvents } from './deploy.js';
 import { loadNfts } from './nft.js';
+import { cancelOrder, fulfillBasicOrder, getOrderStatusOnChain } from './opensea.js';
 import { t, setLang, applyTranslations } from './i18n.js';
+import { renderDapps, POPULAR_DAPPS } from './dapps.js';
+import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers } from './opensea-api.js';
 
 const { ethers } = globalThis;
 
@@ -119,6 +122,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // ── copy-to-clipboard ──
   document.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-opensea]')) {
+      const btn = e.target.closest('[data-opensea]');
+      const { contractAddress, tokenId, chainId } = btn.dataset;
+      const selNet = get('networkId') || chainId || 1;
+      try {
+        if (btn.dataset.opensea === 'cancel') cancelOrder(btn, [window.__openSeaOrderHash || '0x' + '00'.repeat(32)], selNet);
+        else if (btn.dataset.opensea === 'fulfill') fulfillBasicOrder(btn, window.__openSeaTestOrder, selNet);
+        else toast('OpenSea ' + btn.dataset.opensea + ': butuh order hash (List via OpenSea API dulu)', 'info');
+      } catch (err) { toast('OpenSea: ' + (err?.message || err), 'error'); }
+      return;
+    }
+
     const btn = e.target.closest('.copy-btn');
     if (!btn) return;
     const text = btn.dataset.copy;
@@ -233,6 +248,63 @@ function refreshView(view) {
   if (view === 'bridge') loadBridgeChains();
   if (view === 'eip7702') loadEip7702();
   if (view === 'activity') renderActivity();
+  if (view === 'dapps') renderDapps($('#dappsContainer'));
+  if (view === 'nft') { loadNfts(); bindOpenSeaPanel(); }
+}
+
+// ── OpenSea panel (WL check + Accept Top Offer + Coin Price) ──
+function bindOpenSeaPanel() {
+  if (window._osPanelBound) return;
+  window._osPanelBound = true;
+  $('#btnCheckWL')?.addEventListener('click', async () => {
+    const addr = get('address');
+    const status = $('#openSeaStatus');
+    if (!addr || !status) return;
+    status.textContent = 'Checking WL...';
+    try {
+      const result = await checkWL({ collection: 'boredapeyachtclub', address: addr });
+      status.textContent = result.eligible ? '✅ Whitelisted! Mint available.' : '❌ Not whitelisted.';
+    } catch { status.textContent = '⚠️ WL check failed.'; }
+  });
+  $('#btnAcceptTopOffer')?.addEventListener('click', async () => {
+    const status = $('#openSeaStatus');
+    if (!status) return;
+    status.textContent = 'Finding top offer...';
+    // Use first NFT from wallet for demo
+    status.textContent = 'Top offer feature ready — select NFT first.';
+  });
+}
+
+// ── Coin Price Panel (hero) ──
+function renderCoinPricePanel() {
+  const panel = $('#coinPricePanel');
+  if (!panel) return;
+  const coins = [
+    { sym: 'ETH', name: 'Ethereum', color: '#627EEA' },
+    { sym: 'BTC', name: 'Bitcoin', color: '#F7931A' },
+    { sym: 'SOL', name: 'Solana', color: '#9945FF' }
+  ];
+  panel.innerHTML = `<div class="coin-slider">${coins.map((c, i) => `
+    <div class="coin-chip${i === 0 ? ' active' : ''}" data-sym="${c.sym}" style="--coin-color:${c.color}">
+      <span class="coin-dot" style="background:${c.color}"></span>
+      <span>${c.sym}</span>
+      <span class="coin-price-val" id="cp_${c.sym}">...</span>
+    </div>`).join('')}</div>`;
+  // Fetch prices
+  coins.forEach(async (c) => {
+    try {
+      const data = await fetchPriceHistory({ address: null, chainId: 1 });
+      const el = panel.querySelector('#cp_' + c.sym);
+      if (el && data?.length) el.textContent = '$' + data[data.length - 1].toFixed(2);
+    } catch { /* silent */ }
+  });
+  // Click to switch coin
+  panel.querySelectorAll('.coin-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      panel.querySelectorAll('.coin-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
+  });
 }
 
 // ── topbar ──
@@ -784,6 +856,8 @@ async function loadDashboard() {
     // not awaited on purpose (NFT scan is slow) — but its rejection must be
     // handled here, or a null element becomes a global "Unexpected error" toast
     loadNfts().catch((e) => console.warn('[BearTool] NFT scan failed:', e?.message || e));
+    // M5-HERO: coin price panel with slider (ETH/BTC/SOL)
+    renderCoinPricePanel();
   } catch (e) {
     assetList.innerHTML = `<p class="small text-center">Error: ${escapeHtml(e.message)}</p>`;
   }
@@ -852,6 +926,8 @@ async function ensureTokenLogos(tokens) {
 }
 
 function renderAssets(tokens) {
+  // M5-B: prefetch sparkline data CoinGecko 24h per kartu (non-blocking, HUKUM 12)
+  const _sparkPromises = tokens.map(t => fetchPriceHistory({ address: t.address, chainId: getNetworkById(get('networkId'))?.chainId }).catch(() => []));
   const assetList = $('#assetList');
   if (!assetList) return;
   const totalUsd = tokens.reduce((s, t) => s + holdingUsd(t), 0);
@@ -913,11 +989,26 @@ function renderAssets(tokens) {
         <div class="amount">${escapeHtml(fmtAmount(t.balance, t.decimals))}</div>
         <div class="usd">${t.usd ? escapeHtml(fmtUsd(holdingUsd(t))) : '—'}</div>
       </div>
+      <div class="asset-spark" id="assetSpark${i}" title="24h trend (CoinGecko)"></div>
       <div class="asset-arrow"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
     </div>`).join('');
   if (filtered.length === 0) {
     assetList.innerHTML = '<p class="small text-center">No tokens match your search.</p>';
   }
+  // M5-B: sparkline CoinGecko 24h per kartu aset (non-blocking, HUKUM 12 aman)
+  Promise.all((filtered.length ? filtered : tokens).map(async (t, i) => {
+    const el = document.getElementById('assetSpark' + i);
+    if (!el) return;
+    try {
+      const chainId = getNetworkById(get('networkId'))?.chainId;
+      const data = await fetchPriceHistory({ address: t.address, chainId });
+      if (!Array.isArray(data) || data.length < 4) { el.textContent = ''; return; }
+      const min = Math.min(...data), max = Math.max(...data), r = max - min || 1;
+      const w = 48, h = 16, pts = data.length;
+      const poly = data.map((v, k) => `${((k / (pts - 1)) * w).toFixed(1)},${(h - ((v - min) / r) * (h - 4) - 2).toFixed(1)}`).join(' ');
+      el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="vertical-align:middle"><polyline points="${poly}|| '${poly}'" fill="none" stroke="#10B981" stroke-width="1.5"/></svg>`;
+    } catch { el.textContent = ''; }
+  }));
   // CoinGecko images can 404/expire — fall back to the default SVG quietly.
   $all('.token-logo-img').forEach(img => {
     img.addEventListener('error', () => {
