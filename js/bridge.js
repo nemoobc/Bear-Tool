@@ -27,6 +27,7 @@ import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt } from './safetx.js';
 import { getAllNetworks, getNetworkById } from './network.js';
 import { t } from './i18n.js';
+import { BRIDGE_ROUTERS, getBridgeRoutersForChain, CHAIN_NAMES } from './routers.js';
 
 const { ethers } = globalThis;
 
@@ -110,6 +111,28 @@ export function loadBridgeChains() {
   const net = getNetworkById(get('networkId'));
   const sym = net?.symbol || 'Native';
   tok.innerHTML = `<option value="native">${escapeHtml(sym)} — ${escapeHtml(t('bridge.native_only'))}</option>`;
+  // Update bridge router selector with available routers for current chain pair
+  updateBridgeRouterOptions();
+  from.addEventListener('change', updateBridgeRouterOptions);
+  to.addEventListener('change', updateBridgeRouterOptions);
+}
+
+function updateBridgeRouterOptions() {
+  const fromVal = $('#bridgeFromChain')?.value;
+  const toVal = $('#bridgeToChain')?.value;
+  const sel = $('#bridgeRouterSelect');
+  if (!sel || !fromVal || !toVal) return;
+  const fromNet = getNetworkById(fromVal);
+  const toNet = getNetworkById(toVal);
+  if (!fromNet || !toNet) return;
+  const fromRouters = getBridgeRoutersForChain(fromNet.chainId);
+  const toRouters = getBridgeRoutersForChain(toNet.chainId);
+  const fromIds = new Set(fromRouters.map(r => r.id));
+  const common = toRouters.filter(r => fromIds.has(r.id));
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="auto">Auto (Best Route)</option>' +
+    common.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
+  if ([...sel.options].some(o => o.value === currentVal)) sel.value = currentVal;
 }
 
 export async function doBridge() {
