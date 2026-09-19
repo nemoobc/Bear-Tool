@@ -4,3 +4,9 @@ node_modules/
 logs2.zip
 job-logs.txt
 .env
+vendor/
+
+test-contracts/cache/
+test-contracts/out/
+test-contracts/foundry.toml
+vendor/
