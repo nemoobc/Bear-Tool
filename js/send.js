@@ -7,7 +7,7 @@
 import { $, toast, confirmTx, fmtAmount, escapeHtml } from './ui.js';
 import { get, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, withTimeout, RPC_TIMEOUT_MS } from './safetx.js';
-import { getNetworkById, getGasPrice, ERC20_ABI, POPULAR_TOKENS } from './network.js';
+import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import * as wallet from './wallet.js';
 
 const { ethers } = globalThis;
@@ -97,7 +97,8 @@ export async function updateSendPreview() {
   try {
     const provider = get('provider');
     if (provider) {
-      const gasPrice = await getGasPrice(provider);
+      const feeData = await provider.getFeeData();
+      const gasPrice = feeData.gasPrice || feeData.maxFeePerGas || 0n;
       const gasLimit = tokenSel === 'native' ? 21000n : 65000n;
       const gasEth = ethers.formatEther(gasLimit * gasPrice);
       const nativeUsd = get('tokens').find(x => !x.address)?.usd || 0;
@@ -235,14 +236,30 @@ export async function doSend() {
     const signer = get('signer');
     if (!provider || !signer) return toast('Wallet not ready', 'error');
     const feeData = await provider.getFeeData();
-    const gasPrice = gasSpeed === 'slow' ? feeData.gasPrice * 90n / 100n
-      : gasSpeed === 'fast' ? feeData.gasPrice * 120n / 100n
-      : feeData.gasPrice;
+    // gasPrice can be null on some L2s — fallback to maxFeePerGas
+    const baseFee = feeData.gasPrice || feeData.maxFeePerGas || 0n;
+    const gasPrice = gasSpeed === 'slow' ? baseFee * 90n / 100n
+      : gasSpeed === 'fast' ? baseFee * 120n / 100n
+      : baseFee;
+
+    // Validate amount before parsing
+    const parsedAmt = parseFloat(amt);
+    if (!Number.isFinite(parsedAmt) || parsedAmt <= 0) {
+      return toast('Invalid amount', 'error');
+    }
 
     let tx;
     if (tokenSel === 'native') {
+      // Check balance vs amount + gas
+      const bal = await provider.getBalance(signer.address);
+      const value = ethers.parseEther(amt);
+      const gasLimit = 21000n;
+      const gasCost = gasLimit * baseFee;
+      if (value + gasCost > bal) {
+        return toast('Insufficient balance for amount + gas', 'error');
+      }
       tx = await withTimeout(signer.sendTransaction({
-        to, value: ethers.parseEther(amt),
+        to, value,
         maxFeePerGas: feeData.maxFeePerGas || gasPrice,
         maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || gasPrice
       }), BROADCAST_TIMEOUT_MS, 'broadcast');
