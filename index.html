@@ -259,6 +259,10 @@
                 </div>
                 <div class="swap-balance" id="swapToBalance">Balance: 0</div>
               </div>
+              <div class="field" style="margin-bottom:8px">
+                <label for="swapRouterSelect">Router</label>
+                <select class="select" id="swapRouterSelect"><option value="auto">Auto (Best Price)</option><option value="kyberswap">KyberSwap</option><option value="1inch">1inch</option><option value="paraswap">ParaSwap</option><option value="sushiswap">SushiSwap</option><option value="uniswap_v3">Uniswap V3</option><option value="uniswap_v2">Uniswap V2</option></select>
+              </div>
               <div class="swap-extras">
                 <div class="field">
                   <label for="swapSlippage">Slippage</label>
@@ -309,6 +313,10 @@
               <div class="field">
                 <label for="bridgeAmount">Amount</label>
                 <input class="input" id="bridgeAmount" type="number" placeholder="0.0" min="0" step="any">
+              </div>
+              <div class="field" style="margin-bottom:8px">
+                <label for="bridgeRouterSelect">Bridge Router</label>
+                <select class="select" id="bridgeRouterSelect"><option value="auto">Auto (Best Route)</option><option value="lifi">LI.FI</option><option value="socket">Socket</option><option value="stargate">Stargate</option><option value="across">Across</option><option value="hop">Hop</option><option value="wormhole">Wormhole</option><option value="bungee">Bungee</option><option value="synapse">Synapse</option></select>
               </div>
               <div id="bridgeRoute" class="bridge-route hidden"></div>
               <button class="btn btn-success btn-block btn-lg hidden" id="btnBridgeExec">Execute Bridge</button>

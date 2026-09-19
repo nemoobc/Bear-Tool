@@ -97,11 +97,11 @@ test('E2E-probe: intro timer + skip wiring', () => {
   document.getElementById = (id) => id === 'intro' ? intro : id === 'introSkip' ? skip : id === 'introTitle' ? title : id === 'introLogo' ? logo : makeEl();
   theme.runIntro(() => { done = true; });
   assert.equal(done, false, 'intro must not finish synchronously');
-  assert.equal(theme.INTRO_MS, 2500, 'intro must be 2.5s (was 5s — too long for a first-impression flourish)');
+  assert.equal(theme.INTRO_MS, 1500, 'intro must be 1.5s (fast enough to not annoy)');
   // simulate skip click
   const skipHandler = skip.addEventListener.mock?.calls?.[0]?.[1];
   // (addEventListener is stubbed; skip path verified by code review: click → finish)
-  console.log('  intro: 2.5s setTimeout + skip click handler present (code review)');
+  console.log('  intro: 1.5s setTimeout + skip click/touch/keyboard handler present (code review)');
 });
 
 // ── 3. Send double-submit lock ──
