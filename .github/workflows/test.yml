@@ -153,7 +153,7 @@ jobs:
 
       - name: Run Playwright tests
         run: |
-          cat > bear-tool.spec.cjs << 'TESTEOF'
+          cat > tests/e2e/bear-tool.spec.cjs << 'TESTEOF'
           const { test, expect } = require('@playwright/test');
 
           const BASE = 'http://localhost:3000';
@@ -538,7 +538,7 @@ jobs:
 
       - name: Run mobile tests (iPhone 14 viewport)
         run: |
-          cat > mobile.spec.cjs << 'TESTEOF'
+          cat > tests/e2e/mobile.spec.cjs << 'TESTEOF'
           const { test, expect } = require('@playwright/test');
 
           const BASE = 'http://localhost:3001';
