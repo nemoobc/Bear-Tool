@@ -6,6 +6,8 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 
 > ⚠️ **Educational / self-custody tool.** Keys never leave your browser. Always verify addresses. Mainnet transactions require extra confirmation (type `YA` to proceed).
 
+🔗 **Live:** [nemoobc.github.io/Bear-Tool](https://nemoobc.github.io/Bear-Tool)
+
 ---
 
 ## ✨ Features
@@ -22,6 +24,8 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 | 🔐 **Approvals** | Scan popular/custom token approvals, detect UNLIMITED, revoke to 0 |
 | 🧙 **Deploy** | Wizard for ERC-20 / ERC-721 / ERC-1155 — real in-browser solc compile (CDN fallback if the primary mirror is blocked) |
 | 📜 **Activity** | Local tx history with explorer links (sidebar item next to Dashboard) |
+| 🌐 **DApps** | Web3 DApps browser — iframe-based with 10 popular DApps (Uniswap, Aave, Compound, OpenSea, Blur, Lido, Rocket Pool, Etherscan, Snapshot, ENS). Custom URL input. |
+| 🖼️ **NFT** | NFT gallery (on-chain metadata + images), per-card sparklines (CoinGecko price history), OpenSea WL check + mint estimate (price/gas/total), list/cancel/fulfill via Seaport, accept highest offer auto-detect |
 | 🎨 **Theme** | Full cartoon: chunky borders, soft shadows, 5s skippable logo intro, spinning bear loader |
 
 ---
