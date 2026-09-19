@@ -334,14 +334,17 @@ body::before {
 }
 
 /* Receive modal QR code (qrcode-generator SVG) */
-.receive-qr { display:flex; justify-content:center; }
+.receive-qr { display:flex; justify-content:center; align-items:center; margin:0 auto 16px; }
 .receive-qr svg {
-  width: 180px;
-  height: 180px;
+  width: 180px !important;
+  height: 180px !important;
+  max-width: 180px;
   border-radius: 12px;
   background: var(--white);
   border: 2px solid var(--ink);
   padding: 8px;
+  display:block;
+  margin:0 auto;
 }
 
 /* CoinGecko auto-detected token logos (asset list) */
@@ -594,9 +597,9 @@ body::before {
   box-shadow: var(--shadow);
   margin-bottom: 16px;
 }
-.balance-hero .wallet-name { font-size: 1rem; font-weight: 700; opacity: 0.85; margin-bottom: 8px; letter-spacing: 0.5px; }
-.balance-hero .total { font-size: 2.4rem; font-weight: 800; line-height: 1.2; }
-.balance-hero .sub { font-size: 1rem; font-weight: 600; color: var(--ink); line-height: 1.4; margin-top: 4px; }
+.balance-hero .wallet-name { font-size: 1.05rem; font-weight: 700; opacity: 0.85; margin-bottom: 8px; letter-spacing: 0.5px; }
+.balance-hero .total { font-size: 2.6rem; font-weight: 800; line-height: 1.2; }
+.balance-hero .sub { font-size: 1.1rem; font-weight: 600; color: var(--ink); line-height: 1.4; margin-top: 4px; }
 .hero-spark { display: none; }
 .hero-sparkline { display: none; }
 
