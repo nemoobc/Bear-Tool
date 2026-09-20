@@ -150,7 +150,8 @@ export async function cancelOrder(btn, orderHashes, chainId) {
   if (!signer) throw new Error('OpenSea: wallet locked');
 
   return runTx('opensea-cancel', btn, async () => {
-    const seaport = new ethers.Contract(seaportAddr, SEAPORT_ABI, signer);
+    const connected = typeof signer.connect === 'function' ? signer.connect(get('provider')) : signer;
+    const seaport = new ethers.Contract(seaportAddr, SEAPORT_ABI, connected);
     // cancel(bytes32[] orderHashes) — Seaport 1.5 takes an array of hashes.
     const tx = await seaport.cancel(orderHashes);
     return tx;
@@ -169,7 +170,8 @@ export async function fulfillBasicOrder(btn, parameters, chainId) {
   if (!signer) throw new Error('OpenSea: wallet locked');
 
   return runTx('opensea-fulfill', btn, async () => {
-    const seaport = new ethers.Contract(seaportAddr, SEAPORT_ABI, signer);
+    const connected = typeof signer.connect === 'function' ? signer.connect(get('provider')) : signer;
+    const seaport = new ethers.Contract(seaportAddr, SEAPORT_ABI, connected);
     const tx = await seaport.fulfillBasicOrder(parametersValidate(parameters));
     return tx;
   }, { loadingLabel: 'Accepting offer…' });

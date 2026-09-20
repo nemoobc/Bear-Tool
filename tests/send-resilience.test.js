@@ -102,6 +102,23 @@ test('every module that waits for a receipt imports waitForReceipt', () => {
   }
 });
 
+test('every module that broadcasts uses a provider-connected signer (no "missing provider")', () => {
+  // Keystore signers are plain ethers.Wallet instances with NO provider.
+  // Broadcasting with one dies with UNSUPPORTED_OPERATION "missing provider"
+  // (send.js had this bug; deploy.js and opensea.js had the same pattern).
+  const offenders = [];
+  for (const f of jsFiles) {
+    const src = read('js/' + f);
+    const usesSigner = src.includes("get('signer')");
+    const broadcasts = /sendTransaction\(|factory\.deploy\(/.test(src);
+    if (usesSigner && broadcasts && !/\.connect\(/.test(src)) {
+      offenders.push(`js/${f}: uses get('signer') + broadcast but never .connect(provider)`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'unconnected signer broadcast found: ' + offenders.join(', '));
+});
+
 // ── static: Send screen controls are wired, not dead markup ──
 test('send.js wires the paste button and the token balance / gas estimate fields', () => {
   const send = read('js/send.js');

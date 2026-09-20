@@ -58,10 +58,15 @@ test('bridge: provider chain changes across awaited promise', async (t) => {
   Object.defineProperty(state.get(), 'signer', { configurable: true, get() { signerReads++; throw new Error('Unexpected signer access'); } });
   try {
     const pending = bridge.doBridgeExec();
+    // Sign confirmation renders before runTx touches the provider.
+    await new Promise(r => setImmediate(r));
+    const yes = document.querySelector('#confirmYes');
+    assert.ok(yes && typeof yes.onclick === 'function', 'sign confirm rendered');
+    yes.onclick();
     await Promise.resolve();
-    assert.equal(calls, 2);
     release();
     await pending;
+    assert.equal(calls, 2); // preNet guard (1) + runTx netPre (2) — drift caught before netPost
     assert.equal(signerReads, 0);
     assert.equal(fetch.mock.callCount(), 0);
     assert.equal(toasts.length, 1);
@@ -98,8 +103,17 @@ test('bridge: account change during provider await cannot access signer', async 
   Object.defineProperty(state.get(), 'signer', { configurable: true, get() { signerReads++; throw new Error('Signer must not be accessed'); } });
   try {
     const pending = bridge.doBridgeExec();
-    state.set('address', '0x3333333333333333333333333333333333333333');
+    // New pre-confirm guard awaits getNetwork (call 1) FIRST: resolve it,
+    // then the sign confirmation renders, then the account drift is seen by
+    // the post-await re-check inside runTx and the signer is never touched.
+    await new Promise(r => setImmediate(r));
     resolveNetwork({ chainId: 11155111n });
+    await new Promise(r => setImmediate(r));
+    const yes = document.querySelector('#confirmYes');
+    assert.ok(yes && typeof yes.onclick === 'function', 'sign confirm rendered');
+    state.set('address', '0x3333333333333333333333333333333333333333');
+    yes.onclick();
+    await new Promise(r => setImmediate(r));
     await pending;
     assert.equal(signerReads, 0);
     assert.deepEqual(toasts, ['Bridge context changed. Get a new route.']);
@@ -119,6 +133,7 @@ function validQuote() {
 }
 
 function setupExec(t, { quote = validQuote(), providerChain = 11155111n, signerAddress = account, form = {} } = {}) {
+  elements.clear(); // no DOM leakage between tests (confirmYes etc. are per-test)
   t.mock.method(globalThis, 'setTimeout', () => 0);
   t.mock.method(globalThis, 'fetch', async () => { throw new Error('Unexpected network access in offline test'); });
   const toasts = [];
@@ -144,7 +159,12 @@ function setupExec(t, { quote = validQuote(), providerChain = 11155111n, signerA
 
 test('bridge: matching native happy path signs quote-bound tx via spy only', async (t) => {
   const { toasts, spy } = setupExec(t);
-  await bridge.doBridgeExec();
+  const pending = bridge.doBridgeExec();
+  await new Promise(r => setImmediate(r));
+  const yes = document.querySelector('#confirmYes');
+  assert.ok(yes && typeof yes.onclick === 'function', 'sign confirm rendered');
+  yes.onclick();
+  await pending;
   assert.equal(spy.calls, 1, 'exactly one sendTransaction via spy');
   assert.equal(spy.tx.to, '0x2222222222222222222222222222222222222222');
   assert.equal(spy.tx.value, 500000000000000000n);
@@ -164,6 +184,9 @@ test('bridge: wrong live provider chain rejects before signing', async (t) => {
   await bridge.doBridgeExec();
   assert.equal(spy.calls, 0);
   assert.ok(toasts.some(m => m.includes('active network')));
+  // Anti-dialog proof: wrong chain must reject BEFORE the sign confirmation renders.
+  const yes = document.querySelector('#confirmYes');
+  assert.ok(!yes || typeof yes.onclick !== 'function', 'no sign dialog may render on wrong chain');
 });
 
 test('bridge: quote chain drift (form edited after quote) rejects', async (t) => {
@@ -175,7 +198,12 @@ test('bridge: quote chain drift (form edited after quote) rejects', async (t) =>
 
 test('bridge: account change rejects (state + signer identity)', async (t) => {
   const { toasts, spy } = setupExec(t, { signerAddress: '0x7777777777777777777777777777777777777777' });
-  await bridge.doBridgeExec();
+  const pending = bridge.doBridgeExec();
+  await new Promise(r => setImmediate(r));
+  const yes = document.querySelector('#confirmYes');
+  assert.ok(yes && typeof yes.onclick === 'function', 'sign confirm rendered');
+  yes.onclick();
+  await pending;
   assert.equal(spy.calls, 0);
   assert.ok(toasts.some(m => m.includes('account changed')));
 });

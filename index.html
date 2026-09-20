@@ -113,7 +113,7 @@
       </nav>
 
       <!-- main -->
-      <main class="main">
+      <main class="main" id="main" tabindex="-1">
 
         <!-- DASHBOARD -->
         <section class="view active" id="view-dashboard">
@@ -505,8 +505,12 @@
             <div class="card-title">🌊 OpenSea</div>
             <div class="opensea-panel" id="openSeaPanel">
               <div class="field">
-                <label for="openSeaContract">Collection contract</label>
-                <input class="input" id="openSeaContract" placeholder="0x...">
+                <label for="openSeaContract">Collection (link / slug / address)</label>
+                <input class="input" id="openSeaContract" placeholder="opensea.io/collection/… atau 0x… atau slug">
+              </div>
+              <div class="field">
+                <label for="openSeaWlAddress">Wallet for WL check</label>
+                <input class="input" id="openSeaWlAddress" placeholder="0x… (kosong = wallet aktif)">
               </div>
               <div class="field">
                 <label for="openSeaTokenId">Token ID</label>
@@ -523,28 +527,6 @@
                 <button class="btn btn-sm btn-success" id="btnAcceptTopOffer">Accept Top Offer</button>
               </div>
               <div id="openSeaStatus" class="opensea-status" style="margin-top:8px"></div>
-            </div>
-          </div>
-
-          <!-- ═══════════ REVOKE DELEGATION ═══════════ -->
-          <div class="card">
-            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg> Revoke EIP-7702 Delegation</div>
-            <p class="small mb-8">Remove delegation from an EOA (back to plain EOA).</p>
-            <div class="field">
-              <label for="revokeTarget">Target address</label>
-              <input class="input" id="revokeTarget" placeholder="0x... (default: current wallet)">
-            </div>
-            <div class="field">
-              <label for="revokeKey">Private key (optional)</label>
-              <input class="input" id="revokeKey" type="password" placeholder="0x...">
-            </div>
-            <div class="flex gap-8">
-              <button class="btn btn-ghost" id="btnCheckDelegation">Check delegation</button>
-              <button class="btn btn-danger" id="btnRevokeDelegation">Revoke delegation</button>
-            </div>
-            <div id="revokeStatus" class="delegate-status eoa hidden" style="margin-top:12px">
-              <span class="label">Status:</span>
-              <span id="revokeStatusText">—</span>
             </div>
           </div>
 

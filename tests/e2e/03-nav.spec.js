@@ -1,6 +1,6 @@
 // 03 — Navigation: sidebar views, Swap/Bridge chooser, quick actions.
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, createWallet } from './helpers.js';
+import { gotoApp, skipIntro, createWallet , appClick} from './helpers.js';
 
 const SIDEBAR_VIEWS = ['dashboard', 'activity', 'nft', 'eip7702', 'approval', 'deploy', 'swap', 'settings'];
 
@@ -10,7 +10,7 @@ test.describe('Navigation', () => {
     await skipIntro(page);
     await createWallet(page);
     for (const view of SIDEBAR_VIEWS) {
-      await page.click(`.nav-item[data-view="${view}"]`);
+      await appClick(page, `.nav-item[data-view="${view}"]`);
       await expect(page.locator(`#view-${view}`)).toHaveClass(/active/);
     }
   });
@@ -19,12 +19,12 @@ test.describe('Navigation', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('.nav-item[data-view="swap"]');
+    await appClick(page, '.nav-item[data-view="swap"]');
     await expect(page.locator('#view-swap')).toHaveClass(/active/);
-    await page.click('.nav-item[data-view="swap"]');
+    await appClick(page, '.nav-item[data-view="swap"]');
     await expect(page.locator('#chooseBridge')).toBeVisible();
     await expect(page.locator('#chooseSwap')).toBeVisible();
-    await page.click('#chooseBridge');
+    await appClick(page, '#chooseBridge');
     await expect(page.locator('#view-bridge')).toHaveClass(/active/);
   });
 
@@ -32,7 +32,7 @@ test.describe('Navigation', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('.quick-action-btn[data-view="send"]');
+    await appClick(page, '.quick-action-btn[data-view="send"]');
     await expect(page.locator('#view-send')).toHaveClass(/active/);
   });
 
@@ -40,7 +40,7 @@ test.describe('Navigation', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('.quick-action-btn[data-view="deploy"]');
+    await appClick(page, '.quick-action-btn[data-view="deploy"]');
     await expect(page.locator('#view-deploy')).toHaveClass(/active/);
   });
 
@@ -48,7 +48,7 @@ test.describe('Navigation', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('#quickReceive');
+    await appClick(page, '#quickReceive');
     await expect(page.locator('#modalOverlay')).toContainText(/0x/);
   });
 });

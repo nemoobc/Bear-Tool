@@ -50,7 +50,7 @@ npm install   # devDependency: ethers (for tests only)
 npm run verify
 ```
 
-`verify` = syntax check all JS + 341 unit tests (network data, custom networks, testnet toggle, EIP-7702 delegation detection, wallet create/import/encrypt/decrypt/derive, session persist, address poisoning, nav/status UI invariants, Sepolia swap constants).
+`verify` = syntax check all JS + 262 unit tests (261 pass, 1 skip; network data, custom networks, testnet toggle, EIP-7702 delegation detection, wallet create/import/encrypt/decrypt/derive, session persist, address poisoning, nav/status UI invariants, Sepolia swap constants). Plus browser E2E (`npm run test:e2e`, 51 specs) and on-chain fork tests for 12 networks (`run-fork-all.sh`, 10 fork tests per network).
 
 ## 📁 Structure
 

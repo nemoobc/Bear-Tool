@@ -3,6 +3,8 @@
 // DApps browser — in-app iframe browser with toolbar
 // ═══════════════════════════════════════════════════════════════
 
+import { escapeHtml, toast } from './ui.js';
+
 const POPULAR_DAPPS = [
   { name: 'Uniswap', url: 'https://app.uniswap.org', icon: '🦄', category: 'Swap' },
   { name: 'Aave', url: 'https://app.aave.com', icon: '👻', category: 'Lending' },
@@ -18,7 +20,12 @@ const POPULAR_DAPPS = [
 
 function openDappBrowser(url, name) {
   if (!url) return;
-  if (!url.startsWith('http')) url = 'https://' + url;
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  // Only http(s) targets may load in the in-app browser.
+  let parsed;
+  try { parsed = new URL(url); } catch { toast('Invalid URL', 'error'); return; }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') { toast('Invalid URL', 'error'); return; }
+  const safeUrl = parsed.href;
 
   // Inject in-app browser modal
   let overlay = document.getElementById('dappBrowserOverlay');
@@ -36,7 +43,7 @@ function openDappBrowser(url, name) {
         <button class="dapp-browser-btn" id="dappBrowserReload" title="Reload">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         </button>
-        <div class="dapp-browser-title">${name || new URL(url).hostname}</div>
+        <div class="dapp-browser-title">${escapeHtml(name || parsed.hostname)}</div>
         <button class="dapp-browser-btn" id="dappBrowserExternal" title="Open in new tab">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
         </button>
@@ -46,10 +53,10 @@ function openDappBrowser(url, name) {
       </div>
       <div class="dapp-browser-url-bar">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        <span class="dapp-browser-url-text">${url}</span>
+        <span class="dapp-browser-url-text">${escapeHtml(safeUrl)}</span>
       </div>
       <div class="dapp-browser-frame-wrap">
-        <iframe id="dappBrowserFrame" class="dapp-browser-frame" src="${url}" sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" allow="clipboard-write; clipboard-read" loading="lazy"></iframe>
+        <iframe id="dappBrowserFrame" class="dapp-browser-frame" src="${escapeHtml(safeUrl)}" sandbox="allow-scripts allow-popups allow-forms allow-modals" allow="clipboard-write; clipboard-read" loading="lazy"></iframe>
         <div class="dapp-browser-loading" id="dappBrowserLoading">
           <div class="dapp-browser-spinner"></div>
           <span>Loading ${name || 'DApp'}…</span>
@@ -87,12 +94,12 @@ function openDappBrowser(url, name) {
   // Reload
   document.getElementById('dappBrowserReload').addEventListener('click', () => {
     loader.style.display = '';
-    iframe.src = url;
+    iframe.src = safeUrl;
   });
 
   // External tab fallback
   document.getElementById('dappBrowserExternal').addEventListener('click', () => {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(safeUrl, '_blank', 'noopener,noreferrer');
   });
 
   // Close on overlay background click
@@ -118,7 +125,7 @@ export function renderDapps(container) {
       </div>
       <div id="dappGrid" class="dapp-grid">
         ${POPULAR_DAPPS.map(d => `
-          <div class="dapp-card" data-url="${d.url}" data-name="${d.name}">
+          <div class="dapp-card" data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}">
             <div class="dapp-icon">${d.icon}</div>
             <div class="dapp-name">${d.name}</div>
             <div class="dapp-category">${d.category}</div>

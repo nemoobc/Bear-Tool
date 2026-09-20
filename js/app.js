@@ -25,7 +25,7 @@ import { loadNfts } from './nft.js';
 import { cancelOrder, fulfillBasicOrder, getOrderStatusOnChain } from './opensea.js';
 import { t, setLang, applyTranslations } from './i18n.js';
 import { renderDapps, POPULAR_DAPPS } from './dapps.js';
-import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers, cancelListing, listNft } from './opensea-api.js';
+import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers, cancelListing, listNft, parseOpenSeaInput } from './opensea-api.js';
 
 const { ethers } = globalThis;
 
@@ -292,15 +292,27 @@ function bindOpenSeaPanel() {
   if (window._osPanelBound) return;
   window._osPanelBound = true;
   const status = () => $('#openSeaStatus');
-  // Check WL
+  // Check WL — collection from the contract field (OpenSea link / slug /
+  // contract address, auto-parsed) + wallet from the new address field,
+  // falling back to the active wallet. No hardcoded collection.
   $('#btnCheckWL')?.addEventListener('click', async () => {
-    const addr = get('address');
-    if (!addr || !status()) return;
-    status().textContent = 'Checking WL...';
+    const statusEl = status(); if (!statusEl) return;
+    const input = $('#openSeaContract')?.value?.trim();
+    const wlAddr = $('#openSeaWlAddress')?.value?.trim() || get('address');
+    if (!input) return statusEl.textContent = 'Masukkan link OpenSea / slug / address kontrak dulu.';
+    if (!wlAddr) return statusEl.textContent = 'Wallet belum terhubung — isi "Wallet for WL check" manual.';
+    statusEl.textContent = 'Checking WL…';
     try {
-      const result = await checkWL({ collection: 'boredapeyachtclub', address: addr });
-      status().textContent = result.eligible ? '✅ Whitelisted! Mint available.' : '❌ Not whitelisted.';
-    } catch { status().textContent = '⚠️ WL check failed.'; }
+      const r = await checkWL({ collection: input, address: wlAddr });
+      if (r.error || !r.collection) return statusEl.textContent = '⚠️ ' + (r.message || 'WL check failed.');
+      const badge = r.hidden
+        ? '<span class="badge badge-warn">🔒 PRIVATE / HIDDEN</span>'
+        : '<span class="badge badge-success">✅ PUBLIC</span>';
+      statusEl.innerHTML = `<strong>${escapeHtml(r.collection)}</strong> ${badge}<br>
+        <span class="small">Address: ${escapeHtml(wallet.shortAddress(r.address))}</span><br>
+        <span class="small">Floor: ${escapeHtml(String(r.floorPrice))} · Supply: ${escapeHtml(String(r.totalSupply))} · Owners: ${escapeHtml(String(r.listedCount))}</span><br>
+        <span class="small">${escapeHtml(r.note || '')}</span>`;
+    } catch { statusEl.textContent = '⚠️ WL check failed.'; }
   });
   // List NFT
   $('#btnOpenSeaList')?.addEventListener('click', async () => {
@@ -329,12 +341,17 @@ function bindOpenSeaPanel() {
       s.textContent = '✅ Listing cancelled!';
     } catch (e) { s.textContent = '⚠️ ' + (e?.message || 'Cancel failed'); }
   });
-  // Accept top offer
+  // Accept top offer — needs contract (+token ID); a full asset link works too
   $('#btnAcceptTopOffer')?.addEventListener('click', async () => {
     const s = status(); if (!s) return;
+    const input = $('#openSeaContract')?.value?.trim();
+    const tokenId = $('#openSeaTokenId')?.value?.trim();
+    const parsed = parseOpenSeaInput(input || '');
+    const contract = parsed?.contract || input;
+    if (!contract || !tokenId) return s.textContent = 'Isi kontrak (atau link asset) + token ID dulu.';
     s.textContent = 'Finding top offer...';
     try {
-      const result = await getHighestOffer({ collection: 'boredapeyachtclub' });
+      const result = await getHighestOffer({ contract, tokenId });
       s.textContent = result?.price ? `Top offer: $${result.price} — ready to accept.` : 'No active offers found.';
     } catch { s.textContent = '⚠️ Could not fetch offers.'; }
   });

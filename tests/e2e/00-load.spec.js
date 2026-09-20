@@ -1,6 +1,6 @@
 // 00 — Page load sanity: shell, intro, welcome modal, zero console errors.
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, expectWelcome, collectErrors, assertNoErrors } from './helpers.js';
+import { gotoApp, skipIntro, expectWelcome, collectErrors, assertNoErrors , appClick} from './helpers.js';
 
 test.describe('Page load', () => {
   test('loads with correct title and app shell', async ({ page }) => {

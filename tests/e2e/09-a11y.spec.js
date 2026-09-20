@@ -1,6 +1,6 @@
 // 09 — Accessibility: skip link, keyboard nav, accessible button names.
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, createWallet } from './helpers.js';
+import { gotoApp, skipIntro, createWallet , appClick} from './helpers.js';
 
 test.describe('Accessibility', () => {
   test('skip link is present and first focusable', async ({ page }) => {
@@ -39,9 +39,9 @@ test.describe('Accessibility', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('#networkPill');
+    await appClick(page, '#networkPill');
     await expect(page.locator('#modalOverlay')).toHaveClass(/open/);
-    await page.click('#modalOverlay .modal-close');
+    await appClick(page, '#modalOverlay .modal-close');
     await expect(page.locator('#modalOverlay')).not.toHaveClass(/open/);
   });
 });

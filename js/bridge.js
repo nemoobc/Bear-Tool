@@ -303,6 +303,20 @@ export async function doBridgeExec() {
   if (!activeNet || activeNet.id !== context.networkId) return toast(t('bridge.wrong_active_chain'), 'error');
   if (!sameChainId(activeNet.chainId, context.chainId)) return toast(t('bridge.wrong_active_chain'), 'error');
 
+  // Live provider chain check BEFORE any confirmation — a wrong-chain
+  // provider must never show a sign dialog (and never sign). The full
+  // TOCTOU double-check still runs inside runTx after the confirm await.
+  const provider = get('provider');
+  if (!provider) return toast(t('bridge.no_provider'), 'error');
+  let preNet;
+  try {
+    preNet = await provider.getNetwork();
+  } catch {
+    // RPC down / switching — fail loudly, never show a misleading dialog.
+    return toast(t('bridge.wrong_active_chain'), 'error');
+  }
+  if (!preNet || !sameChainId(preNet.chainId, context.chainId)) return toast(t('bridge.wrong_active_chain'), 'error');
+
   // Mainnet safety confirmation at EXECUTION time (not quote time)
   if (fromNet.type === 'mainnet' || toNet.type === 'mainnet') {
     const ok = await confirmTx({

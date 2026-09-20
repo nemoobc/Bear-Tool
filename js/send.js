@@ -233,8 +233,12 @@ export async function doSend() {
 
   await runTx('send', $('#btnSend'), async () => {
     const provider = get('provider');
-    const signer = get('signer');
-    if (!provider || !signer) return toast('Wallet not ready', 'error');
+    const baseSigner = get('signer');
+    if (!provider || !baseSigner) return toast('Wallet not ready', 'error');
+    // Signer from the keystore has no provider attached (all other tx modules
+    // — swap/eip7702/bridge — connect explicitly; send must too, otherwise
+    // eth_sendTransaction fails with "missing provider").
+    const signer = baseSigner.connect(provider);
 
     // Validate amount strictly before any ethers call
     const trimmedAmt = String(amt).trim();

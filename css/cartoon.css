@@ -433,7 +433,7 @@ body::before {
   grid-template-columns: var(--sidebar-w) 1fr;
   gap: var(--sp-20);
   padding: var(--sp-20);
-  max-width: 1200px;
+  max-width: 1360px;
   margin: 0 auto;
   min-height: calc(100vh - var(--topbar-h));
 }
@@ -590,16 +590,16 @@ body::before {
 /* ═══════════ BALANCE / DASHBOARD ═══════════ */
 .balance-hero {
   text-align: center;
-  padding: 28px 32px;
+  padding: 44px 40px;
   background: linear-gradient(135deg, var(--honey), var(--orange));
   border: var(--border-thick);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   margin-bottom: 16px;
 }
-.balance-hero .wallet-name { font-size: 1.05rem; font-weight: 700; opacity: 0.85; margin-bottom: 8px; letter-spacing: 0.5px; }
-.balance-hero .total { font-size: 2.6rem; font-weight: 800; line-height: 1.2; }
-.balance-hero .sub { font-size: 1.1rem; font-weight: 600; color: var(--ink); line-height: 1.4; margin-top: 4px; }
+.balance-hero .wallet-name { font-size: 1.25rem; font-weight: 700; opacity: 0.85; margin-bottom: 8px; letter-spacing: 0.5px; }
+.balance-hero .total { font-size: 3.4rem; font-weight: 800; line-height: 1.2; }
+.balance-hero .sub { font-size: 1.3rem; font-weight: 600; color: var(--ink); line-height: 1.4; margin-top: 4px; }
 .hero-spark { display: none; }
 .hero-sparkline { display: none; }
 
@@ -835,11 +835,15 @@ body::before {
   flex-shrink: 0;
 }
 
+/* ═══════════ MAIN CONTENT ─ DASHBOARD (bigger home) ═══════════ */
+#view-dashboard .card { padding: 28px; }
+#view-dashboard .card-title { font-size: 1.35rem; margin-bottom: 16px; }
+
 /* ═══════════ DASHBOARD — QUICK ACTIONS ═══════════ */
 .quick-actions {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: var(--sp-12);
+  gap: var(--sp-16);
   margin-bottom: var(--sp-16);
 }
 .quick-action-btn {
@@ -847,30 +851,30 @@ body::before {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: var(--sp-12) var(--sp-8);
-  min-height: var(--touch-min);
+  gap: 8px;
+  padding: var(--sp-20) var(--sp-12);
+  min-height: 92px;
   background: var(--white);
   border: var(--border);
   border-radius: var(--radius);
   cursor: pointer;
   font-family: var(--font);
   font-weight: 700;
-  font-size: 0.8rem;
+  font-size: 0.95rem;
   box-shadow: var(--shadow-sm);
   transition: all 0.12s;
 }
 .quick-action-btn:hover { transform: translateY(-3px); box-shadow: var(--shadow); background: var(--cream); }
 .quick-action-btn:active { transform: translateY(1px); box-shadow: none; }
 .qa-icon {
-  font-size: 1.6rem;
+  font-size: 2.2rem;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .qa-icon svg {
-  width: 28px;
-  height: 28px;
+  width: 38px;
+  height: 38px;
 }
 .qa-label { color: var(--ink); }
 
@@ -1964,6 +1968,7 @@ body::before {
   background-image: radial-gradient(var(--ink-soft) 2px, transparent 2px);
   opacity: 0.08;
 }
+.theme-dark .btn { color: #2D2A32; }
 .theme-dark .topbar { background: var(--white); }
 .theme-dark .sidebar { background: var(--white); }
 .theme-dark .card { background: var(--white); }
@@ -2036,7 +2041,8 @@ body::before {
   .topbar-logo img { width: 32px; height: 32px; }
   .topbar-logo h1 { font-size: 1.1rem; }
   .network-pill span.label, .account-pill span.label { display: none; }
-  .balance-hero .total { font-size: 0.95rem; }
+  .balance-hero .total { font-size: 1.5rem; }
+  .balance-hero { padding: 28px 20px; }
   .card { padding: var(--sp-16); }
   .btn-lg { padding: 14px 24px; font-size: 1rem; }
 }

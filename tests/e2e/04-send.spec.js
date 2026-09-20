@@ -1,7 +1,7 @@
 // 04 — Send view: form render, address validation, poisoning detection.
 import { test, expect } from '@playwright/test';
 import { ethers } from 'ethers';
-import { gotoApp, skipIntro, createWallet, openSendView } from './helpers.js';
+import { gotoApp, skipIntro, createWallet, openSendView , appClick} from './helpers.js';
 
 test.describe('Send', () => {
   test('send view renders the form', async ({ page }) => {
@@ -56,7 +56,7 @@ test.describe('Send', () => {
     const similar = ethers.getAddress(v.slice(0, 6) + 'deadbeefdeadbeefdeadbeefdeadbeef' + v.slice(-4));
     await page.fill('#sendTo', similar);
     await page.fill('#sendAmount', '0.01');
-    await page.click('#btnSend');
+    await appClick(page, '#btnSend');
     await expect(page.locator('#modalOverlay')).toContainText(/ADDRESS POISONING/i);
     await expect(page.locator('#confirmTypeInput')).toBeVisible();
   });
@@ -70,7 +70,7 @@ test.describe('Send', () => {
     await openSendView(page);
     await page.fill('#sendTo', usdc);
     await page.fill('#sendAmount', '0.01');
-    await page.click('#btnSend');
+    await appClick(page, '#btnSend');
     await expect(page.locator('#modalOverlay')).toContainText(/TOKEN CONTRACT DESTINATION/i);
   });
 });

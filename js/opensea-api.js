@@ -42,26 +42,58 @@ export function parseOpenSeaInput(input) {
 }
 
 // ── WL Check ──────────────────────────────────────────────
-// Check if wallet address is whitelisted for a collection.
-// Also auto-detects mint eligibility + price.
+// Check which wallet address is checked against a collection.
+// `collection` may be: an OpenSea link (collection or asset),
+// a raw slug, or a contract address (auto-resolved to the slug).
+// Honest: the OpenSea API has NO per-address whitelist endpoint, so we
+// report the collection's public/private status + mint info and say so
+// explicitly — never a pretend per-address "whitelisted" verdict.
 export async function checkWL({ collection, address }) {
   try {
-    const data = await osFetch(`/collections/${collection}`);
-    const wl = data?.hidden || false;
-    const floorPrice = data?.floor_price || 0;
-    const totalSupply = data?.stats?.total_supply || 0;
-    const listedCount = data?.stats?.num_owners || 0;
-    return {
-      eligible: !wl,
-      collection: data?.name || collection,
-      slug: collection,
-      floorPrice,
-      totalSupply,
-      listedCount,
-      description: data?.description || '',
-      image: data?.image_url || ''
-    };
-  } catch { return { eligible: false, error: true }; }
+    if (!collection || !address) return { eligible: false, error: true, message: 'Missing collection or address' };
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return { eligible: false, error: true, message: 'Invalid wallet address' };
+
+    // Resolve whatever the user pasted (link / slug / contract) to a slug.
+    let slug = collection.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(slug)) {
+      const parsed = parseOpenSeaInput(collection);
+      if (parsed?.type === 'collection' && parsed.collection) slug = parsed.collection;
+      else if (parsed?.type === 'asset' && parsed.contract) slug = parsed.contract; // resolved below
+    }
+
+    const data = await osFetch(`/collections/${encodeURIComponent(slug)}`);
+    if (!data?.slug && /^0x[0-9a-fA-F]{40}$/.test(slug)) {
+      // pasted a contract address → resolve it to the collection slug first
+      const byAddr = await osFetch(`/collections/${slug}`);
+      slug = byAddr?.slug || slug;
+      const data2 = await osFetch(`/collections/${encodeURIComponent(slug)}`);
+      return wlResult(data2, slug, address, collection);
+    }
+    return wlResult(data, slug, address, collection);
+  } catch {
+    return { eligible: false, error: true, message: 'Failed to fetch collection data' };
+  }
+}
+
+function wlResult(data, slug, address, rawInput) {
+  const hidden = !!data?.hidden;
+  return {
+    eligible: !hidden, // public mint = mintable without a per-address WL
+    hidden,
+    open: !hidden,
+    collection: data?.name || slug,
+    slug,
+    floorPrice: data?.floor_price || 0,
+    totalSupply: data?.stats?.total_supply || 0,
+    listedCount: data?.stats?.num_owners || 0,
+    description: data?.description || '',
+    image: data?.image_url || '',
+    address,
+    rawInput,
+    note: hidden
+      ? 'Collection is private/hidden — whitelist is managed off-chain by the project (check their official site).'
+      : 'Collection is public — mint is open to everyone.'
+  };
 }
 
 // ── Auto-detect NFT details from contract address ──────────

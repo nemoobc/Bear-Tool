@@ -1,6 +1,8 @@
 node_modules/
 *.log
-.DS_Storeprobe-build.mjs
+.DS_Store
+probe-build.mjs
+test-results/
 logs2.zip
 job-logs.txt
 .env
@@ -10,3 +12,6 @@ test-contracts/cache/
 test-contracts/out/
 test-contracts/foundry.toml
 vendor/
+
+# dev artifacts
+logs/

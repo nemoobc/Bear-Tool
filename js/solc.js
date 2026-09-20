@@ -12,6 +12,9 @@
 
 export const SOLC_VERSION = '0.8.28';
 export const SOLC_URL = `https://cdn.jsdelivr.net/npm/solc@${SOLC_VERSION}/soljson.js`;
+// SHA-384 of soljson.js 0.8.28 (verified 2026-09-20 from the jsdelivr mirror).
+// Both mirrors serve the identical npm artifact, so one integrity covers both.
+export const SOLC_INTEGRITY = 'sha384-KPNN359HSsJb+rJUYqYP9AKB4mS6MrE1akNLfiSAD3+3RwoAqohTYlzIQ24esQUb';
 // Mirrors tried in order when the primary CDN fails (all allow-listed by the CSP).
 export const SOLC_FALLBACK_URLS = [
   `https://unpkg.com/solc@${SOLC_VERSION}/soljson.js`
@@ -41,10 +44,11 @@ function waitForRuntime(deadline) {
   });
 }
 
-function loadScript(url) {
+function loadScript(url, integrity) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = url;
+    if (integrity) { script.integrity = integrity; script.crossOrigin = 'anonymous'; }
     script.async = true;
     script.onload = () => resolve();
     script.onerror = () => reject(new Error('Failed to download the Solidity compiler from ' + url));
@@ -66,7 +70,7 @@ export function loadCompiler({ onStatus } = {}) {
     for (const url of urls) {
       try {
         onStatus?.(`Loading Solidity compiler ${SOLC_VERSION} (~9 MB, first run only)…`);
-        await loadScript(url);
+        await loadScript(url, SOLC_INTEGRITY);
         const M = await waitForRuntime(Date.now() + LOAD_TIMEOUT_MS);
         const compile = M.cwrap('solidity_compile', 'string', ['string', 'number']);
         if (typeof compile !== 'function') throw new Error('Solidity compiler loaded but exposed no solidity_compile()');

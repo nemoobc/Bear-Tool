@@ -19,6 +19,26 @@ test('opensea-api: checkWL function signature', () => {
   assert.match(apiSrc, /export\s+(async\s+)?function\s+checkWL\s*\(\s*\{[^}]*collection[^}]*address/);
 });
 
+test('opensea-api: checkWL accepts an OpenSea LINK (not only a slug) via parseOpenSeaInput', () => {
+  assert.match(apiSrc, /export\s+function\s+parseOpenSeaInput/);
+  assert.match(apiSrc, /opensea\.io\/collection\//i, 'parser must understand collection links');
+  assert.match(apiSrc, /opensea\.io\/assets\//i, 'parser must understand asset links');
+  // the WL check must route the user input through the parser, never hardcode a collection
+  assert.doesNotMatch(apiSrc, /checkWL\(\{\s*collection:\s*['"]boredapeyachtclub/, 'checkWL body must not hardcode a collection');
+});
+
+test('opensea-api: checkWL validates the wallet address honestly', () => {
+  assert.match(apiSrc, /\^0x\[0-9a-fA-F\]\{40\}\$/, 'checkWL must validate the wallet address format');
+  assert.match(apiSrc, /Invalid wallet address/, 'checkWL must tell the user when the address is malformed');
+});
+
+test('opensea-api: checkWL never pretends a per-address whitelist verdict', () => {
+  // OpenSea v2 has no "is this wallet whitelisted" endpoint — the module must
+  // report public/private status + an explicit note, not a fake "whitelisted".
+  assert.match(apiSrc, /no\s+per-address whitelist endpoint/i, 'must document the API limitation');
+  assert.match(apiSrc, /Collection is private\/hidden — whitelist is managed off-chain/, 'hidden collections must say WL is off-chain');
+});
+
 test('opensea-api: getMintEstimate returns price + gas + total', () => {
   assert.match(apiSrc, /gasEstimate/);
   assert.match(apiSrc, /total.*price|price.*total/);
@@ -108,6 +128,11 @@ test('index.html: has Check WL button', () => {
   assert.match(htmlSrc, /id="btnCheckWL"/);
 });
 
+test('index.html: WL check has a wallet address field', () => {
+  assert.match(htmlSrc, /id="openSeaWlAddress"/);
+  assert.match(htmlSrc, /openSeaWlAddress[\s\S]{0,200}wallet aktif/, 'placeholder should hint the active-wallet fallback');
+});
+
 test('index.html: has Accept Top Offer button', () => {
   assert.match(htmlSrc, /id="btnAcceptTopOffer"/);
 });
@@ -129,6 +154,12 @@ test('app.js: imports opensea.js functions', () => {
 
 test('app.js: has bindOpenSeaPanel function', () => {
   assert.match(appSrc, /function\s+bindOpenSeaPanel/);
+});
+
+test('app.js: Check WL reads the collection field + wallet field (no hardcoded collection)', () => {
+  assert.match(appSrc, /\$\('#btnCheckWL'\)[\s\S]{0,600}openSeaContract/, 'WL handler must read the collection input');
+  assert.match(appSrc, /\$\('#openSeaWlAddress'\)/, 'WL handler must read the wallet address field');
+  assert.ok(!appSrc.includes("collection: 'boredapeyachtclub'"), 'no hardcoded collection in the app');
 });
 
 test('app.js: refreshView calls bindOpenSeaPanel for deploy view', () => {

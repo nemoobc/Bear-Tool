@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 import { ethers } from 'ethers';
 import {
   gotoApp, skipIntro, importWallet, unlock, expectUnlocked,
-  collectErrors, assertNoErrors,
+  collectErrors, assertNoErrors, appClick,
 } from './helpers.js';
 
 test.describe('Wallet import', () => {
@@ -15,7 +15,7 @@ test.describe('Wallet import', () => {
     await importWallet(page, { secret: w.mnemonic.phrase });
     await expectUnlocked(page);
     // account modal shows the full address
-    await page.click('#accountPill');
+    await appClick(page, '#accountPill');
     await expect(page.locator('.modal .mono').first()).toContainText(w.address.slice(0, 10));
     await assertNoErrors(errors);
   });
@@ -32,10 +32,10 @@ test.describe('Wallet import', () => {
     const w = ethers.Wallet.createRandom();
     await gotoApp(page);
     await skipIntro(page);
-    await page.click('#wImport');
+    await appClick(page, '#wImport');
     await page.fill('#importSecret', w.mnemonic.phrase);
     await page.fill('#importPw', 'short');
-    await page.click('#importBtn');
+    await appClick(page, '#importBtn');
     await expect(page.locator('#toast-wrap')).toContainText(/Password too short/i);
     await expect(page.locator('#importBtn')).toBeVisible(); // modal stays open
   });
@@ -43,9 +43,9 @@ test.describe('Wallet import', () => {
   test('import with empty secret rejected', async ({ page }) => {
     await gotoApp(page);
     await skipIntro(page);
-    await page.click('#wImport');
+    await appClick(page, '#wImport');
     await page.fill('#importPw', 'password123');
-    await page.click('#importBtn');
+    await appClick(page, '#importBtn');
     await expect(page.locator('#toast-wrap')).toContainText(/Enter seed phrase or private key/i);
   });
 
@@ -54,8 +54,8 @@ test.describe('Wallet import', () => {
     await gotoApp(page);
     await skipIntro(page);
     await importWallet(page, { secret: w.mnemonic.phrase });
-    await page.click('#accountPill');
-    await page.click('#lockBtn');
+    await appClick(page, '#accountPill');
+    await appClick(page, '#lockBtn');
     await page.waitForSelector('#unlockPw', { timeout: 10_000 });
     await unlock(page, 'password123');
     await expectUnlocked(page);

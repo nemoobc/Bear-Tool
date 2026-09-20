@@ -1,13 +1,13 @@
 // 07 — Settings & i18n: language switch, testnet toggle, persistence.
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, createWallet } from './helpers.js';
+import { gotoApp, skipIntro, createWallet , appClick} from './helpers.js';
 
 test.describe('Settings & i18n', () => {
   test('settings view renders all controls', async ({ page }) => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('.nav-item[data-view="settings"]');
+    await appClick(page, '.nav-item[data-view="settings"]');
     await expect(page.locator('#setLang')).toBeVisible();
     await expect(page.locator('#setCurrency')).toBeVisible();
     await expect(page.locator('#setAutoLock')).toBeVisible();
@@ -20,9 +20,9 @@ test.describe('Settings & i18n', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('.nav-item[data-view="settings"]');
+    await appClick(page, '.nav-item[data-view="settings"]');
     await page.selectOption('#setLang', 'id');
-    await page.click('#btnSaveSettings');
+    await appClick(page, '#btnSaveSettings');
     await expect(page.locator('.nav-item[data-view="dashboard"]')).toContainText('Dasbor');
     await expect(page.locator('.nav-item[data-view="activity"]')).toContainText('Aktivitas');
     const lang = await page.evaluate(() => localStorage.getItem('bear.lang'));
@@ -33,9 +33,9 @@ test.describe('Settings & i18n', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('.nav-item[data-view="settings"]');
+    await appClick(page, '.nav-item[data-view="settings"]');
     await page.selectOption('#setLang', 'id');
-    await page.click('#btnSaveSettings');
+    await appClick(page, '#btnSaveSettings');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('.nav-item[data-view="dashboard"]')).toContainText('Dasbor');
   });
@@ -45,14 +45,14 @@ test.describe('Settings & i18n', () => {
     await skipIntro(page);
     await createWallet(page);
     // switch to Sepolia first
-    await page.click('#networkPill');
-    await page.click('#netListTestnet [data-net="sepolia"]');
+    await appClick(page, '#networkPill');
+    await appClick(page, '#netListTestnet [data-net="sepolia"]');
     await expect(page.locator('#networkName')).toHaveText(/Sepolia/i);
     // turn testnets off → active chain must fall back to Ethereum
-    await page.click('.nav-item[data-view="settings"]');
-    await page.click('.switch'); // toggle testnets OFF (checkbox is visually hidden)
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await appClick(page, '.switch'); // toggle testnets OFF (checkbox is visually hidden)
     await expect(page.locator('#setTestnet')).not.toBeChecked();
-    await page.click('#btnSaveSettings');
+    await appClick(page, '#btnSaveSettings');
     await expect(page.locator('#networkName')).toHaveText(/Ethereum/i);
   });
 
@@ -60,22 +60,22 @@ test.describe('Settings & i18n', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('#networkPill');
-    await page.click('#netListTestnet [data-net="sepolia"]');
+    await appClick(page, '#networkPill');
+    await appClick(page, '#netListTestnet [data-net="sepolia"]');
     await expect(page.locator('#networkName')).toHaveText(/Sepolia/i);
     // OFF → falls back to Ethereum (testnet hidden)
-    await page.click('.nav-item[data-view="settings"]');
-    await page.click('.switch');
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await appClick(page, '.switch');
     await expect(page.locator('#setTestnet')).not.toBeChecked();
-    await page.click('#btnSaveSettings');
+    await appClick(page, '#btnSaveSettings');
     await expect(page.locator('#networkName')).toHaveText(/Ethereum/i);
     // ON again → Sepolia is selectable from the network list
-    await page.click('.nav-item[data-view="settings"]');
-    await page.click('.switch');
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await appClick(page, '.switch');
     await expect(page.locator('#setTestnet')).toBeChecked();
-    await page.click('#btnSaveSettings');
-    await page.click('#networkPill');
-    await page.click('#netListTestnet [data-net="sepolia"]');
+    await appClick(page, '#btnSaveSettings');
+    await appClick(page, '#networkPill');
+    await appClick(page, '#netListTestnet [data-net="sepolia"]');
     await expect(page.locator('#networkName')).toHaveText(/Sepolia/i);
   });
 
@@ -83,8 +83,8 @@ test.describe('Settings & i18n', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await page.click('#networkPill');
-    await page.click('#netListTestnet [data-net="sepolia"]');
+    await appClick(page, '#networkPill');
+    await appClick(page, '#netListTestnet [data-net="sepolia"]');
     await expect(page.locator('#networkName')).toHaveText(/Sepolia/i);
   });
 });

@@ -97,8 +97,12 @@ export async function doDeploy() {
 
     if (btn) setBtnDots(btn, true, 'Estimating gas');
     const provider = await getProvider(net.chainId);
-    const signer = get('signer');
-    if (!signer) { requireUnlock(); return; }
+    const baseSigner = get('signer');
+    if (!baseSigner) { requireUnlock(); return; }
+    // Keystore signers have no provider attached — deploy() sends a
+    // transaction, so connect before building the factory (same pattern as
+    // send/swap/eip7702; otherwise: "missing provider").
+    const signer = baseSigner.connect(provider);
     const factory = new ethers.ContractFactory(compiled.abi, compiled.bytecode, signer);
     const deployTx = await factory.getDeployTransaction(...plan.args);
 
