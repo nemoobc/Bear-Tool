@@ -26,7 +26,12 @@ export default defineConfig({
     baseURL: process.env.BEAR_BASE_URL || 'http://localhost:8080',
     viewport: { width: 1280, height: 800 },
     launchOptions: {
-      args: ['--no-sandbox'],
+      args: [
+        '--no-sandbox',
+        // soljson wasm (~9 MB) compiles synchronously on the main thread —
+        // Chrome blocks sync compile >8 MB without this (deploy hangs).
+        '--enable-features=WebAssemblyUnlimitedSyncCompilation',
+      ],
     },
     trace: 'retain-on-failure',
   },

@@ -21,16 +21,24 @@ stop_all() {
 declare -A NET=(
   [ethereum]="18545|1|https://ethereum-rpc.publicnode.com"
   [bsc]="18546|56|https://bsc-rpc.publicnode.com"
-  [polygon]="18547|137|https://polygon-bor-rpc.publicnode.com"
+  [polygon]="18547|137|https://polygon.drpc.org"
   [arbitrum]="18548|42161|https://arb1.arbitrum.io/rpc"
   [optimism]="18549|10|https://mainnet.optimism.io"
   [base]="18550|8453|https://mainnet.base.org"
   [sepolia]="18551|11155111|https://sepolia.gateway.tenderly.co"
-  [amoy]="18552|80002|https://polygon-amoy.drpc.org"
+  [amoy]="18552|80002|https://polygon-amoy-bor-rpc.publicnode.com"
   [arbitrum-sepolia]="18553|421614|https://arbitrum-sepolia-rpc.publicnode.com"
   [op-sepolia]="18554|11155420|https://sepolia.optimism.io"
   [base-sepolia]="18555|84532|https://sepolia.base.org"
   [bsc-testnet]="18556|97|https://bsc-testnet-rpc.publicnode.com"
+)
+
+# Fallback upstream RPCs for networks whose free endpoints prune fork state
+# intermittently — restart-one rotates primary → alt → primary across attempts.
+declare -A ALT=(
+  [polygon]="https://polygon-bor-rpc.publicnode.com"
+  [amoy]="https://polygon-amoy.drpc.org"
+  [arbitrum-sepolia]="https://sepolia-rollup.arbitrum.io/rpc"
 )
 
 start_one() {
@@ -38,8 +46,29 @@ start_one() {
   line="${NET[$n]:-}"
   [ -n "$line" ] || { echo "unknown network: $n"; return 1; }
   IFS='|' read -r port chain rpc <<< "$line"
+  [ -n "${2:-}" ] && rpc="$2"
   anvil --port "$port" --chain-id "$chain" --fork-url "$rpc" --silent > "$LOG/$n.log" 2>&1 &
   echo $! >> "$PIDFILE"
+}
+
+# blockNumber answering is NOT enough — stale/pruned forks still answer it
+# while every state read fails. Gate on a real estimateGas (fork-health.mjs).
+fork_healthy() {
+  (cd "$ROOT" && timeout 25 node tests/fork/fork-health.mjs "$1") >/dev/null 2>&1
+}
+
+kill_port() {
+  if [ -f "$PIDFILE" ]; then
+    local pid newpids=""
+    while read -r pid; do
+      if [ -d "/proc/$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "--port $1"; then
+        kill "$pid" 2>/dev/null || true
+      else
+        newpids="$newpids $pid"
+      fi
+    done < "$PIDFILE"
+    printf '%s\n' $newpids | sed 's/^ //' > "$PIDFILE"
+  fi
 }
 
 restart_one() {
@@ -51,7 +80,7 @@ restart_one() {
   if [ -f "$PIDFILE" ]; then
     local pid
     while read -r pid; do
-      if [ -d "/proc/$pid" ] && grep -qaF -- "--port $port" "/proc/$pid/cmdline" 2>/dev/null; then
+      if [ -d "/proc/$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "--port $port"; then
         kill "$pid" 2>/dev/null || true
       else
         newpids="$newpids $pid"
@@ -88,10 +117,20 @@ restart_one() {
       fi
     done
     if [ "$ok" = "1" ]; then
-      echo "UP   $n (fresh fork :$port)"
-      return 0
+      if fork_healthy "$port"; then
+        echo "UP   $n (fresh fork :$port)"
+        return 0
+      fi
+      echo "fork :$port answers but state unhealthy — restarting..."
+      kill_port "$port"
     fi
-    [ "$attempt" -lt 3 ] && echo "retrying $n fork start (attempt $attempt of 3)..." && start_one "$n"
+    if [ "$attempt" -lt 3 ]; then
+      echo "retrying $n fork start (attempt $attempt of 3)..."
+      # rotate to the fallback RPC on first retry (then back to primary)
+      local rpc_try=""
+      [ "$attempt" = "1" ] && [ -n "${ALT[$n]:-}" ] && rpc_try="${ALT[$n]}"
+      start_one "$n" "$rpc_try"
+    fi
   done
   echo "DOWN $n (fresh fork :$port)"
   return 1

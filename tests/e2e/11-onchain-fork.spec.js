@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { ethers } from 'ethers';
 import {
-  gotoApp, skipIntro, importWallet, expectUnlocked, openSendView,
+  gotoApp, skipIntro, importWallet, expectUnlocked, openSendView, appClick,
 } from './helpers.js';
 
 // Anvil forks pin to the block they started at. Some upstream nodes (BSC,
@@ -25,7 +25,7 @@ function freshFork(netId) {
   });
 }
 
-test.setTimeout(180_000);
+test.setTimeout(300_000);
 
 const ANVIL_KEY0 = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const ANVIL_0 = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
@@ -115,6 +115,22 @@ async function getReceipt(port, hash) {
   return null;
 }
 
+// Switch network through the network modal — scrolls the row into view first
+// (rows below the fold get missed by raw coordinate clicks) and asserts the
+// switch stuck via persisted bear.networkId (fail fast, not a mainnet-gate
+// dead end 45s later).
+async function switchNetwork(page, netId) {
+  await appClick(page, '#networkPill');
+  const row = page.locator(`.asset-row[data-net="${netId}"]`);
+  await row.waitFor({ timeout: 10_000 });
+  await row.scrollIntoViewIfNeeded().catch(() => {});
+  await appClick(page, `.asset-row[data-net="${netId}"]`);
+  await page.waitForFunction(
+    (id) => localStorage.getItem('bear.networkId') === id,
+    netId, { timeout: 10_000 }
+  );
+}
+
 for (const [netId, fork] of Object.entries(FORKS)) {
   test(`onchain send via web UI → ${netId} fork (:${fork.port})`, async ({ page }) => {
     freshFork(netId); // stale fork state = root cause of intermittent onchain flake
@@ -124,16 +140,7 @@ for (const [netId, fork] of Object.entries(FORKS)) {
     await importWallet(page, { secret: ANVIL_KEY0 });
     await expectUnlocked(page);
 
-    // switch network through the network modal
-    await page.locator('#networkPill').click({ timeout: 5000 }).catch(async () => {
-      const box = await page.locator('#networkPill').boundingBox();
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    });
-    await page.waitForSelector(`.asset-row[data-net="${netId}"]`, { timeout: 10_000 });
-    await page.locator(`.asset-row[data-net="${netId}"]`).click({ timeout: 5000 }).catch(async () => {
-      const box = await page.locator(`.asset-row[data-net="${netId}"]`).boundingBox();
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    });
+    await switchNetwork(page, netId);
 
     // Send view with the native token loaded (proves fork RPC answered).
     await openSendView(page);
@@ -153,8 +160,11 @@ for (const [netId, fork] of Object.entries(FORKS)) {
         await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       });
     }
-    // SIGN TRANSACTION dialog → sign & send
+    // SIGN TRANSACTION dialog → re-pin the fork right before broadcast
+    // (fast chains prune the fork base state within minutes and the UI flow
+    // up to here is slow) → sign & send
     await page.waitForSelector('#confirmYes', { timeout: 15_000 });
+    freshFork(netId);
     await page.locator('#confirmYes').click({ timeout: 5000 }).catch(async () => {
       const box = await page.locator('#confirmYes').boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -200,16 +210,7 @@ async function deployErc20ViaWeb(page, fork, netId) {
   await importWallet(page, { secret: ANVIL_KEY0 });
   await expectUnlocked(page);
 
-  // switch network through the network modal
-  await page.locator('#networkPill').click({ timeout: 5000 }).catch(async () => {
-    const box = await page.locator('#networkPill').boundingBox();
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  });
-  await page.waitForSelector(`.asset-row[data-net="${netId}"]`, { timeout: 10_000 });
-  await page.locator(`.asset-row[data-net="${netId}"]`).click({ timeout: 5000 }).catch(async () => {
-    const box = await page.locator(`.asset-row[data-net="${netId}"]`).boundingBox();
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  });
+  await switchNetwork(page, netId);
   // wait for the network modal to fully close before clicking into Tools
   await page.waitForFunction(
     () => !document.querySelector('#modalOverlay')?.classList.contains('open'),
@@ -231,12 +232,16 @@ async function deployErc20ViaWeb(page, fork, netId) {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   });
 
-  // mainnet networks get the extra "DEPLOY ON MAINNET!" gate (type YA)
+  // single confirmTx dialog does gate+sign (requireType YA for mainnet) —
+  // it appears only after solc compile finishes (slow first run)
   if (fork.type === 'mainnet') {
-    await page.waitForSelector('#confirmTypeInput', { timeout: 20_000 });
+    await page.waitForSelector('#confirmTypeInput', { timeout: 90_000 });
     await page.fill('#confirmTypeInput', 'YA');
   }
-  await page.waitForSelector('#confirmYes', { timeout: 20_000 });
+  await page.waitForSelector('#confirmYes', { timeout: 90_000 });
+  // dialog is up = compile done → re-pin before broadcast (fast chains
+  // prune within minutes, compile already consumed time)
+  freshFork(netId);
   await page.locator('#confirmYes').click({ timeout: 5000 }).catch(async () => {
     const box = await page.locator('#confirmYes').boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -262,10 +267,10 @@ async function deployErc20ViaWeb(page, fork, netId) {
   expect(act, `deploy activity entry for ${netId}`).toBeTruthy();
   expect(act.hash).toMatch(/^0x[0-9a-fA-F]{64}$/);
 
-  // registry must know the contract
+  // registry is grouped by helper type — wizard deploys live under .token
   const reg = await page.evaluate(() => {
-    const r = JSON.parse(localStorage.getItem('bear.deployedContracts') || '[]');
-    return r.find((e) => e.standard === 'erc20' && e.address);
+    const r = JSON.parse(localStorage.getItem('bear.deployedContracts') || '{}');
+    return ((r && r.token) || []).find((e) => e.address);
   });
   expect(reg, `deployed registry entry for ${netId}`).toBeTruthy();
   expect(reg.address.toLowerCase()).toBe(addr.toLowerCase());
