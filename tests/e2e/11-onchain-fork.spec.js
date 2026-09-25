@@ -151,10 +151,24 @@ for (const [netId, fork] of Object.entries(FORKS)) {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
 
-    // Mainnet networks show the extra "MAINNET TRANSACTION!" gate. Typed
-    // confirmation is disabled app-wide (see TYPED_CONFIRMATION in js/ui.js), so
-    // there is no #confirmTypeInput to fill — just click through the button.
-    // Kept as a separate step because the modal is still an extra step here.
+    // Mainnet networks show an extra "MAINNET TRANSACTION!" gate. Whether it
+    // also demands a typed confirmation is app config (TYPED_CONFIRMATION in
+    // js/ui.js), so handle both shapes instead of assuming one: if the input is
+    // rendered, fill it, then clear the gate. Afterwards the sign dialog is
+    // always confirmed.
+    if (fork.type === 'mainnet') {
+      const typed = page.locator('#confirmTypeInput');
+      if (await typed.count() > 0 && await typed.isVisible().catch(() => false)) {
+        await typed.fill('YA');
+      }
+      const gate = page.locator('#confirmYes');
+      if (await gate.count() > 0) {
+        await gate.click({ timeout: 5000 }).catch(async () => {
+          const box = await gate.boundingBox();
+          if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        });
+      }
+    }
     // SIGN TRANSACTION dialog → re-pin the fork right before broadcast
     // (fast chains prune the fork base state within minutes and the UI flow
     // up to here is slow) → sign & send
