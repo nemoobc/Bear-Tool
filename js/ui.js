@@ -216,14 +216,22 @@ export function animateValue(el, target, { duration = 800, formatter = v => v } 
 }
 
 // ── confirm dialog with bear ──
+// Typed confirmation ("type YA to confirm") is currently DISABLED app-wide.
+// Flip this to true to restore the type-to-confirm gate on every dangerous
+// action (mainnet send/swap/bridge/deploy, EIP-7702 delegate/revoke/batch/
+// rescue/claim). Call sites still pass requireType; this switch is the single
+// place that decides whether it is enforced.
+const TYPED_CONFIRMATION = false;
+
 export function confirmTx({ title, rows, confirmText = 'Confirm', danger = false, requireType = null }) {
   return new Promise((resolve) => {
     const rowsHtml = rows.map(r =>
       `<div class="row"><span class="k">${escapeHtml(r.k)}</span><span class="v">${escapeHtml(r.v)}</span></div>`
     ).join('');
-    const typeInput = requireType
-      ? `<div class="field mt-8"><label>Type <strong>${escapeHtml(requireType)}</strong> to confirm</label>
-         <input class="input" id="confirmTypeInput" placeholder="${escapeHtml(requireType)}"></div>`
+    const gate = TYPED_CONFIRMATION ? requireType : null;
+    const typeInput = gate
+      ? `<div class="field mt-8"><label>Type <strong>${escapeHtml(gate)}</strong> to confirm</label>
+         <input class="input" id="confirmTypeInput" placeholder="${escapeHtml(gate)}"></div>`
       : '';
     openModal(`
       <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
@@ -240,11 +248,11 @@ export function confirmTx({ title, rows, confirmText = 'Confirm', danger = false
     `);
     const yes = $('#confirmYes');
     const no = $('#confirmNo');
-    const typeEl = $('#confirmTypeInput');
+    const typeEl = gate ? $('#confirmTypeInput') : null;
     if (typeEl) {
       yes.disabled = true;
       typeEl.addEventListener('input', () => {
-        yes.disabled = typeEl.value.trim() !== requireType;
+        yes.disabled = typeEl.value.trim() !== gate;
       });
     }
     yes.onclick = () => { closeModal(); resolve(true); };

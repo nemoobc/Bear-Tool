@@ -708,6 +708,10 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Toasts are informational, never interactive. Without this the wrapper
+     sits over the mobile bottom nav (both are bottom-anchored) and swallows
+     taps — the user could not press Settings/More while any toast showed. */
+  pointer-events: none;
 }
 .toast {
   background: var(--white);
@@ -2409,6 +2413,21 @@ body::before {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
   background: var(--cream, #FFF8F0);
   font-family: 'Fredoka', sans-serif; font-size: 0.85rem; color: var(--ink);
+}
+/* Shown when the dapp refuses to be framed (X-Frame-Options / frame-ancestors).
+   Without this the user gets a blank frame and only a console violation. */
+.dapp-browser-blocked {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 24px; text-align: center;
+  background: var(--cream, #FFF8F0);
+  font-family: 'Fredoka', sans-serif; font-size: 0.9rem; color: var(--ink);
+}
+.dapp-browser-blocked p { margin: 0; max-width: 42ch; line-height: 1.45; }
+.dapp-browser-blocked p.dim { font-size: 0.8rem; opacity: 0.75; }
+.dapp-browser-blocked code {
+  font-family: ui-monospace, monospace; font-size: 0.78rem;
+  background: rgba(0, 0, 0, 0.06); padding: 1px 4px; border-radius: 4px;
 }
 .dapp-browser-spinner {
   width: 32px; height: 32px;

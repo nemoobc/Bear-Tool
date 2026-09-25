@@ -5,20 +5,31 @@
 
 import { escapeHtml, toast } from './ui.js';
 
+// frameable:false → the site ships clickjacking protection (X-Frame-Options or
+// frame-ancestors), so NO in-app browser can embed it. Verified against live
+// response headers, 2026-09:
+//   uniswap   X-Frame-Options: SAMEORIGIN
+//   opensea   X-Frame-Options: DENY
+//   blur      X-Frame-Options: DENY
+//   lido      frame-ancestors *
+//   rocketpool/etherscan  X-Frame-Options: SAMEORIGIN
+//   ens       frame-ancestors 'self' https://app.safe.global
+// Only Aave, Compound and Snapshot allow cross-origin framing. For the rest we
+// open a new tab instead of showing a blank frame + a console violation.
 const POPULAR_DAPPS = [
-  { name: 'Uniswap', url: 'https://app.uniswap.org', icon: '🦄', category: 'Swap' },
-  { name: 'Aave', url: 'https://app.aave.com', icon: '👻', category: 'Lending' },
-  { name: 'Compound', url: 'https://app.compound.finance', icon: '🏦', category: 'Lending' },
-  { name: 'OpenSea', url: 'https://opensea.io', icon: '🌊', category: 'NFT' },
-  { name: 'Blur', url: 'https://blur.io', icon: '🎨', category: 'NFT' },
-  { name: 'Lido', url: 'https://stake.lido.fi', icon: '🏊', category: 'Staking' },
-  { name: 'Rocket Pool', url: 'https://rocketpool.net', icon: '🚀', category: 'Staking' },
-  { name: 'Etherscan', url: 'https://etherscan.io', icon: '🔍', category: 'Explorer' },
-  { name: 'Snapshot', url: 'https://snapshot.org', icon: '📷', category: 'Governance' },
-  { name: 'ENS', url: 'https://app.ens.domains', icon: '🏷️', category: 'Identity' }
+  { name: 'Uniswap', url: 'https://app.uniswap.org', icon: '🦄', category: 'Swap', frameable: false },
+  { name: 'Aave', url: 'https://app.aave.com', icon: '👻', category: 'Lending', frameable: true },
+  { name: 'Compound', url: 'https://app.compound.finance', icon: '🏦', category: 'Lending', frameable: true },
+  { name: 'OpenSea', url: 'https://opensea.io', icon: '🌊', category: 'NFT', frameable: false },
+  { name: 'Blur', url: 'https://blur.io', icon: '🎨', category: 'NFT', frameable: false },
+  { name: 'Lido', url: 'https://stake.lido.fi', icon: '🏊', category: 'Staking', frameable: false },
+  { name: 'Rocket Pool', url: 'https://rocketpool.net', icon: '🚀', category: 'Staking', frameable: false },
+  { name: 'Etherscan', url: 'https://etherscan.io', icon: '🔍', category: 'Explorer', frameable: false },
+  { name: 'Snapshot', url: 'https://snapshot.org', icon: '📷', category: 'Governance', frameable: true },
+  { name: 'ENS', url: 'https://app.ens.domains', icon: '🏷️', category: 'Identity', frameable: false }
 ];
 
-function openDappBrowser(url, name) {
+function openDappBrowser(url, name, frameable = true) {
   if (!url) return;
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   // Only http(s) targets may load in the in-app browser.
@@ -56,7 +67,7 @@ function openDappBrowser(url, name) {
         <span class="dapp-browser-url-text">${escapeHtml(safeUrl)}</span>
       </div>
       <div class="dapp-browser-frame-wrap">
-        <iframe id="dappBrowserFrame" class="dapp-browser-frame" src="${escapeHtml(safeUrl)}" sandbox="allow-scripts allow-popups allow-forms allow-modals" allow="clipboard-write; clipboard-read" loading="lazy"></iframe>
+        <iframe id="dappBrowserFrame" class="dapp-browser-frame" src="${frameable ? escapeHtml(safeUrl) : 'about:blank'}" sandbox="allow-scripts allow-popups allow-forms allow-modals" allow="clipboard-write; clipboard-read" loading="lazy"></iframe>
         <div class="dapp-browser-loading" id="dappBrowserLoading">
           <div class="dapp-browser-spinner"></div>
           <span>Loading ${name || 'DApp'}…</span>
@@ -69,13 +80,55 @@ function openDappBrowser(url, name) {
 
   const iframe = document.getElementById('dappBrowserFrame');
   const loader = document.getElementById('dappBrowserLoading');
+  const wrap = document.querySelector('.dapp-browser-frame-wrap');
 
+  let loaded = false;
   iframe.addEventListener('load', () => {
+    loaded = true;
     if (loader) loader.style.display = 'none';
+    // A site that sends X-Frame-Options / frame-ancestors still fires `load`
+    // for the blocked frame, so check whether anything actually rendered.
+    try {
+      const doc = iframe.contentDocument;
+      if (doc && doc.body && doc.body.childElementCount === 0) showBlocked();
+    } catch { /* opaque origin (sandbox) — cannot inspect, assume fine */ }
   });
 
-  // Fallback: hide loader after 8s even if load never fires (CORS blocks events)
-  setTimeout(() => { if (loader) loader.style.display = 'none'; }, 8000);
+  // Many major dapps ship clickjacking protection (X-Frame-Options: DENY or
+  // frame-ancestors 'self'), so they can NEVER be embedded by any wallet —
+  // Uniswap allows only itself and Safe Global. The frame stays blank and only
+  // the console shows a violation, which reads as a broken app. Say so, and
+  // offer the one route that does work.
+  function showBlocked() {
+    if (!wrap || wrap.querySelector('.dapp-browser-blocked')) return;
+    const n = document.createElement('div');
+    n.className = 'dapp-browser-blocked';
+    n.innerHTML = `<div class="dapp-browser-spinner"></div>
+      <p><strong>${escapeHtml(name || 'This DApp')} can’t be embedded here.</strong></p>
+      <p class="dim">It sends <code>X-Frame-Options</code> / <code>frame-ancestors</code>
+      to block clickjacking, so no in-app browser can display it. Open it in a
+      new tab instead — your wallet stays untouched.</p>
+      <button class="btn btn-primary" id="dappBlockedOpen">↗ Open in new tab</button>`;
+    wrap.appendChild(n);
+    n.querySelector('#dappBlockedOpen').addEventListener('click', () => {
+      window.open(safeUrl, '_blank', 'noopener,noreferrer');
+    });
+    if (loader) loader.style.display = 'none';
+  }
+
+  // Known-unframeable: show the explanation immediately instead of pointing an
+  // iframe at a site that will refuse it (blank frame + console violation only).
+  // No early return — the close/back/external handlers below must still bind.
+  if (!frameable) {
+    loaded = true;
+    showBlocked();
+  } else {
+    // Only a heuristic for sites we have no verified header data for (custom
+    // URL). Generous: heavy web3 apps routinely take >10s, and firing early
+    // would show a false "can't be embedded" on a perfectly frameable site.
+    setTimeout(() => { if (!loaded) showBlocked(); }, 15000);
+  }
+  setTimeout(() => { if (loader) loader.style.display = 'none'; }, 9000);
 
   // Close
   document.getElementById('dappBrowserClose').addEventListener('click', () => {
@@ -125,7 +178,7 @@ export function renderDapps(container) {
       </div>
       <div id="dappGrid" class="dapp-grid">
         ${POPULAR_DAPPS.map(d => `
-          <div class="dapp-card" data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}">
+          <div class="dapp-card" data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}" data-frameable="${d.frameable ? '1' : '0'}">
             <div class="dapp-icon">${d.icon}</div>
             <div class="dapp-name">${d.name}</div>
             <div class="dapp-category">${d.category}</div>
@@ -136,7 +189,7 @@ export function renderDapps(container) {
   // Wire events — open in-app browser
   container.querySelectorAll('.dapp-card').forEach(card => {
     card.addEventListener('click', () => {
-      openDappBrowser(card.dataset.url, card.dataset.name);
+      openDappBrowser(card.dataset.url, card.dataset.name, card.dataset.frameable === '1');
     });
   });
   const goBtn = container.querySelector('#dappGo');

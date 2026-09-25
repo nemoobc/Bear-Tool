@@ -695,6 +695,11 @@ export async function revokeDelegation() {
     const authorization = signer.authorizeSync({ chainId: net.chainId, address: EIP7702.ZERO_ADDRESS, nonce });
     const feeData = await provider.getFeeData();
     const tx = await signer.sendTransaction({
+      // MUST be explicit: ethers v6 otherwise infers an EIP-1559 type-2 tx from
+      // the fee fields and SILENTLY DROPS the authorizationList. The tx then
+      // mines fine, receipt.status === 1, the UI reports "Delegation revoked!"
+      // — and the delegation is still live on-chain.
+      type: 4,
       to: target,
       authorizationList: [authorization],
       maxFeePerGas: feeData.maxFeePerGas,
@@ -707,8 +712,23 @@ export async function revokeDelegation() {
       toast(`Tx ${tx.hash.slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'eip7702-revoke', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `revoke → ${target}` });
-    toast(receipt.status === 1 ? 'Delegation revoked! ✅' : 'Revoke failed!', receipt.status === 1 ? 'success' : 'error');
+    // A mined receipt is NOT proof the delegation was removed: a type-2 tx that
+    // silently dropped the authorizationList also mines with status 1. Verify
+    // the on-chain code actually cleared before telling the user it worked.
+    let stillDelegated = null;
+    try {
+      stillDelegated = await getDelegation(provider, target);
+    } catch { /* RPC hiccup — fall through to the receipt verdict */ }
+    const revoked = receipt.status === 1 && !stillDelegated;
+    addActivity({
+      hash: tx.hash, type: 'eip7702-revoke',
+      status: revoked ? 'success' : 'failed', ts: Date.now(), detail: `revoke → ${target}`
+    });
+    if (receipt.status === 1 && stillDelegated) {
+      toast('Revoke tx mined but the delegation is STILL ACTIVE on-chain — the authorization did not apply.', 'error');
+    } else {
+      toast(revoked ? 'Delegation revoked! ✅' : 'Revoke failed!', revoked ? 'success' : 'error');
+    }
     checkDelegation();
     emit('refresh');
   } catch (e) {

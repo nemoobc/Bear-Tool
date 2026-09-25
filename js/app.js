@@ -49,6 +49,22 @@ window.addEventListener('DOMContentLoaded', () => {
   // path already calls requireUnlock(). The decrypted key is never persisted.
   const restored = restoreReadOnlyAccount();
   const boot = () => {
+    // Secure-context guard. Web Crypto (crypto.subtle) is only exposed on HTTPS
+    // and on localhost. Served over plain HTTP from any other origin the app
+    // still LOOKS fine but every keystore operation dies with
+    // "Cannot read properties of undefined (reading 'importKey')" — a silent,
+    // unexplainable failure. Say so up front instead.
+    if (!window.crypto?.subtle) {
+      const insecure = location.protocol === 'http:'
+        && !['localhost', '127.0.0.1', '::1', ''].includes(location.hostname);
+      toast(
+        insecure
+          ? '⚠️ Insecure context: this page is not HTTPS and not localhost, so Web Crypto is unavailable — the wallet cannot create, import or unlock. Serve over HTTPS or use http://localhost.'
+          : '⚠️ Web Crypto (crypto.subtle) is unavailable in this browser context — wallet features are disabled.',
+        'error'
+      );
+      console.warn('[BearTool] crypto.subtle unavailable; secure context required for wallet operations.');
+    }
     // Session secret survives a refresh (sessionStorage) and a tab reopen
     // (localStorage fallback, within the auto-lock window): restore the signer
     // and stay unlocked. Lock / auto-lock clears both copies.
@@ -292,6 +308,28 @@ function bindOpenSeaPanel() {
   if (window._osPanelBound) return;
   window._osPanelBound = true;
   const status = () => $('#openSeaStatus');
+
+  // OpenSea API v2 answers 401 to keyless browser requests (the same URL
+  // returns 200 from curl), so the key has to come from somewhere. The api
+  // module already reads globalThis.__OPENSEA_API_KEY; wire the field to it and
+  // remember it. Stored in localStorage like the rest of the settings — this is
+  // a public read key, never a wallet secret.
+  const keyInput = $('#openSeaApiKey');
+  if (keyInput) {
+    let saved = '';
+    try { saved = localStorage.getItem('bear.openseaKey') || ''; } catch { /* private mode */ }
+    keyInput.value = saved;
+    globalThis.__OPENSEA_API_KEY = saved;
+    keyInput.addEventListener('change', () => {
+      const v = keyInput.value.trim();
+      globalThis.__OPENSEA_API_KEY = v;
+      try {
+        if (v) localStorage.setItem('bear.openseaKey', v);
+        else localStorage.removeItem('bear.openseaKey');
+      } catch { /* private mode */ }
+      const s = status(); if (s) s.textContent = v ? 'API key disimpan.' : 'API key dikosongkan.';
+    });
+  }
   // Check WL — collection from the contract field (OpenSea link / slug /
   // contract address, auto-parsed) + wallet from the new address field,
   // falling back to the active wallet. No hardcoded collection.

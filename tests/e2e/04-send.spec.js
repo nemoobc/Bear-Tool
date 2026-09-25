@@ -58,7 +58,10 @@ test.describe('Send', () => {
     await page.fill('#sendAmount', '0.01');
     await appClick(page, '#btnSend');
     await expect(page.locator('#modalOverlay')).toContainText(/ADDRESS POISONING/i);
-    await expect(page.locator('#confirmTypeInput')).toBeVisible();
+    // Typed confirmation is disabled app-wide (TYPED_CONFIRMATION in js/ui.js),
+    // so the dialog no longer renders #confirmTypeInput. Assert the actionable
+    // button is offered instead of an input that will never appear.
+    await expect(page.locator('#confirmYes')).toBeVisible();
   });
 
   test('sending to a token contract triggers destination warning', async ({ page }) => {

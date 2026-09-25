@@ -13,7 +13,19 @@ async function osFetch(path, opts = {}) {
   const key = getApiKey();
   if (key) headers['X-API-KEY'] = key;
   const res = await fetch(url, { ...opts, headers });
-  if (!res.ok) throw new Error(`OpenSea API ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+  if (!res.ok) {
+    // 401/403 from OpenSea v2 means no usable key. This is NOT a transient
+    // failure and the generic "failed to fetch" message sent users hunting for
+    // network problems that were never the cause.
+    if (res.status === 401 || res.status === 403) {
+      const e = new Error('OpenSea API key required — add one in the OpenSea panel (v2 rejects keyless browser requests with 401).');
+      e.code = 'OPENSEA_NO_KEY';
+      throw e;
+    }
+    const e = new Error(`OpenSea API ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+    e.code = 'OPENSEA_HTTP_' + res.status;
+    throw e;
+  }
   return res.json();
 }
 
@@ -61,17 +73,23 @@ export async function checkWL({ collection, address }) {
       else if (parsed?.type === 'asset' && parsed.contract) slug = parsed.contract; // resolved below
     }
 
+    // OpenSea resolves BOTH a slug and a bare contract address through the same
+    // /collections/{id} route, so one request covers both. The old code issued
+    // a second identical request when the response had no `slug` — it could
+    // never return anything different, so it only doubled latency/rate-limit
+    // spend on exactly the case it was meant to fix.
     const data = await osFetch(`/collections/${encodeURIComponent(slug)}`);
-    if (!data?.slug && /^0x[0-9a-fA-F]{40}$/.test(slug)) {
-      // pasted a contract address → resolve it to the collection slug first
-      const byAddr = await osFetch(`/collections/${slug}`);
-      slug = byAddr?.slug || slug;
-      const data2 = await osFetch(`/collections/${encodeURIComponent(slug)}`);
-      return wlResult(data2, slug, address, collection);
-    }
+    if (!data) return { eligible: false, error: true, message: 'Collection not found on OpenSea' };
     return wlResult(data, slug, address, collection);
-  } catch {
-    return { eligible: false, error: true, message: 'Failed to fetch collection data' };
+  } catch (e) {
+    // Surface the real reason (missing key, 404, network) instead of one opaque
+    // string that reads like a connectivity problem.
+    return {
+      eligible: false, error: true,
+      message: e?.code === 'OPENSEA_NO_KEY'
+        ? e.message
+        : (e?.message || 'Failed to fetch collection data')
+    };
   }
 }
 
@@ -85,7 +103,10 @@ function wlResult(data, slug, address, rawInput) {
     slug,
     floorPrice: data?.floor_price || 0,
     totalSupply: data?.stats?.total_supply || 0,
-    listedCount: data?.stats?.num_owners || 0,
+    // Named ownerCount because that is what stats.num_owners actually is. It
+    // was called listedCount, which read as a listing count and was wrong.
+    ownerCount: data?.stats?.num_owners || 0,
+    listedCount: data?.stats?.num_owners || 0, // kept: app.js reads this key
     description: data?.description || '',
     image: data?.image_url || '',
     address,

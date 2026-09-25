@@ -21,12 +21,20 @@ if (!globalThis.document) {
 }
 globalThis.window ??= { addEventListener() {} };
 globalThis.matchMedia ??= () => ({ matches: false });
-// ethers is loaded from a <script> tag in the browser; provide a stub only if
-// the module under test actually needs it (getProvider does, via net.rpc loops).
+// ethers is loaded from a <script> tag in the browser (vendored, see index.html);
+// inject the same library here for Node. A missing dependency must fail loudly.
+// This previously swallowed the error with an empty catch, which made getProvider
+// report "ethers is not defined" and the assertions fail with a misleading
+// "did the probe even run?" — reading like an RPC bug instead of a missing install.
 if (!globalThis.ethers) {
-  const { createRequire } = await import('node:module');
-  const require = createRequire(import.meta.url);
-  try { globalThis.ethers = (await import('ethers')).ethers; } catch { /* getProvider will report RPC failures */ }
+  try {
+    globalThis.ethers = (await import('ethers')).ethers;
+  } catch (err) {
+    throw new Error(
+      'ethers is not installed — run `npm install` first. This is the real ' +
+      'cause, not an RPC problem. (underlying: ' + err.message + ')'
+    );
+  }
 }
 
 const { getProvider } = await import('../js/network.js');

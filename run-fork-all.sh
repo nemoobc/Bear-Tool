@@ -2,7 +2,7 @@
 # run-fork-all.sh — fork lokal mainnet + testnet ALL (12 network), 4 paralel.
 set -u
 export PATH="$HOME/.foundry/bin:$PATH"
-cd /root/bear-tool || exit 1
+cd "$(dirname "$0")" || exit 1
 mkdir -p logs
 NETWORKS="ethereum bsc polygon arbitrum optimism base sepolia amoy arbitrum-sepolia optimism-sepolia base-sepolia bsc-testnet"
 run_net() {

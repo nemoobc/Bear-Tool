@@ -10,13 +10,17 @@ import { get, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
 import * as wallet from './wallet.js';
-import { renderDeployedRegistry } from './eip7702-tools.js';
+import { renderDeployedRegistry, revokeDelegation } from './eip7702-tools.js';
 
 const { ethers } = globalThis;
 
 export function bindEip7702Events() {
   $('#btnDelegate').addEventListener('click', () => doEip7702('delegate'));
-  $('#btnRevoke').addEventListener('click', () => doEip7702('revoke'));
+  // Revoke goes through revokeDelegation(): it honours #revokeTarget/#revokeKey
+  // so you can revoke an address that is NOT the unlocked wallet. doEip7702's
+  // revoke branch always acted on get('address') and ignored those fields, so
+  // it revoked the wrong account while reporting success.
+  $('#btnRevoke').addEventListener('click', () => revokeDelegation());
   $('#btnBatchAdd').addEventListener('click', addBatchItem);
   $('#btnBatchExecute').addEventListener('click', executeBatch);
   $('#btnRescue').addEventListener('click', doRescue);
@@ -100,6 +104,10 @@ export async function doEip7702(action) {
     });
     const feeData = await provider.getFeeData();
     const tx = await signer.sendTransaction({
+      // MUST be explicit — without it ethers v6 infers an EIP-1559 type-2 tx
+      // from the fee fields and silently drops the authorizationList, so the
+      // delegation never takes effect while the tx still reports success.
+      type: 4,
       to: get('address'),
       authorizationList: [authorization],
       maxFeePerGas: feeData.maxFeePerGas,

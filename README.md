@@ -24,8 +24,8 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 | 🔐 **Approvals** | Scan popular/custom token approvals, detect UNLIMITED, revoke to 0 |
 | 🧙 **Deploy** | Wizard for ERC-20 / ERC-721 / ERC-1155 — real in-browser solc compile (CDN fallback if the primary mirror is blocked) |
 | 📜 **Activity** | Local tx history with explorer links (sidebar item next to Dashboard) |
-| 🌐 **DApps** | Web3 DApps browser — iframe-based with 10 popular DApps (Uniswap, Aave, Compound, OpenSea, Blur, Lido, Rocket Pool, Etherscan, Snapshot, ENS). Custom URL input. |
-| 🖼️ **NFT** | NFT gallery (on-chain metadata + images), per-card sparklines (CoinGecko price history), OpenSea WL check + mint estimate (price/gas/total), list/cancel/fulfill via Seaport, accept highest offer auto-detect |
+| 🌐 **DApps** | Web3 DApps browser — iframe for sites that permit framing (Aave, Compound, Snapshot) + a curated URL box. Uniswap, OpenSea, Blur, Lido, Rocket Pool, Etherscan and ENS ship `X-Frame-Options` / `frame-ancestors` clickjacking protection, so **no** in-app browser can embed them; those open in a new tab instead of showing a blank frame. See [DApps & framing](#-dapps--why-most-dapps-open-in-a-new-tab) |
+| 🖼️ **NFT** | NFT gallery (on-chain metadata + images), per-card sparklines (CoinGecko price history), OpenSea WL check + mint estimate (price/gas/total), list/cancel/fulfill via Seaport, accept highest offer auto-detect. **OpenSea needs an API key** — see below |
 | 🎨 **Theme** | Full cartoon: chunky borders, soft shadows, 5s skippable logo intro, spinning bear loader |
 
 ---
@@ -50,7 +50,7 @@ npm install   # devDependency: ethers (for tests only)
 npm run verify
 ```
 
-`verify` = syntax check all JS + 262 unit tests (261 pass, 1 skip; network data, custom networks, testnet toggle, EIP-7702 delegation detection, wallet create/import/encrypt/decrypt/derive, session persist, address poisoning, nav/status UI invariants, Sepolia swap constants). Plus browser E2E (`npm run test:e2e`, 51 specs) and on-chain fork tests for 12 networks (`run-fork-all.sh`, 10 fork tests per network).
+`verify` = syntax check all JS + 268 unit tests (267 pass, 1 skip; network data, custom networks, testnet toggle, EIP-7702 delegation detection, wallet create/import/encrypt/decrypt/derive, session persist, address poisoning, nav/status UI invariants, Sepolia swap constants). Plus browser E2E (`npm run test:e2e`, 65 tests) and on-chain fork tests for 12 networks (`run-fork-all.sh`, 10 fork tests per network).
 
 ## 📁 Structure
 
@@ -82,8 +82,20 @@ Bear-Tool/
 ## 🔒 Security notes
 
 - Keys encrypted with **PBKDF2 (310k iterations) + AES-GCM** via Web Crypto — never stored plaintext.
+- `ethers` is **vendored** at `js/vendor/ethers.umd.min.js` with a SHA-384 SRI in `index.html`, not fetched from a CDN at runtime. This is the wallet's one hard dependency — no ethers means no wallet — so a blocked or down CDN was a single point of total failure. The CDN build is kept only as a fallback if the vendored copy fails to execute. The version is pinned identically in `package.json` (no caret), so the test suite exercises the exact library the browser runs.
 - **EIP-7702 is powerful and dangerous**: a malicious delegation = total compromise. Only delegate to audited implementations. Mainnet requires type-4 RPC (Alchemy/QuickNode).
+- **Serve over HTTPS or `http://localhost`.** Web Crypto (`crypto.subtle`) is only exposed in a secure context. On plain HTTP from any other host the app boots fine but every keystore operation dies with `Cannot read properties of undefined (reading 'importKey')` — silent and unexplainable. The app now detects this and warns at boot. This is also why the DApps list is not framed blind: `index.html` needs `frame-src https:` for the iframe browser to load anything at all.
 - Address poisoning detection flags addresses sharing prefix+suffix.
+- **OpenSea API v2 rejects keyless browser requests.** The same
+  `GET /api/v2/collections/{slug}` returns `200` from curl and `401` from a page,
+  so the WL check, listing lookup and offer lookup cannot work until you paste a
+  key into the OpenSea panel. It is stored in `localStorage` (`bear.openseaKey`)
+  and sent as `X-API-KEY`; the UI now says exactly that instead of a generic
+  "failed to fetch". Get a free key at <https://docs.opensea.io/>.
+- **Whitelist (WL) is collection-level, not address-level.** OpenSea exposes no
+  per-address whitelist endpoint, so the app reports whether a collection is
+  public or private and tells you the WL is managed off-chain — it never invents
+  a per-address "you are whitelisted" verdict.
 - Mainnet sends/swaps/deploys require typed confirmation.
 - This is a reference implementation — audit before real funds.
 

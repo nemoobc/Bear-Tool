@@ -1,7 +1,32 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — price.js
-// USD prices: CoinGecko (keyless) + DexScreener fallback + cache.
+// Prices: CoinGecko + DexScreener fallback + cache.
+// Currency comes from Settings (usd/eur/idr/cny) — it used to be hardcoded to
+// USD in every request, which made the Currency picker a control that saved a
+// value nothing ever read. An optional CoinGecko key lifts the rate limit; the
+// keyless free tier is CORS-blocked in browsers and rate-limited hard.
 // ═══════════════════════════════════════════════════════════════
+
+import { get } from './state.js';
+
+// Selected display currency, e.g. 'usd' | 'eur' | 'idr' | 'cny'.
+function currency() {
+  const c = (get('settings') || {}).currency;
+  return /^[a-z]{3}$/i.test(c || '') ? c.toLowerCase() : 'usd';
+}
+
+// Optional key from Settings → localStorage. Absent = keyless free tier.
+function cgKey() {
+  try { return localStorage.getItem('bear.coingeckoKey') || ''; } catch { return ''; }
+}
+
+function cgUrl(path, params) {
+  const u = new URL(`https://api.coingecko.com/api/v3/${path}`);
+  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+  const key = cgKey();
+  if (key) u.searchParams.set('x_cg_demo_api_key', key);
+  return u.toString();
+}
 
 // CoinGecko platform ids per chainId (ERC-20 token_price endpoint)
 const COINGECKO_PLATFORMS = {
@@ -86,20 +111,29 @@ async function fetchWithTimeout(url, timeoutMs = 10000) {
 async function fetchCoinGeckoNative(chainId) {
   const id = NATIVE_COIN_IDS[chainId];
   if (!id) return null;
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`;
-  const res = await fetchWithTimeout(url);
+  const cur = currency();
+  const res = await fetchWithTimeout(cgUrl('simple/price', { ids: id, vs_currencies: cur }));
   if (!res.ok) throw new Error('CoinGecko ' + res.status);
   const data = await res.json();
-  return data[id]?.usd ?? null;
+  return data[id]?.[cur] ?? null;
 }
 
 async function fetchCoinGeckoTokens(chainId, addresses) {
   const platform = COINGECKO_PLATFORMS[chainId];
   if (!platform || !addresses.length) return {};
-  const url = `https://api.coingecko.com/api/v3/simple/token_price/${platform}?contract_addresses=${addresses.join(',')}&vs_currencies=usd`;
-  const res = await fetchWithTimeout(url);
+  const cur = currency();
+  const res = await fetchWithTimeout(cgUrl(`simple/token_price/${platform}`,
+    { contract_addresses: addresses.join(','), vs_currencies: cur }));
   if (!res.ok) throw new Error('CoinGecko ' + res.status);
-  return res.json();
+  const data = await res.json();
+  // Normalise every token to the selected currency key so callers read
+  // `result[addr][cur]` rather than assuming `.usd`.
+  const out = {};
+  for (const [addr, v] of Object.entries(data || {})) {
+    const p = v?.[cur];
+    if (typeof p === 'number' && Number.isFinite(p)) out[addr] = p;
+  }
+  return out;
 }
 
 // DexScreener chainId slugs per numeric chainId (search endpoint uses slugs)
@@ -201,9 +235,9 @@ export async function fetchOHLC({ address, chainId, days = 1 }) {
 
   let url = null;
   if (address && platform) {
-    url = `https://api.coingecko.com/api/v3/coins/${platform}/contract/${String(address).toLowerCase()}/ohlc?vs_currency=usd&days=${days}`;
+    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/ohlc`, { vs_currency: currency(), days });
   } else if (!address && nativeId) {
-    url = `https://api.coingecko.com/api/v3/coins/${nativeId}/ohlc?vs_currency=usd&days=${days}`;
+    url = cgUrl(`coins/${nativeId}/ohlc`, { vs_currency: currency(), days });
   }
   if (!url) return [];
 
@@ -248,9 +282,9 @@ export async function fetchPriceHistory({ address, chainId }) {
 
   let url = null;
   if (address && platform) {
-    url = `https://api.coingecko.com/api/v3/coins/${platform}/contract/${String(address).toLowerCase()}/market_chart?vs_currency=usd&days=1`;
+    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/market_chart`, { vs_currency: currency(), days: 1 });
   } else if (!address && nativeId) {
-    url = `https://api.coingecko.com/api/v3/coins/${nativeId}/market_chart?vs_currency=usd&days=1`;
+    url = cgUrl(`coins/${nativeId}/market_chart`, { vs_currency: currency(), days: 1 });
   }
   if (!url) return [];
 

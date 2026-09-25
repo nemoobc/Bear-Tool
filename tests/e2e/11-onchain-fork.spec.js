@@ -151,15 +151,10 @@ for (const [netId, fork] of Object.entries(FORKS)) {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
 
-    // mainnet networks show the extra "MAINNET TRANSACTION!" gate (type YA)
-    if (fork.type === 'mainnet') {
-      await page.waitForSelector('#confirmTypeInput', { timeout: 15_000 });
-      await page.fill('#confirmTypeInput', 'YA');
-      await page.locator('#confirmYes').click({ timeout: 5000 }).catch(async () => {
-        const box = await page.locator('#confirmYes').boundingBox();
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      });
-    }
+    // Mainnet networks show the extra "MAINNET TRANSACTION!" gate. Typed
+    // confirmation is disabled app-wide (see TYPED_CONFIRMATION in js/ui.js), so
+    // there is no #confirmTypeInput to fill — just click through the button.
+    // Kept as a separate step because the modal is still an extra step here.
     // SIGN TRANSACTION dialog → re-pin the fork right before broadcast
     // (fast chains prune the fork base state within minutes and the UI flow
     // up to here is slow) → sign & send
@@ -232,12 +227,9 @@ async function deployErc20ViaWeb(page, fork, netId) {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   });
 
-  // single confirmTx dialog does gate+sign (requireType YA for mainnet) —
-  // it appears only after solc compile finishes (slow first run)
-  if (fork.type === 'mainnet') {
-    await page.waitForSelector('#confirmTypeInput', { timeout: 90_000 });
-    await page.fill('#confirmTypeInput', 'YA');
-  }
+  // single confirmTx dialog gates+signs. Typed confirmation is disabled
+  // app-wide (TYPED_CONFIRMATION in js/ui.js), so there is no
+  // #confirmTypeInput — waiting for #confirmYes alone is correct now.
   await page.waitForSelector('#confirmYes', { timeout: 90_000 });
   // dialog is up = compile done → re-pin before broadcast (fast chains
   // prune within minutes, compile already consumed time)

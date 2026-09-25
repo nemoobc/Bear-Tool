@@ -6,7 +6,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bear Tool — The Cartoon Wallet That Means Business</title>
   <meta name="description" content="Bear Tool — self-custody crypto wallet, all EVM networks mainnet & testnet, EIP-7702 suite. 100% client-side.">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.ethers.io https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: blob:; connect-src 'self' https: wss:; font-src 'self' data: https://fonts.gstatic.com;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.ethers.io https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: blob:; connect-src 'self' https: wss:; font-src 'self' data: https://fonts.gstatic.com; frame-src 'self' https: http://localhost:* http://127.0.0.1:*; child-src 'self' https:; object-src 'none'; base-uri 'none';">
+  <!--
+    frame-src/child-src exist because the DApps browser frames external sites.
+    Without them the policy falls back to `default-src 'self'` and EVERY entry
+    in the DApps list is refused — the feature renders a blank frame with only
+    a console violation. https: is required because the custom-URL box accepts
+    any site; the frame is sandboxed WITHOUT allow-same-origin, so framed pages
+    run in an opaque origin and cannot touch this page. Plain http: is allowed
+    only for loopback (local development).
+  -->
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <meta http-equiv="Referrer-Policy" content="no-referrer">
   <link rel="icon" href="assets/bear.svg" type="image/svg+xml">
@@ -513,6 +522,10 @@
                 <input class="input" id="openSeaWlAddress" placeholder="0x… (kosong = wallet aktif)">
               </div>
               <div class="field">
+                <label for="openSeaApiKey">OpenSea API key <span class="small">(wajib — API v2 membalas 401 tanpa key dari browser)</span></label>
+                <input class="input" id="openSeaApiKey" type="password" autocomplete="off" placeholder="kosongkan = pakai key tersimpan">
+              </div>
+              <div class="field">
                 <label for="openSeaTokenId">Token ID</label>
                 <input class="input" id="openSeaTokenId" type="number" placeholder="e.g. 1234">
               </div>
@@ -755,10 +768,21 @@
     <span>You're offline. Some features may not work.</span>
   </div>
 
-  <!-- ethers.js v6 (pinned 6.14.0, SRI-verified) -->
-  <script src="https://cdn.jsdelivr.net/npm/ethers@6.14.0/dist/ethers.umd.min.js"
-    integrity="sha384-34QHxjpmrckLfsLBqjRCEfb9y2fUhFwOPXGgAcnStQq185tj8/hY8VB6UY94pSUm"
-    crossorigin="anonymous"></script>
+  <!-- ethers.js v6.17.0 — vendored locally. The SRI below was computed from the
+       official npm tarball (ethers-6.17.0.tgz) and cross-checked against the
+       jsdelivr build; they are byte-identical. Vendored because this is the one
+       hard dependency the whole wallet needs: no ethers == no wallet, so a
+       blocked/down CDN was a single point of total failure. -->
+  <script src="js/vendor/ethers.umd.min.js"
+    integrity="sha384-lApM4ELRuFNT7NgNqnXB2zFWgSDdhVvmnOHov2DPJz/2zuNpZImXBeklFr18ilvi"></script>
+  <script>
+    // Fallback only if the vendored copy did not execute (e.g. js/vendor/ was
+    // stripped from a build). document.write is safe here: this is a classic
+    // parser-inserted script, and the app below is type="module" (deferred).
+    if (typeof window.ethers === 'undefined') {
+      document.write('<scr' + 'ipt src="https://cdn.jsdelivr.net/npm/ethers@6.17.0/dist/ethers.umd.min.js" integrity="sha384-lApM4ELRuFNT7NgNqnXB2zFWgSDdhVvmnOHov2DPJz/2zuNpZImXBeklFr18ilvi" crossorigin="anonymous"><\/scr' + 'ipt>');
+    }
+  </script>
   <!-- qrcode-generator v1.4.4 (vendored, MIT) — Receive QR code -->
   <script src="js/vendor/qrcode.min.js"></script>
   <!-- app modules -->

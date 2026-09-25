@@ -173,8 +173,14 @@ test('E2E-probe: LI.FI quote API works when fromAddress is added', async () => {
   console.log('  LI.FI with fromAddress: tool =', json.tool, '| action.fromToken.symbol =', json.action?.fromToken?.symbol);
 });
 
-test('E2E-probe: CoinGecko native price API works (dashboard USD)', async () => {
+test('E2E-probe: CoinGecko native price API works (dashboard USD)', async (t) => {
   const res = await httpGetRetry('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+  // 429 is CoinGecko's rate limit, not a defect in this app. Everything else in
+  // the suite mocks CoinGecko; this probe hits the live API, so it must degrade
+  // to an honest skip instead of failing whenever a shared IP is throttled.
+  if (res.status === 429) {
+    return t.skip('CoinGecko rate limit (429) — live probe, not a code failure');
+  }
   assert.equal(res.status, 200);
   const json = JSON.parse(res.text);
   assert.ok(json.ethereum?.usd > 0);
