@@ -1099,7 +1099,7 @@ function renderAssets(tokens) {
       const min = Math.min(...data), max = Math.max(...data), r = max - min || 1;
       const w = 48, h = 16, pts = data.length;
       const poly = data.map((v, k) => `${((k / (pts - 1)) * w).toFixed(1)},${(h - ((v - min) / r) * (h - 4) - 2).toFixed(1)}`).join(' ');
-      el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="vertical-align:middle"><polyline points="${poly}|| '${poly}'" fill="none" stroke="#10B981" stroke-width="1.5"/></svg>`;
+      el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="vertical-align:middle"><polyline points="${poly}" fill="none" stroke="#10B981" stroke-width="1.5"/></svg>`;
     } catch { el.textContent = ''; }
   }));
   // CoinGecko images can 404/expire — fall back to the default SVG quietly.
