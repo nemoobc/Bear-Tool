@@ -339,6 +339,11 @@ export function applyRpcOverrides() {
   return all;
 }
 
+/** Which node the current provider is actually talking to, for display. */
+export function providerEndpoint(provider) {
+  return provider?.bearEndpoint || null;
+}
+
 export function getAllNetworks() {
   const all = [...NETWORKS, ...getCustomNetworks()];
   // Settings → Testnet mode OFF hides every testnet from choosers.
@@ -365,15 +370,38 @@ export async function getProvider(chainId) {
   const net = getNetwork(chainId);
   if (!net) throw new Error('Unknown network chainId ' + chainId);
   const failures = [];
-  for (const url of net.rpc) {
+
+  // The first entry is a user override when one is stored. That endpoint is the
+  // one they asked for, and quietly using a DIFFERENT node instead is how a
+  // wallet fails for no visible reason: a fresh anvil fork can take a while to
+  // answer its first call, the probe times out, and the loop walks on to the
+  // public endpoint — which then rejects anvil_setBalance, reports a balance
+  // the user never funded, and answers estimateGas for an account that does not
+  // exist on the real chain. Every symptom traced back to this one silent
+  // substitution, so an override that fails now fails LOUDLY.
+  const override = (getRpcOverrides()[net.id] || [])[0];
+  const urls = override ? [override, ...net.rpc.filter((u) => u !== override)] : net.rpc;
+
+  for (const url of urls) {
     try {
       const p = new ethers.JsonRpcProvider(url, Number(chainId), { staticNetwork: true });
       // Bounded probe: an endpoint that accepts the connection but never
       // answers would otherwise hang here forever, leaving the UI spinning.
-      await withTimeout(p.getBlockNumber(), RPC_TIMEOUT_MS, url);
+      // The first attempt gets a longer budget because a local node may still
+      // be initialising.
+      await withTimeout(p.getBlockNumber(), url === urls[0] ? RPC_TIMEOUT_MS * 3 : RPC_TIMEOUT_MS, url);
+      // Remember which node answered, so the UI can show it. A provider whose
+      // origin is invisible is a provider nobody can debug.
+      try { Object.defineProperty(p, 'bearEndpoint', { value: url, enumerable: true }); } catch { /* frozen */ }
       return p;
     } catch (e) {
       failures.push(`${url} (${e?.message || e})`);
+      if (url === override) {
+        throw new Error(
+          `Your RPC for ${net.name} did not answer: ${url} — ${e?.message || e}. `
+          + 'Fix Settings → Custom RPC, or remove it to use the default endpoints.',
+        );
+      }
     }
   }
   throw new Error(`All RPCs failed for ${net.name} — ` + failures.join('; '));
