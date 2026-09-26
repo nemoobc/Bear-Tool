@@ -130,9 +130,19 @@ export async function verifySpendable({ amount, token, provider, from, to }) {
       : (globalThis.ethers ? globalThis.ethers.parseUnits(amount, token?.decimals ?? 18) : 0n);
   } catch { return { ok: false, message: `That amount cannot be read: "${amount}".`, gasWei }; }
 
+  // Live balance, for the same reason resolveMax reads one: token.balance is a
+  // snapshot from the last dashboard render. A cached figure fails this check in
+  // both directions — too low and a perfectly good send is refused, too high and
+  // an impossible one is waved through to a node error the user cannot act on.
+  // ERC-20 included: reading only the native balance left every token send on the
+  // stale number while the native one had been fixed.
   let balance = token?.balance ?? 0n;
-  if (isNative && provider && from) {
-    try { balance = await provider.getBalance(from); } catch { /* keep the cached balance */ }
+  if (provider && from) {
+    try {
+      balance = isNative
+        ? await provider.getBalance(from)
+        : await new ethers.Contract(token.address, ['function balanceOf(address) view returns (uint256)'], provider).balanceOf(from);
+    } catch { /* keep the cached balance — a stale number beats a refusal */ }
   }
   return { ...checkSpendable({ amountWei, balance, gasWei, paysGas: isNative }), gasWei, amountWei, balance };
 }

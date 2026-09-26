@@ -161,12 +161,22 @@ window.addEventListener('DOMContentLoaded', () => {
         </div>
         <p class="dim small" id="tdNote" style="margin-top:8px"></p>
       </div>
-      <div class="field"><label for="customTokenChain">Chain ID</label><input class="input" id="customTokenChain" type="number" value="${currentChain}"></div>
+      <!-- There was a Chain ID input here and it was a lie. detect() reads
+           through get('provider') - the CURRENT network - so typing a different
+           chain re-ran the same probe against the same node and then saved the
+           number that was typed alongside a name and decimals read from a
+           different chain. The result was a token whose metadata belonged to one
+           network and whose chainId said another, with nothing on screen saying
+           so. The network is a fact, not a setting: it is shown, not chosen. -->
+      <p class="small dim" id="tdNetwork" style="margin:0 0 10px"></p>
       <button class="btn btn-primary btn-block" id="btnConfirmAddToken" disabled>Add Token</button>
     `);
 
     const addrEl = document.getElementById('customTokenAddr');
-    const chainEl = document.getElementById('customTokenChain');
+    const netEl = document.getElementById('tdNetwork');
+    const activeChainId = () => getNetworkById(get('networkId'))?.chainId || currentChain;
+    const activeNetName = () => getNetworkById(get('networkId'))?.name || 'this network';
+    if (netEl) netEl.textContent = 'Network: ' + activeNetName() + ' (chain ' + activeChainId() + ')';
     const box = document.getElementById('tokenDetect');
     const saveBtn = document.getElementById('btnConfirmAddToken');
     const ERC20 = [
@@ -209,7 +219,11 @@ window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('tdSymbol').textContent = sym || nm || 'Unknown';
         document.getElementById('tdName').textContent = [nm, sym].filter(Boolean).join(' · ') || '—';
         document.getElementById('tdDecimals').textContent = `${dec} decimals`;
-        document.getElementById('tdNote').textContent = 'Detected on chain ' + (chainEl.value || currentChain) + '. Change the Chain ID if that is wrong.';
+        // Say which network was read, and what to do if it is the wrong one.
+        // The old wording offered a control that could not change the answer.
+        document.getElementById('tdNote').textContent =
+          'Read from ' + activeNetName() + ' (chain ' + activeChainId() + '). '
+          + 'Not the token you expected? Switch network first, then paste it again.';
         saveBtn.disabled = false;
         saveBtn.dataset.sym = sym || nm || '';
         saveBtn.dataset.dec = String(dec);
@@ -224,13 +238,14 @@ window.addEventListener('DOMContentLoaded', () => {
     // 'paste' covers the common case; 'input' also catches typing/autofill.
     addrEl.addEventListener('paste', () => setTimeout(detect, 0));
     addrEl.addEventListener('input', detect);
-    chainEl.addEventListener('change', () => {
-      if (!saveBtn.disabled) detect();
-    });
+    // Switching networks underneath an open modal used to leave a token probed
+    // on the old chain looking valid on the new one. Re-probe instead.
+    on('networkId', () => { if (!saveBtn.disabled || addrEl.value.trim()) detect(); });
 
     saveBtn?.addEventListener('click', async () => {
       const addr = addrEl.value.trim();
-      const chainId = parseInt(chainEl.value) || 1;
+      // The chain the token was actually read on - never a typed number.
+      const chainId = activeChainId();
       if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) return toast('Invalid contract address', 'error');
       const provider = get('provider');
       if (!provider) return toast('Wallet not ready', 'error');

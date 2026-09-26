@@ -125,10 +125,14 @@ export function computeMax({ balance, decimals = 18, gasWei = 0n, paysGas = true
     ok: true,
     shortfallWei: 0n,
     balance: bal, gasWei: gas, symbol,
+    // Short on purpose. This sits directly under the amount field as a blue note
+    // and the previous wording ran to four lines of small grey text on a phone,
+    // which is the weightiest thing on the screen for a fact that is one clause:
+    // what is left is the fee. The arithmetic is unchanged; only the sentence is.
     message: paysGas
-      ? `Left in the wallet: ${formatDown(bal - spendable, decimals, dp)} ${symbol} — the fee plus a `
-        + 'small cushion, because sending the exact balance would leave nothing to pay with.'
-      : `Full balance ${formatDown(spendable, decimals, dp)} ${symbol}. The fee is paid in another token.`,
+      ? `Leaves ${formatDown(bal - spendable, decimals, dp)} ${symbol} for fees — sending the exact `
+        + 'balance would leave nothing to pay with.'
+      : `Full balance ${formatDown(spendable, decimals, dp)} ${symbol} — fees are paid in another token.`,
   };
 }
 

@@ -2762,11 +2762,14 @@ body::before {
    of the router control. Measured at 390px: row at y=313, button at y=400. */
 .amount-max-btn { flex: 0 0 auto; align-self: center; position: static; }
 .max-note {
-  display: none; margin: 6px 0 0; font-size: .78rem; line-height: 1.45;
-  padding: 6px 9px; border-radius: 9px;
-  background: rgba(88, 160, 255, .12); color: var(--ink-soft);
-  border-left: 3px solid rgba(88, 160, 255, .55);
+  display: none; margin: 8px 0 0; font-size: .75rem; line-height: 1.4;
+  padding: 7px 10px; border-radius: 8px;
+  background: rgba(88, 160, 255, .1); color: var(--ink-soft);
+  border-left: 3px solid rgba(88, 160, 255, .5);
+  /* It is a footnote to the amount above it, not a panel of its own. */
+  max-width: 100%; overflow-wrap: anywhere;
 }
+.max-note b, .max-note strong { color: var(--ink); font-weight: 700; }
 .max-note.show { display: block; }
 
 /* ═══════════ Security Center ═══════════ */
