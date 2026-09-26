@@ -118,20 +118,55 @@ async function fetchCoinGeckoNative(chainId) {
   return data[id]?.[cur] ?? null;
 }
 
+// CoinGecko's public tier allows exactly ONE contract address per
+// /simple/token_price request. Sending the wallet's whole token list in one
+// call returned 400 with error_code 10012 ("Number of contract addresses in
+// the request exceeds the allowed limit of 1"), which is a hard failure, not a
+// rate limit — so every price in the list was lost. Verified live, one address
+// answers 200 and eight answer 400.
+//
+// Kept as a named constant because it is a fact about the free tier, not a
+// tuning knob: if it is ever wrong the app degrades to a 400 again, and the
+// test below pins the chunking so that failure cannot come back silently.
+export const CG_MAX_ADDRESSES = 1;
+
+/** Split addresses into request-sized chunks, de-duplicated and lower-cased. */
+export function cgTokenPriceChunks(addresses, size = CG_MAX_ADDRESSES) {
+  const n = Math.max(1, Number(size) || 1);
+  // Filter BEFORE stringifying. String(null) is "null" and String(undefined) is
+  // "undefined" — both truthy, so a post-map filter would happily request a
+  // token literally named "null".
+  const uniq = [...new Set(
+    (Array.isArray(addresses) ? addresses : [])
+      .filter((a) => typeof a === 'string' && a.trim())
+      .map((a) => a.trim().toLowerCase()),
+  )];
+  const out = [];
+  for (let i = 0; i < uniq.length; i += n) out.push(uniq.slice(i, i + n));
+  return out;
+}
+
 async function fetchCoinGeckoTokens(chainId, addresses) {
   const platform = COINGECKO_PLATFORMS[chainId];
-  if (!platform || !addresses.length) return {};
+  if (!platform || !addresses?.length) return {};
   const cur = currency();
-  const res = await fetchWithTimeout(cgUrl(`simple/token_price/${platform}`,
-    { contract_addresses: addresses.join(','), vs_currencies: cur }));
-  if (!res.ok) throw new Error('CoinGecko ' + res.status);
-  const data = await res.json();
-  // Normalise every token to the selected currency key so callers read
-  // `result[addr][cur]` rather than assuming `.usd`.
+  const chunks = cgTokenPriceChunks(addresses);
   const out = {};
-  for (const [addr, v] of Object.entries(data || {})) {
-    const p = v?.[cur];
-    if (typeof p === 'number' && Number.isFinite(p)) out[addr] = p;
+
+  // Sequential on purpose: these are rate-limited endpoints, and firing eight
+  // at once is how a free tier starts refusing. One chunk per token is at most
+  // a handful of small requests, and the cache means it happens once.
+  for (const chunk of chunks) {
+    try {
+      const res = await fetchWithTimeout(cgUrl(`simple/token_price/${platform}`,
+        { contract_addresses: chunk.join(','), vs_currencies: cur }));
+      if (!res.ok) continue;                 // keep whatever earlier chunks gave us
+      const data = await res.json();
+      for (const [addr, v] of Object.entries(data || {})) {
+        const p = v?.[cur];
+        if (typeof p === 'number' && Number.isFinite(p)) out[addr] = p;
+      }
+    } catch { /* this chunk failed; the rest still get their chance */ }
   }
   return out;
 }
