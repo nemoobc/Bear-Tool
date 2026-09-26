@@ -6,12 +6,16 @@ test-results/
 logs2.zip
 job-logs.txt
 .env
-vendor/
+# Root-only: a bare "vendor/" would also swallow js/vendor/, which holds the
+# vendored ethers + qrcode bundles the app loads at runtime.
+/vendor/
 
 test-contracts/cache/
 test-contracts/out/
 test-contracts/foundry.toml
-vendor/
 
 # dev artifacts
 logs/
+
+# verification screenshots produced by the browser-driven audit runs
+shots/
