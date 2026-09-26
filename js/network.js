@@ -387,9 +387,13 @@ export async function getProvider(chainId) {
       const p = new ethers.JsonRpcProvider(url, Number(chainId), { staticNetwork: true });
       // Bounded probe: an endpoint that accepts the connection but never
       // answers would otherwise hang here forever, leaving the UI spinning.
-      // The first attempt gets a longer budget because a local node may still
-      // be initialising.
-      await withTimeout(p.getBlockNumber(), url === urls[0] ? RPC_TIMEOUT_MS * 3 : RPC_TIMEOUT_MS, url);
+      // One budget, for every attempt, including the first. I gave the first
+      // attempt 3x on the theory that a local node may still be initialising;
+      // the test that watches for unbounded waits caught the cost immediately —
+      // a dead endpoint then held the UI for 24s instead of 8. A cold fork is
+      // better fixed by warming the node than by making every dead socket
+      // three times worse to discover.
+      await withTimeout(p.getBlockNumber(), RPC_TIMEOUT_MS, url);
       // Remember which node answered, so the UI can show it. A provider whose
       // origin is invisible is a provider nobody can debug.
       try { Object.defineProperty(p, 'bearEndpoint', { value: url, enumerable: true }); } catch { /* frozen */ }
