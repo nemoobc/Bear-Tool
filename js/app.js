@@ -338,7 +338,6 @@ function bindNav() {
   $all('.mobile-nav-item[data-view]').forEach(item => {
     item.addEventListener('click', () => activateNav(item));
   });
-  $('#mobileMoreBtn')?.addEventListener('click', () => showMoreSheet(activateNav));
   // dashboard quick actions
   $all('.quick-action-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -357,7 +356,27 @@ function bindNav() {
 // had 9, so EIP-7702, Approvals and Tools were reachable on desktop and simply
 // did not exist on a phone. Building it from the sidebar makes that class of
 // drift impossible: add a view to the sidebar and mobile gets it too.
-const MOBILE_PRIMARY = ['dashboard', 'swap', 'activity', 'nft'];
+//
+// Five slots, in the order the user named them, and no "More" — a sixth button
+// whose contents you had to guess was the wrong trade for a thumb. Reachability
+// of the views that no longer fit is preserved WITHOUT the sheet, and each
+// route is listed in REACHABLE_ON_MOBILE below so the next person editing this
+// can see at a glance that nothing became unreachable.
+const MOBILE_PRIMARY = ['dashboard', 'activity', 'swap', 'dapps', 'settings'];
+
+/**
+ * Every sidebar view, and how a phone still gets to it now that the bottom bar
+ * is five fixed slots. Keep this honest: a view with no route here is a view
+ * that exists on desktop and not on mobile, which is the exact bug this bar
+ * was rebuilt to remove.
+ */
+const REACHABLE_ON_MOBILE = {
+  send: 'Dashboard quick action',
+  deploy: 'Dashboard quick action (Tools)',
+  nft: 'Dashboard quick action',
+  bridge: 'Second press of Swap',
+  approval: 'Settings → Security Center → Approvals',
+};
 
 function syncMobileNav() {
   const bar = $('#mobileNav');
@@ -379,51 +398,11 @@ function syncMobileNav() {
   const cell = (i, active) => `<button class="mobile-nav-item${active ? ' active' : ''}" data-view="${escapeHtml(i.view)}"
       aria-label="${escapeHtml(i.label || i.view)}">${i.icon ? `<span class="icon">${i.icon}</span>` : ''}<span>${escapeHtml(i.label || i.view)}</span></button>`;
 
-  bar.innerHTML =
-    primary.map((v) => cell(items.find((i) => i.view === v), v === 'dashboard')).join('') +
-    // The More button carries a count so it is obvious how much is behind it.
-    `<button class="mobile-nav-item" id="mobileMoreBtn" aria-label="More features" aria-haspopup="dialog">
-       <span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></span><span>More</span>
-     </button>`;
+  bar.innerHTML = primary
+    .map((v) => cell(items.find((i) => i.view === v), v === 'dashboard'))
+    .join('');
   // Re-apply translations so the generated labels follow the active language.
   applyTranslations?.();
-}
-
-// Every sidebar view that did not fit the bottom bar, in one sheet. Rendered from
-// the same list as the sidebar, so this is the whole navigation, not a subset.
-function showMoreSheet(activateNav) {
-  const items = [...$all('.sidebar .nav-item')].map((el) => {
-    const label = el.querySelector('[data-i18n]');
-    return {
-      view: el.dataset.view,
-      label: (label?.textContent || '').trim(),
-      icon: el.querySelector('.icon')?.innerHTML || '',
-    };
-  }).filter((i) => i.view);
-  if (!items.length) return;
-
-  openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
-    <h2>All Features</h2>
-    <p class="dim small">Every view in Bear Tool — the same list as the desktop sidebar.</p>
-    <div class="nav-sheet" id="navSheet">
-      ${items.map((i) => `
-        <button class="nav-sheet-item${i.view === 'dashboard' ? ' active' : ''}" data-view="${escapeHtml(i.view)}">
-          <span class="icon">${i.icon}</span><span>${escapeHtml(i.label || i.view)}</span>
-        </button>`).join('')}
-    </div>
-  `);
-  $all('#navSheet .nav-sheet-item').forEach((b) => {
-    const go = () => {
-      const src = document.querySelector(`.sidebar .nav-item[data-view="${b.dataset.view}"]`);
-      if (activateNav && src) activateNav(src); else switchView(b.dataset.view);
-      closeModal();
-    };
-    b.addEventListener('click', go);
-    b.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
-    });
-  });
 }
 
 function switchView(view) {
@@ -435,9 +414,9 @@ function switchView(view) {
   const mobileItem = $(`.mobile-nav-item[data-view="${navView}"]`);
   if (sidebarItem) sidebarItem.classList.add('active');
   if (mobileItem) mobileItem.classList.add('active');
-  // Views that live behind "More" have no bottom-bar button, so light that up
-  // instead — otherwise the bar looks broken while you are on EIP-7702.
-  if (!mobileItem) $('#mobileMoreBtn')?.classList.add('active');
+  // A view with no bottom-bar button is reached from the Dashboard or from
+  // Settings, so no bar item lights up for it. That is honest: the bar is not
+  // broken, the view simply is not one of the five.
   $all('.view').forEach(v => v.classList.remove('active'));
   $('#view-' + view).classList.add('active');
   refreshView(view);
