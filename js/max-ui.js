@@ -12,6 +12,13 @@
 
 import { maxSpendable, computeMax, formatDown, defaultGasLimit, gasCost, checkSpendable } from './max-amount.js';
 
+// ethers comes off globalThis here, as in every other module. The bare
+// `import ethers from 'ethers'` form works in the browser but not under
+// `node --test`: ethers v6 ships no default export, so the whole module fails to
+// load and every test that imports it dies at import time rather than at the
+// assertion. One broken import took 17 tests with it.
+const { ethers } = globalThis;
+
 /** Read the current fee in wei, preferring the EIP-1559 ceiling when present. */
 export async function currentGasPriceWei(provider) {
   if (!provider) return 0n;
@@ -62,11 +69,33 @@ export async function resolveMax({ token, provider, from, to, pct = 100 }) {
   const { limit, source } = await gasLimitFor({ provider, isNative, from, to, tokenAddress: token?.address });
   const gasWei = gasCost({ gasLimit: limit, gasPriceWei: price });
 
-  const spendable = maxSpendable({ balance: token?.balance ?? 0n, gasWei, paysGas: isNative });
+  // The balance the caller passed in is a CACHED one — it was last written when
+  // the dashboard loaded. Measured on a real wallet: 19.999795 ETH on chain,
+  // 9.999795 in the token list, and MAX dutifully filled in half the balance.
+  // Funds arriving between the dashboard render and the MAX press is an ordinary
+  // thing, not a race, so the amount that gets SENT must come from the chain.
+  // The cached value stays as the fallback: if the node cannot answer we would
+  // rather under-send on a stale figure than refuse to fill the field at all.
+  let balance = token?.balance ?? 0n;
+  let balanceSource = 'cached';
+  if (isNative && provider && from) {
+    try {
+      const live = await provider.getBalance(from);
+      if (live > 0n) { balance = live; balanceSource = 'live'; }
+    } catch { /* keep the cached balance */ }
+  } else if (!isNative && token?.address && provider && from) {
+    try {
+      const c = new ethers.Contract(token.address, ['function balanceOf(address) view returns (uint256)'], provider);
+      const live = await c.balanceOf(from);
+      if (live > 0n) { balance = live; balanceSource = 'live'; }
+    } catch { /* keep the cached balance */ }
+  }
+
+  const spendable = maxSpendable({ balance, gasWei, paysGas: isNative });
 
   if (spendable <= 0n) {
-    const r = computeMax({ balance: token?.balance ?? 0n, decimals, gasWei, paysGas: isNative, symbol });
-    return { amount: '', ok: false, message: r.message, gasWei, spendable: 0n, source };
+    const r = computeMax({ balance, decimals, gasWei, paysGas: isNative, symbol });
+    return { amount: '', ok: false, message: r.message, gasWei, spendable: 0n, source, balanceSource };
   }
 
   const p = Math.max(0, Math.min(100, Number(pct) || 100));
@@ -74,13 +103,13 @@ export async function resolveMax({ token, provider, from, to, pct = 100 }) {
   // spendable amount, which is the same failure as rounding the total up.
   const share = p === 100 ? spendable : (spendable * BigInt(p)) / 100n;
 
-  const r = computeMax({ balance: token?.balance ?? 0n, decimals, gasWei, paysGas: isNative, symbol });
+  const r = computeMax({ balance, decimals, gasWei, paysGas: isNative, symbol });
   const amount = formatDown(share, decimals, 6);
   const message = p === 100
     ? r.message
     : `${p}% of what is sendable — ${amount} ${symbol}. ${r.message}`;
 
-  return { amount, ok: true, message, gasWei, spendable, source };
+  return { amount, ok: true, message, gasWei, spendable, source, balanceSource };
 }
 
 /**

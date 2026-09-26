@@ -139,5 +139,37 @@ test('the ids wired by send.js really exist in index.html', () => {
 
 test('loadSendTokens refreshes the balance label, not just the options', () => {
   const send = read('js/send.js');
-  assert.match(send, /updateSendTokenBalance\(\);\s*\}\s*$/m, 'loadSendTokens must call updateSendTokenBalance');
+  // Assert the intent, not the exact tail of the function. The old check was
+  // /updateSendTokenBalance\(\);\s*\}\s*$/m — it demanded that the call be the
+  // LAST statement before the closing brace, so adding a background refresh
+  // after it failed a test whose name says nothing about ordering. A check that
+  // breaks on a correct refactor trains you to route around the check.
+  const body = send.slice(send.indexOf('export function loadSendTokens()'));
+  const fn = body.slice(0, body.indexOf('\n}'));
+  assert.match(fn, /updateSendTokenBalance\(\)/, 'loadSendTokens must call updateSendTokenBalance');
+});
+
+test('the send form re-reads balances from the chain, not a cached snapshot', () => {
+  const send = read('js/send.js');
+  // The token list is written by the dashboard render. Funds that arrive after
+  // it left the dropdown offering a balance the user did not have, and MAX
+  // filling in the stale figure: measured 19.999795 ETH on chain against
+  // 9.999795 in the list, so "100%" sent half of what the user actually held.
+  assert.match(send, /refreshSendBalances/, 'loadSendTokens must trigger a balance refresh');
+  const fn = send.slice(send.indexOf('export async function refreshSendBalances'));
+  assert.match(fn, /getBalance|balanceOf/, 'the refresh must read the chain, not re-render the cache');
+  assert.match(fn, /get\('provider'\)/, 'and it needs a provider to ask');
+});
+
+test('MAX reads a live balance, so a stale list cannot shorten it', () => {
+  const maxui = read('js/max-ui.js');
+  // resolveMax used token.balance verbatim - a cache. The amount that gets SENT
+  // must come from the chain; the cache is only the fallback when the node
+  // cannot answer.
+  const fn = maxui.slice(maxui.indexOf('export async function resolveMax'));
+  const body = fn.slice(0, fn.indexOf('\n}'));
+  assert.match(body, /provider\.getBalance\(from\)/,
+    'resolveMax must read the native balance from the node');
+  assert.match(body, /balanceSource/,
+    'and it must say where the number came from, so a stale one is visible');
 });

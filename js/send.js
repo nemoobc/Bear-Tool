@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { $, toast, confirmTx, fmtAmount, escapeHtml } from './ui.js';
-import { get, addActivity, requireUnlock, emit } from './state.js';
+import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, withTimeout, RPC_TIMEOUT_MS } from './safetx.js';
 import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import * as wallet from './wallet.js';
@@ -97,6 +97,43 @@ export function loadSendTokens() {
     `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)} (${escapeHtml(fmtAmount(t.balance, t.decimals))})</option>`
   ).join('');
   updateSendTokenBalance();
+  // The list above is a snapshot from the last dashboard render. Funds can
+  // arrive after it — a bridge landing, a tab opened in the morning, a receive
+  // on another device — and then this dropdown would offer a balance the user
+  // does not have and MAX would fill in the stale figure. Refresh in the
+  // background and repaint when the chain answers; a slow node must not hold
+  // the form hostage, so the snapshot stays on screen until real numbers land.
+  refreshSendBalances();
+}
+
+/** Re-read the balances the send form shows, without blocking it. */
+export async function refreshSendBalances() {
+  const provider = get('provider');
+  const address = get('address');
+  if (!provider || !address) return;
+  const sel = $('#sendToken');
+  const before = sel?.value;
+  try {
+    const tokens = await Promise.all((get('tokens') || []).map(async (t) => {
+      try {
+        const balance = t.address
+          ? await new ethers.Contract(t.address, ERC20_ABI, provider).balanceOf(address)
+          : await provider.getBalance(address);
+        return { ...t, balance: balance.toString() };
+      } catch { return t; }          // one unreachable token must not blank the list
+    }));
+    // Write back to state so anything else reading it sees the same numbers.
+    const kept = (get('tokens') || []).map((old) =>
+      tokens.find((t) => (t.address || 'native') === (old.address || 'native')) || old);
+    set('tokens', kept);
+    const el = $('#sendToken');
+    if (!el) return;
+    el.innerHTML = kept.map(t =>
+      `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)} (${escapeHtml(fmtAmount(t.balance, t.decimals))})</option>`
+    ).join('');
+    if (before) el.value = before;   // do not move the user's selection
+    updateSendTokenBalance();
+  } catch { /* keep the snapshot — a stale number beats an empty form */ }
 }
 
 // live preview + gas estimate (best effort)
