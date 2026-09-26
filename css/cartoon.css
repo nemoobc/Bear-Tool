@@ -813,6 +813,10 @@ body::before {
 .nft-empty {
   grid-column: 1 / -1;
   min-height: 220px;
+  /* A fixed 220px is centring inside a small box parked at the top of a tall
+     screen, which is what "not found is not quite in the middle" actually is.
+     Height comes from the space available (below); this is only the floor for
+     the moment before the gallery has measured itself. */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2885,12 +2889,69 @@ body::before {
   justify-content: center;
 }
 
-/* …and the real target where a thumb is actually doing the pressing. */
-@media (pointer: coarse), (max-width: 560px) {
+/* Mouse-level floors. Declared here, above the query, so the coarse-pointer
+   rule below overrides them instead of losing a same-specificity tie. */
+.dapp-url-input,
+.slippage-btn,
+.pct-btn { min-height: 32px; }
+/* A checkbox is only as good as the label you can hit. This label is the target,
+   so the label gets the size — and a visible hover/focus so a tap that lands
+   here is visibly acknowledged rather than silent. */
+.check-target {
+  min-height: 32px;
+  align-items: center;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.check-target:hover { background: var(--cream); }
+.check-target:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
+.gas-btn { min-height: 36px; }
+.switch { min-height: 28px; }
+
+/* …and the real target where a thumb is actually doing the pressing. Every
+   entry below was MEASURED in a browser at 390px, not assumed. The list grew
+   from a single sweep over all ten views; the numbers in brackets are what
+   each control actually rendered at before this rule existed.
+
+   Keep it a list, and keep it in this one place. The same floor written
+   twice — once here, once in a component's own block — is how a 23px checkbox
+   label and a 31px omnibox survived a sweep that used a different number.
+
+   768px, not 560px, and that is the whole point of the number. The phone
+   LAYOUT (bottom bar, no sidebar) starts at 768px, so between 561 and 768 a
+   phone was being shown mouse-sized tap targets: the finger-sized layout with
+   the mouse-sized controls. Two breakpoints for one decision is the bug. This
+   one tracks the layout, not the crowding — the 560px queries below it are
+   about two controls failing to share a line, which is a different question. */
+@media (pointer: coarse), (max-width: 768px) {
   .swap-max-btn,
   .amount-row .btn,
   .dapp-chip,
-  .dbr-chip {
+  .dbr-chip,
+  .dapp-url-input,      /* 31px */
+  .check-target,        /* 23px — "Allow ALL chains", the most dangerous toggle here */
+  .slippage-btn,        /* 36px */
+  .pct-btn,             /* 32px — 25/50/75/100% */
+  .gas-btn,             /* 40px — slow/medium/fast */
+  .switch {             /* 26px */
     min-height: var(--touch-min);
   }
 }
+
+/* ═══════════ NFT GALLERY — FILL THE VIEW ═══════════ */
+/* "NFT not found" has to be centred in the area the user can SEE. With a fixed
+   220px block it sat 15px above the card's midpoint, near the top of an 844px
+   phone screen — horizontally centred, vertically not. So: the view fills the
+   main column, the card fills the view, the grid fills the card, and the empty
+   state fills the grid. Every level grows, then the text centres once, in the
+   real space rather than in a guessed one. */
+.main { display: flex; flex-direction: column; }
+#view-nft.active { display: flex; flex-direction: column; flex: 1 1 auto; }
+#view-nft > .card { flex: 1 1 auto; display: flex; flex-direction: column; }
+#view-nft .nft-grid { flex: 1 1 auto; align-content: stretch; }
+/* Only when the gallery holds nothing: a single row that takes the full height.
+   With NFTs present the cards keep their natural square aspect. */
+#view-nft .nft-grid:has(> .nft-empty:only-child) { grid-template-rows: 1fr; }
+#view-nft .nft-empty { min-height: 0; height: 100%; }

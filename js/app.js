@@ -8,7 +8,7 @@
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider,
          addCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
-         addRpcOverride, applyRpcOverrides } from './network.js';
+         addRpcOverride, applyRpcOverrides, providerEndpoint } from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
@@ -452,9 +452,13 @@ function refreshView(view) {
   if (view === 'swap') loadSwapTokens();
   if (view === 'bridge') loadBridgeChains();
   if (view === 'deploy') { loadEip7702(); bindOpenSeaPanel(); }
+  if (view === 'nft') loadNfts();
   if (view === 'activity') renderActivity();
   if (view === 'dapps') renderDapps($('#dappsContainer'));
-  if (view === 'settings') renderSecurityCenter($('#securityCenter'));
+  if (view === 'settings') {
+    renderSecurityCenter($('#securityCenter'));
+    paintActiveRpc();
+  }
 }
 
 // ── dApp bridge ──────────────────────────────────────────────────────────
@@ -1986,10 +1990,28 @@ async function reconnectRpc() {
       }
     }
     updateTopbar();
+    paintActiveRpc();
     if (get('address')) loadDashboard();
   } catch (e) {
     toast('Could not connect to the new RPC: ' + (e?.message || e), 'error');
   }
+}
+
+/**
+ * Show which node the wallet is actually talking to.
+ *
+ * A provider whose origin is invisible is a provider nobody can debug: a
+ * silent substitution to a public endpoint is what made a funded fork look
+ * empty, and the only symptom was a transaction that would not go through.
+ */
+function paintActiveRpc() {
+  const el = $('#setRpcActive');
+  if (!el) return;
+  const net = getNetworkById(get('networkId'));
+  const url = providerEndpoint(get('provider'));
+  if (!url) { el.textContent = ''; return; }
+  const isCustom = (getRpcOverrides()[net?.id] || []).includes(url);
+  el.textContent = `Using: ${url}${isCustom ? ' (your custom RPC)' : ''} — ${net?.name || get('networkId')}`;
 }
 
 async function saveSettingsHandler() {

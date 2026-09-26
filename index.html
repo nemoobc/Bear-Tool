@@ -468,8 +468,12 @@
                   <input class="input" id="delegateChainId" type="number" placeholder="auto (current chain)">
                 </div>
                 <div class="field">
-                  <label class="flex gap-8" style="align-items:center;cursor:pointer">
-                    <input type="checkbox" id="delegateAnyChain" style="width:20px;height:20px">
+                  <!-- min-height, not just a bigger box: this is the one toggle
+                       that hands a signature to every chain at once, so its tap
+                       target has to be as easy to hit as it is to regret. It
+                       measured 23px, under the 32px floor used everywhere else. -->
+                  <label class="flex gap-8 check-target" style="align-items:center;cursor:pointer">
+                    <input type="checkbox" id="delegateAnyChain" style="width:20px;height:20px;flex:0 0 auto">
                     <span>Allow ALL chains (chainId 0 — replay risk!)</span>
                   </label>
                 </div>
@@ -666,11 +670,16 @@
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> NFT Gallery</div>
 
+            <!-- A neutral loading state, and nothing more. It used to claim
+                 "No NFTs found" AND "Connect wallet to view your NFTs" at the
+                 same time, which is two different situations said at once — and
+                 it was what a visitor actually saw, because nothing ever
+                 replaced it: refreshView had no nft branch, so loadNfts() was
+                 imported and never called. The outcome is nft.js's to state. -->
             <div id="nftList" class="nft-grid">
-              <div class="empty-state">
-                <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                <p>No NFTs found</p>
-                <p class="sub">Connect wallet to view your NFTs</p>
+              <div class="nft-empty" role="status">
+                <div class="nft-empty-title">Loading your NFTs…</div>
+                <div class="nft-empty-hint">Reading the collection list for this wallet on the current network.</div>
               </div>
             </div>
           </div>
@@ -735,7 +744,9 @@
             </div>
             <div class="field">
               <label for="setRpc">Custom RPC URL (optional)</label>
-              <input class="input" id="setRpc" placeholder="https://...">
+              <input class="input" id="setRpc" placeholder="https://..." data-i18n-placeholder="set.rpc.ph" autocomplete="off" spellcheck="false">
+              <p class="small dim" id="setRpcActive" role="status" aria-live="polite"></p>
+              <p class="small dim" data-i18n="set.rpc.hint">A custom URL is used as-is. If it stops answering, the app says so instead of quietly switching to a different node — which is how a wallet ends up reporting a balance you never funded.</p>
             </div>
             <button class="btn btn-secondary" id="btnSaveSettings">Save Settings</button>
             <hr class="mt-16 mb-16">
