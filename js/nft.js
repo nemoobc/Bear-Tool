@@ -82,7 +82,11 @@ export async function enumerateNfts(address, chainId, provider) {
 }
 
 export async function loadNfts() {
-  if (!get('unlocked')) return;
+  // Not `unlocked`. Enumerating NFTs only reads the chain with an address that
+  // is already public, and the app restores a read-only account on boot — so
+  // requiring the password meant the gallery silently stayed empty for anyone
+  // who had not typed it yet.
+  if (!get('address')) return;
   const net = getNetworkById(get('networkId'));
   const grid = $('#nftList');
   if (!grid) return;
