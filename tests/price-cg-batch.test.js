@@ -66,10 +66,22 @@ test('the batching is used, not bypassed by a single joined request', () => {
   );
 });
 
-test('one failed chunk no longer discards the prices already fetched', () => {
-  // The old code threw on !res.ok, so a single 400 voided every price. A
-  // partial answer is still a useful answer.
+test('one failed chunk does not throw away the prices already fetched', () => {
+  // The old code threw on !res.ok, so a single 400 voided every price. A partial
+  // answer is still a useful answer, and the fallback provider picks up the rest.
   assert.ok(!/if \(!res\.ok\) throw new Error\('CoinGecko ' \+ res\.status\);\s*const data = await res\.json\(\);\s*\/\/ Normalise/.test(src),
     'the throwing path must be gone from the token fetcher');
-  assert.match(src, /if \(!res\.ok\) continue;/, 'a rejected chunk must not abort the loop');
+  assert.match(src, /consecutiveFailures/, 'failures must be counted, not thrown');
+});
+
+test('the breaker stops after two consecutive failures, not after one', () => {
+  // One failure is noise. Two in a row means the endpoint is unhappy and the
+  // remaining twenty-odd requests would only add console noise — the limiter
+  // answers with an error page carrying no CORS headers, so the console blames
+  // CORS and hides the real cause.
+  assert.match(src, /if \(\+\+consecutiveFailures >= 2\) break;/,
+    'the loop must break on the SECOND consecutive failure');
+  assert.ok(!/if \(consecutiveFailures >= 1\) break;/.test(src),
+    'breaking on the first failure would give up too eagerly');
+  assert.match(src, /consecutiveFailures = 0;/, 'a success must reset the counter');
 });

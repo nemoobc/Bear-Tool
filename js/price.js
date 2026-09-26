@@ -153,20 +153,31 @@ async function fetchCoinGeckoTokens(chainId, addresses) {
   const chunks = cgTokenPriceChunks(addresses);
   const out = {};
 
-  // Sequential on purpose: these are rate-limited endpoints, and firing eight
-  // at once is how a free tier starts refusing. One chunk per token is at most
-  // a handful of small requests, and the cache means it happens once.
+  // Sequential on purpose, with a circuit breaker. One request per token means
+  // a wallet holding twenty tokens asks twenty questions of a free tier, and the
+  // limiter answers some of them with an error page that carries no CORS
+  // headers — which the console then reports as a CORS failure, burying the
+  // real cause. Two consecutive failures is enough to conclude the endpoint is
+  // unhappy right now; the rest are left to DexScreener, which is one call per
+  // token anyway and does not share this quota.
+  let consecutiveFailures = 0;
   for (const chunk of chunks) {
     try {
       const res = await fetchWithTimeout(cgUrl(`simple/token_price/${platform}`,
         { contract_addresses: chunk.join(','), vs_currencies: cur }));
-      if (!res.ok) continue;                 // keep whatever earlier chunks gave us
+      if (!res.ok) {
+        if (++consecutiveFailures >= 2) break;
+        continue;
+      }
       const data = await res.json();
+      consecutiveFailures = 0;
       for (const [addr, v] of Object.entries(data || {})) {
         const p = v?.[cur];
         if (typeof p === 'number' && Number.isFinite(p)) out[addr] = p;
       }
-    } catch { /* this chunk failed; the rest still get their chance */ }
+    } catch {
+      if (++consecutiveFailures >= 2) break;
+    }
   }
   return out;
 }

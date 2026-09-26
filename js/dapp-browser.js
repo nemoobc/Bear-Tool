@@ -343,7 +343,11 @@ function navigate(rawUrl, name) {
   const verdict = classifyInput(rawUrl);
 
   if (verdict.kind === 'blocked') {
-    toast(verdict.reason, 'error');
+    // Not just a toast. A toast leaves whatever was in the blocked panel from
+    // the PREVIOUS attempt on screen, so refusing javascript:alert() could
+    // leave a homograph warning about a different site sitting there — the user
+    // reads evidence that has nothing to do with what they just typed.
+    schemeSheet(verdict.reason);
     return false;
   }
 
@@ -401,6 +405,31 @@ function load(url, name) {
   saveSession();
   paint();
   return true;
+}
+
+/**
+ * The panel shown when the address itself cannot be navigated — a javascript:
+ * or data: URL, or a host on the user's blocklist. It always states the reason
+ * for THIS attempt rather than leaving the previous report in place.
+ */
+function schemeSheet(reason) {
+  el.blocked.innerHTML = `
+    <div class="dbr-report" role="alertdialog" aria-label="Address refused">
+      <div class="dbr-rep-h"><span aria-hidden="true">⛔</span> That address was not opened</div>
+      <ul class="dsig-list"><li class="dsig dsig-fail"><span class="dsig-mark" aria-hidden="true">✖</span>
+        <span><strong>Refused</strong> — ${escapeHtml(reason)}</span></li></ul>
+      <div class="dbr-rep-btns">
+        <button class="btn btn-sm btn-secondary" data-act="back">Back</button>
+      </div>
+    </div>`;
+  el.blocked.hidden = false;
+  el.frame.hidden = true;
+  el.homePage.hidden = true;
+  el.blocked.querySelector('[data-act="back"]')?.addEventListener('click', () => {
+    el.blocked.innerHTML = '';
+    el.blocked.hidden = true;
+    paint();
+  });
 }
 
 /** The pre-load sheet. Also the reporting UI when there is no way past it. */
