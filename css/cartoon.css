@@ -1230,7 +1230,16 @@ body::before {
 /* ═══════════ BRIDGE CARD ═══════════ */
 .bridge-card { display: flex; flex-direction: column; gap: var(--sp-12); }
 .bridge-chains { display: flex; align-items: flex-end; gap: var(--sp-8); }
-.bridge-chain-field { flex: 1; }
+.bridge-chain-field {
+  flex: 1;
+  /* Without this the field's automatic minimum size is its min-content
+     width, which OVERRIDES flex-shrink. The 'To' field then refuses to
+     shrink below its widest chain name and the row runs off the right
+     edge on a 390px phone — measured at 196px where it had 143px to
+     use, putting the trigger 21px past the viewport. Same trap as the
+     swap control's fixed flex basis. */
+  min-width: 0;
+}
 .bridge-chain-field label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: var(--sp-4); }
 .bridge-chain-select { width: 100%; min-height: var(--touch-min); }
 .bridge-chain-arrow {
@@ -1353,6 +1362,11 @@ body::before {
 }
 .wizard-step {
   flex: 1;
+  /* Same trap as .bridge-chain-field: with min-width:auto the automatic
+     minimum is the min-content width, which OVERRIDES flex-shrink. Measured at
+     320px the three steps came out 92/104/94 and the last one reached x=330 —
+     ten pixels past the screen. */
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--sp-4);
@@ -1364,6 +1378,13 @@ body::before {
   font-weight: 600;
   opacity: 0.5;
   transition: all 0.2s;
+}
+.wizard-step .step-text {
+  min-width: 0;
+  /* Wrapping, not clipping: a wizard step whose label you cannot finish
+     reading is worse than one that takes two lines on a 320px phone. */
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 .wizard-step.active { opacity: 1; background: var(--honey); box-shadow: var(--shadow-sm); }
 .wizard-step.done { opacity: 1; background: var(--mint); }
@@ -2721,6 +2742,12 @@ body::before {
 /* ═══════════ MAX amount: the fee has to come from somewhere ═══════════ */
 .amount-row { display: flex; gap: 8px; align-items: stretch; }
 .amount-row .input { flex: 1 1 auto; min-width: 0; }
+/* The bridge MAX sits in normal flow beside its input. It must NOT borrow
+   .swap-max-btn, which is absolutely positioned on purpose to float over the
+   swap input: in a static .amount-row that positioning is relative to some
+   ancestor further up, and the button lands ~90px below its own row, on top
+   of the router control. Measured at 390px: row at y=313, button at y=400. */
+.amount-max-btn { flex: 0 0 auto; align-self: center; position: static; }
 .max-note {
   display: none; margin: 6px 0 0; font-size: .78rem; line-height: 1.45;
   padding: 6px 9px; border-radius: 9px;
@@ -2815,4 +2842,55 @@ body::before {
 @media (max-width: 560px) {
   .dbr-secure { order: 9; }
   .dbr-urlwrap { order: 10; flex-basis: 100%; }
+}
+
+/* ═══════════ Touch targets ═══════════
+   Measured in a real browser at 320px: the MAX buttons were 26px tall and the
+   DApps category chips 27px, while this file already defines --touch-min: 44px
+   and uses it for the topbar. 26px is roughly half of what a thumb needs, and
+   a MAX button is the one control you press in a hurry.
+
+   A coarse pointer is the real signal. The narrow-viewport half is there
+   because a desktop window squeezed to phone width is operated the same way,
+   and a 44px chip in a 1440px-wide sidebar would just look wrong. */
+/* ═══════════ Swap rows on a phone ═══════════
+   Measured at 390px: the From and To rows were two controls side by side in a
+   326px card. The "To" token trigger got 79px, which left its symbol 6px wide —
+   "USDT" rendered as an unreadable smudge. And the MAX button, which floats
+   over the amount input on purpose, covered 57px of it, leaving 36px to type
+   into. Neither is fixable by shrinking type: the row simply has no room for
+   two controls.
+
+   So at phone width the picker takes its own line and the amount gets the next
+   one, with MAX beside it where there is finally space for both. */
+@media (max-width: 560px) {
+  .swap-input-row { flex-wrap: wrap; }
+  .swap-input-row .swap-token-select,
+  .swap-input-row .token-picker { flex: 1 1 100%; }
+  .swap-input-row .swap-amount-wrap { flex: 1 1 100%; }
+  /* With the amount on its own full-width line, the reserved gutter is enough
+     again — it was sized for the 26px button this replaced. */
+  .swap-amount-wrap .input { padding-right: 68px; }
+}
+
+/* A floor for everyone, including a mouse: 26px is under the 28px minimum
+   pointer guidelines ask for, and a MAX button is pressed in a hurry. */
+.swap-max-btn,
+.amount-row .btn,
+.dapp-chip,
+.dbr-chip {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* …and the real target where a thumb is actually doing the pressing. */
+@media (pointer: coarse), (max-width: 560px) {
+  .swap-max-btn,
+  .amount-row .btn,
+  .dapp-chip,
+  .dbr-chip {
+    min-height: var(--touch-min);
+  }
 }
