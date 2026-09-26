@@ -1340,6 +1340,15 @@ body::before {
 }
 .pct-btn:hover { background: var(--cream); }
 .pct-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); }
+/* MAX is the one that spends the account down, so it gets its own weight
+   rather than sitting in a row of equal-looking quarters. */
+.pct-max {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-color: var(--ink);
+  background: var(--honey);
+}
+.pct-max.active { background: var(--ink); color: var(--white); }
 .gas-btns { display: flex; gap: var(--sp-4); }
 .gas-btn {
   flex: 1;

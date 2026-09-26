@@ -220,7 +220,14 @@
                   <button class="pct-btn" data-pct="25">25%</button>
                   <button class="pct-btn" data-pct="50">50%</button>
                   <button class="pct-btn" data-pct="75">75%</button>
-                  <button class="pct-btn" data-pct="100">100%</button>
+                  <!-- Labelled MAX, not 100%. Beside 25/50/75, "100%" reads as
+                       "send my whole balance" - and it is not: it sends the whole
+                       balance MINUS the fee, because a transfer that spends the
+                       last wei cannot pay for itself. MAX says what the button
+                       does; the amount field shows the number either way. -->
+                  <button class="pct-btn pct-max" data-pct="100"
+                          title="Send everything spendable — the balance minus the fee"
+                          aria-label="MAX: send everything spendable, the balance minus the fee">MAX</button>
                 
                   <p class="max-note" id="sendMaxNote" role="status" aria-live="polite"></p></div>
               </div>
