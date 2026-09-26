@@ -7,7 +7,7 @@
 
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider,
-         addCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
+         addCustomNetwork, removeCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
          addRpcOverride, applyRpcOverrides, providerEndpoint,
          getRpcOverrides } from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
@@ -1098,6 +1098,24 @@ function showNetworkModal() {
   `;
   openModal(html);
   // network search
+  // Remove a custom network. Never the active one without moving off it first:
+  // deleting the chain you are standing on would leave the app pointing at a
+  // network that no longer exists in any list.
+  $all('[data-remove-net]').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = b.dataset.removeNet;
+      if (id === get('networkId')) {
+        return toast('Switch to another network first, then remove this one', 'error');
+      }
+      const list = getCustomNetworks();
+      const net = list.find((x) => x.id === id);
+      removeCustomNetwork(id);
+      toast(`${net?.name || 'Network'} removed`, 'success');
+      showNetworkModal();
+    });
+  });
+
   const searchInput = $('#netSearchInput');
   if (searchInput) {
     searchInput.addEventListener('input', () => {
@@ -1130,11 +1148,26 @@ function showNetworkModal() {
 
 function netRow(n) {
   const active = n.id === get('networkId') ? 'style="border-left:8px solid var(--mint)"' : '';
+  // A custom network is the only kind the user put there themselves, so it is
+  // the only kind they can take away. removeCustomNetwork() existed and was
+  // never called from anywhere: add a network, get it forever, with no control
+  // anywhere in the app that removes it.
+  // The remove control REPLACES the mainnet/testnet tag on a custom row rather
+  // than sitting beside it. At 282px the row has room for the name, one line of
+  // subtitle, and exactly one trailing control: the button cost the subtitle
+  // 56px, which wrapped "Chain 987654 - UJI" onto two lines and made the row
+  // 78px against 63px for every built-in. The tag is also the redundant half -
+  // you added this network yourself, and its chain id is already in the
+  // subtitle, so what the row actually needed was a way to take it away.
+  const tail = n.custom
+    ? `<button class="btn-icon net-remove" data-remove-net="${escapeHtml(n.id)}"
+         aria-label="Remove ${escapeHtml(n.name)}" title="Remove this network">✕</button>`
+    : `<span class="badge ${n.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(titleCase(n.type))}</span>`;
   return `<div class="asset-row" data-net="${escapeHtml(n.id)}" ${active}>
     <div class="net-logo">${getNetworkLogo(n.name, 32)}</div>
     <div class="asset-info"><div class="asset-name">${escapeHtml(n.name)}</div>
       <div class="asset-symbol">Chain ${escapeHtml(String(n.chainId))} · ${escapeHtml(n.symbol)}</div></div>
-    <span class="badge ${n.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(titleCase(n.type))}</span>
+    ${tail}
   </div>`;
 }
 

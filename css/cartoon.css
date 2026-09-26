@@ -2967,3 +2967,34 @@ body::before {
    With NFTs present the cards keep their natural square aspect. */
 #view-nft .nft-grid:has(> .nft-empty:only-child) { grid-template-rows: 1fr; }
 #view-nft .nft-empty { min-height: 0; height: 100%; }
+
+/* Remove control on a custom network row. Sized to the touch floor like
+   everything else here, and it stops the row's own click from also firing -
+   the row navigates, and a 44px target sitting inside it is an easy accident. */
+.net-remove {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  background: var(--white);
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.net-remove:hover { background: #ffd9d9; border-color: #b23b3b; color: #b23b3b; }
+.net-remove:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* The network rows carry a badge, and a custom one also carries a 44px remove
+   button. A flex child defaults to min-width:auto, which means it refuses to
+   shrink below its content and the name/subtitle column collapsed from 124px to
+   75px - the "Chain 987654 - UJI" line wrapped and the row grew from 63px to
+   78px. Same cause as the swap rows: the fix is min-width:0 plus a flex basis,
+   not a smaller button, because the button already meets the touch floor. */
+.asset-row > .asset-info { min-width: 0; flex: 1 1 auto; }
+.asset-row > .asset-symbol,
+.asset-row .asset-symbol { overflow-wrap: anywhere; }
