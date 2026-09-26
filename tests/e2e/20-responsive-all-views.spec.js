@@ -44,9 +44,16 @@ async function openView(page, view) {
     await appClick(page, `.mobile-nav-item[data-view="${view}"]`);
     return;
   }
-  // Bridge is deliberately not a nav item: pressing Swap a second time opens a
-  // Swap/Bridge chooser, so the two live under one entry. Reaching it through
-  // that path is also the only honest way to walk every view.
+  // Two views are deliberately not in the sidebar, and assuming otherwise is
+  // what made the first two runs of this file fail at every size: the walk
+  // waited for a nav item that does not exist. The sidebar has exactly eight
+  // entries. Send is a dashboard quick action, and Bridge lives under a
+  // Swap/Bridge chooser that a second press of Swap opens.
+  if (view === 'send') {
+    await openView(page, 'dashboard');
+    await appClick(page, '.quick-action-btn[data-view="send"]');
+    return;
+  }
   if (view === 'bridge') {
     await openView(page, 'swap');
     await appClick(page, '.sidebar .nav-item[data-view="swap"], .mobile-nav-item[data-view="swap"]');

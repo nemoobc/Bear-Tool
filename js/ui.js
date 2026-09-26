@@ -225,12 +225,18 @@ export function animateValue(el, target, { duration = 800, formatter = v => v } 
 }
 
 // ── confirm dialog with bear ──
-// Typed confirmation ("type YA to confirm") is currently DISABLED app-wide.
-// Flip this to true to restore the type-to-confirm gate on every dangerous
-// action (mainnet send/swap/bridge/deploy, EIP-7702 delegate/revoke/batch/
-// rescue/claim). Call sites still pass requireType; this switch is the single
-// place that decides whether it is enforced.
-const TYPED_CONFIRMATION = false;
+// Typed confirmation ("type YA to confirm") is ENABLED app-wide.
+//
+// It was switched off, and every call site still passed requireType while the
+// switch quietly discarded it — so a mainnet send showed a one-click "I
+// understand, send" for an irreversible transfer of the entire balance. Found by
+// driving a real mainnet-fork transaction in a browser: the dialog rendered no
+// input at all and the confirm button was never disabled.
+//
+// The switch stays, because it is the one place that decides this, but it now
+// guards rather than disables: a caller that asks for a typed gate gets one,
+// and the confirm button stays disabled until the text matches.
+const TYPED_CONFIRMATION = true;
 
 export function confirmTx({ title, rows, confirmText = 'Confirm', danger = false, requireType = null }) {
   return new Promise((resolve) => {

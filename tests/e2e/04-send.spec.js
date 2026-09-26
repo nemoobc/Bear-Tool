@@ -58,10 +58,19 @@ test.describe('Send', () => {
     await page.fill('#sendAmount', '0.01');
     await appClick(page, '#btnSend');
     await expect(page.locator('#modalOverlay')).toContainText(/ADDRESS POISONING/i);
-    // Typed confirmation is disabled app-wide (TYPED_CONFIRMATION in js/ui.js),
-    // so the dialog no longer renders #confirmTypeInput. Assert the actionable
-    // button is offered instead of an input that will never appear.
-    await expect(page.locator('#confirmYes')).toBeVisible();
+    // The typed gate is enforced app-wide (TYPED_CONFIRMATION in js/ui.js). This
+    // used to assert the input never appeared, which described a switch that had
+    // been turned off — a mainnet send was one click. Now it asserts the gate
+    // itself: the input is there, the confirm button is locked, and only the
+    // exact text releases it.
+    const typed = page.locator('#confirmTypeInput');
+    await expect(typed).toBeVisible();
+    const confirm = page.locator('#confirmYes');
+    await expect(confirm).toBeDisabled();
+    await typed.fill('NOPE');
+    await expect(confirm).toBeDisabled();
+    await typed.fill('YA');
+    await expect(confirm).toBeEnabled();
   });
 
   test('sending to a token contract triggers destination warning', async ({ page }) => {

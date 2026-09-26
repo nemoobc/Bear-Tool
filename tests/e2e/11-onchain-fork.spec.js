@@ -257,9 +257,10 @@ async function deployErc20ViaWeb(page, fork, netId) {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   });
 
-  // single confirmTx dialog gates+signs. Typed confirmation is disabled
-  // app-wide (TYPED_CONFIRMATION in js/ui.js), so there is no
-  // #confirmTypeInput — waiting for #confirmYes alone is correct now.
+  // One confirmTx dialog gates and signs. The typed gate is enforced app-wide
+  // now, so #confirmTypeInput is present and #confirmYes starts disabled —
+  // waiting for the selector alone is correct, the click below handles the
+  // typing, and the defensive shape-check further up covers either form.
   await page.waitForSelector('#confirmYes', { timeout: 90_000 });
   // dialog is up = compile done → re-pin before broadcast (fast chains
   // prune within minutes, compile already consumed time)
