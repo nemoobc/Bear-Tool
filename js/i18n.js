@@ -13,6 +13,8 @@ const TRANSLATIONS = {
     'nav.approval': 'Approvals',
     'nav.deploy': 'Tools',
     'nav.dapps': 'DApps',
+    'nav.nft': 'NFT',
+    'nav.nft': 'NFT',
     'nav.activity': 'Activity',
     'nav.settings': 'Settings',
     'os.guide.title': 'Start here — 3 steps',
