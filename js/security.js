@@ -45,13 +45,59 @@ const SEL_NAMES = Object.fromEntries(Object.entries(SEL).map(([k, v]) => [v, k])
 const SECRET_WORDS = /(seed|mnemonic|recovery[-_]?phrase|privkey|priv[-_]?key|private[-_]?key|secret|passphrase|password|api[-_]?key|apikey|token=|bearer)/i;
 
 /** A long hex run: 32+ bytes of raw key material in a path or query. */
-const HEX_BLOB = /(^|[?&=/])0x?[0-9a-fA-F]{64,}([0-9a-fA-F]*)/;
+// '#' belongs in the boundary class. It was missing, and that is the one
+// character people most often have in front of pasted key material: a URL like
+// https://x.com/#0xac09… slipped straight through a guard written to catch it.
+const HEX_BLOB = /(^|[?&=/#])0x?[0-9a-fA-F]{64,}([0-9a-fA-F]*)/;
 
 /** A 64-char bare hex (no 0x) — a raw private key typed into a search box. */
-const BARE_HEX_64 = /(^|[/?&=])[0-9a-fA-F]{64}([0-9a-fA-F]*)/;
+const BARE_HEX_64 = /(^|[/?&=#])[0-9a-fA-F]{64}([0-9a-fA-F]*)/;
 
 /** A 12/15/18/21/24-word sequence — BIP-39 look-alike. */
 const WORD_RUN = /\b(\w+\s+){11,23}\w+\b/;
+
+/**
+ * The word counts BIP-39 actually produces. A mnemonic is 12, 15, 18, 21 or 24
+ * words and nothing else, so those are the only lengths worth stopping for.
+ *
+ * This matters because the check REFUSES to open the address - it is not a
+ * "do not save to history" hint. Counting "twelve or more words" instead made a
+ * legitimate URL with a 13-word query unopenable with no way past it, which is
+ * the wrong price to pay for catching a paste. Pinning the count keeps the
+ * catch and drops the false positive, because a 13-word English sentence is not
+ * a mnemonic length and never was.
+ */
+const MNEMONIC_LENGTHS = new Set([12, 15, 18, 21, 24]);
+
+/** Words a mnemonic is made of: short, lowercase, alphabetic. */
+const MNEMONIC_WORD = /^[a-z]{3,8}$/;
+
+function looksLikeMnemonic(text) {
+  // Strip the parameter name before counting. A query arrives as "?s=abandon
+  // abandon …", and splitting that on whitespace makes the first "word" the
+  // string "?s=abandon" - ten characters with a question mark and an equals
+  // sign in it. That failed the word shape test and let a real pasted mnemonic
+  // straight through while the identical phrase in a fragment was caught.
+  let body = text.trim();
+  const eq = body.indexOf('=');
+  if (eq !== -1 && eq < 24) body = body.slice(eq + 1);
+  // And ignore any further "&param=" splits: only the value can be a phrase.
+  body = body.split('&')[0];
+  const words = body.trim().split(/\s+/).filter(Boolean);
+  if (!MNEMONIC_LENGTHS.has(words.length)) return false;
+  return words.every((w) => MNEMONIC_WORD.test(w));
+}
+
+/**
+ * A browser encodes a space as %20 (or '+') the moment a phrase is pasted into
+ * the address bar, so the word-run check above — which needs literal whitespace
+ * — never saw a real pasted mnemonic. Decoding a COPY before the test is what
+ * makes this guard match the thing it was written for; the original string is
+ * untouched because it is what gets stored.
+ */
+function normaliseForScan(s) {
+  return s.replace(/%20/gi, ' ').replace(/%09/gi, ' ').replace(/\+/g, ' ');
+}
 
 /**
  * Should this URL never be written into history, bookmarks or a tab list?
@@ -60,18 +106,21 @@ const WORD_RUN = /\b(\w+\s+){11,23}\w+\b/;
 export function isSecretishUrl(url) {
   const s = String(url || '');
   if (!s) return { secret: false, why: null };
+  // Scanning happens on the decoded copy: an encoded key is still a key.
+  const flat_hex = (re) => s.match(re) || normaliseForScan(s).match(re);
   let m = s.match(SECRET_WORDS);
   if (m) return { secret: true, why: `the address contains "${m[1]}"` };
-  m = s.match(HEX_BLOB) || s.match(BARE_HEX_64);
+  m = flat_hex(HEX_BLOB) || flat_hex(BARE_HEX_64);
   if (m) {
     const body = m[1].replace(/^[/?&=]/, '');
     return { secret: true, why: `a ${body.length}-character hex run — that is key material, not a page address` };
   }
   // Only meaningful inside the query or fragment; a long path segment of words
   // is far more likely to be a title.
-  const tail = s.split('#')[1] || (s.includes('?') ? s.slice(s.indexOf('?')) : '');
-  if (tail && WORD_RUN.test(tail)) {
-    return { secret: true, why: 'a long run of words in the query — that is how a recovery phrase gets pasted by accident' };
+  const flat = normaliseForScan(s);
+  const tail = flat.split('#')[1] || (flat.includes('?') ? flat.slice(flat.indexOf('?')) : '');
+  if (tail && WORD_RUN.test(tail) && looksLikeMnemonic(tail)) {
+    return { secret: true, why: 'a ' + tail.trim().split(/\s+/).length + '-word run in the query — that is a BIP-39 mnemonic length, and that is how a recovery phrase gets pasted by accident' };
   }
   return { secret: false, why: null };
 }
