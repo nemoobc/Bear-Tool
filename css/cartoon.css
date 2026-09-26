@@ -334,17 +334,34 @@ body::before {
 }
 
 /* Receive modal QR code (qrcode-generator SVG) */
-.receive-qr { display:flex; justify-content:center; align-items:center; margin:0 auto 16px; }
+.receive-qr {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  /* The modal's .modal-close is `float: right` and 44px wide, so it eats into
+     the inline space of the content that follows it. Without `clear` the flex
+     box is narrowed by the float and the QR renders ~22px LEFT of the modal's
+     centre — measured identically on desktop (1440→1024) and mobile (430→280).
+     `clear` takes the QR out of the float's way so it centres on the full
+     content box. Fixing .modal-close itself (position:absolute) also zeroes the
+     offset but lets every modal <h2> run under the X button, so scope it here. */
+  clear: both;
+  margin: 0 auto 16px;
+}
 .receive-qr svg {
-  width: 180px !important;
-  height: 180px !important;
+  /* min() instead of a hard 180px so a narrow phone shrinks it instead of
+     overflowing; aspect-ratio keeps it square when the height follows width.
+     The SVG carries its own 8-module quiet zone from createSvgTag(4, 8). */
+  width: min(180px, 100%) !important;
+  height: auto !important;
+  aspect-ratio: 1 / 1;
   max-width: 180px;
   border-radius: 12px;
   background: var(--white);
   border: 2px solid var(--ink);
   padding: 8px;
-  display:block;
-  margin:0 auto;
+  display: block;
+  margin: 0 auto;
 }
 
 /* CoinGecko auto-detected token logos (asset list) */
@@ -787,6 +804,34 @@ body::before {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
+}
+/* Empty state for the gallery. .nft-grid is `auto-fill minmax(140px, 1fr)`, so a
+   bare <p> becomes ONE 140px cell in the top-left corner and .text-center only
+   centres the text inside that cell — "Not Found" ended up hugging the corner.
+   This spans every column, takes the gallery's height and centres on BOTH axes,
+   so it sits dead centre at any grid width. */
+.nft-empty {
+  grid-column: 1 / -1;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 24px 16px;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+.nft-empty .nft-empty-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.nft-empty .nft-empty-hint {
+  font-size: 0.8rem;
+  max-width: 34ch;
+  line-height: 1.5;
 }
 .nft-card {
   border: var(--border);
@@ -2401,6 +2446,33 @@ body::before {
   flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-family: monospace;
 }
+/* The address bar is an editable input, not a label — that is what makes this
+   a browser rather than a viewer. */
+.dapp-browser-url-input {
+  flex: 1; min-width: 0;
+  padding: 5px 9px;
+  border: 2px solid var(--border, #ddd); border-radius: 9px;
+  background: var(--white, #fff); color: var(--ink, #2D2B29);
+  font-family: monospace; font-size: 12px;
+}
+.dapp-browser-url-input:focus {
+  outline: none; border-color: var(--mint, #10B981);
+}
+.dapp-browser-go {
+  flex: 0 0 auto;
+  padding: 5px 12px; border-radius: 9px; cursor: pointer;
+  border: 2px solid var(--ink, #2D2B29); background: var(--honey, #FFC93C);
+  font: inherit; font-size: 12px; font-weight: 700; color: var(--ink, #2D2B29);
+}
+.dapp-browser-go:hover { filter: brightness(1.06); }
+/* A disabled Back/Forward must look disabled, not just be unclickable. */
+.dapp-browser-btn:disabled { opacity: .35; cursor: default; }
+.dapp-browser-btn[aria-pressed="true"] { color: var(--mint, #10B981); }
+/* The "cannot be embedded" panel now offers two routes, not one. */
+.dapp-blocked-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+  margin-top: 10px;
+}
 .dapp-browser-frame-wrap {
   flex: 1; position: relative; overflow: hidden;
   background: #fff;
@@ -2448,3 +2520,296 @@ body::before {
 .opensea-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .opensea-status { font-size: 13px; margin-left: auto; }
 .asset-spark { display: inline-block; vertical-align: middle; margin-right: 4px; }
+
+/* ═══════════ MOBILE "MORE" SHEET + ADD-TOKEN ROW + CHAIN PRESETS ═══════════ */
+.nav-sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-8);
+  margin-top: var(--sp-8);
+}
+.nav-sheet-item {
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: 14px 12px;
+  border-radius: 14px;
+  border: 2px solid var(--border);
+  background: var(--bg-card, #f5f5f0);
+  font: inherit; font-weight: 600; color: var(--ink);
+  cursor: pointer; text-align: left;
+  transition: background .15s, border-color .15s;
+}
+.nav-sheet-item:hover, .nav-sheet-item:focus-visible { background: var(--cream); border-color: var(--mint); }
+.nav-sheet-item.active { background: var(--honey); border-color: var(--ink); }
+.nav-sheet-item .icon { display: inline-flex; flex: 0 0 auto; }
+.nav-sheet-item .icon svg { width: 20px; height: 20px; }
+
+/* "Add Token" sits under the asset list, not in the header row. */
+.asset-addtoken { margin-top: var(--sp-12); }
+
+/* Chain preset rows in the "Add Network" picker. */
+.chain-preset { cursor: pointer; }
+.chain-preset:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
+
+/* ═══════════ DAPPS: filters + frameable badge ═══════════ */
+.dapps-filters { display: flex; flex-direction: column; gap: var(--sp-8); margin: var(--sp-8) 0; }
+.dapp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dapp-chip {
+  padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  border: 2px solid var(--border); background: var(--bg-card, #f5f5f0);
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+}
+.dapp-chip.active { background: var(--honey); color: var(--ink); border-color: var(--ink); }
+.dapp-chip:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
+.dapp-card:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
+.dapp-frame-note { font-size: 10px; opacity: .65; margin-top: 2px; }
+.dapp-note { text-align: center; padding: 8px 12px; color: var(--text-secondary); font-size: 12px; }
+.dapp-note code { font-size: 11px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   IN-APP TOKEN / NETWORK PICKER (Swap + Bridge)
+
+   A native <select> draws its option list as an OS-level popup: on a phone it
+   escapes the page, ignores the app's styling and can sit partly off-screen.
+   The controls below keep the native <select> in the DOM as the authoritative
+   value holder (bridge.js reads .value from it in seven places, swap.js in
+   four, and the e2e suite reads inputValue()), but hide it and drive a popover
+   that is positioned INSIDE the app.
+   ═══════════════════════════════════════════════════════════════ */
+.token-picker {
+  position: relative;          /* the panel is clamped to this box            */
+  flex: 1 1 auto;
+  min-width: 0;                /* lets it shrink on a narrow phone            */
+  max-width: 100%;
+}
+/* Keep the real control in the a11y tree and queryable, but out of the layout.
+   NOT display:none — a display:none select is still .value-readable, but
+   hiding it this way also stops it from being a second visible target. */
+.token-picker-native {
+  position: absolute !important;
+  width: 1px !important; height: 1px !important;
+  padding: 0 !important; margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.token-picker-trigger {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; min-width: 0;
+  min-height: var(--touch-min);
+  padding: 8px 10px;
+  border: 2px solid var(--ink); border-radius: 12px;
+  background: var(--white); color: var(--ink);
+  font: inherit; font-weight: 600; cursor: pointer; text-align: left;
+}
+.token-picker-trigger:hover { background: var(--cream); }
+.token-picker-trigger:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
+.token-picker-logo {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+}
+.token-picker-logo img, .token-picker-logo .token-logo-mark,
+.token-row-logo img, .token-row-logo .token-logo-mark {
+  border-radius: 50%; object-fit: cover; display: block; flex: 0 0 auto;
+}
+.token-logo-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; color: #fff; font-weight: 800; font-size: 11px;
+  line-height: 1; text-align: center;
+}
+.token-logo-generic { background: var(--grape, #9B5DE5); }
+.token-picker-symbol {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.token-picker-caret { flex: 0 0 auto; opacity: .6; font-size: .8rem; }
+
+/* The panel: inside the app, never wider than the trigger, height-clamped to
+   the viewport, scrollable, and flipped above the trigger when it would
+   overflow the bottom. `position: absolute` (not fixed) is what keeps it tied
+   to the layout instead of floating over the app chrome. */
+.token-picker-panel {
+  position: absolute;
+  top: calc(100% + 6px); left: 0; right: 0;
+  z-index: 60;
+  min-width: 100%;
+  max-width: 100%;
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border: 2px solid var(--ink); border-radius: 12px;
+  background: var(--white);
+  box-shadow: var(--shadow-md, 0 6px 18px rgba(0,0,0,.18));
+}
+.token-picker-panel.open-up { top: auto; bottom: calc(100% + 6px); }
+.token-picker-panel[hidden] { display: none; }
+.token-picker-empty { margin: 10px; text-align: center; color: var(--ink-soft); font-size: .8rem; }
+.token-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--ink);
+  font: inherit; cursor: pointer; text-align: left;
+}
+.token-row:hover, .token-row.cursor { background: var(--cream); }
+.token-row.active { background: var(--honey); font-weight: 700; }
+.token-row:focus-visible { outline: 2px solid var(--mint); outline-offset: -2px; }
+.token-row-logo { flex: 0 0 auto; display: inline-flex; }
+.token-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.token-row-sym { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.token-row-bal { font-size: .72rem; color: var(--ink-soft); font-weight: 400; }
+.token-row-usd { flex: 0 0 auto; font-size: .72rem; color: var(--ink-soft); }
+
+/* ═══════════ NFT DROP INTEL (OpenSea panel) ═══════════ */
+.intel-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.intel-verdict { margin: 6px 0; font-weight: 700; padding: 8px 10px; border-radius: 10px; }
+.intel-pass { background: rgba(16,185,129,.15); color: #0f7a52; }
+.intel-warn { background: rgba(255,201,60,.2); color: #8a6a00; }
+.intel-fail { background: rgba(255,107,107,.15); color: #b23b3b; }
+.intel-h { margin: 12px 0 4px; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); }
+.intel-cost { list-style: none; margin: 0; padding: 0; }
+.intel-cost-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px dashed var(--border); }
+.intel-cost-row .mono { font-size: .8rem; }
+.intel-total { font-weight: 800; border-bottom: 0 !important; border-top: 2px solid var(--ink); margin-top: 4px; padding-top: 8px !important; }
+.intel-signals { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.intel-signal { display: flex; gap: 8px; align-items: flex-start; font-size: .8rem; line-height: 1.4; }
+.intel-mark { flex: 0 0 auto; font-weight: 800; }
+.intel-pass-intel-mark, .intel-signal.intel-pass .intel-mark { color: #0f7a52; }
+.intel-signal.intel-warn .intel-mark { color: #8a6a00; }
+.intel-signal.intel-fail .intel-mark { color: #b23b3b; }
+.intel-signal.intel-info .intel-mark { color: var(--ink-soft); }
+
+/* ═══════════ OpenSea guide (tutorial + API key) ═══════════ */
+.os-guide, .os-advanced {
+  border: 2px solid var(--border); border-radius: 12px;
+  padding: 8px 10px; margin-bottom: 10px; background: rgba(127,127,127,.05);
+}
+.os-guide > summary, .os-advanced > summary {
+  cursor: pointer; font-weight: 800; list-style: none;
+  display: flex; align-items: center; gap: 6px; user-select: none;
+}
+.os-guide > summary::-webkit-details-marker, .os-advanced > summary::-webkit-details-marker { display: none; }
+.os-guide > summary::after, .os-advanced > summary::after { content: '▾'; margin-left: auto; opacity: .6; }
+.os-guide[open] > summary::after, .os-advanced[open] > summary::after { content: '▴'; }
+.os-steps { margin: 10px 0 2px; padding-left: 0; list-style: none; counter-reset: none; }
+.os-steps > li { border-left: 3px solid var(--border); padding: 0 0 10px 12px; margin-bottom: 6px; }
+.os-steps > li:last-child { border-left-color: transparent; padding-bottom: 2px; }
+.os-step-h { font-weight: 700; display: flex; align-items: center; gap: 7px; margin-bottom: 2px; }
+.os-step-n {
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--ink); color: var(--bg); font-size: .7rem;
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 900;
+}
+.os-steps .field { margin: 6px 0 4px; }
+.os-key-row { display: flex; gap: 6px; align-items: stretch; }
+.os-key-row .input { flex: 1 1 auto; min-width: 0; }
+.req {
+  font-size: .62rem; text-transform: uppercase; letter-spacing: .05em;
+  background: var(--danger, #d64545); color: #fff; padding: 1px 6px;
+  border-radius: 999px; vertical-align: middle;
+}
+#openSeaKeyState { margin: 4px 0 0; }
+#openSeaKeyState.key-bad { color: #b23b3b; font-weight: 700; }
+.os-guide p code { font-size: .72rem; background: rgba(127,127,127,.18); padding: 0 4px; border-radius: 4px; }
+
+/* ═══════════ MAX amount: the fee has to come from somewhere ═══════════ */
+.amount-row { display: flex; gap: 8px; align-items: stretch; }
+.amount-row .input { flex: 1 1 auto; min-width: 0; }
+.max-note {
+  display: none; margin: 6px 0 0; font-size: .78rem; line-height: 1.45;
+  padding: 6px 9px; border-radius: 9px;
+  background: rgba(88, 160, 255, .12); color: var(--ink-soft);
+  border-left: 3px solid rgba(88, 160, 255, .55);
+}
+.max-note.show { display: block; }
+
+/* ═══════════ Security Center ═══════════ */
+.sec-block { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px dashed var(--border); }
+.sec-block:last-child { border-bottom: 0; }
+.sec-h { margin: 0 0 6px; font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); }
+.sec-row { display: grid; grid-template-columns: minmax(120px, 34%) 1fr; gap: 10px; padding: 5px 0; font-size: .82rem; align-items: baseline; }
+.sec-k { font-weight: 700; }
+.sec-v { color: var(--ink-soft); }
+.sec-empty { margin: 4px 0; }
+.sec-item { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.sec-item:last-child { border-bottom: 0; }
+.sec-item-main { flex: 1 1 auto; min-width: 0; }
+.sec-item-t { font-weight: 700; font-size: .85rem; }
+.sec-item-s { font-size: .72rem; color: var(--ink-soft); overflow-wrap: anywhere; }
+.sec-perms { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+.sec-perm, .sec-chip {
+  display: inline-flex; align-items: center; gap: 4px; font-size: .72rem;
+  background: rgba(127,127,127,.16); border: 1px solid var(--border);
+  border-radius: 999px; padding: 1px 6px 1px 9px;
+}
+.sec-x { border: 0; background: none; cursor: pointer; font-size: .9rem; line-height: 1; padding: 0 2px; color: var(--ink-soft); }
+.sec-x:hover { color: var(--danger, #d64545); }
+.sec-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+.sec-add { display: flex; gap: 6px; margin-top: 6px; }
+.sec-add .input { flex: 1 1 auto; min-width: 0; }
+.sec-sub { margin-bottom: 12px; }
+.sec-sub-t { font-weight: 700; font-size: .82rem; margin-bottom: 2px; }
+
+/* ═══════════ dApp browser chrome ═══════════ */
+.dapp-browser-overlay {
+  position: fixed; inset: 0; z-index: 9000; background: var(--bg);
+  display: none; flex-direction: column;
+}
+.dapp-browser-overlay.open { display: flex; }
+.dbr-top { display: flex; align-items: center; gap: 5px; padding: 7px 8px; border-bottom: 1px solid var(--border); background: var(--card, #fff); flex-wrap: wrap; }
+.dbr-btn { border: 1px solid var(--border); background: transparent; border-radius: 9px; min-width: 34px; height: 34px; cursor: pointer; font-size: 1rem; }
+.dbr-btn:disabled { opacity: .35; cursor: default; }
+.dbr-secure { font-size: .7rem; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.dbr-secure.ok { background: rgba(16,185,129,.16); color: #0f7a52; }
+.dbr-secure.warn { background: rgba(255,201,60,.22); color: #8a6a00; }
+.dbr-secure.bad { background: rgba(255,107,107,.18); color: #b23b3b; }
+.dbr-urlwrap { flex: 1 1 220px; min-width: 140px; }
+.dbr-url { width: 100%; border: 1px solid var(--border); border-radius: 999px; padding: 7px 13px; background: transparent; font-size: .82rem; }
+.dbr-tabs { display: flex; gap: 4px; padding: 5px 8px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--card, #fff); }
+.dbr-tab { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; font-size: .76rem; max-width: 190px; flex: 0 0 auto; }
+.dbr-tab.on { background: rgba(88,160,255,.16); border-color: var(--ink); }
+.dbr-tab.incog { border-style: dashed; }
+.dbr-tab-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbr-tab-x { border: 0; background: none; cursor: pointer; font-size: .95rem; line-height: 1; }
+.dbr-tab-new { flex: 0 0 auto; border: 1px dashed var(--border); background: none; border-radius: 9px; height: 28px; width: 32px; cursor: pointer; }
+.dbr-menu { position: absolute; right: 8px; top: 50px; z-index: 20; background: var(--card, #fff); border: 1px solid var(--border); border-radius: 11px; box-shadow: 0 8px 26px rgba(0,0,0,.18); padding: 4px; min-width: 210px; }
+.dbr-menu-item { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: .82rem; }
+.dbr-menu-item:hover { background: rgba(127,127,127,.14); }
+.dbr-menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+.dbr-stage { position: relative; flex: 1 1 auto; min-height: 0; }
+.dbr-frame, .dbr-home, .dbr-blocked { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.dbr-home { overflow: auto; padding: 14px; }
+.dbr-hero { margin-bottom: 12px; }
+.dbr-hero-t { font-size: 1.05rem; font-weight: 800; margin-bottom: 3px; }
+.dbr-sec-h { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); margin: 12px 0 6px; font-weight: 800; }
+.dbr-mini, .dbr-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+.dbr-chip { border: 1px solid var(--border); background: rgba(127,127,127,.1); border-radius: 999px; padding: 4px 11px; font-size: .76rem; cursor: pointer; }
+.dbr-chip.on { background: var(--ink); color: var(--bg); }
+.dbr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+.dbr-card { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 11px 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--card, #fff); cursor: pointer; }
+.dbr-card:hover { border-color: var(--ink); }
+.dbr-card-ic { font-size: 1.35rem; }
+.dbr-card-nm { font-size: .78rem; font-weight: 700; text-align: center; }
+.dbr-card-ct { font-size: .66rem; color: var(--ink-soft); }
+.dbr-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--bg); font-size: .85rem; }
+.dbr-spin { width: 15px; height: 15px; border: 2px solid var(--border); border-top-color: var(--ink); border-radius: 50%; animation: dbrspin .7s linear infinite; }
+@keyframes dbrspin { to { transform: rotate(360deg); } }
+.dbr-blocked { overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 22px 12px; }
+.dbr-report { max-width: 560px; border: 1px solid var(--border); border-radius: 14px; padding: 15px; background: var(--card, #fff); }
+.dbr-rep-h { font-weight: 800; margin-bottom: 4px; }
+.dbr-rep-host { font-family: monospace; font-size: .8rem; overflow-wrap: anywhere; margin-bottom: 8px; }
+.dbr-rep-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.dbr-remember { display: flex; gap: 6px; align-items: center; margin-top: 9px; font-size: .78rem; }
+.dsig-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.dsig { display: flex; gap: 7px; align-items: flex-start; font-size: .8rem; line-height: 1.45; }
+.dsig-mark { flex: 0 0 auto; }
+.dsig-pass .dsig-mark { color: #0f7a52; }
+.dsig-warn .dsig-mark { color: #8a6a00; }
+.dsig-fail .dsig-mark { color: #b23b3b; }
+@media (max-width: 560px) {
+  .dbr-secure { order: 9; }
+  .dbr-urlwrap { order: 10; flex-basis: 100%; }
+}

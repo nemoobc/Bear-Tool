@@ -224,6 +224,54 @@ export const EIP7702 = {
   GAS_PER_AUTH: 25000
 };
 
+// ═══════════════════════════════════════════════════════════════
+// CHAIN_PRESETS — catalogue for the "Add network" picker.
+//
+// The 12 networks in NETWORKS are what the app ships with. These are the OTHER
+// common EVM chains, offered as one-tap presets so nobody has to type a name,
+// chainId, symbol, explorer and RPC by hand. Every entry's RPC was verified to
+// answer eth_chainId with the chainId claimed here (see docs/CHAIN-PRESETS.md
+// for the probe output). Picking one pre-fills the whole form; the RPC field
+// stays editable for anyone behind a private endpoint.
+// ═══════════════════════════════════════════════════════════════
+export const CHAIN_PRESETS = [
+  { name: 'Celo', chainId: 42220, type: 'mainnet', symbol: 'CELO', icon: '🟠', color: '#FCFF52',
+    rpc: ['https://celo-rpc.publicnode.com'], explorer: 'https://celoscan.io' },
+  { name: 'Gnosis', chainId: 100, type: 'mainnet', symbol: 'xDAI', icon: '🦊', color: '#04795B',
+    rpc: ['https://gnosis-rpc.publicnode.com'], explorer: 'https://gnosisscan.io' },
+  { name: 'Avalanche C-Chain', chainId: 43114, type: 'mainnet', symbol: 'AVAX', icon: '❄️', color: '#E84142',
+    rpc: ['https://avalanche-c-chain-rpc.publicnode.com'], explorer: 'https://snowtrace.io' },
+  { name: 'Sonic', chainId: 146, type: 'mainnet', symbol: 'S', icon: '🎵', color: '#F2A72B',
+    rpc: ['https://sonic-rpc.publicnode.com'], explorer: 'https://sonicscan.org' },
+  { name: 'Linea', chainId: 59144, type: 'mainnet', symbol: 'ETH', icon: '📐', color: '#61DFFF',
+    rpc: ['https://linea-rpc.publicnode.com'], explorer: 'https://lineascan.build' },
+  { name: 'Scroll', chainId: 534352, type: 'mainnet', symbol: 'ETH', icon: '📜', color: '#FFB0B0',
+    rpc: ['https://scroll-rpc.publicnode.com'], explorer: 'https://scrollscan.com' },
+  { name: 'Blast', chainId: 81457, type: 'mainnet', symbol: 'ETH', icon: '💥', color: '#FCFC03',
+    rpc: ['https://blast-rpc.publicnode.com'], explorer: 'https://blastscan.io' },
+  { name: 'Mantle', chainId: 5000, type: 'mainnet', symbol: 'MNT', icon: '🔱', color: '#65B3AE',
+    rpc: ['https://mantle-rpc.publicnode.com'], explorer: 'https://mantlescan.xyz' },
+  { name: 'Moonbeam', chainId: 1284, type: 'mainnet', symbol: 'GLMR', icon: '🌙', color: '#53CBC8',
+    rpc: ['https://1rpc.io/glmr'], explorer: 'https://moonbeam.moonscan.io' },
+  { name: 'Cronos', chainId: 25, type: 'mainnet', symbol: 'CRO', icon: '⏱️', color: '#002D74',
+    rpc: ['https://evm.cronos.org'], explorer: 'https://cronoscan.com' },
+  { name: 'Aurora', chainId: 1313161554, type: 'mainnet', symbol: 'ETH', icon: '🌅', color: '#70D44B',
+    rpc: ['https://mainnet.aurora.dev'], explorer: 'https://explorer.aurora.dev' },
+  { name: 'Polygon zkEVM', chainId: 1101, type: 'mainnet', symbol: 'ETH', icon: '🟪', color: '#8247E5',
+    rpc: ['https://zkevm-rpc.com'], explorer: 'https://zkevm.polygonscan.com' },
+  { name: 'Mode', chainId: 34443, type: 'mainnet', symbol: 'ETH', icon: '🎼', color: '#FF6E00',
+    rpc: ['https://1rpc.io/mode'], explorer: 'https://explorer.mode.network' },
+  { name: 'Metis Andromeda', chainId: 1088, type: 'mainnet', symbol: 'METIS', icon: '🟠', color: '#00DACC',
+    rpc: ['https://andromeda.metis.io/?owner=1088'], explorer: 'https://explorer.metis.io' },
+  { name: 'hoodi', chainId: 560048, type: 'testnet', symbol: 'ETH', icon: '🧪', color: '#8B95C4',
+    rpc: ['https://ethereum-hoodi-rpc.publicnode.com'], explorer: 'https://hoodi.etherscan.io' }
+];
+// Chains deliberately NOT listed, because no public RPC answered eth_chainId
+// with the claimed id at verification time: Holesky (17000 — deprecated by
+// Ethereum, superseded by Hoodi) and Celo Sepolia (44787). Re-add them only once
+// `.probe-chains.mjs` reports OK; shipping an unverified preset would let the
+// picker add a network that silently talks to the wrong chain.
+
 // custom networks stored in localStorage
 const CUSTOM_KEY = 'bear.customNetworks';
 

@@ -131,8 +131,13 @@ test('deploy: real solc compiles every template to real bytecode', { skip: proce
 test('tools: "deploy the helper first" is explicit, real, and bounded', () => {
   const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  // status card lives in the Tools view, ABOVE the flows that need it
-  const view = html.slice(html.indexOf('id="view-eip7702"'));
+  // The helper-status card lives in the Tools view, ABOVE the flows that need
+  // it. It used to be sliced out of a separate #view-eip7702 section; that view
+  // is gone now — the EIP-7702 suite was merged into #view-deploy so there is a
+  // single Tools entry instead of two views holding copies of the same forms.
+  const view = html.slice(html.indexOf('id="view-deploy"'));
+  assert.match(html, /id="view-deploy"/, 'the Tools view must exist');
+  assert.doesNotMatch(html, /id="view-eip7702"/, 'the duplicate EIP-7702 view must be gone');
   assert.match(view, /id="helperStatusList"/, 'Tools must show helper-contract status');
   assert.ok(view.indexOf('id="helperStatusList"') < view.indexOf('id="batchList"'), 'step 1 must come before the batch queue');
   // explicit up-front deploy + the fixed compiler

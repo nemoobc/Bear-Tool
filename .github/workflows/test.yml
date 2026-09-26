@@ -148,6 +148,15 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
+      # tests/e2e/11-onchain-fork.spec.js drives real transactions against an
+      # Anvil fork of each network from inside the browser. Without foundry it
+      # cannot run at all, and the spec now skips itself with a clear reason
+      # rather than timing out for an hour — which would have made this job
+      # permanently red. Installing the toolchain here is what turns those 14
+      # tests from "skipped" into real coverage.
+      - name: Install foundry (anvil)
+        uses: foundry-rs/foundry-toolchain@v1
+
       - name: Run E2E suite (tests/e2e/*.spec.js)
         run: npm run test:e2e -- --reporter=list
 

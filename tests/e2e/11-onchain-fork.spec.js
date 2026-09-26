@@ -6,6 +6,8 @@
 // receipt ONCHAIN through the fork's own RPC: status=1, correct from/to.
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { ethers } from 'ethers';
 import {
   gotoApp, skipIntro, importWallet, expectUnlocked, openSendView, appClick,
@@ -24,6 +26,20 @@ function freshFork(netId) {
     cwd: REPO, stdio: 'pipe', timeout: 90_000,
   });
 }
+
+// Every test here needs a real Anvil fork of its network. Without foundry on
+// PATH each one used to burn its full 300s timeout and then fail — 12 networks
+// is about an hour of red on any machine that simply has no anvil installed.
+// Probe once and skip the whole file, so a plain `npm run test:e2e` reports
+// "skipped: needs anvil" instead. CI installs foundry first
+// (.github/workflows/fork-tests.yml), so there these run for real.
+const HAS_ANVIL = (process.env.PATH || '').split(':')
+  .some((d) => d && existsSync(join(d, 'anvil')))
+  || existsSync(join(process.env.HOME || '', '.foundry/bin/anvil'));
+
+test.beforeEach(() => {
+  test.skip(!HAS_ANVIL, 'needs anvil (foundry) — https://foundry.paradigm.xyz');
+});
 
 test.setTimeout(300_000);
 

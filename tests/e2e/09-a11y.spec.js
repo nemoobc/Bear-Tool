@@ -44,4 +44,37 @@ test.describe('Accessibility', () => {
     await appClick(page, '#modalOverlay .modal-close');
     await expect(page.locator('#modalOverlay')).not.toHaveClass(/open/);
   });
+
+  // TODO:23 — the topbar pills were plain divs: no role, tabindex -1, and no
+  // keydown wiring, so they were mouse-only while every .nav-item was keyboard
+  // operable. Guard both pills with the same contract.
+  for (const [id, name] of [['#networkPill', 'network'], ['#accountPill', 'account']]) {
+    test(`${name} pill exposes a button role and is tab-focusable`, async ({ page }) => {
+      await gotoApp(page);
+      await skipIntro(page);
+      await createWallet(page);
+      const info = await page.locator(id).evaluate((el) => ({
+        role: el.getAttribute('role'),
+        tabIndex: el.tabIndex,
+      }));
+      expect(info.role, `${id} role`).toBe('button');
+      expect(info.tabIndex, `${id} tabIndex`).toBeGreaterThanOrEqual(0);
+      // Reachable by real Tab presses, not just programmatic focus().
+      await page.locator(id).focus();
+      await expect(page.locator(id)).toBeFocused();
+    });
+
+    test(`${name} pill opens its modal with Enter and with Space`, async ({ page }) => {
+      await gotoApp(page);
+      await skipIntro(page);
+      await createWallet(page);
+      for (const key of ['Enter', ' ']) {
+        await page.locator(id).focus();
+        await page.keyboard.press(key === ' ' ? 'Space' : 'Enter');
+        await expect(page.locator('#modalOverlay'), `${id} opens on ${key}`).toHaveClass(/open/);
+        await appClick(page, '#modalOverlay .modal-close');
+        await expect(page.locator('#modalOverlay')).not.toHaveClass(/open/);
+      }
+    });
+  }
 });

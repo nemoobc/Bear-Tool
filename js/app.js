@@ -7,10 +7,11 @@
 
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider,
-         addCustomNetwork, getCustomNetworks } from './network.js';
+         addCustomNetwork, getCustomNetworks, CHAIN_PRESETS } from './network.js';
+import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
-         fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue } from './ui.js';
+         fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue, titleCase } from './ui.js';
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity } from './state.js';
 import { fetchAllPrices, fetchPriceHistory, fetchOHLC } from './price.js';
@@ -25,6 +26,10 @@ import { loadNfts } from './nft.js';
 import { cancelOrder, fulfillBasicOrder, getOrderStatusOnChain } from './opensea.js';
 import { t, setLang, applyTranslations } from './i18n.js';
 import { renderDapps, POPULAR_DAPPS } from './dapps.js';
+import { dappBrowserOnLock } from './dapp-browser.js';
+import { renderSecurityCenter } from './security-center.js';
+import { createProvider, announceLock, announceAccounts, disconnectOrigin, PROVIDER_FLAG } from './dapp-bridge.js';
+import { siteAllowed } from './dapp-sessions.js';
 import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers, cancelListing, listNft, parseOpenSeaInput } from './opensea-api.js';
 
 const { ethers } = globalThis;
@@ -38,10 +43,14 @@ window.addEventListener('DOMContentLoaded', () => {
     loadDashboard();
     if ($('#view-activity').classList.contains('active')) renderActivity();
   });
+  syncMobileNav();
   bindNav();
   bindTopbar();
   bindViews();
   initTheme();
+  // The provider must exist before any page can ask, and it answers "locked"
+  // on its own until the user signs in — so installing it early is safe.
+  installBridge();
 
   // A refresh must not dump the user back into the password box. The address
   // is not a secret (it is already public on-chain), so restore it and render
@@ -124,24 +133,108 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // ── custom token add ──
+  // Paste a contract address and the token identifies itself: name, symbol and
+  // decimals are read straight off the contract and shown before you commit, so
+  // a wrong paste is obvious instead of silently landing in the asset list as an
+  // unlabelled row.
   document.getElementById('btnAddCustomToken')?.addEventListener('click', () => {
+    const currentChain = get('networkId') ? (getNetworkById(get('networkId'))?.chainId || 1) : 1;
     openModal(`
       <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
       <h2>Add Custom Token</h2>
-      <div class="field"><label for="customTokenAddr">Contract Address</label><input class="input" id="customTokenAddr" placeholder="0x..."></div>
-      <div class="field"><label for="customTokenChain">Chain ID</label><input class="input" id="customTokenChain" type="number" value="${get('networkId') ? (getNetworkById(get('networkId'))?.chainId || 1) : 1}"></div>
-      <button class="btn btn-primary btn-block" id="btnConfirmAddToken">Add Token</button>
+      <div class="field"><label for="customTokenAddr">Contract Address</label>
+        <input class="input" id="customTokenAddr" placeholder="0x... paste an ERC-20 address" autocomplete="off" spellcheck="false"></div>
+      <div id="tokenDetect" style="display:none">
+        <div class="asset-row" style="border-left:8px solid var(--mint)">
+          <div class="net-logo" id="tdIcon" style="font-size:20px">🪙</div>
+          <div class="asset-info">
+            <div class="asset-name" id="tdSymbol">—</div>
+            <div class="asset-symbol" id="tdName">—</div>
+          </div>
+          <span class="badge" id="tdDecimals">—</span>
+        </div>
+        <p class="dim small" id="tdNote" style="margin-top:8px"></p>
+      </div>
+      <div class="field"><label for="customTokenChain">Chain ID</label><input class="input" id="customTokenChain" type="number" value="${currentChain}"></div>
+      <button class="btn btn-primary btn-block" id="btnConfirmAddToken" disabled>Add Token</button>
     `);
-    document.getElementById('btnConfirmAddToken')?.addEventListener('click', async () => {
-      const addr = document.getElementById('customTokenAddr')?.value?.trim();
-      const chainId = parseInt(document.getElementById('customTokenChain')?.value) || 1;
-      if (!addr || !addr.startsWith('0x') || addr.length !== 42) return toast('Invalid contract address', 'error');
+
+    const addrEl = document.getElementById('customTokenAddr');
+    const chainEl = document.getElementById('customTokenChain');
+    const box = document.getElementById('tokenDetect');
+    const saveBtn = document.getElementById('btnConfirmAddToken');
+    const ERC20 = [
+      'function symbol() view returns (string)',
+      'function name() view returns (string)',
+      'function decimals() view returns (uint8)',
+      'function balanceOf(address) view returns (uint256)'
+    ];
+    // Latest probe wins, so a fast paste-then-edit cannot be overwritten by an
+    // older, slower RPC round-trip.
+    let probeSeq = 0;
+
+    const reset = () => { box.style.display = 'none'; saveBtn.disabled = true; };
+
+    const detect = async () => {
+      const addr = addrEl.value.trim();
+      if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) { reset(); return; }
+      const provider = get('provider');
+      if (!provider) { reset(); return; }
+      const mine = ++probeSeq;
+      box.style.display = '';
+      document.getElementById('tdSymbol').textContent = 'Detecting…';
+      document.getElementById('tdName').textContent = '';
+      document.getElementById('tdDecimals').textContent = '';
+      document.getElementById('tdNote').textContent = 'Reading name, symbol and decimals from the contract…';
+      try {
+        const c = new ethers.Contract(addr, ERC20, provider);
+        // symbol()/name() are optional on some tokens — resolve each defensively.
+        const soft = async (fn, fb) => { try { return await fn(); } catch { return fb; } };
+        const [sym, nm, dec] = await Promise.all([
+          soft(() => c.symbol(), null), soft(() => c.name(), null), soft(() => c.decimals(), 18),
+        ]);
+        if (mine !== probeSeq) return; // a newer paste won
+        if (sym == null && nm == null) {
+          reset();
+          document.getElementById('tdNote').textContent = 'No ERC-20 name/symbol found at that address on this network.';
+          return;
+        }
+        document.getElementById('tdIcon').textContent = '🪙';
+        document.getElementById('tdSymbol').textContent = sym || nm || 'Unknown';
+        document.getElementById('tdName').textContent = [nm, sym].filter(Boolean).join(' · ') || '—';
+        document.getElementById('tdDecimals').textContent = `${dec} decimals`;
+        document.getElementById('tdNote').textContent = 'Detected on chain ' + (chainEl.value || currentChain) + '. Change the Chain ID if that is wrong.';
+        saveBtn.disabled = false;
+        saveBtn.dataset.sym = sym || nm || '';
+        saveBtn.dataset.dec = String(dec);
+      } catch (e) {
+        if (mine !== probeSeq) return;
+        reset();
+        document.getElementById('tokenDetect').style.display = '';
+        document.getElementById('tdNote').textContent = 'Could not read that contract: ' + (e?.shortMessage || e?.message || 'unknown');
+      }
+    };
+
+    // 'paste' covers the common case; 'input' also catches typing/autofill.
+    addrEl.addEventListener('paste', () => setTimeout(detect, 0));
+    addrEl.addEventListener('input', detect);
+    chainEl.addEventListener('change', () => {
+      if (!saveBtn.disabled) detect();
+    });
+
+    saveBtn?.addEventListener('click', async () => {
+      const addr = addrEl.value.trim();
+      const chainId = parseInt(chainEl.value) || 1;
+      if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) return toast('Invalid contract address', 'error');
       const provider = get('provider');
       if (!provider) return toast('Wallet not ready', 'error');
       try {
-        const ERC20 = ['function symbol() view returns (string)', 'function decimals() view returns (uint8)', 'function balanceOf(address) view returns (uint256)'];
-        const contract = new ethers.Contract(addr, ERC20, provider);
-        const [sym, dec, bal] = await Promise.all([contract.symbol(), contract.decimals(), contract.balanceOf(get('address') || ethers.ZeroAddress)]);
+        const c = new ethers.Contract(addr, ERC20, provider);
+        const [sym, dec, bal] = await Promise.all([
+          c.symbol().catch(() => saveBtn.dataset.sym || '?'),
+          c.decimals().catch(() => Number(saveBtn.dataset.dec) || 18),
+          c.balanceOf(get('address') || ethers.ZeroAddress),
+        ]);
         const tokens = get('tokens') || [];
         if (tokens.some(t => t.address?.toLowerCase() === addr.toLowerCase())) return toast('Token already added', 'info');
         tokens.push({ address: addr, symbol: sym, decimals: Number(dec), balance: bal.toString(), chainId, usd: null });
@@ -237,10 +330,11 @@ function bindNav() {
       }
     });
   });
-  // mobile bottom nav (native <button> — click only is fine)
-  $all('.mobile-nav-item').forEach(item => {
+  // mobile bottom nav — items are generated by syncMobileNav() before this runs.
+  $all('.mobile-nav-item[data-view]').forEach(item => {
     item.addEventListener('click', () => activateNav(item));
   });
+  $('#mobileMoreBtn')?.addEventListener('click', () => showMoreSheet(activateNav));
   // dashboard quick actions
   $all('.quick-action-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -254,6 +348,80 @@ function bindNav() {
   });
 }
 
+// ── mobile nav, generated from the sidebar ──
+// The bottom bar used to be a hand-written list of 6 buttons while the sidebar
+// had 9, so EIP-7702, Approvals and Tools were reachable on desktop and simply
+// did not exist on a phone. Building it from the sidebar makes that class of
+// drift impossible: add a view to the sidebar and mobile gets it too.
+const MOBILE_PRIMARY = ['dashboard', 'swap', 'activity', 'nft'];
+
+function syncMobileNav() {
+  const bar = $('#mobileNav');
+  if (!bar) return;
+  const items = [...$all('.sidebar .nav-item')].map((el) => {
+    const label = el.querySelector('[data-i18n]');
+    return {
+      view: el.dataset.view,
+      label: (label?.textContent || '').trim(),
+      icon: el.querySelector('.icon')?.innerHTML || '',
+      i18n: label?.dataset.i18n || '',
+    };
+  }).filter((i) => i.view);
+  if (!items.length) return;
+
+  const primary = MOBILE_PRIMARY.filter((v) => items.some((i) => i.view === v));
+  const rest = items.filter((i) => !primary.includes(i.view));
+
+  const cell = (i, active) => `<button class="mobile-nav-item${active ? ' active' : ''}" data-view="${escapeHtml(i.view)}"
+      aria-label="${escapeHtml(i.label || i.view)}">${i.icon ? `<span class="icon">${i.icon}</span>` : ''}<span>${escapeHtml(i.label || i.view)}</span></button>`;
+
+  bar.innerHTML =
+    primary.map((v) => cell(items.find((i) => i.view === v), v === 'dashboard')).join('') +
+    // The More button carries a count so it is obvious how much is behind it.
+    `<button class="mobile-nav-item" id="mobileMoreBtn" aria-label="More features" aria-haspopup="dialog">
+       <span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></span><span>More</span>
+     </button>`;
+  // Re-apply translations so the generated labels follow the active language.
+  applyTranslations?.();
+}
+
+// Every sidebar view that did not fit the bottom bar, in one sheet. Rendered from
+// the same list as the sidebar, so this is the whole navigation, not a subset.
+function showMoreSheet(activateNav) {
+  const items = [...$all('.sidebar .nav-item')].map((el) => {
+    const label = el.querySelector('[data-i18n]');
+    return {
+      view: el.dataset.view,
+      label: (label?.textContent || '').trim(),
+      icon: el.querySelector('.icon')?.innerHTML || '',
+    };
+  }).filter((i) => i.view);
+  if (!items.length) return;
+
+  openModal(`
+    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <h2>All Features</h2>
+    <p class="dim small">Every view in Bear Tool — the same list as the desktop sidebar.</p>
+    <div class="nav-sheet" id="navSheet">
+      ${items.map((i) => `
+        <button class="nav-sheet-item${i.view === 'dashboard' ? ' active' : ''}" data-view="${escapeHtml(i.view)}">
+          <span class="icon">${i.icon}</span><span>${escapeHtml(i.label || i.view)}</span>
+        </button>`).join('')}
+    </div>
+  `);
+  $all('#navSheet .nav-sheet-item').forEach((b) => {
+    const go = () => {
+      const src = document.querySelector(`.sidebar .nav-item[data-view="${b.dataset.view}"]`);
+      if (activateNav && src) activateNav(src); else switchView(b.dataset.view);
+      closeModal();
+    };
+    b.addEventListener('click', go);
+    b.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+    });
+  });
+}
+
 function switchView(view) {
   $all('.nav-item').forEach(i => i.classList.remove('active'));
   $all('.mobile-nav-item').forEach(i => i.classList.remove('active'));
@@ -263,6 +431,9 @@ function switchView(view) {
   const mobileItem = $(`.mobile-nav-item[data-view="${navView}"]`);
   if (sidebarItem) sidebarItem.classList.add('active');
   if (mobileItem) mobileItem.classList.add('active');
+  // Views that live behind "More" have no bottom-bar button, so light that up
+  // instead — otherwise the bar looks broken while you are on EIP-7702.
+  if (!mobileItem) $('#mobileMoreBtn')?.classList.add('active');
   $all('.view').forEach(v => v.classList.remove('active'));
   $('#view-' + view).classList.add('active');
   refreshView(view);
@@ -297,10 +468,75 @@ function refreshView(view) {
   if (view === 'send') loadSendTokens();
   if (view === 'swap') loadSwapTokens();
   if (view === 'bridge') loadBridgeChains();
-  if (view === 'eip7702') loadEip7702();
+  if (view === 'deploy') { loadEip7702(); bindOpenSeaPanel(); }
   if (view === 'activity') renderActivity();
   if (view === 'dapps') renderDapps($('#dappsContainer'));
-  if (view === 'deploy') { bindOpenSeaPanel(); }
+  if (view === 'settings') renderSecurityCenter($('#securityCenter'));
+}
+
+// ── dApp bridge ──────────────────────────────────────────────────────────
+// window.ethereum, for pages served from this wallet's own origin. See
+// dapp-bridge.js for why a cross-origin dApp can never see it, and
+// Settings → Security for what the user is told.
+let bearProvider = null;
+
+function installBridge() {
+  if (globalThis[PROVIDER_FLAG]) return bearProvider;
+  bearProvider = createProvider({
+    origin: location.origin,
+    getAddress: () => get('address'),
+    isUnlocked: () => !!get('unlocked'),
+    getChainId: () => get('networkId') || 1,
+    onRequest: async ({ method, params, kind, origin }) => {
+      if (kind === 'consent') {
+        return confirmTx({
+          title: '🔗 Connect this site?',
+          rows: [
+            { k: 'Site', v: origin },
+            { k: 'Gets', v: method === 'eth_requestAccounts' ? 'your address (read-only)' : String(method) },
+          ],
+          confirmText: 'Connect',
+          requireType: null,
+        });
+      }
+      if (kind === 'permission') {
+        return confirmTx({
+          title: '⚠️ Authorise ' + method + '?',
+          danger: method === 'eth_sendTransaction',
+          rows: [
+            { k: 'Site', v: origin },
+            { k: 'Method', v: method },
+            { k: 'Grant', v: 'Stays until you revoke it in Settings → Security' },
+          ],
+          confirmText: 'Authorise',
+        });
+      }
+      // Plain calls: hand the request to the node the wallet is already using.
+      const provider = get('provider');
+      if (!provider) throw new Error('No RPC provider.');
+      return provider.send(method, ...params);
+    },
+  });
+  globalThis[PROVIDER_FLAG] = bearProvider;
+  if (!globalThis.ethereum) globalThis.ethereum = bearProvider;
+  // The browser toolbar calls this to cut a site off. Defined here because this
+  // is the only place that holds both the provider and the session store.
+  window.__bearDisconnectSite = (origin) => {
+    disconnectOrigin(bearProvider, origin);
+    toast('Disconnected ' + origin, 'info');
+  };
+  return bearProvider;
+}
+
+function bridgeLocked() {
+  if (bearProvider) announceLock(bearProvider);
+  // A site that was waved through earlier in this session does not get a
+  // free pass just because the wallet was locked and reopened.
+  dappBrowserOnLock();
+}
+
+function bridgeAccounts() {
+  if (bearProvider) announceAccounts(bearProvider, get('address'));
 }
 
 // ── OpenSea panel (WL check + Accept Top Offer + Coin Price) ──
@@ -327,31 +563,146 @@ function bindOpenSeaPanel() {
         if (v) localStorage.setItem('bear.openseaKey', v);
         else localStorage.removeItem('bear.openseaKey');
       } catch { /* private mode */ }
-      const s = status(); if (s) s.textContent = v ? 'API key disimpan.' : 'API key dikosongkan.';
+      if (keyInput) paintKeyState(v);
     });
   }
+
+  // The guide above needs honest feedback about the key, otherwise "wajib" is
+  // just a word: whether one is saved, and whether OpenSea actually accepts it.
+  // The test is a real authenticated request — a local check could not tell the
+  // difference between a valid key and a revoked one.
+  const keyState = $('#openSeaKeyState');
+  function paintKeyState(key) {
+    if (keyState) keyState.textContent = key ? t('os.key.saved') : t('os.key.none');
+  }
+  paintKeyState((keyInput?.value || '').trim());
+
+  $('#btnRevealOsKey')?.addEventListener('click', () => {
+    if (!keyInput) return;
+    const showing = keyInput.type === 'text';
+    keyInput.type = showing ? 'password' : 'text';
+    $('#btnRevealOsKey').setAttribute('aria-pressed', String(!showing));
+  });
+
+  $('#btnTestOsKey')?.addEventListener('click', async () => {
+    if (!keyInput) return;
+    const key = keyInput.value.trim();
+    if (!key) { if (keyState) keyState.textContent = t('os.key.none'); return; }
+    if (keyState) keyState.textContent = t('os.key.testing');
+    try {
+      // limit=1 keeps the probe small; a 200/401 split is the whole answer.
+      const res = await fetch('https://api.opensea.io/api/v2/collections/cryptopunks?limit=1', {
+        headers: { 'x-api-key': key, accept: 'application/json' },
+      });
+      if (keyState) {
+        keyState.textContent = res.ok ? t('os.key.ok') : t('os.key.bad', { code: res.status });
+        keyState.classList.toggle('dim', res.ok);
+        keyState.classList.toggle('key-bad', !res.ok);
+      }
+    } catch {
+      if (keyState) keyState.textContent = '⚠️ Offline / request failed.';
+    }
+  });
+
   // Check WL — collection from the contract field (OpenSea link / slug /
   // contract address, auto-parsed) + wallet from the new address field,
   // falling back to the active wallet. No hardcoded collection.
+  // Drop intel: is this address actually eligible, what would it cost, and is
+  // anything about the contract a red flag. Every number is labelled with where
+  // it came from, and a private project allowlist is reported as unknowable
+  // rather than guessed.
   $('#btnCheckWL')?.addEventListener('click', async () => {
     const statusEl = status(); if (!statusEl) return;
     const input = $('#openSeaContract')?.value?.trim();
-    const wlAddr = $('#openSeaWlAddress')?.value?.trim() || get('address');
-    if (!input) return statusEl.textContent = 'Masukkan link OpenSea / slug / address kontrak dulu.';
-    if (!wlAddr) return statusEl.textContent = 'Wallet belum terhubung — isi "Wallet for WL check" manual.';
-    statusEl.textContent = 'Checking WL…';
+    const addr = $('#openSeaWlAddress')?.value?.trim() || get('address');
+    const chainId = getNetworkById(get('networkId'))?.chain || 'ethereum';
+    if (!input) return statusEl.textContent = 'Isi link OpenSea / slug / address kontrak dulu.';
+    if (!addr) return statusEl.textContent = 'Wallet belum terhubung — isi "Wallet for WL check" manual.';
+    statusEl.textContent = 'Menganalisis koleksi…';
     try {
-      const r = await checkWL({ collection: input, address: wlAddr });
-      if (r.error || !r.collection) return statusEl.textContent = '⚠️ ' + (r.message || 'WL check failed.');
-      const badge = r.hidden
-        ? '<span class="badge badge-warn">🔒 PRIVATE / HIDDEN</span>'
-        : '<span class="badge badge-success">✅ PUBLIC</span>';
-      statusEl.innerHTML = `<strong>${escapeHtml(r.collection)}</strong> ${badge}<br>
-        <span class="small">Address: ${escapeHtml(wallet.shortAddress(r.address))}</span><br>
-        <span class="small">Floor: ${escapeHtml(String(r.floorPrice))} · Supply: ${escapeHtml(String(r.totalSupply))} · Owners: ${escapeHtml(String(r.listedCount))}</span><br>
-        <span class="small">${escapeHtml(r.note || '')}</span>`;
-    } catch { statusEl.textContent = '⚠️ WL check failed.'; }
+      const r = await resolveSlug(input, chainId);
+      const verdict = await checkEligibility({ slug: r.slug, address: addr });
+
+      const head = `<div class="intel-head"><strong>${escapeHtml(r.slug)}</strong>`
+        + `<span class="small mono">${escapeHtml(wallet.shortAddress(addr))}</span></div>`;
+
+      if (verdict.error) {
+        statusEl.innerHTML = head + `<p class="intel-verdict intel-warn">⚠️ ${escapeHtml(verdict.error)}</p>`;
+        return;
+      }
+
+      if (!verdict.eligible) {
+        // Not a holder: the user asked for "kalau ga elig yaudah" — so say so
+        // briefly, with the reason, and stop. No cost, no safety theatre.
+        statusEl.innerHTML = head
+          + `<p class="intel-verdict intel-fail">✖ Tidak eligible — alamat ini bukan holder koleksi.</p>`
+          + `<p class="small dim">${escapeHtml(verdict.note)}</p>`;
+        return;
+      }
+
+      // Eligible → gather the rest.
+      statusEl.textContent = 'Eligible — menghitung biaya & memeriksa kontrak…';
+      const intel = r.contract ? await nftIntel({ contract: r.contract, tokenId: r.input?.tokenId, chain: chainId }).catch(() => null) : null;
+      const ask = r.slug ? await collectionAsk({ slug: r.slug, chain: chainId }).catch(() => ({ lowest: null })) : { lowest: null };
+      const gasWei = await estimateMintGas(r.contract, addr).catch(() => 0n);
+      const ethUsd = await ethPriceUsd().catch(() => null);
+      const cost = costBreakdown({
+        askEth: ask.lowest?.price ?? 0,
+        gasWei,
+        ethUsd,
+      });
+      const safety = r.contract
+        ? await contractSafety(get('provider'), r.contract, { intel }).catch((e) => ({
+            signals: [{ level: 'warn', label: 'Pemeriksaan gagal', detail: String(e?.message || e).slice(0, 120) }],
+            verdict: 'unknown',
+            note: 'Tidak bisa menyelesaikan pemeriksaan.',
+          }))
+        : { signals: [], verdict: 'unknown', note: 'Butuh address kontrak untuk memeriksa keamanan.' };
+
+      const hold = intel?.estimatedUsd != null
+        ? `Estimasi nilai item: ${escapeHtml(fmtUsd(intel.estimatedUsd))}`
+        : '';
+
+      statusEl.innerHTML = head
+        + `<p class="intel-verdict intel-pass">✔ Eligible — alamat ini holder`
+          + `${verdict.holds > 1 ? ' (' + verdict.holds + ' item)' : ''}.</p>`
+        + `<p class="small dim">${escapeHtml(verdict.note)}</p>`
+        + (hold ? `<p class="small">${hold}</p>` : '')
+        + `<h4 class="intel-h">Biaya</h4>${renderCost(cost)}`
+        + `<h4 class="intel-h">Keamanan kontrak</h4>`
+          + `<ul class="intel-signals">${renderSignals(safety.signals)}</ul>`
+          + `<p class="small dim">${escapeHtml(safety.note)}</p>`;
+    } catch (e) {
+      statusEl.textContent = '⚠️ ' + (e?.message || 'Analisis gagal.');
+    }
   });
+
+  // Real gas for one mint, from the wallet's own provider. A bare estimateGas
+  // against a mint() we cannot know the arguments of is not honest, so when the
+  // ABI is not available the estimate is 0 and the UI says so rather than
+  // inventing a number.
+  async function estimateMintGas(contract, from) {
+    const provider = get('provider');
+    if (!provider || !contract) return 0n;
+    try {
+      const iface = new ethers.Interface(['function mint(uint256 quantity)']);
+      const data = iface.encodeFunctionData('mint', [1]);
+      const gas = await provider.estimateGas({ from, to: contract, data });
+      const fee = await provider.getFeeData();
+      const price = fee.maxFeePerGas ?? fee.gasPrice ?? 0n;
+      return gas * BigInt(price);
+    } catch {
+      return 0n;   // shown as "—" / 0 in the breakdown, never faked
+    }
+  }
+
+  async function ethPriceUsd() {
+    const net = getNetworkById(get('networkId'));
+    const prices = await fetchAllPrices([net?.symbol || 'ETH']);
+    const p = prices?.[net?.symbol || 'ETH'];
+    return Number.isFinite(Number(p)) ? Number(p) : null;
+  }
+
   // List NFT
   $('#btnOpenSeaList')?.addEventListener('click', async () => {
     const s = status(); if (!s) return;
@@ -400,8 +751,19 @@ function bindTopbar() {
   $('#btnHome').addEventListener('click', () => {
     switchView('dashboard');
   });
+  // The pills are divs (role="button", tabindex="0" in index.html) so they need
+  // the same Enter/Space wiring the sidebar nav items get above — otherwise
+  // they are mouse-only and unreachable by keyboard.
+  const pillKey = (el, open) => el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      open();
+    }
+  });
   $('#networkPill').addEventListener('click', showNetworkModal);
   $('#accountPill').addEventListener('click', showAccountModal);
+  pillKey($('#networkPill'), showNetworkModal);
+  pillKey($('#accountPill'), showAccountModal);
 }
 
 function updateTopbar() {
@@ -759,42 +1121,129 @@ function netRow(n) {
     <div class="net-logo">${getNetworkLogo(n.name, 32)}</div>
     <div class="asset-info"><div class="asset-name">${escapeHtml(n.name)}</div>
       <div class="asset-symbol">Chain ${escapeHtml(String(n.chainId))} · ${escapeHtml(n.symbol)}</div></div>
-    <span class="badge ${n.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(n.type)}</span>
+    <span class="badge ${n.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(titleCase(n.type))}</span>
   </div>`;
 }
 
+// ── add network: pick a chain, don't type one ──
+// Was five free-text fields (name, chainId, RPC, symbol, explorer) where a typo
+// in chainId silently produced a network that talks to the wrong chain. Now the
+// common EVM chains are one-tap presets whose RPCs were verified to answer
+// eth_chainId with the id claimed (docs/CHAIN-PRESETS.md). The fields stay
+// editable afterwards for a private RPC, but they arrive pre-filled.
 function showAddNetworkModal() {
+  const presets = CHAIN_PRESETS;
+  const rowFor = (p) => `
+    <div class="asset-row asset-clickable chain-preset" role="button" tabindex="0"
+         data-name="${escapeHtml(p.name)}" data-chain="${p.chainId}" data-type="${p.type}"
+         data-symbol="${escapeHtml(p.symbol)}" data-rpc="${escapeHtml(p.rpc[0])}"
+         data-explorer="${escapeHtml(p.explorer || '')}" data-icon="${escapeHtml(p.icon || '🛰️')}">
+      <div class="net-logo" style="font-size:20px">${escapeHtml(p.icon || '🛰️')}</div>
+      <div class="asset-info">
+        <div class="asset-name">${escapeHtml(p.name)}</div>
+        <div class="asset-symbol">Chain ${p.chainId} · ${escapeHtml(p.symbol)}</div>
+      </div>
+      <span class="badge ${p.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(titleCase(p.type))}</span>
+    </div>`;
+
   openModal(`
     <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
-    <h2>➕ Custom Network</h2>
-    <div class="field"><label>Name</label><input class="input" id="cnName" placeholder="My Chain"></div>
-    <div class="field"><label>Chain ID</label><input class="input" id="cnChainId" type="number" placeholder="12345"></div>
-    <div class="field"><label>RPC URL</label><input class="input" id="cnRpc" placeholder="https://..."></div>
-    <div class="field"><label>Symbol</label><input class="input" id="cnSymbol" placeholder="MYC"></div>
-    <div class="field"><label>Explorer URL</label><input class="input" id="cnExplorer" placeholder="https://..."></div>
-    <div class="field"><label>Type</label>
-      <select class="select" id="cnType"><option value="mainnet">Mainnet</option><option value="testnet">Testnet</option></select>
+    <h2>➕ Add Network</h2>
+    <p class="dim small">Pick a chain — the fields fill themselves in. Only change the RPC if you have a private endpoint.</p>
+    <div class="field"><input class="input" id="cnSearch" type="text" placeholder="🔍 Search ${presets.length} chains by name or chain ID..." autocomplete="off"></div>
+    <div id="cnPresetList" style="max-height:38vh;overflow-y:auto">
+      <div id="cnMainnetWrap">
+        <div class="mb-8"><span class="badge badge-mainnet">MAINNET</span></div>
+        <div id="cnMainnet">${presets.filter(p => p.type === 'mainnet').map(rowFor).join('')}</div>
+      </div>
+      <div id="cnTestnetWrap">
+        <div class="mb-8 mt-16"><span class="badge badge-testnet">TESTNET</span></div>
+        <div id="cnTestnet">${presets.filter(p => p.type === 'testnet').map(rowFor).join('')}</div>
+      </div>
+      <p id="cnNoMatch" class="small text-center" style="display:none">No chain matches that search.</p>
     </div>
-    <div class="danger-box">⚠️ Custom RPC = you trust this provider with your address and balance data.</div>
-    <button class="btn btn-primary btn-block" id="cnSave">Save Network</button>
+    <div id="cnForm" style="display:none">
+      <hr class="mt-16 mb-16">
+      <div class="asset-row" style="border-left:8px solid var(--mint)">
+        <div class="net-logo" id="cnIcon" style="font-size:20px">🛰️</div>
+        <div class="asset-info">
+          <div class="asset-name" id="cnNameLabel">—</div>
+          <div class="asset-symbol" id="cnChainLabel">—</div>
+        </div>
+      </div>
+      <div class="field mt-16"><label for="cnRpc">RPC URL</label><input class="input" id="cnRpc" placeholder="https://..."></div>
+      <div class="danger-box">⚠️ Custom RPC = you trust this provider with your address and balance data.</div>
+      <button class="btn btn-primary btn-block" id="cnSave">Add Network</button>
+    </div>
   `);
-  $('#cnSave').onclick = () => {
+
+  let picked = null;
+  const form = $('#cnForm');
+  const show = () => { if (picked) form.style.display = ''; };
+
+  const pick = (el) => {
+    const d = el.dataset;
+    picked = {
+      name: d.name, chainId: Number(d.chain), type: d.type, symbol: d.symbol,
+      rpc: [d.rpc], explorer: d.explorer, icon: d.icon, color: '#9B5DE5', decimals: 18
+    };
+    $('#cnIcon').textContent = d.icon;
+    $('#cnNameLabel').textContent = d.name;
+    $('#cnChainLabel').textContent = `Chain ${d.chain} · ${d.symbol}`;
+    $('#cnRpc').value = d.rpc;
+    $all('.chain-preset').forEach((r) => { r.style.borderLeft = ''; });
+    el.style.borderLeft = '8px solid var(--mint)';
+    show();
+  };
+
+  $all('.chain-preset').forEach((el) => {
+    el.addEventListener('click', () => pick(el));
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(el); }
+    });
+  });
+
+  $('#cnSearch')?.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase().trim();
+    let any = false;
+    for (const [wrapId, listId] of [['#cnMainnetWrap', '#cnMainnet'], ['#cnTestnetWrap', '#cnTestnet']]) {
+      let vis = 0;
+      $(listId).querySelectorAll('.chain-preset').forEach((r) => {
+        const hit = !q || r.dataset.name.toLowerCase().includes(q) || r.dataset.chain.includes(q);
+        r.style.display = hit ? '' : 'none';
+        if (hit) vis++;
+      });
+      $(wrapId).style.display = vis ? '' : 'none';
+      any = any || vis > 0;
+    }
+    $('#cnNoMatch').style.display = any ? 'none' : '';
+  });
+
+  $('#cnSave').onclick = async () => {
+    if (!picked) return toast('Pick a chain first', 'error');
     const rpc = $('#cnRpc').value.trim();
     if (!/^https:\/\//.test(rpc)) return toast('RPC must be an https:// URL', 'error');
-    const net = {
-      name: $('#cnName').value.trim(),
-      chainId: Number($('#cnChainId').value),
-      rpc: [rpc],
-      symbol: $('#cnSymbol').value.trim() || 'ETH',
-      decimals: 18,
-      explorer: $('#cnExplorer').value.trim(),
-      type: $('#cnType').value,
-      icon: '🛰️', color: '#9B5DE5'
-    };
-    if (!net.name || !net.chainId || !net.rpc[0]) return toast('Fill name, chainId, RPC', 'error');
-    addCustomNetwork(net);
+    // Prove the endpoint really is the chain that was picked before saving it.
+    const btn = $('#cnSave');
+    btn.disabled = true; btn.textContent = 'Checking RPC…';
+    try {
+      const res = await fetch(rpc, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      });
+      const json = await res.json();
+      const got = json?.result != null ? parseInt(json.result, 16) : null;
+      if (got !== picked.chainId) {
+        return toast(`RPC reports chain ${got ?? 'unknown'}, expected ${picked.chainId}`, 'error');
+      }
+    } catch {
+      return toast('Could not reach that RPC', 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Add Network';
+    }
+    addCustomNetwork({ ...picked, rpc: [rpc] });
     closeModal();
-    toast('Network added!', 'success');
+    toast(`${picked.name} added!`, 'success');
     showNetworkModal();
   };
 }
@@ -860,6 +1309,8 @@ function showAccountModal() {
   };
   $('#lockBtn').onclick = () => {
     set('unlocked', false); set('signer', null);
+    // A page holding an account list must be told the wallet went dark.
+    bridgeLocked();
     wallet.clearSession();
     closeModal();
     toast('Locked 🔒', 'info');
@@ -972,26 +1423,12 @@ function holdingUsd(t) {
 // ── CoinGecko token logos (auto-detect, cached 24h) ──
 // The manual SVG map covers the popular tokens; anything else asks CoinGecko
 // search once per symbol and caches the result so the list stays fast.
-const LOGO_CACHE_KEY = 'bear.logoCache';
-const LOGO_TTL = 24 * 60 * 60 * 1000;
+// The cache + mark rendering now live in js/token-logo.js so the dashboard and
+// the Swap/Bridge pickers cannot drift apart. Re-exported here because several
+// call sites in this file still use the old local names.
+import { tokenLogoHTML, getCachedLogo, cacheLogo, guardTokenLogos, readLogoCache as loadLogoCache } from './token-logo.js';
 const MANUAL_LOGO_SYMS = new Set(['eth', 'ether', 'usdc', 'usdt', 'dai', 'wbtc', 'link', 'uni', 'aave', 'reth', 'cbeth', 'wsteth', 'frax']);
 
-function loadLogoCache() {
-  try { return JSON.parse(localStorage.getItem(LOGO_CACHE_KEY) || '{}'); }
-  catch { return {}; }
-}
-function saveLogoCache(cache) {
-  try { localStorage.setItem(LOGO_CACHE_KEY, JSON.stringify(cache)); } catch {}
-}
-function getCachedLogo(sym) {
-  const e = loadLogoCache()[(sym || '').toLowerCase()];
-  return e && Date.now() - e.ts < LOGO_TTL ? e.url : null;
-}
-function cacheLogo(sym, url) {
-  const c = loadLogoCache();
-  c[(sym || '').toLowerCase()] = { url, ts: Date.now() };
-  saveLogoCache(c);
-}
 async function fetchCoinGeckoLogo(sym) {
   const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(sym)}`;
   const controller = new AbortController();
@@ -1019,8 +1456,6 @@ async function ensureTokenLogos(tokens) {
 }
 
 function renderAssets(tokens) {
-  // M5-B: prefetch sparkline data CoinGecko 24h per kartu (non-blocking, HUKUM 12)
-  const _sparkPromises = tokens.map(t => fetchPriceHistory({ address: t.address, chainId: getNetworkById(get('networkId'))?.chainId }).catch(() => []));
   const assetList = $('#assetList');
   if (!assetList) return;
   const totalUsd = tokens.reduce((s, t) => s + holdingUsd(t), 0);
@@ -1032,41 +1467,7 @@ function renderAssets(tokens) {
   }
   // Show search if > 3 tokens
   $('#assetSearch').style.display = tokens.length > 3 ? '' : 'none';
-  // Token SVG logos — unique IDs per symbol to avoid gradient clash
-  const tokenLogos = {
-    eth: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="ethG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#ethG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="14" font-weight="800" font-family="Arial">Ξ</text></svg>`,
-    usdc: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="usdcG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#usdcG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">$</text></svg>`,
-    usdt: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="usdtG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#26A17B"/><stop offset="100%" stop-color="#3DD68C"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#usdtG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">₮</text></svg>`,
-    dai: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="daiG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F5AC37"/><stop offset="100%" stop-color="#F8C967"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#daiG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">D</text></svg>`,
-    wbtc: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="wbtcG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#wbtcG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">B</text></svg>`,
-    link: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="linkG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2A5ADA"/><stop offset="100%" stop-color="#5B8DEF"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#linkG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="13" font-weight="800" font-family="Arial">⬡</text></svg>`,
-    uni: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="uniG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF007A"/><stop offset="100%" stop-color="#FF4DA6"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#uniG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="13" font-weight="800" font-family="Arial">U</text></svg>`,
-    aave: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="aaveG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B6509E"/><stop offset="100%" stop-color="#2EBAC6"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#aaveG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="12" font-weight="800" font-family="Arial">AA</text></svg>`,
-    reth: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="rethG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E84142"/><stop offset="100%" stop-color="#FF6B6B"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#rethG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">rΞ</text></svg>`,
-    cbeth: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="cbethG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0052FF"/><stop offset="100%" stop-color="#4D8BFF"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#cbethG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">cb</text></svg>`,
-    wsteth: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="wstG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00A3FF"/><stop offset="100%" stop-color="#66C2FF"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#wstG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="10" font-weight="800" font-family="Arial">wΞ</text></svg>`,
-    frax: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="fraxG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000"/><stop offset="100%" stop-color="#333"/></linearGradient></defs><circle cx="16" cy="16" r="16" fill="url(#fraxG${i})"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="11" font-weight="800" font-family="Arial">FX</text></svg>`,
-    default: (i) => `<svg viewBox="0 0 32 32" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#FFD9C0"/><text x="16" y="21" text-anchor="middle" fill="#2D2A32" font-size="11" font-weight="800" font-family="Arial">?</text></svg>`
-  };
-  const getLogo = (sym, idx) => {
-    const s = (sym || '').toLowerCase();
-    const i = idx ?? 0;
-    if (s === 'eth' || s === 'ether') return tokenLogos.eth(i);
-    if (s === 'usdc') return tokenLogos.usdc(i);
-    if (s === 'usdt') return tokenLogos.usdt(i);
-    if (s === 'dai') return tokenLogos.dai(i);
-    if (s === 'wbtc') return tokenLogos.wbtc(i);
-    if (s === 'link') return tokenLogos.link(i);
-    if (s === 'uni') return tokenLogos.uni(i);
-    if (s === 'aave') return tokenLogos.aave(i);
-    if (s === 'reth') return tokenLogos.reth(i);
-    if (s === 'cbeth') return tokenLogos.cbeth(i);
-    if (s === 'wsteth') return tokenLogos.wsteth(i);
-    if (s === 'frax') return tokenLogos.frax(i);
-    const cached = getCachedLogo(sym);
-    if (cached) return `<img class="token-logo-img" data-idx="${i}" src="${escapeHtml(cached)}" alt="" loading="lazy">`;
-    return tokenLogos.default(i);
-  };
+  const getLogo = (sym) => tokenLogoHTML(sym, 32);
   // Store tokens for filtering
   window._assetTokens = tokens;
   const filter = ($('#tokenSearchInput')?.value || '').toLowerCase();
@@ -1082,31 +1483,20 @@ function renderAssets(tokens) {
         <div class="amount">${escapeHtml(fmtAmount(t.balance, t.decimals))}</div>
         <div class="usd">${t.usd ? escapeHtml(fmtUsd(holdingUsd(t))) : '—'}</div>
       </div>
-      <div class="asset-spark" id="assetSpark${i}" title="24h trend (CoinGecko)"></div>
       <div class="asset-arrow"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
     </div>`).join('');
   if (filtered.length === 0) {
     assetList.innerHTML = '<p class="small text-center">No tokens match your search.</p>';
   }
-  // M5-B: sparkline CoinGecko 24h per kartu aset (non-blocking, HUKUM 12 aman)
-  Promise.all((filtered.length ? filtered : tokens).map(async (t, i) => {
-    const el = document.getElementById('assetSpark' + i);
-    if (!el) return;
-    try {
-      const chainId = getNetworkById(get('networkId'))?.chainId;
-      const data = await fetchPriceHistory({ address: t.address, chainId });
-      if (!Array.isArray(data) || data.length < 4) { el.textContent = ''; return; }
-      const min = Math.min(...data), max = Math.max(...data), r = max - min || 1;
-      const w = 48, h = 16, pts = data.length;
-      const poly = data.map((v, k) => `${((k / (pts - 1)) * w).toFixed(1)},${(h - ((v - min) / r) * (h - 4) - 2).toFixed(1)}`).join(' ');
-      el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="vertical-align:middle"><polyline points="${poly}" fill="none" stroke="#10B981" stroke-width="1.5"/></svg>`;
-    } catch { el.textContent = ''; }
-  }));
+  // The per-asset 24h sparkline was removed from the coin list: it fetched a
+  // CoinGecko history call for every row, all of which failed CORS from a plain
+  // static host, so the list rendered a column of empty boxes. The detail modal
+  // (token-chart) still draws a real chart on demand.
   // CoinGecko images can 404/expire — fall back to the default SVG quietly.
   $all('.token-logo-img').forEach(img => {
     img.addEventListener('error', () => {
       const i = Number(img.dataset.idx || 0);
-      img.outerHTML = tokenLogos.default(i);
+      img.outerHTML = tokenLogoHTML('', 32, { remote: false });
     });
   });
   // Click handlers

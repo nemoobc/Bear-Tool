@@ -10,6 +10,15 @@ export function $(sel) { return document.querySelector(sel); }
 export function $all(sel) { return document.querySelectorAll(sel); }
 
 // ── XSS guard: escape any string before it enters innerHTML ──
+// One capital letter at the front. The network modal had a "MAINNET" section
+// header sitting directly above row badges reading "mainnet", so the same word
+// appeared in two cases inside one dialog. Values stay lower-case in the data
+// ("mainnet"/"testnet"); this is display-only and is never written back.
+export function titleCase(s) {
+  const t = String(s ?? '');
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
+
 export function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   return String(str)

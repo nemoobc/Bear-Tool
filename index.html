@@ -93,12 +93,12 @@
         <h1>Bear Tool</h1>
       </div>
       <div class="topbar-right">
-        <div class="network-pill" id="networkPill" title="Switch network">
+        <div class="network-pill" id="networkPill" role="button" tabindex="0" title="Switch network">
           <span class="net-logo"></span>
           <span class="label" id="networkName">Ethereum</span>
           <span>▾</span>
         </div>
-        <div class="account-pill" id="accountPill" title="Accounts">
+        <div class="account-pill" id="accountPill" role="button" tabindex="0" title="Accounts">
           <span>🐻</span>
           <span class="label" id="accountShort">Not connected</span>
         </div>
@@ -111,13 +111,13 @@
       <nav class="sidebar" id="sidebar" aria-label="Main navigation">
         <div class="nav-item active" data-view="dashboard" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span> <span data-i18n="nav.dashboard">Dashboard</span></div>
         <div class="nav-item" data-view="activity" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span> <span data-i18n="nav.activity">Activity</span></div>
-        <div class="nav-item" data-view="nft" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span> <span>NFT</span></div>        <div class="nav-item" data-view="dapps" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span> <span>DApps</span></div>
-        <div class="nav-divider"></div>
-        <div class="nav-item" data-view="eip7702" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> <span data-i18n="nav.eip7702">EIP-7702</span></div>
-        <div class="nav-item" data-view="approval" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span> <span data-i18n="nav.approval">Approvals</span></div>
-        <div class="nav-item" data-view="deploy" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span> <span>Tools</span></div>
-        <div class="nav-divider"></div>
         <div class="nav-item nav-item-highlight" data-view="swap" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span> <span>Swap</span></div>
+        <div class="nav-item" data-view="nft" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span> <span>NFT</span></div>
+        <div class="nav-item" data-view="dapps" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span> <span>DApps</span></div>
+        <div class="nav-divider"></div>
+        <div class="nav-item" data-view="deploy" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span> <span data-i18n="nav.deploy">Tools</span></div>
+        <div class="nav-item" data-view="approval" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span> <span data-i18n="nav.approval">Approvals</span></div>
+        <div class="nav-divider"></div>
         <div class="nav-item" data-view="settings" role="button" tabindex="0"><span class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> <span data-i18n="nav.settings">Settings</span></div>
       </nav>
 
@@ -142,7 +142,6 @@
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> <span data-i18n="dashboard.assets">My Assets</span></div>
             <div class="asset-search" id="assetSearch" style="display:none">
               <input type="text" class="input" id="tokenSearchInput" placeholder="Search tokens..." autocomplete="off">
-              <button class="btn btn-ghost btn-sm" id="btnAddCustomToken" title="Add custom token">+ Add Token</button>
             </div>
             <div class="asset-grid" id="assetList">
               <!-- skeleton loading -->
@@ -173,6 +172,9 @@
                   </div>
                 </div>
               </div>
+            </div>
+            <div class="asset-addtoken">
+              <button class="btn btn-secondary btn-block" id="btnAddCustomToken" title="Add a custom token by contract address">+ Add Token</button>
             </div>
           </div>
         </section>
@@ -219,7 +221,8 @@
                   <button class="pct-btn" data-pct="50">50%</button>
                   <button class="pct-btn" data-pct="75">75%</button>
                   <button class="pct-btn" data-pct="100">100%</button>
-                </div>
+                
+                  <p class="max-note" id="sendMaxNote" role="status" aria-live="polite"></p></div>
               </div>
               <div class="field">
                 <label>Gas speed</label>
@@ -249,7 +252,15 @@
               <div class="swap-field">
                 <label for="swapFrom">From</label>
                 <div class="swap-input-row">
-                  <select class="select swap-token-select" id="swapFrom"></select>
+                                    <div class="token-picker" data-picker="swapFrom">
+                    <select class="select swap-token-select token-picker-native" id="swapFrom" aria-label="from token"></select>
+                    <button type="button" class="token-picker-trigger" id="swapFromBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose from token">
+                      <span class="token-picker-logo" data-logo aria-hidden="true"></span>
+                      <span class="token-picker-symbol" data-symbol>—</span>
+                      <span class="token-picker-caret" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="token-picker-panel" id="swapFromPanel" role="listbox" hidden></div>
+                  </div>
                   <div class="swap-amount-wrap">
                     <input class="input" id="swapFromAmount" type="number" placeholder="0.0" min="0" step="any">
                     <button class="btn btn-ghost btn-sm swap-max-btn" id="btnSwapMax" title="Max amount">MAX</button>
@@ -263,7 +274,15 @@
               <div class="swap-field">
                 <label for="swapTo">To</label>
                 <div class="swap-input-row">
-                  <select class="select swap-token-select" id="swapTo"></select>
+                                    <div class="token-picker" data-picker="swapTo">
+                    <select class="select swap-token-select token-picker-native" id="swapTo" aria-label="to token"></select>
+                    <button type="button" class="token-picker-trigger" id="swapToBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose to token">
+                      <span class="token-picker-logo" data-logo aria-hidden="true"></span>
+                      <span class="token-picker-symbol" data-symbol>—</span>
+                      <span class="token-picker-caret" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="token-picker-panel" id="swapToPanel" role="listbox" hidden></div>
+                  </div>
                   <input class="input" id="swapToAmount" type="number" placeholder="0.0" readonly>
                 </div>
                 <div class="swap-balance" id="swapToBalance">Balance: 0</div>
@@ -302,30 +321,36 @@
         <!-- BRIDGE -->
         <section class="view" id="view-bridge">
           <div class="card">
-            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> Bridge</div>
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                <p class="max-note" id="swapMaxNote" role="status" aria-live="polite"></p><line x1="4" y1="22" x2="4" y2="15"/></svg> Bridge</div>
             <div class="bridge-card">
               <div class="bridge-chains">
                 <div class="bridge-chain-field">
                   <label for="bridgeFromChain">From</label>
-                  <select class="select bridge-chain-select" id="bridgeFromChain"></select>
+                  <div class="token-picker" data-picker="bridgeFromChain"><select class="select bridge-chain-select token-picker-native" id="bridgeFromChain" aria-label="source chain"></select><button type="button" class="token-picker-trigger" id="bridgeFromChainBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose source chain"><span class="token-picker-logo" data-logo aria-hidden="true"></span><span class="token-picker-symbol" data-symbol>—</span><span class="token-picker-caret" aria-hidden="true">▾</span></button><div class="token-picker-panel" id="bridgeFromChainPanel" role="listbox" hidden></div></div>
                 </div>
                 <div class="bridge-chain-arrow">→</div>
                 <div class="bridge-chain-field">
                   <label for="bridgeToChain">To</label>
-                  <select class="select bridge-chain-select" id="bridgeToChain"></select>
+                  <div class="token-picker" data-picker="bridgeToChain"><select class="select bridge-chain-select token-picker-native" id="bridgeToChain" aria-label="destination chain"></select><button type="button" class="token-picker-trigger" id="bridgeToChainBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose destination chain"><span class="token-picker-logo" data-logo aria-hidden="true"></span><span class="token-picker-symbol" data-symbol>—</span><span class="token-picker-caret" aria-hidden="true">▾</span></button><div class="token-picker-panel" id="bridgeToChainPanel" role="listbox" hidden></div></div>
                 </div>
               </div>
               <div class="field">
                 <label for="bridgeToken">Token</label>
-                <select class="select" id="bridgeToken"></select>
+                <div class="token-picker" data-picker="bridgeToken"><select class="select token-picker-native" id="bridgeToken" aria-label="token"></select><button type="button" class="token-picker-trigger" id="bridgeTokenBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose token"><span class="token-picker-logo" data-logo aria-hidden="true"></span><span class="token-picker-symbol" data-symbol>—</span><span class="token-picker-caret" aria-hidden="true">▾</span></button><div class="token-picker-panel" id="bridgeTokenPanel" role="listbox" hidden></div></div>
               </div>
               <div class="field">
                 <label for="bridgeAmount">Amount</label>
-                <input class="input" id="bridgeAmount" type="number" placeholder="0.0" min="0" step="any">
+                <div class="amount-row">
+                  <input class="input" id="bridgeAmount" type="number" placeholder="0.0" min="0" step="any">
+                  <button class="btn btn-ghost btn-sm swap-max-btn" type="button" id="btnBridgeMax"
+                          title="Use the largest amount that can actually be sent">MAX</button>
+                </div>
+                <p class="max-note" id="bridgeMaxNote" role="status" aria-live="polite"></p>
               </div>
               <div class="field" style="margin-bottom:8px">
                 <label for="bridgeRouterSelect">Bridge Router</label>
-                <select class="select" id="bridgeRouterSelect"><option value="auto">Auto (Best Route)</option><option value="lifi">LI.FI</option><option value="socket">Socket</option><option value="stargate">Stargate</option><option value="across">Across</option><option value="hop">Hop</option><option value="wormhole">Wormhole</option><option value="bungee">Bungee</option><option value="synapse">Synapse</option></select>
+                <div class="token-picker" data-picker="bridgeRouterSelect"><select class="select token-picker-native" id="bridgeRouterSelect" aria-label="bridge provider"><option value="auto">Auto (Best Route)</option><option value="lifi">LI.FI</option><option value="socket">Socket</option><option value="stargate">Stargate</option><option value="across">Across</option><option value="hop">Hop</option><option value="wormhole">Wormhole</option><option value="bungee">Bungee</option><option value="synapse">Synapse</option></select><button type="button" class="token-picker-trigger" id="bridgeRouterSelectBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose bridge provider"><span class="token-picker-logo" data-logo aria-hidden="true"></span><span class="token-picker-symbol" data-symbol>—</span><span class="token-picker-caret" aria-hidden="true">▾</span></button><div class="token-picker-panel" id="bridgeRouterSelectPanel" role="listbox" hidden></div></div>
               </div>
               <div id="bridgeRoute" class="bridge-route hidden"></div>
               <button class="btn btn-success btn-block btn-lg hidden" id="btnBridgeExec">Execute Bridge</button>
@@ -339,7 +364,79 @@
         </section>
 
         <!-- EIP-7702 -->
-        <section class="view" id="view-eip7702">
+        
+
+        <!-- APPROVAL -->
+        <section class="view" id="view-approval">
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> <span data-i18n="approval.title">Approval Manager</span></div>
+            <p class="small mb-8">Scan token approvals and revoke dangerous allowances. Unlimited approvals = risk.</p>
+            <div class="approval-controls">
+              <div class="field">
+                <label for="approvalMode">Scan mode</label>
+                <select class="select" id="approvalMode">
+                  <option value="popular">Popular tokens (19 built-in)</option>
+                  <option value="custom">Custom token address</option>
+                </select>
+              </div>
+              <div class="field hidden" id="approvalCustomWrap">
+                <label for="approvalCustom">Token address</label>
+                <input class="input" id="approvalCustom" placeholder="0x...">
+              </div>
+            </div>
+            <button class="btn btn-primary btn-block" id="btnApprovalScan">Scan Approvals</button>
+            <div id="approvalList" class="mt-16"></div>
+          </div>
+        </section>
+
+        <!-- DEPLOY -->
+        <section class="view" id="view-deploy">
+          <!-- ═══════════ OPENSEA ═══════════ -->
+          
+
+          <!-- ═══════════ WIZARD DEPLOY ═══════════ -->
+          <div class="card">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg> <span data-i18n="nav.deploy">Wizard Deploy</span></div>
+            <div class="deploy-card">
+              <div class="field">
+                <label for="deployStandard">Standard</label>
+                <select class="select" id="deployStandard">
+                  <option value="erc20">ERC-20 (fungible token)</option>
+                  <option value="erc721">ERC-721 (NFT)</option>
+                  <option value="erc1155">ERC-1155 (multi-token)</option>
+                </select>
+              </div>
+              <div class="deploy-preview" id="deployPreview">
+                <div class="deploy-preview-card">
+                  <span class="deploy-preview-icon">📄</span>
+                  <span class="deploy-preview-text">ERC-20 Token Contract</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="deployName">Name</label>
+                <input class="input" id="deployName" placeholder="My Token">
+              </div>
+              <div class="field">
+                <label for="deploySymbol">Symbol</label>
+                <input class="input" id="deploySymbol" placeholder="MTK">
+              </div>
+              <div id="deployExtra"></div>
+              <button class="btn btn-primary btn-block btn-lg" id="btnDeploy">Deploy Contract</button>
+              <div id="deployStatus" class="deploy-status hidden"></div>
+            </div>
+          </div>
+
+          <!-- ═══════════ BATCH CALL ═══════════ -->
+          
+
+          <!-- ═══════════ RESCUE ATOMIC ═══════════ -->
+          
+
+          <!-- ═══════════ CLAIM AIRDROP ═══════════ -->
+          
+        
+          <!-- EIP-7702 suite, moved here from the old separate view-eip7702 -->
+
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg> Helper Contracts <span class="helper-required">step 1</span></div>
             <p class="small mb-8">Batch Call, Rescue and Claim Airdrop all run through a helper contract that must exist on this chain first. Deploy it here (Batch), or let the flow deploy it for you — it is <strong>reused</strong> on later runs instead of redeployed.</p>
@@ -482,173 +579,78 @@
             <p class="small mb-8">Helper contracts deployed via EIP-7702 flows are saved here and reused to save gas. Remove an entry to force a fresh deploy.</p>
             <div id="deployedRegistryList" class="registry-list"></div>
           </div>
-        </section>
-
-        <!-- APPROVAL -->
-        <section class="view" id="view-approval">
-          <div class="card">
-            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> <span data-i18n="approval.title">Approval Manager</span></div>
-            <p class="small mb-8">Scan token approvals and revoke dangerous allowances. Unlimited approvals = risk.</p>
-            <div class="approval-controls">
-              <div class="field">
-                <label for="approvalMode">Scan mode</label>
-                <select class="select" id="approvalMode">
-                  <option value="popular">Popular tokens (19 built-in)</option>
-                  <option value="custom">Custom token address</option>
-                </select>
-              </div>
-              <div class="field hidden" id="approvalCustomWrap">
-                <label for="approvalCustom">Token address</label>
-                <input class="input" id="approvalCustom" placeholder="0x...">
-              </div>
-            </div>
-            <button class="btn btn-primary btn-block" id="btnApprovalScan">Scan Approvals</button>
-            <div id="approvalList" class="mt-16"></div>
-          </div>
-        </section>
-
-        <!-- DEPLOY -->
-        <section class="view" id="view-deploy">
-          <!-- ═══════════ OPENSEA ═══════════ -->
-          <div class="card">
+        <div class="card">
             <div class="card-title">🌊 OpenSea</div>
             <div class="opensea-panel" id="openSeaPanel">
-              <div class="field">
-                <label for="openSeaContract">Collection (link / slug / address)</label>
-                <input class="input" id="openSeaContract" placeholder="opensea.io/collection/… atau 0x… atau slug">
-              </div>
-              <div class="field">
-                <label for="openSeaWlAddress">Wallet for WL check</label>
-                <input class="input" id="openSeaWlAddress" placeholder="0x… (kosong = wallet aktif)">
-              </div>
-              <div class="field">
-                <label for="openSeaApiKey">OpenSea API key <span class="small">(wajib — API v2 membalas 401 tanpa key dari browser)</span></label>
-                <input class="input" id="openSeaApiKey" type="password" autocomplete="off" placeholder="kosongkan = pakai key tersimpan">
-              </div>
-              <div class="field">
-                <label for="openSeaTokenId">Token ID</label>
-                <input class="input" id="openSeaTokenId" type="number" placeholder="e.g. 1234">
-              </div>
-              <div class="field">
-                <label for="openSeaPrice">List price (ETH)</label>
-                <input class="input" id="openSeaPrice" type="number" step="0.001" placeholder="0.1">
-              </div>
-              <div class="opensea-bar">
-                <button class="btn btn-sm btn-primary" id="btnCheckWL">Check WL</button>
-                <button class="btn btn-sm btn-secondary" id="btnOpenSeaList">List NFT</button>
-                <button class="btn btn-sm btn-danger" id="btnOpenSeaCancel">Cancel Listing</button>
-                <button class="btn btn-sm btn-success" id="btnAcceptTopOffer">Accept Top Offer</button>
-              </div>
-              <div id="openSeaStatus" class="opensea-status" style="margin-top:8px"></div>
-            </div>
-          </div>
 
-          <!-- ═══════════ WIZARD DEPLOY ═══════════ -->
-          <div class="card">
-            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg> <span data-i18n="nav.deploy">Wizard Deploy</span></div>
-            <div class="deploy-card">
-              <div class="field">
-                <label for="deployStandard">Standard</label>
-                <select class="select" id="deployStandard">
-                  <option value="erc20">ERC-20 (fungible token)</option>
-                  <option value="erc721">ERC-721 (NFT)</option>
-                  <option value="erc1155">ERC-1155 (multi-token)</option>
-                </select>
-              </div>
-              <div class="deploy-preview" id="deployPreview">
-                <div class="deploy-preview-card">
-                  <span class="deploy-preview-icon">📄</span>
-                  <span class="deploy-preview-text">ERC-20 Token Contract</span>
+              <!-- Guide first. The API key is the one value a new user cannot
+                   infer, so it is step 1 rather than a footnote. -->
+              <details class="os-guide" id="openSeaGuide" open>
+                <summary><span aria-hidden="true">📖</span> <span data-i18n="os.guide.title">Mulai di sini &mdash; 3 langkah</span></summary>
+                <ol class="os-steps">
+
+                  <li>
+                    <div class="os-step-h"><span class="os-step-n">1</span> <span data-i18n="os.guide.s1">Buat API key gratis dari OpenSea</span></div>
+                    <p class="small dim" data-i18n="os.guide.s1d">Buka app.opensea.io/settings/api-keys &rarr; <em>My API Keys</em> &rarr; <em>Create</em>, lalu salin key-nya ke kotak di bawah. Key disimpan hanya di browser ini, tidak pernah dikirim ke server kami.</p>
+                    <div class="field">
+                      <label for="openSeaApiKey"><span data-i18n="os.guide.s1l">OpenSea API key</span> <span class="req" data-i18n="os.req">wajib</span></label>
+                      <div class="os-key-row">
+                        <input class="input" id="openSeaApiKey" type="password" autocomplete="off" placeholder="paste key…" aria-describedby="openSeaKeyState">
+                        <button class="btn btn-sm btn-secondary" type="button" id="btnRevealOsKey" aria-pressed="false" title="Show / hide key">👁</button>
+                        <button class="btn btn-sm btn-secondary" type="button" id="btnTestOsKey" data-i18n="os.guide.testkey">Test</button>
+                      </div>
+                      <p class="small dim" id="openSeaKeyState" role="status" data-i18n="os.guide.nokey">Belum ada key tersimpan.</p>
+                    </div>
+                  </li>
+
+                  <li>
+                    <div class="os-step-h"><span class="os-step-n">2</span> <span data-i18n="os.guide.s2">Tempel link koleksi, slug, atau alamat kontrak</span></div>
+                    <p class="small dim" data-i18n="os.guide.s2d">Salah satu saja cukup &mdash;_example_: <code>opensea.io/collection/cryptopunks</code> &middot; <code>cryptopunks</code> &middot; <code>0xBC4C…f13D</code></p>
+                    <div class="field">
+                      <label for="openSeaContract" data-i18n="os.field.collection">Koleksi (link / slug / address)</label>
+                      <input class="input" id="openSeaContract" placeholder="opensea.io/collection/… atau 0x… atau slug" spellcheck="false" autocomplete="off">
+                    </div>
+                  </li>
+
+                  <li>
+                    <div class="os-step-h"><span class="os-step-n">3</span> <span data-i18n="os.guide.s3">Masukkan wallet, lalu tekan tombol hijau</span></div>
+                    <p class="small dim" data-i18n="os.guide.s3d">Kosongkan saja kalau wallet sudah terhubung. Kalau wallet terdaftar sebagai holder, muncul harga ask + gas + total + daftar sinyal keamanan. Kalau tidak, tampil sebatas itu saja.</p>
+                    <div class="field">
+                      <label for="openSeaWlAddress" data-i18n="os.field.wladdr">Wallet untuk cek eligibility</label>
+                      <input class="input" id="openSeaWlAddress" placeholder="0x… (kosong = wallet aktif)" spellcheck="false" autocomplete="off">
+                    </div>
+                    <button class="btn btn-sm btn-primary" id="btnCheckWL" data-i18n="os.btn.check">✔ Cek eligibility</button>
+                  </li>
+
+                </ol>
+              </details>
+
+              <!-- Market actions are contract calls, not a check, so they sit
+                   behind a disclosure. Ids unchanged for the guarding suites. -->
+              <details class="os-advanced" id="openSeaAdvanced">
+                <summary data-i18n="os.adv.title">Jual / batalkan NFT (opsional)</summary>
+                <div class="field">
+                  <label for="openSeaTokenId" data-i18n="os.field.tokenid">Token ID</label>
+                  <input class="input" id="openSeaTokenId" type="number" placeholder="e.g. 1234">
                 </div>
-              </div>
-              <div class="field">
-                <label for="deployName">Name</label>
-                <input class="input" id="deployName" placeholder="My Token">
-              </div>
-              <div class="field">
-                <label for="deploySymbol">Symbol</label>
-                <input class="input" id="deploySymbol" placeholder="MTK">
-              </div>
-              <div id="deployExtra"></div>
-              <button class="btn btn-primary btn-block btn-lg" id="btnDeploy">Deploy Contract</button>
-              <div id="deployStatus" class="deploy-status hidden"></div>
+                <div class="field">
+                  <label for="openSeaPrice" data-i18n="os.field.listprice">List price (ETH)</label>
+                  <input class="input" id="openSeaPrice" type="number" step="0.001" placeholder="0.1">
+                </div>
+                <div class="opensea-bar">
+                  <button class="btn btn-sm btn-secondary" id="btnOpenSeaList" data-i18n="os.btn.list">List NFT</button>
+                  <button class="btn btn-sm btn-danger" id="btnOpenSeaCancel" data-i18n="os.btn.cancel">Cancel Listing</button>
+                  <button class="btn btn-sm btn-success" id="btnAcceptTopOffer" data-i18n="os.btn.accept">Accept Top Offer</button>
+                </div>
+              </details>
+
+              <div id="openSeaStatus" class="opensea-status" style="margin-top:8px" role="status" aria-live="polite"></div>
             </div>
           </div>
 
-          <!-- ═══════════ BATCH CALL ═══════════ -->
-          <div class="card">
-            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg> <span data-i18n="eip7702.batch">Batch Call</span> (atomic)</div>
-            <div class="batch-queue" id="batchList2"></div>
-            <button class="btn btn-ghost mb-8" id="btnBatchAdd2">+ Add action</button>
-            <button class="btn btn-primary btn-block" id="btnBatchExecute2">Execute Batch</button>
-          </div>
-
-          <!-- ═══════════ RESCUE ATOMIC ═══════════ -->
-          <div class="card">
-            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> <span data-i18n="eip7702.rescue">Rescue Atomic</span></div>
-            <p class="small mb-8">Rescue ETH/ERC20/ERC721 from a locked wallet. Deploy rescue contract once, target signs authorization, sponsor pays gas.</p>
-            <div class="field">
-              <label for="rescueType2">Asset type</label>
-              <select class="input" id="rescueType2">
-                <option value="eth" selected>ETH</option>
-                <option value="erc20">ERC-20</option>
-                <option value="erc721">ERC-721</option>
-              </select>
-            </div>
-            <div class="field hidden" id="rescueTokenWrap2">
-              <label for="rescueTokenAddr2">Token address</label>
-              <input class="input" id="rescueTokenAddr2" placeholder="0x...">
-            </div>
-            <div class="field hidden" id="rescueTokenIdWrap2">
-              <label for="rescueTokenId2">Token ID</label>
-              <input class="input" id="rescueTokenId2" placeholder="0 or id">
-            </div>
-            <div class="field">
-              <label for="rescueSponsorKey2">Sponsor private key</label>
-              <div class="input-group">
-                <input class="input" type="password" id="rescueSponsorKey2" placeholder="0x..." autocomplete="off">
-                <button type="button" class="btn btn-ghost btn-sm" id="btnRescueKeyToggle2" aria-label="Show sponsor key"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-              </div>
-            </div>
-            <div class="field">
-              <label for="rescueTarget2">Locked wallet address</label>
-              <input class="input" id="rescueTarget2" placeholder="0x...">
-            </div>
-            <div class="field">
-              <label for="rescueSafe2">SAFE destination address</label>
-              <input class="input" id="rescueSafe2" placeholder="0x...">
-            </div>
-            <button class="btn btn-secondary btn-block" id="btnRescue2">Rescue Assets</button>
-          </div>
-
-          <!-- ═══════════ CLAIM AIRDROP ═══════════ -->
-          <div class="card">
-            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg> <span data-i18n="eip7702.claim">Claim Airdrop</span></div>
-            <div class="field">
-              <label for="claimContract2">Claim contract address</label>
-              <input class="input" id="claimContract2" placeholder="0x...">
-            </div>
-            <div class="field">
-              <label for="claimData2">Claim data (hex)</label>
-              <input class="input" id="claimData2" placeholder="0x...">
-            </div>
-            <div class="field">
-              <label for="claimToken2">Token address</label>
-              <input class="input" id="claimToken2" placeholder="0x...">
-            </div>
-            <div class="field">
-              <label for="claimSafe2">Forward to SAFE</label>
-              <input class="input" id="claimSafe2" placeholder="0x...">
-            </div>
-            <div class="field">
-              <label for="claimSponsorKey2">Sponsor private key</label>
-              <div class="input-group">
-                <input class="input" type="password" id="claimSponsorKey2" placeholder="0x..." autocomplete="off">
-                <button type="button" class="btn btn-ghost btn-sm" id="btnClaimKeyToggle2" aria-label="Show sponsor key"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-              </div>
-            </div>
-            <button class="btn btn-success btn-block" id="btnClaim2">Claim + Forward</button>
-          </div>
+          <!-- OpenSea market actions: listing, cancelling and accepting an offer
+               are contract calls against the wallet, so they live with the Tools
+               view rather than the gallery. -->
         </section>
 
         <!-- ACTIVITY -->
@@ -672,6 +674,7 @@
               </div>
             </div>
           </div>
+        
         </section>
 
         <!-- DAPPS BROWSER -->
@@ -736,6 +739,8 @@
             </div>
             <button class="btn btn-secondary" id="btnSaveSettings">Save Settings</button>
             <hr class="mt-16 mb-16">
+            <div id="securityCenter"></div>
+            <hr class="mt-16 mb-16">
             <button class="btn btn-danger" id="btnClearData"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Clear all data</button>
           </div>
         </section>
@@ -744,14 +749,9 @@
     </div><!-- end .layout -->
 
     <!-- ═══════════ MOBILE BOTTOM NAV (visible ≤768px) ═══════════ -->
-    <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation">
-      <button class="mobile-nav-item active" data-view="dashboard"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span>Home</button>
-      <button class="mobile-nav-item" data-view="activity"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>Activity</button>
-      <button class="mobile-nav-item" data-view="swap"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>Swap</button>
-      <button class="mobile-nav-item" data-view="nft"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>NFT</button>
-      <button class="mobile-nav-item" data-view="dapps"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>DApps</button>
-      <button class="mobile-nav-item" data-view="settings"><span class="icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>More</button>
-    </nav>
+    <!-- Built by syncMobileNav() in app.js from the desktop sidebar, so the two
+         can never drift again. Do not hand-write items here. -->
+    <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation"></nav>
   </div>
 
   <!-- ═══════════ MODAL (generic) ═══════════ -->

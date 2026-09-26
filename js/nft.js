@@ -101,9 +101,22 @@ export async function loadNfts() {
           </div>
         </div>`).join('');
     } else {
-      grid.innerHTML = '<p class="small text-center">Not Found</p>';
+      // .nft-empty spans the grid and centres on both axes — see the CSS note.
+      // The gallery is empty for two very different reasons, so say which:
+      // the wallet holds no NFT here, versus the network cannot be enumerated.
+      grid.innerHTML =
+        '<div class="nft-empty" role="status">' +
+          '<div class="nft-empty-title">NFT not found</div>' +
+          '<div class="nft-empty-hint">This wallet holds no NFT on the current network. ' +
+          'Switch network, or import the collection contract below.</div>' +
+        '</div>';
     }
   } catch {
-    grid.innerHTML = '<p class="small text-center">NFT gallery unavailable on this network.</p>';
+    grid.innerHTML =
+      '<div class="nft-empty" role="status">' +
+        '<div class="nft-empty-title">NFT gallery unavailable</div>' +
+        '<div class="nft-empty-hint">This network cannot be enumerated for NFTs. ' +
+        'Try Ethereum, Base or Polygon.</div>' +
+      '</div>';
   }
 }
