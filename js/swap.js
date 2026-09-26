@@ -486,7 +486,7 @@ export async function doSwap() {
     const ok = await confirmTx({
       title: 'MAINNET SWAP!',
       rows: [{ k: 'From', v: `${amt} ${from}` }, { k: 'To', v: to }, { k: 'Network', v: net.name }, { k: 'Route', v: quote.source || '?' }],
-      confirmText: 'Swap', danger: true, requireType: 'YA'
+      confirmText: 'Swap', danger: true
     });
     if (!ok) return;
   }

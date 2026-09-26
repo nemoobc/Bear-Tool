@@ -8,8 +8,7 @@
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider,
          addCustomNetwork, removeCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
-         addRpcOverride, applyRpcOverrides, providerEndpoint,
-         getRpcOverrides } from './network.js';
+         applyRpcOverrides, providerEndpoint } from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
@@ -50,9 +49,22 @@ window.addEventListener('DOMContentLoaded', () => {
   // provider, or the wallet quietly talks to the public endpoint.
   try { applyRpcOverrides(); } catch { /* a corrupt store must not block boot */ }
   syncMobileNav();
-  bindNav();
-  bindTopbar();
-  bindViews();
+  // The intro is dismissed FIRST, before anything that can throw.
+  //
+  // A single null.addEventListener in bindViews() once killed the entire module:
+  // the TypeError aborted app.js, so runIntro() was never reached, its 2s safety
+  // timer was never armed, and the splash stayed on top at z-index 9999 eating
+  // every click. The app looked fine in the DOM and was completely unusable —
+  // the worst possible failure, because nothing on screen says anything is
+  // wrong.
+  //
+  // So the order matters, and a bind that throws must not be able to strand
+  // anyone here. The CSS carries a matching last-resort animation, so even a
+  // total failure to load this module still frees the screen.
+  try { armIntroDismissal(); } catch { /* the CSS animation is the backstop */ }
+  try { bindNav(); } catch (e) { console.error('[BearTool] nav binding failed:', e); }
+  try { bindTopbar(); } catch (e) { console.error('[BearTool] topbar binding failed:', e); }
+  try { bindViews(); } catch (e) { console.error('[BearTool] view binding failed:', e); }
   initTheme();
   // The provider must exist before any page can ask, and it answers "locked"
   // on its own until the user signs in — so installing it early is safe.
@@ -481,10 +493,7 @@ function refreshView(view) {
   if (view === 'nft') loadNfts();
   if (view === 'activity') renderActivity();
   if (view === 'dapps') renderDapps($('#dappsContainer'));
-  if (view === 'settings') {
-    renderSecurityCenter($('#securityCenter'));
-    paintActiveRpc();
-  }
+  if (view === 'settings') renderSecurityCenter($('#securityCenter'));
 }
 
 // ── dApp bridge ──────────────────────────────────────────────────────────
@@ -509,7 +518,6 @@ function installBridge() {
             { k: 'Gets', v: method === 'eth_requestAccounts' ? 'your address (read-only)' : String(method) },
           ],
           confirmText: 'Connect',
-          requireType: null,
         });
       }
       if (kind === 'permission') {
@@ -1090,13 +1098,60 @@ function showNetworkModal() {
       ${nets.filter(n => n.type === 'mainnet').map(n => netRow(n)).join('')}
     </div>
     <div id="netListTestnet">
-      <div class="mb-8 mt-16"><span class="badge badge-testnet">TESTNET</span></div>
+      <div class="mb-8 mt-16">
+        <span class="badge badge-testnet">TESTNET</span>
+      </div>
+      <!-- The testnet switch lives here, not in Settings. Settings is for what a
+           person changes about the app; this is about which chains are on
+           screen, so it belongs beside the list it filters. It also used to sit
+           in Settings where it only took effect on Save - it went green, the knob
+           moved, the setting stayed true and all six testnets stayed listed. A
+           control that visibly changes and changes nothing.
+
+           Deliberately a sibling of the .mb-8 badge, not a child: the search
+           box hides .mb-8 when no row matches, and a filter you cannot reach
+           once you have searched is a filter you cannot turn back off. -->
+      <label class="net-filter">
+        <input type="checkbox" id="netShowTestnet" ${get('settings').testnet !== false ? 'checked' : ''}>
+        <span data-i18n="net.showTestnet">Show testnets</span>
+      </label>
       ${nets.filter(n => n.type === 'testnet').map(n => netRow(n)).join('')}
     </div>
     <hr class="mt-16 mb-16">
     <button class="btn btn-secondary btn-block" id="addNetBtn">+ Add Custom Network</button>
   `;
   openModal(html);
+  applyTranslations();
+
+  // Applies the moment it is flipped. Hiding testnets can strand the app on a
+  // chain that nothing lists any more, so if that is where we are standing, the
+  // move to Ethereum happens first and the toast says so.
+  $('#netShowTestnet')?.addEventListener('change', (e) => {
+    const on = !!e.target.checked;
+    const settings = get('settings');
+    settings.testnet = on;
+    set('settings', { ...settings });
+    saveSettings();
+
+    if (!on) {
+      // Look the active chain up in the UNFILTERED list. getNetworkById() and
+      // getAllNetworks() already hide testnets the moment this is off, so they
+      // would report the active chain as Ethereum and skip the move.
+      const active = [...NETWORKS, ...getCustomNetworks()].find((n) => n.id === get('networkId'));
+      if (active?.type === 'testnet') {
+        set('networkId', 'ethereum');
+        localStorage.setItem('bear.networkId', 'ethereum');
+        updateTopbar();
+        if (get('address')) loadDashboard();
+        toast('Testnets hidden — moved to Ethereum', 'info');
+        showNetworkModal();
+        return;
+      }
+    }
+    toast(on ? 'Testnets shown' : 'Testnets hidden', 'success');
+    showNetworkModal();
+  });
+
   // network search
   // Remove a custom network. Never the active one without moving off it first:
   // deleting the chain you are standing on would leave the app pointing at a
@@ -1268,7 +1323,15 @@ function showAddNetworkModal() {
   $('#cnSave').onclick = async () => {
     if (!picked) return toast('Pick a chain first', 'error');
     const rpc = $('#cnRpc').value.trim();
-    if (!/^https:\/\//.test(rpc)) return toast('RPC must be an https:// URL', 'error');
+    // The shared rule, not an inline /^https:\/\// test. That regex was here and
+    // it was wrong twice: it refused http://localhost:8545, so a node on this
+    // same machine — a perfectly normal thing to point a wallet at — was
+    // impossible to add, while it waved through anything else beginning with
+    // https://. isSafeRpcUrl is the tested version of the same question and it
+    // allows loopback deliberately, and only loopback, over http.
+    if (!isSafeRpcUrl(rpc)) {
+      return toast('Use https:// — or http:// for a local node (localhost / 127.0.0.1)', 'error');
+    }
     // Prove the endpoint really is the chain that was picked before saving it.
     const btn = $('#cnSave');
     btn.disabled = true; btn.textContent = 'Checking RPC…';
@@ -1825,16 +1888,63 @@ function bindViews() {
   bindEip7702ToolsEvents();
   bindDeployEvents();
 
-  $('#approvalMode').addEventListener('change', () => {
-    $('#approvalCustomWrap').classList.toggle('hidden', $('#approvalMode').value !== 'custom');
-  });
-  $('#btnApprovalScan').addEventListener('click', scanApprovals);
+    // Anything that binds one element must tolerate its absence. A single
+    // null.addEventListener threw here once, and because this runs during module
+    // evaluation it aborted the whole of app.js: no provider, no nav, and the
+    // splash left sitting on top at z-index 9999 eating every click. The page
+    // looked alive in the DOM and was completely unusable. One missing element
+    // must never be able to take the wallet down.
+    const on = (sel, ev, fn) => $(sel)?.addEventListener(ev, fn);
 
-  $('#btnSaveSettings').addEventListener('click', saveSettingsHandler);
-  $('#btnClearData').addEventListener('click', clearAllData);
-  const testnetEl = $('#setTestnet');
-  if (testnetEl) testnetEl.checked = get('settings').testnet !== false;
-  // Auto-lock is a dropdown now — reflect the saved value (not the HTML default)
+    on('#approvalMode', 'change', () => {
+      on('#approvalCustomWrap')?.classList.toggle('hidden', $('#approvalMode').value !== 'custom');
+    });
+    on('#btnApprovalScan', 'click', scanApprovals);
+
+  // There is no Save button on this page any more, and every control here is
+  // applied the moment it is touched. That is not a preference: the Save button
+  // used to be the only way to apply the language and the auto-lock, so when the
+  // page was reorganised and the button went with it, those two became dead
+  // controls — a dropdown that changed nothing on screen. A form field is
+  // saved; a preference in a wallet is not a form.
+  $('#setLang')?.addEventListener('change', (e) => {
+    setLang(e.target.value);
+    applyTranslations();
+    const s = get('settings');
+    s.lang = e.target.value;
+    set('settings', { ...s });
+    saveSettings();
+    // The bottom bar is generated, so it needs the new labels rebuilt, not just
+    // the static ones rescanned.
+    syncMobileNav();
+  });
+  $('#setCurrency')?.addEventListener('change', (e) => {
+    const s = get('settings');
+    s.currency = e.target.value;
+    set('settings', { ...s });
+    saveSettings();
+    // Prices are cached against a currency, so the old ones are now wrong.
+    try { localStorage.removeItem('bear.priceCache'); } catch { /* private mode */ }
+    if (get('address')) loadDashboard();
+  });
+  $('#setAutoLock')?.addEventListener('change', (e) => {
+    const minutes = Number(e.target.value);
+    const s = get('settings');
+    s.autoLock = Number.isFinite(minutes) ? minutes : 5;
+    set('settings', { ...s });
+    saveSettings();
+    startAutoLock();
+    toast('Auto-lock set to ' + (minutes === 0 ? 'never' : minutes + ' min'), 'success');
+  });
+  // One delete, in the Safety group, where the consequences are spelled out
+  // beside it. It used to also sit at the very bottom of the page below the
+  // whole Security Center, so a destructive action appeared twice on one screen
+  // and the second copy was a long scroll past six other sections.
+  $('#btnClearAllData')?.addEventListener('click', clearAllData);
+  // The testnet switch and the custom RPC field are no longer on this page.
+  // Their handlers went with them rather than being left as dead code: a
+  // control wired to a field that is not there is a claim the app cannot keep.
+  // Auto-lock is a dropdown — reflect the saved value (not the HTML default)
   const autoLockEl = $('#setAutoLock');
   if (autoLockEl) autoLockEl.value = String(get('settings').autoLock ?? 5);
 }
@@ -2049,7 +2159,6 @@ async function reconnectRpc() {
       }
     }
     updateTopbar();
-    paintActiveRpc();
     if (get('address')) loadDashboard();
     // A row left 'pending' by a closed tab must be settled against the chain
     // before the history is shown, or a finished transfer reads as in-flight
@@ -2060,70 +2169,6 @@ async function reconnectRpc() {
     }).catch(() => { /* the honest state is 'pending', not a guess */ });
   } catch (e) {
     toast('Could not connect to the new RPC: ' + (e?.message || e), 'error');
-  }
-}
-
-/**
- * Show which node the wallet is actually talking to.
- *
- * A provider whose origin is invisible is a provider nobody can debug: a
- * silent substitution to a public endpoint is what made a funded fork look
- * empty, and the only symptom was a transaction that would not go through.
- */
-function paintActiveRpc() {
-  const el = $('#setRpcActive');
-  if (!el) return;
-  const net = getNetworkById(get('networkId'));
-  const url = providerEndpoint(get('provider'));
-  if (!url) { el.textContent = ''; return; }
-  const isCustom = (getRpcOverrides()[net?.id] || []).includes(url);
-  el.textContent = `Using: ${url}${isCustom ? ' (your custom RPC)' : ''} — ${net?.name || get('networkId')}`;
-}
-
-async function saveSettingsHandler() {
-  const settings = get('settings');
-  settings.currency = $('#setCurrency').value;
-  settings.lang = $('#setLang').value;
-  const rawAutoLock = Number($('#setAutoLock').value);
-  settings.autoLock = Number.isFinite(rawAutoLock) ? rawAutoLock : 5;
-  const testnetEl = $('#setTestnet');
-  if (testnetEl) settings.testnet = testnetEl.checked;
-  const rpc = $('#setRpc').value.trim();
-  if (rpc) {
-    if (!isSafeRpcUrl(rpc)) {
-      return toast('Use https:// — or http:// for a local node (localhost / 127.0.0.1)', 'error');
-    }
-    const net = getNetworkById(get('networkId'));
-    if (net) {
-      // Persist, then apply. Unshifting onto the in-memory list alone looked
-      // like it worked and was gone after the next reload.
-      addRpcOverride(net.id, rpc);
-      net.rpc = [rpc, ...net.rpc.filter((u) => u !== rpc)];
-      // Adding an RPC has to actually take effect, or the toast is a lie:
-      // "Custom RPC added for Ethereum" appeared while the balance stayed at
-      // zero, because the provider was built against the previous URL and
-      // nothing rebuilt it.
-      await reconnectRpc();
-      toast('Custom RPC added for ' + net.name, 'success');
-    }
-  }
-  set('settings', { ...settings });
-  saveSettings();
-  setLang(settings.lang);
-  toast('Settings saved! 🐻', 'success');
-  startAutoLock();
-  // testnet toggle: if the active network is a testnet and testnets are now
-  // hidden, fall back to Ethereum so the app never sits on an invisible chain.
-  // NOTE: look up the active chain in the UNFILTERED list — getNetworkById()
-  // and getAllNetworks() already hide testnets once settings.testnet is false,
-  // so they would report the active chain as Ethereum and skip the fallback.
-  if (!settings.testnet) {
-    const activeNet = [...NETWORKS, ...getCustomNetworks()].find(n => n.id === get('networkId'));
-    if (activeNet?.type === 'testnet') {
-      set('networkId', 'ethereum');
-      updateTopbar();
-      if (get('address')) loadDashboard();
-    }
   }
 }
 

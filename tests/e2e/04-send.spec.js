@@ -58,19 +58,15 @@ test.describe('Send', () => {
     await page.fill('#sendAmount', '0.01');
     await appClick(page, '#btnSend');
     await expect(page.locator('#modalOverlay')).toContainText(/ADDRESS POISONING/i);
-    // The typed gate is enforced app-wide (TYPED_CONFIRMATION in js/ui.js). This
-    // used to assert the input never appeared, which described a switch that had
-    // been turned off — a mainnet send was one click. Now it asserts the gate
-    // itself: the input is there, the confirm button is locked, and only the
-    // exact text releases it.
-    const typed = page.locator('#confirmTypeInput');
-    await expect(typed).toBeVisible();
+    // The dialog is Cancel and a button that names the action. There is no
+    // "type YA" field any more: it measured typing rather than intent, and every
+    // irreversible action already asks twice - once to approve, once to sign -
+    // with the decoded details on screen both times.
+    await expect(page.locator('#confirmTypeInput')).toHaveCount(0);
     const confirm = page.locator('#confirmYes');
-    await expect(confirm).toBeDisabled();
-    await typed.fill('NOPE');
-    await expect(confirm).toBeDisabled();
-    await typed.fill('YA');
     await expect(confirm).toBeEnabled();
+    await expect(confirm).toBeVisible();
+    await expect(page.locator('#confirmNo')).toBeVisible();
   });
 
   test('sending to a token contract triggers destination warning', async ({ page }) => {

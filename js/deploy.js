@@ -123,7 +123,6 @@ export async function doDeploy() {
       rows: [...plan.summary, { k: 'Network', v: net.name }, { k: 'Est. cost', v: costLabel }],
       confirmText: 'Deploy',
       danger: net.type === 'mainnet',
-      requireType: net.type === 'mainnet' ? 'YA' : null
     });
     if (!ok) { setDeployStatus('Deploy cancelled.'); return; }
 

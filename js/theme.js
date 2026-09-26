@@ -8,6 +8,36 @@
 // Intro duration. 1.5s — fast enough to not annoy, slow enough to see logo.
 export const INTRO_MS = 1500;
 
+/**
+ * Make sure the splash can never trap anyone.
+ *
+ * The splash is a full-screen fixed overlay at z-index 9999. If anything throws
+ * before its dismissal is armed, the overlay stays and every click in the app
+ * goes to it — the page looks alive in the DOM and is completely unusable, with
+ * nothing on screen to say why. That is not hypothetical: one null
+ * addEventListener in a bind function aborted app.js, runIntro was never
+ * reached, and the app bricked itself.
+ *
+ * So this is called before any binding, and it arms its own timer plus the
+ * click/touch/keyboard handlers. A matching CSS animation is the final backstop
+ * for the case where this module never loads at all.
+ */
+export function armIntroDismissal(finish) {
+  const intro = document.getElementById('intro');
+  if (!intro || typeof finish !== 'function') return false;
+  if (intro.dataset.dismissArmed === '1') return true;
+  intro.dataset.dismissArmed = '1';
+
+  setTimeout(() => finish(false), 2000);
+  intro.addEventListener('click', () => finish(true));
+  intro.addEventListener('touchstart', () => finish(true), { once: true });
+  intro.setAttribute('tabindex', '0');
+  intro.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') finish(true);
+  });
+  return true;
+}
+
 export function runIntro(onDone) {
   const intro = document.getElementById('intro');
   const title = document.getElementById('introTitle');
@@ -25,24 +55,15 @@ export function runIntro(onDone) {
     }
     if (onDone) onDone();
   };
+  armIntroDismissal(finish);
 
   // ABSOLUTE SAFETY: no matter what, call onDone within 2s
-  const safetyTimer = setTimeout(() => finish(false), 2000);
+  armIntroDismissal(finish);
 
   // reduced motion: skip everything immediately
   const prefersReduced = typeof matchMedia !== 'undefined' &&
     matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (prefersReduced) { clearTimeout(safetyTimer); return finish(true); }
-
-  // skip on click/touch/keyboard anywhere on intro
-  if (intro) {
-    intro.addEventListener('click', () => { clearTimeout(safetyTimer); finish(true); });
-    intro.addEventListener('touchstart', () => { clearTimeout(safetyTimer); finish(true); }, { once: true });
-    intro.setAttribute('tabindex', '0');
-    intro.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { clearTimeout(safetyTimer); finish(true); }
-    });
-  }
+  if (prefersReduced) { return finish(true); }
 
   // letter-by-letter title
   const text = 'BEAR TOOL';

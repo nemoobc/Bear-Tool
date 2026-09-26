@@ -220,7 +220,7 @@ async function executeBatch() {
     const ok = await confirmTx({
       title: 'BATCH CALL ON MAINNET!',
       rows: [{ k: 'Calls', v: String(valid.length) }, { k: 'Network', v: net.name }],
-      confirmText: 'Execute', danger: true, requireType: 'EXECUTE'
+      confirmText: 'Execute', danger: true
     });
     if (!ok) return;
   }
@@ -305,7 +305,7 @@ async function executeRescue() {
         { k: 'Token type', v: type.toUpperCase() },
         { k: 'Network', v: net.name }
       ],
-      confirmText: 'Rescue', danger: true, requireType: 'RESCUE'
+      confirmText: 'Rescue', danger: true
     });
     if (!ok) return;
   }
@@ -396,7 +396,7 @@ async function executeClaim() {
         { k: 'Forward to', v: wallet.shortAddress(safe) },
         { k: 'Network', v: net.name }
       ],
-      confirmText: 'Claim', danger: true, requireType: 'CLAIM'
+      confirmText: 'Claim', danger: true
     });
     if (!ok) return;
   }
@@ -684,7 +684,7 @@ export async function revokeDelegation() {
       { k: 'Current delegation', v: delegate },
       { k: 'Action', v: 'Revoke (back to plain EOA)' }
     ],
-    confirmText: 'Revoke', danger: true, requireType: 'REVOKE'
+    confirmText: 'Revoke', danger: true
   });
   if (!ok) return;
 

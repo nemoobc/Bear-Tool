@@ -39,6 +39,29 @@ const SEL = {
 
 const SEL_NAMES = Object.fromEntries(Object.entries(SEL).map(([k, v]) => [v, k]));
 
+/**
+ * Plain transfers: recognised, and deliberately NOT a warning.
+ *
+ * The table above is scoped to approval-shaped calls because those are the ones
+ * that cost people money. But a plain ERC-20 transfer was missing from it, so
+ * the single most common token action in the app - sending a token - came back
+ * as "Unrecognised function" at elevated risk. Measured on a real transfer on
+ * the mainnet fork: status 1, 1250 USDC delivered, and the guard called it
+ * unreadable.
+ *
+ * That is the failure mode of a warning that fires on ordinary work: people
+ * learn to wave it through, and then it says nothing when it matters. Naming
+ * these costs nothing and keeps "unrecognised" meaning something.
+ */
+const SEL_PLAIN = {
+  transfer: '0xa9059cbb',              // transfer(address,uint256)
+  transferWithPermit: '0x36c78516',    // some wrappers
+  safeTransferFrom4: '0xb88d4fde',     // safeTransferFrom(address,address,uint256,bytes)
+  mint: '0x40c10f19',                  // mint(uint256)
+  burn: '0x42966c68',                  // burn(uint256)
+};
+const SEL_PLAIN_NAMES = Object.fromEntries(Object.entries(SEL_PLAIN).map(([k, v]) => [v, k]));
+
 // ═══ URL secret hygiene ═══════════════════════════════════════════════════
 
 // Words that only appear in a URL when someone put a secret in it.
@@ -218,7 +241,8 @@ export function selectorOf(data) {
 }
 
 export function selectorName(data) {
-  return SEL_NAMES[selectorOf(data)] || null;
+  const sel = selectorOf(data);
+  return SEL_NAMES[sel] || SEL_PLAIN_NAMES[sel] || null;
 }
 
 // ═══ transaction scan ═════════════════════════════════════════════════════
@@ -278,7 +302,14 @@ export function scanTransaction(tx = {}) {
       add('warn', 'Transferring a token you may not own',
         'This pulls a token out of an address other than your own. If you are approving someone else’s withdrawal, that is a custody decision, not a payment.');
     }
-    if (!name) {
+    // A recognised plain transfer is worth stating plainly, and is not a finding:
+    // it moves only what the user typed, to the address they typed.
+    const plain = SEL_PLAIN_NAMES[sel];
+    if (!name && plain) {
+      add('info', 'Token transfer',
+        `This is ${plain} — it moves tokens to one address and approves nothing.`);
+    }
+    if (!name && !plain) {
       add('warn', 'Unrecognised function',
         `Selector ${sel} is not one this wallet can name. The full calldata is shown below — read it, or refuse it. A call you cannot decode is a call you should not sign on trust.`);
     }

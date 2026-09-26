@@ -225,36 +225,30 @@ export function animateValue(el, target, { duration = 800, formatter = v => v } 
 }
 
 // ── confirm dialog with bear ──
-// Typed confirmation ("type YA to confirm") is ENABLED app-wide.
+// Cancel, and a button that says what it does. That is the whole dialog.
 //
-// It was switched off, and every call site still passed requireType while the
-// switch quietly discarded it — so a mainnet send showed a one-click "I
-// understand, send" for an irreversible transfer of the entire balance. Found by
-// driving a real mainnet-fork transaction in a browser: the dialog rendered no
-// input at all and the confirm button was never disabled.
+// There used to be a second gate here: "type YA to confirm", enabled app-wide
+// across seventeen call sites. It was put there for a real reason - a silent
+// switch had once made a mainnet transfer of the entire balance a single click -
+// but it is the wrong shape of protection. Every irreversible action in this app
+// already asks twice, once to approve and once to sign, and both dialogs show
+// the decoded details. Adding a third step that only tests whether the user can
+// type a word trains people to type the word: it measures typing, not intent, and
+// it makes the safe paths feel as heavy as the dangerous ones.
 //
-// The switch stays, because it is the one place that decides this, but it now
-// guards rather than disables: a caller that asks for a typed gate gets one,
-// and the confirm button stays disabled until the text matches.
-const TYPED_CONFIRMATION = true;
-
-export function confirmTx({ title, rows, confirmText = 'Confirm', danger = false, requireType = null }) {
+// Danger is still expressed - the bear's question is prefixed, the button turns
+// red, and the rows say what is about to happen. What is gone is the puzzle.
+export function confirmTx({ title, rows, confirmText = 'Confirm', danger = false }) {
   return new Promise((resolve) => {
     const rowsHtml = rows.map(r =>
       `<div class="row"><span class="k">${escapeHtml(r.k)}</span><span class="v">${escapeHtml(r.v)}</span></div>`
     ).join('');
-    const gate = TYPED_CONFIRMATION ? requireType : null;
-    const typeInput = gate
-      ? `<div class="field mt-8"><label>Type <strong>${escapeHtml(gate)}</strong> to confirm</label>
-         <input class="input" id="confirmTypeInput" placeholder="${escapeHtml(gate)}"></div>`
-      : '';
     openModal(`
       <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
       <div class="tx-confirm">
         <img src="assets/bear.svg" alt="Bear asks">
         <div class="question">${danger ? '⚠️ ' : ''}${escapeHtml(title)}</div>
         <div class="tx-detail">${rowsHtml}</div>
-        ${typeInput}
         <div class="flex gap-8">
           <button class="btn btn-ghost" id="confirmNo">Cancel</button>
           <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="confirmYes">${escapeHtml(confirmText)}</button>
@@ -263,13 +257,6 @@ export function confirmTx({ title, rows, confirmText = 'Confirm', danger = false
     `);
     const yes = $('#confirmYes');
     const no = $('#confirmNo');
-    const typeEl = gate ? $('#confirmTypeInput') : null;
-    if (typeEl) {
-      yes.disabled = true;
-      typeEl.addEventListener('input', () => {
-        yes.disabled = typeEl.value.trim() !== gate;
-      });
-    }
     yes.onclick = () => { closeModal(); resolve(true); };
     no.onclick = () => { closeModal(); resolve(false); };
   });

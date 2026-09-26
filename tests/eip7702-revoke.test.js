@@ -25,7 +25,10 @@ test('revoke: revoke path sends a real type-4 tx to ZERO_ADDRESS', () => {
   assert.match(toolsSrc, /EIP7702\.ZERO_ADDRESS/, 'revoke must authorize to the zero address');
   assert.match(toolsSrc, /authorizeSync\(\{ chainId: net\.chainId, address: EIP7702\.ZERO_ADDRESS, nonce \}\)/, 'must build the authorization');
   assert.match(toolsSrc, /authorizationList: \[authorization\]/, 'must send a type-4 transaction');
-  assert.match(toolsSrc, /requireType: 'REVOKE'/, 'revoke must require typed confirmation');
+  assert.match(toolsSrc, /confirmText: 'Revoke', danger: true/,
+    'revoke must still be confirmed explicitly, and marked dangerous');
+  assert.doesNotMatch(toolsSrc, /requireType/,
+    'the typed gate is gone app-wide; nothing may reintroduce it as a dead option');
   assert.match(toolsSrc, /getDelegation\(provider, target\)/, 'must check the current delegation first');
   assert.match(toolsSrc, /No active delegation on this address/, 'must refuse to revoke when nothing is delegated');
 });

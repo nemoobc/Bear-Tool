@@ -138,6 +138,31 @@ body::before {
 #intro.hidden { display: none; }
 #intro.intro-fade { opacity: 0; }
 
+/* ═══════════ THE SPLASH MUST NEVER TRAP SOMEONE ═══════════
+   #intro is a full-screen fixed overlay at z-index 9999. If any script throws
+   before its dismissal is armed, it stays up and swallows every click in the
+   app: the DOM looks alive, the page is unusable, and nothing on screen says
+   why. That happened for real — one null addEventListener in a bind function
+   aborted app.js, so runIntro() was never reached and the wallet bricked itself
+   with no visible error.
+
+   The JS now arms the dismissal before anything that can throw, and this
+   animation is the layer below that: it needs no JavaScript at all. A splash
+   that cannot be dismissed by CSS is a splash that can lock somebody out of
+   their own wallet. `forwards` matters — without it the overlay snaps back into
+   view the moment the animation ends. */
+@keyframes intro-force-hide {
+  0%, 96% { opacity: 1; visibility: visible; }
+  100% { opacity: 0; visibility: hidden; }
+}
+#intro {
+  animation: intro-force-hide 3s ease 0s forwards;
+}
+#intro.hidden, #intro.intro-fade { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  #intro { animation-duration: 0.01s; }
+}
+
 .intro-stage {
   position: relative;
   width: 260px;
@@ -2998,3 +3023,66 @@ body::before {
 .asset-row > .asset-info { min-width: 0; flex: 1 1 auto; }
 .asset-row > .asset-symbol,
 .asset-row .asset-symbol { overflow-wrap: anywhere; }
+
+/* ═══════════ SETTINGS, GROUPED ═══════════
+   Six loose fields stacked on a phone read as a wall of options. Nothing here is
+   decorative - currency feeds the price cache, language drives every label,
+   auto-lock decides when the key is released, testnet mode changes which chains
+   exist, the RPC decides which node answers. So nothing was removed; the fields
+   are grouped by what they are FOR, which is what was missing. */
+.set-group {
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px 4px;
+  margin-bottom: 14px;
+  background: var(--cream);
+}
+.set-group-h {
+  margin: 0 0 10px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.set-group .field:last-child { margin-bottom: 12px; }
+/* A switch and its explanation sit side by side, so the label is the target and
+   the explanation does not push the control off the right edge. */
+.set-group .field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.set-group .field-row > div { min-width: 0; }
+.set-group .field-row .small { margin: 2px 0 0; }
+.set-group .switch { flex: 0 0 auto; }
+
+/* The testnet filter in the network picker. It is a checkbox, not the big
+   switch, because it filters the list right below it rather than changing a
+   saved preference — but it still meets the 44px touch floor, because it is the
+   only way back to a hidden list once you have turned it off. */
+.net-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0 0 10px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  user-select: none;
+}
+.net-filter:hover { background: var(--cream); }
+.net-filter input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  accent-color: var(--mint);
+  cursor: pointer;
+}
+.net-filter:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
+

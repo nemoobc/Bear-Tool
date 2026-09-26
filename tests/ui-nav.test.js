@@ -103,9 +103,29 @@ test('dashboard: green Connected status indicator is gone', () => {
   assert.ok(!html.includes('status-text'), 'status-text must be removed');
 });
 
-test('settings: testnet mode toggle exists and defaults on', () => {
-  assert.match(html, /id="setTestnet"/, 'testnet toggle must exist');
-  assert.match(html, /id="setTestnet" checked/, 'testnet toggle must default to on');
+test('the testnet filter lives in the network picker, not in Settings', () => {
+  // Settings is five settings and nothing else: what the app looks like, how
+  // long it holds a key, and the delete button. The testnet filter moved out of
+  // it because it does not describe the app - it describes which chains are on
+  // screen, so it belongs beside the list it filters.
+  assert.doesNotMatch(html, /id="setTestnet"/,
+    'the testnet switch is no longer a Settings field');
+  assert.match(jsApp, /id="netShowTestnet"/,
+    'it must exist in the network picker, generated with the list it filters');
+  // It only works if it is reachable while testnets are hidden, so it must not
+  // be inside the .mb-8 header that the search box hides when nothing matches.
+  const picker = jsApp.slice(jsApp.indexOf('id="netListTestnet"'));
+  const toggleAt = picker.indexOf('id="netShowTestnet"');
+  const headerAt = picker.indexOf('class="mb-8 mt-16"');
+  assert.ok(toggleAt > -1 && headerAt > -1, 'both the header and the filter must exist');
+  assert.ok(toggleAt > headerAt + 'class="mb-8 mt-16"'.length,
+    'the filter must be a sibling of the .mb-8 header, not inside it - a filter you cannot reach after searching is a filter you cannot turn back off');
+  // And it must apply the moment it is flipped, not on Save.
+  const handler = jsApp.slice(jsApp.indexOf("id=\"netShowTestnet\""));
+  assert.match(handler.slice(0, 900), /addEventListener\('change'/,
+    'the filter must react to the change itself');
+  assert.match(handler.slice(0, 900), /saveSettings\(\)/,
+    'and it must persist, otherwise it forgets on reload');
 });
 
 test('nft: empty state says "NFT not found" and never shows a native balance', () => {

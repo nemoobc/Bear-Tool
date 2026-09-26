@@ -71,7 +71,7 @@ export async function doEip7702(action) {
           { k: 'Warning', v: 'This signature can be replayed on ANY chain. Only proceed on testnet.' }
         ],
         confirmText: 'I understand',
-        danger: true, requireType: 'SAYA PAHAM RISIKO REPLAY'
+        danger: true
       });
       if (!ok) return;
     }
@@ -88,7 +88,7 @@ export async function doEip7702(action) {
         { k: 'Chain ID', v: chainId === 0 ? '0 (ALL CHAINS — replay risk!)' : String(chainId) },
         { k: 'Network', v: net.name }
       ],
-      confirmText: 'Delegate', danger: true, requireType: 'DELEGATE'
+      confirmText: 'Delegate', danger: true
     });
     if (!ok) return;
   }
@@ -172,7 +172,7 @@ export async function executeBatch() {
     const ok = await confirmTx({
       title: 'BATCH ON MAINNET!',
       rows: [{ k: 'Actions', v: String(valid.length) }, { k: 'Network', v: net.name }],
-      confirmText: 'Execute', danger: true, requireType: 'YA'
+      confirmText: 'Execute', danger: true
     });
     if (!ok) return;
   }
@@ -190,7 +190,7 @@ export async function doRescue() {
     const ok = await confirmTx({
       title: 'RESCUE ON MAINNET!',
       rows: [{ k: 'Locked wallet', v: target }, { k: 'SAFE destination', v: safe }, { k: 'Network', v: net.name }],
-      confirmText: 'Rescue', danger: true, requireType: 'YA'
+      confirmText: 'Rescue', danger: true
     });
     if (!ok) return;
   }
@@ -209,7 +209,7 @@ export async function doClaim() {
     const ok = await confirmTx({
       title: 'CLAIM ON MAINNET!',
       rows: [{ k: 'Token', v: token }, { k: 'Forward to', v: safe }, { k: 'Network', v: net.name }],
-      confirmText: 'Claim', danger: true, requireType: 'YA'
+      confirmText: 'Claim', danger: true
     });
     if (!ok) return;
   }

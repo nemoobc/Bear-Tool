@@ -714,61 +714,69 @@
         <section class="view" id="view-settings">
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> <span data-i18n="nav.settings">Settings</span></div>
-            <div class="field">
-              <label for="setCurrency">Currency</label>
-              <select class="select" id="setCurrency">
-                <option value="usd">USD $</option>
-                <option value="eur">EUR €</option>
-                <option value="idr">IDR Rp</option>
-                <option value="cny">CNY ¥</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="setLang">Language</label>
-              <select class="select" id="setLang">
-                <option value="en">English</option>
-                <option value="id">Bahasa Indonesia</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Theme</label>
-              <div class="theme-toggle">
-                <button class="theme-btn active" data-theme="light">☀️ Light</button>
-                <button class="theme-btn" data-theme="dark">🌙 Dark</button>
-                <button class="theme-btn" data-theme="auto">💻 Auto</button>
+            <!-- Five settings, and five is what this page is for.
+                 Testnet mode and the custom RPC field came off it deliberately:
+                 both are real capabilities, and both are now reachable from the
+                 places that own them - testnets can be filtered per session
+                 from the network picker itself, and a custom node belongs with
+                 the node it replaces rather than in a general settings list.
+                 What stays here is what a person opens Settings to change:
+                 how it looks, and how long it holds an unlocked key. -->
+            <div class="set-group">
+              <h4 class="set-group-h" data-i18n="set.group.look">Appearance</h4>
+
+              <div class="field">
+                <label for="setLang" data-i18n="settings.language">Language</label>
+                <select class="select" id="setLang">
+                  <option value="en">English</option>
+                  <option value="id">Bahasa Indonesia</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label for="setCurrency" data-i18n="settings.currency">Currency</label>
+                <select class="select" id="setCurrency">
+                  <option value="usd">USD $</option>
+                  <option value="eur">EUR €</option>
+                  <option value="idr">IDR Rp</option>
+                  <option value="cny">CNY ¥</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label data-i18n="set.theme">Theme</label>
+                <div class="theme-toggle">
+                  <button class="theme-btn active" data-theme="light">☀️ <span data-i18n="set.theme.light">Light</span></button>
+                  <button class="theme-btn" data-theme="dark">🌙 <span data-i18n="set.theme.dark">Dark</span></button>
+                  <button class="theme-btn" data-theme="auto">💻 <span data-i18n="set.theme.auto">Auto</span></button>
+                </div>
               </div>
             </div>
-            <div class="field">
-              <label for="setAutoLock">Auto-lock</label>
-              <select class="select" id="setAutoLock">
-                <option value="1">1 minute</option>
-                <option value="5" selected>5 minutes</option>
-                <option value="10">10 minutes</option>
-                <option value="15">15 minutes</option>
-                <option value="30">30 minutes</option>
-                <option value="60">1 hour</option>
-                <option value="0">Never</option>
-              </select>
+
+            <div class="set-group">
+              <h4 class="set-group-h" data-i18n="set.group.safe">Safety</h4>
+
+              <div class="field">
+                <label for="setAutoLock" data-i18n="settings.auto_lock">Auto-lock</label>
+                <select class="select" id="setAutoLock">
+                  <option value="1">1 minute</option>
+                  <option value="5" selected>5 minutes</option>
+                  <option value="10">10 minutes</option>
+                  <option value="15">15 minutes</option>
+                  <option value="30">30 minutes</option>
+                  <option value="60">1 hour</option>
+                  <option value="0">Never</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label data-i18n="set.group.data">Your data</label>
+                <p class="small dim" data-i18n="set.data.hint">Everything lives in this browser only. Deleting removes every wallet, every setting and your whole history from here. It cannot be undone, and there is no copy anywhere else.</p>
+                <button class="btn btn-danger btn-block" id="btnClearAllData">🗑️ <span data-i18n="set.data.clear">Clear all data</span></button>
+              </div>
             </div>
-            <div class="field">
-              <label class="switch-label" for="setTestnet">Testnet mode</label>
-              <label class="switch">
-                <input type="checkbox" id="setTestnet" checked>
-                <span class="slider"></span>
-              </label>
-              <p class="small">OFF hides test networks (Sepolia, Amoy, …) from the network list.</p>
-            </div>
-            <div class="field">
-              <label for="setRpc">Custom RPC URL (optional)</label>
-              <input class="input" id="setRpc" placeholder="https://..." data-i18n-placeholder="set.rpc.ph" autocomplete="off" spellcheck="false">
-              <p class="small dim" id="setRpcActive" role="status" aria-live="polite"></p>
-              <p class="small dim" data-i18n="set.rpc.hint">A custom URL is used as-is. If it stops answering, the app says so instead of quietly switching to a different node — which is how a wallet ends up reporting a balance you never funded.</p>
-            </div>
-            <button class="btn btn-secondary" id="btnSaveSettings">Save Settings</button>
-            <hr class="mt-16 mb-16">
+
             <div id="securityCenter"></div>
-            <hr class="mt-16 mb-16">
-            <button class="btn btn-danger" id="btnClearData"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Clear all data</button>
           </div>
         </section>
 

@@ -167,16 +167,11 @@ for (const [netId, fork] of Object.entries(FORKS)) {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
 
-    // Mainnet networks show an extra "MAINNET TRANSACTION!" gate. Whether it
-    // also demands a typed confirmation is app config (TYPED_CONFIRMATION in
-    // js/ui.js), so handle both shapes instead of assuming one: if the input is
-    // rendered, fill it, then clear the gate. Afterwards the sign dialog is
-    // always confirmed.
+    // Mainnet networks show an extra "MAINNET TRANSACTION!" dialog. It is
+    // Cancel plus a named button - no typed field - so there is nothing to fill
+    // before clearing it. Afterwards the sign dialog is always confirmed.
     if (fork.type === 'mainnet') {
-      const typed = page.locator('#confirmTypeInput');
-      if (await typed.count() > 0 && await typed.isVisible().catch(() => false)) {
-        await typed.fill('YA');
-      }
+      await expect(page.locator('#confirmTypeInput')).toHaveCount(0);
       const gate = page.locator('#confirmYes');
       if (await gate.count() > 0) {
         await gate.click({ timeout: 5000 }).catch(async () => {
@@ -257,10 +252,7 @@ async function deployErc20ViaWeb(page, fork, netId) {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   });
 
-  // One confirmTx dialog gates and signs. The typed gate is enforced app-wide
-  // now, so #confirmTypeInput is present and #confirmYes starts disabled —
-  // waiting for the selector alone is correct, the click below handles the
-  // typing, and the defensive shape-check further up covers either form.
+  // One confirmTx dialog gates and signs: Cancel plus a named button.
   await page.waitForSelector('#confirmYes', { timeout: 90_000 });
   // dialog is up = compile done → re-pin before broadcast (fast chains
   // prune within minutes, compile already consumed time)

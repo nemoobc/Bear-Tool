@@ -205,7 +205,7 @@ async function warnSuspiciousDestination(to, net) {
         { k: 'Similar to', v: similar[0] }
       ],
       confirmText: 'I understand the risk',
-      danger: true, requireType: 'UNDERSTAND'
+      danger: true
     });
     if (!ok) return false;
   }
@@ -221,7 +221,7 @@ async function warnSuspiciousDestination(to, net) {
         { k: 'Target', v: wallet.shortAddress(to) }
       ],
       confirmText: 'I understand the risk',
-      danger: true, requireType: 'BURNS'
+      danger: true
     });
     if (!ok) return false;
   }
@@ -238,7 +238,7 @@ async function warnSuspiciousDestination(to, net) {
           { k: 'Target', v: wallet.shortAddress(to) }
         ],
         confirmText: 'I understand the risk',
-        danger: true, requireType: 'RISIKO'
+        danger: true
       });
       if (!ok) return false;
     }
@@ -287,7 +287,7 @@ export async function doSend() {
       title: 'MAINNET TRANSACTION!',
       rows: [{ k: 'Network', v: net.name }, { k: 'To', v: wallet.shortAddress(to) }, { k: 'Amount', v: `${amt} ${t.symbol}` }],
       confirmText: 'I understand, send',
-      danger: true, requireType: 'YA'
+      danger: true
     });
     if (!ok) return;
   }
