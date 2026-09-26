@@ -395,10 +395,19 @@ function syncMobileNav() {
   if (!items.length) return;
 
   const primary = MOBILE_PRIMARY.filter((v) => items.some((i) => i.view === v));
-  const rest = items.filter((i) => !primary.includes(i.view));
 
-  const cell = (i, active) => `<button class="mobile-nav-item${active ? ' active' : ''}" data-view="${escapeHtml(i.view)}"
-      aria-label="${escapeHtml(i.label || i.view)}">${i.icon ? `<span class="icon">${i.icon}</span>` : ''}<span>${escapeHtml(i.label || i.view)}</span></button>`;
+  // The label span needs its own data-i18n key. It had none, so the key read
+  // from the sidebar was collected into `i18n` and then thrown away, and
+  // applyTranslations() - which works by scanning [data-i18n] - had nothing to
+  // find. The result was a bar that stayed English while the sidebar beside it
+  // turned Indonesian, which on a phone is the only nav most people ever see.
+  // The initial text is translated here too, so the bar is right on first paint
+  // rather than only after applyTranslations runs.
+  const cell = (i, active) => {
+    const text = i.i18n ? t(i.i18n) : (i.label || i.view);
+    return `<button class="mobile-nav-item${active ? ' active' : ''}" data-view="${escapeHtml(i.view)}"
+      aria-label="${escapeHtml(text)}">${i.icon ? `<span class="icon">${i.icon}</span>` : ''}<span${i.i18n ? ` data-i18n="${escapeHtml(i.i18n)}"` : ''}>${escapeHtml(text)}</span></button>`;
+  };
 
   bar.innerHTML = primary
     .map((v) => cell(items.find((i) => i.view === v), v === 'dashboard'))
