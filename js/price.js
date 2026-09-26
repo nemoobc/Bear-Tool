@@ -8,6 +8,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { get } from './state.js';
+import { setMoneyRate, usdToDisplay } from './ui.js';
 
 // Selected display currency, e.g. 'usd' | 'eur' | 'idr' | 'cny'.
 function currency() {
@@ -47,6 +48,73 @@ const NATIVE_COIN_IDS = {
   10: 'ethereum',
   8453: 'ethereum'
 };
+
+// ── the rate between the canonical unit and the one on screen ──
+//
+// Every price this module fetches, caches or returns is USD. That is the whole
+// point: CoinGecko will quote any currency you ask for, and DexScreener will
+// only ever quote USD, so asking each for the display currency produced a list
+// where the top row was in the chosen currency and the rest were in dollars.
+// The conversion happens once, here, and nowhere else.
+//
+// The rate comes out of a request the app was making anyway — one id, two
+// vs_currencies — so it costs no extra quota and cannot be the reason a price
+// fails. USD is 1:1 and is never fetched.
+const RATE_KEY = 'bear.usdRate';
+const RATE_TTL = 30 * 60_000;
+
+/** Push the rate into the formatter so every `fmtUsd` in the app agrees. */
+function publishRate(cur, rate) {
+  setMoneyRate(cur, rate);
+}
+
+function cachedRate(cur) {
+  try {
+    const e = JSON.parse(localStorage.getItem(RATE_KEY) || 'null');
+    if (e && e.cur === cur && Number.isFinite(e.rate) && e.rate > 0
+        && Date.now() - e.ts < RATE_TTL) return e.rate;
+  } catch { /* private mode */ }
+  return null;
+}
+
+function saveRate(cur, rate) {
+  try { localStorage.setItem(RATE_KEY, JSON.stringify({ cur, rate, ts: Date.now() })); }
+  catch { /* private mode */ }
+}
+
+/**
+ * Make sure the formatter knows how to turn USD into the selected currency.
+ * Never throws and never blocks: a failed lookup leaves 1:1, which shows the
+ * right number with the wrong currency rather than an empty wallet.
+ */
+export async function ensureUsdRate() {
+  const cur = currency();
+  if (cur === 'usd') { publishRate('usd', 1); return 1; }
+  const hit = cachedRate(cur);
+  if (hit !== null) { publishRate(cur, hit); return hit; }
+  try {
+    const res = await fetchWithTimeout(cgUrl('simple/price', {
+      ids: 'ethereum', vs_currencies: `usd,${cur}`,
+    }));
+    if (!res.ok) throw new Error('rate ' + res.status);
+    const d = await res.json();
+    const usd = d?.ethereum?.usd;
+    const other = d?.ethereum?.[cur];
+    if (!(Number.isFinite(usd) && usd > 0) || !Number.isFinite(other)) throw new Error('rate missing');
+    const rate = other / usd;
+    saveRate(cur, rate);
+    publishRate(cur, rate);
+    return rate;
+  } catch {
+    publishRate(cur, 1);
+    return 1;
+  }
+}
+
+/** Drop the cached rate, so the next read fetches the one now wanted. */
+export function clearUsdRate() {
+  try { localStorage.removeItem(RATE_KEY); } catch { /* private mode */ }
+}
 
 const CACHE_KEY = 'bear.priceCache';
 const MEM_TTL = 60_000;          // in-memory TTL
@@ -111,11 +179,12 @@ async function fetchWithTimeout(url, timeoutMs = 10000) {
 async function fetchCoinGeckoNative(chainId) {
   const id = NATIVE_COIN_IDS[chainId];
   if (!id) return null;
-  const cur = currency();
-  const res = await fetchWithTimeout(cgUrl('simple/price', { ids: id, vs_currencies: cur }));
+  // usd, always. See the rate block above — the display currency is applied once,
+  // at the edge, by fmtUsd.
+  const res = await fetchWithTimeout(cgUrl('simple/price', { ids: id, vs_currencies: 'usd' }));
   if (!res.ok) throw new Error('CoinGecko ' + res.status);
   const data = await res.json();
-  return data[id]?.[cur] ?? null;
+  return data[id]?.usd ?? null;
 }
 
 // CoinGecko's public tier allows exactly ONE contract address per
@@ -149,7 +218,6 @@ export function cgTokenPriceChunks(addresses, size = CG_MAX_ADDRESSES) {
 async function fetchCoinGeckoTokens(chainId, addresses) {
   const platform = COINGECKO_PLATFORMS[chainId];
   if (!platform || !addresses?.length) return {};
-  const cur = currency();
   const chunks = cgTokenPriceChunks(addresses);
   const out = {};
 
@@ -164,7 +232,7 @@ async function fetchCoinGeckoTokens(chainId, addresses) {
   for (const chunk of chunks) {
     try {
       const res = await fetchWithTimeout(cgUrl(`simple/token_price/${platform}`,
-        { contract_addresses: chunk.join(','), vs_currencies: cur }));
+        { contract_addresses: chunk.join(','), vs_currencies: 'usd' }));
       if (!res.ok) {
         if (++consecutiveFailures >= 2) break;
         continue;
@@ -172,7 +240,7 @@ async function fetchCoinGeckoTokens(chainId, addresses) {
       const data = await res.json();
       consecutiveFailures = 0;
       for (const [addr, v] of Object.entries(data || {})) {
-        const p = v?.[cur];
+        const p = v?.usd;
         if (typeof p === 'number' && Number.isFinite(p)) out[addr] = p;
       }
     } catch {
@@ -222,6 +290,9 @@ export async function fetchAllPrices(tokens, chainId) {
   const result = new Map();
   const native = tokens.find(t => !t.address);
   const erc20s = tokens.filter(t => t.address);
+  // Before the prices, the rate that turns them into money the user reads. It
+  // usually comes from cache, so this is not an extra request per refresh.
+  await ensureUsdRate();
 
   // native gas token
   if (native) {
@@ -272,6 +343,7 @@ export async function fetchAllPrices(tokens, chainId) {
 // CoinGecko OHLC: days=1 → 5min candles, days=7 → 1h candles.
 // Returns [{ time, open, high, low, close }] or [] when unavailable.
 export async function fetchOHLC({ address, chainId, days = 1 }) {
+  await ensureUsdRate();
   const platform = COINGECKO_PLATFORMS[chainId];
   const nativeId = NATIVE_COIN_IDS[chainId];
   const key = `ohlc:${address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`}:${days}`;
@@ -281,9 +353,9 @@ export async function fetchOHLC({ address, chainId, days = 1 }) {
 
   let url = null;
   if (address && platform) {
-    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/ohlc`, { vs_currency: currency(), days });
+    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/ohlc`, { vs_currency: 'usd', days });
   } else if (!address && nativeId) {
-    url = cgUrl(`coins/${nativeId}/ohlc`, { vs_currency: currency(), days });
+    url = cgUrl(`coins/${nativeId}/ohlc`, { vs_currency: 'usd', days });
   }
   if (!url) return [];
 
@@ -296,13 +368,19 @@ export async function fetchOHLC({ address, chainId, days = 1 }) {
       .map(d => ({ time: d[0], open: d[1], high: d[2], low: d[3], close: d[4] }))
       .filter(c => [c.open, c.high, c.low, c.close].every(v => typeof v === 'number' && Number.isFinite(v)));
     if (candles.length < 2) throw new Error('No OHLC data');
-    historyCache.set(key, { data: candles, ts: Date.now() });
-    return candles;
+    // Chart axes are plain numbers with no symbol, so the conversion has to
+    // happen here or the chart would read in dollars while the balance beside it
+    // reads in rupiah — two true numbers on one screen meaning different things.
+    const shown = candles.map((c) => ({ ...c, open: usdToDisplay(c.open), high: usdToDisplay(c.high), low: usdToDisplay(c.low), close: usdToDisplay(c.close) }));
+    historyCache.set(key, { data: shown, ts: Date.now() });
+    return shown;
   } catch {
     // Fallback: convert price history to pseudo-candles
     try {
       const prices = await fetchPriceHistory({ address, chainId });
       if (prices.length < 2) return [];
+      // prices is already in display currency (fetchPriceHistory converts), so
+      // these pseudo-candles must not be scaled a second time.
       const candles = prices.map((p, i) => {
         const next = prices[i + 1] || p;
         return { time: Date.now() - (prices.length - i) * 300000, open: p, high: Math.max(p, next), low: Math.min(p, next), close: next };
@@ -319,6 +397,7 @@ export async function fetchOHLC({ address, chainId, days = 1 }) {
 const HISTORY_TTL = 5 * 60_000;
 
 export async function fetchPriceHistory({ address, chainId }) {
+  await ensureUsdRate();
   const platform = COINGECKO_PLATFORMS[chainId];
   const nativeId = NATIVE_COIN_IDS[chainId];
   const key = address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`;
@@ -328,9 +407,9 @@ export async function fetchPriceHistory({ address, chainId }) {
 
   let url = null;
   if (address && platform) {
-    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/market_chart`, { vs_currency: currency(), days: 1 });
+    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/market_chart`, { vs_currency: 'usd', days: 1 });
   } else if (!address && nativeId) {
-    url = cgUrl(`coins/${nativeId}/market_chart`, { vs_currency: currency(), days: 1 });
+    url = cgUrl(`coins/${nativeId}/market_chart`, { vs_currency: 'usd', days: 1 });
   }
   if (!url) return [];
 
@@ -344,7 +423,7 @@ export async function fetchPriceHistory({ address, chainId }) {
     if (raw.length < 2) throw new Error('No data');
     // evenly spaced sample (~30 points), always keeping first + latest
     const target = Math.min(30, raw.length);
-    const sampled = Array.from({ length: target }, (_, k) => raw[Math.round(k * (raw.length - 1) / (target - 1))]);
+    const sampled = Array.from({ length: target }, (_, k) => usdToDisplay(raw[Math.round(k * (raw.length - 1) / (target - 1))]));
     historyCache.set(key, { data: sampled, ts: Date.now() });
     return sampled;
   } catch {

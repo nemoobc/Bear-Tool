@@ -16,7 +16,7 @@ import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPasswo
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity,
          reconcileActivity } from './state.js';
-import { fetchAllPrices, fetchPriceHistory, fetchOHLC } from './price.js';
+import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate } from './price.js';
 import { waitForReceipt } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
@@ -1949,13 +1949,21 @@ function bindViews() {
     // the static ones rescanned.
     syncMobileNav();
   });
-  $('#setCurrency')?.addEventListener('change', (e) => {
+  $('#setCurrency')?.addEventListener('change', async (e) => {
     const s = get('settings');
     s.currency = e.target.value;
     set('settings', { ...s });
     saveSettings();
-    // Prices are cached against a currency, so the old ones are now wrong.
-    try { localStorage.removeItem('bear.priceCache'); } catch { /* private mode */ }
+    // Only the RATE is currency-specific now. Prices are cached in USD, so
+    // throwing the price cache away meant re-asking CoinGecko for every token in
+    // the wallet just to change how a number was spelled. The rate is one
+    // request and the dashboard redraw is instant.
+    clearUsdRate();
+    await ensureUsdRate();
+    // Re-render the numbers in place. Without this the balance keeps showing the
+    // old currency until something else happens to refresh it, which is the
+    // same "the control moved and nothing changed" failure as the Save button.
+    renderAssets(get('tokens') || []);
     if (get('address')) loadDashboard();
   });
   $('#setAutoLock')?.addEventListener('change', (e) => {

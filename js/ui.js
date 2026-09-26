@@ -305,9 +305,54 @@ export function fmtAmount(wei, decimals = 18, max) {
   } catch { return '0.00'; }
 }
 
+// ── money ────────────────────────────────────────────────────────
+// Prices are stored in USD everywhere: one canonical unit, so a cache entry
+// means the same thing whichever source filled it and whichever currency the
+// user happens to be looking at. This holds the USD→display rate and the symbol,
+// pushed in once by price.js, and fmtUsd converts on the way out.
+//
+// It used to print a hard "$" over whatever number it was handed, and the
+// number it was handed was whatever currency CoinGecko had been asked for.
+// Choosing Indonesian rupiah fetched 48,172,840 and printed "$48,172,840" — a
+// wrong number wearing the right symbol, which is worse than showing nothing at
+// all. The DexScreener fallback made it worse rather than better: that path is
+// USD-only, so a single asset list could hold rupiah in one row and dollars in
+// the next and nothing about it looked wrong.
+//
+// ui.js imports nothing, deliberately — it is included by half the app and a
+// cycle here would be everyone's problem. price.js owns the fetch and calls
+// setMoneyRate, so the rate lives in exactly one place.
+const MONEY = { cur: 'usd', rate: 1, sym: '$' };
+
+/**
+ * @param {string} cur  ISO code from Settings
+ * @param {number} rate how many units of `cur` one USD buys
+ */
+export function setMoneyRate(cur, rate) {
+  const c = /^[a-z]{3}$/i.test(cur || '') ? cur.toLowerCase() : 'usd';
+  const r = Number(rate);
+  MONEY.cur = c;
+  // A missing, zero, negative or non-finite rate must fall back to 1:1, because
+  // the alternative is printing every balance in the app as zero because a
+  // currency lookup failed. Wrong-looking is recoverable; an empty wallet is not.
+  MONEY.rate = Number.isFinite(r) && r > 0 ? r : 1;
+  MONEY.sym = { usd: '$', eur: '€', idr: 'Rp ', cny: '¥' }[MONEY.cur] || (MONEY.cur.toUpperCase() + ' ');
+}
+
+export function moneyCurrency() { return { ...MONEY }; }
+
+/** USD amount → the user's currency, formatted. */
 export function fmtUsd(num) {
-  if (num === null || num === undefined || isNaN(num)) return '$0.00';
-  return '$' + num.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (num === null || num === undefined || isNaN(num)) return MONEY.sym + '0.00';
+  const v = Number(num) * MONEY.rate;
+  return MONEY.sym + v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+/** The same conversion without formatting — for chart axes and tooltips. */
+export function usdToDisplay(num) {
+  const n = Number(num);
+  if (!Number.isFinite(n)) return 0;
+  return n * MONEY.rate;
 }
 
 export function fmtTime(ts) {
