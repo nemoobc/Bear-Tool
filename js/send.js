@@ -9,23 +9,47 @@ import { get, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, withTimeout, RPC_TIMEOUT_MS } from './safetx.js';
 import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import * as wallet from './wallet.js';
+import { resolveMax, verifySpendable } from './max-ui.js';
 
 const { ethers } = globalThis;
 const BROADCAST_TIMEOUT_MS = 15000; // 15s for broadcast
 
 export function bindSendEvents() {
   $('#btnSend').addEventListener('click', doSend);
-  // percentage buttons
+  // Percentage buttons, and the 100% one is where the real bug lived: it used
+  // to write the whole balance, so sending the native token left nothing to pay
+  // the fee with and the node answered "insufficient funds for gas". It also
+  // used toFixed(), which rounds — so even a share could land a hair above the
+  // balance. Both are gone: the amount now comes from resolveMax, which
+  // subtracts the fee first and truncates.
   document.querySelectorAll('.pct-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const pct = parseInt(btn.dataset.pct);
+    btn.addEventListener('click', async () => {
+      const pct = parseInt(btn.dataset.pct, 10);
       const sel = $('#sendToken');
       const t = get('tokens').find(x => (x.address || 'native') === sel.value);
       if (!t) return;
-      const bal = parseFloat(fmtAmount(t.balance, t.decimals));
-      $('#sendAmount').value = (bal * pct / 100).toFixed(6);
       document.querySelectorAll('.pct-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+
+      const r = await resolveMax({
+        token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+        provider: get('provider'),
+        from: get('address'),
+        to: ($('#sendTo')?.value || '').trim(),
+        pct,
+      });
+
+      const note = $('#sendMaxNote');
+      if (!r.ok) {
+        // Saying nothing and leaving the old value would be worse: the user
+        // would send whatever was there and get the node's error instead.
+        $('#sendAmount').value = '';
+        if (note) { note.textContent = r.message; note.classList.add('show'); }
+        toast('MAX is not available here', 'error');
+        return;
+      }
+      $('#sendAmount').value = r.amount;
+      if (note) { note.textContent = r.message; note.classList.add('show'); }
       updateSendPreview();
     });
   });
@@ -200,9 +224,25 @@ export async function doSend() {
   const t = get('tokens').find(x => (x.address || 'native') === tokenSel);
   if (!t) return toast('Token not found', 'error');
 
-  // safety warnings before anything is signed
+  // Safety warnings come FIRST, before any balance arithmetic. A poisoned
+  // address is the thing worth interrupting the user for; an insufficient
+  // balance is a number they can already see. Running the balance check first
+  // made its early return swallow the poisoning warning entirely, which is the
+  // wrong way round for a security check.
   const safe = await warnSuspiciousDestination(to, net);
   if (!safe) return;
+
+  // Then catch an unspendable amount. MAX already reserves the fee, but the
+  // balance can move between pressing MAX and pressing Send, and the
+  // alternative to checking here is a node error the user cannot act on.
+  const spend = await verifySpendable({
+    amount: amt,
+    token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+    provider: get('provider'),
+    from: get('address'),
+    to,
+  });
+  if (!spend.ok) return toast(spend.message, 'error');
 
   // mainnet safety
   if (net.type === 'mainnet') {

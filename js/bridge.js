@@ -23,11 +23,13 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
+import { resolveMax } from './max-ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt } from './safetx.js';
 import { getAllNetworks, getNetworkById } from './network.js';
 import { t } from './i18n.js';
 import { BRIDGE_ROUTERS, getBridgeRoutersForChain, CHAIN_NAMES } from './routers.js';
+import { initTokenPicker, initNetworkPicker, initOptionPicker } from './token-picker.js';
 
 const { ethers } = globalThis;
 
@@ -82,6 +84,32 @@ export function bindBridgeEvents() {
   // No manual "Get Route" button — the route is always live.
   const debouncedQuote = debounce(doBridge, 600);
   const el = (sel) => document.querySelector(sel);
+  // Bridge had no MAX at all, unlike Send and Swap — so "send it all" meant
+  // typing the number by hand and getting it wrong. Same rule as everywhere
+  // else: subtract the fee when the token being bridged is the one paying it.
+  $('#btnBridgeMax')?.addEventListener('click', async () => {
+    const tokSel = $('#bridgeToken');
+    const t = (get('tokens') || []).find(x => (x.address || 'native') === tokSel?.value);
+    const field = $('#bridgeAmount');
+    const note = $('#bridgeMaxNote');
+    if (!t || !field) return;
+    const r = await resolveMax({
+      token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+      provider: get('provider'),
+      from: get('address'),
+      pct: 100,
+    });
+    if (!r.ok) {
+      field.value = '';
+      if (note) { note.textContent = r.message; note.classList.add('show'); }
+      toast('MAX is not available here', 'error');
+      return;
+    }
+    field.value = r.amount;
+    if (note) { note.textContent = r.message; note.classList.add('show'); }
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
   ['#bridgeFromChain', '#bridgeToChain', '#bridgeToken', '#bridgeAmount'].forEach(sel => {
     const node = el(sel);
     if (node) {
@@ -111,10 +139,30 @@ export function loadBridgeChains() {
   const net = getNetworkById(get('networkId'));
   const sym = net?.symbol || 'Native';
   tok.innerHTML = `<option value="native">${escapeHtml(sym)} — ${escapeHtml(t('bridge.native_only'))}</option>`;
+
+  // In-app pickers on top of the native selects, which stay authoritative.
+  // A native select's option list is an OS popup that escapes the page on a
+  // phone, so the chain/token/router lists are drawn inside the app instead.
+  const nets = getAllNetworks();
+  initNetworkPicker('bridgeFromChain', nets);
+  initNetworkPicker('bridgeToChain', nets);
+  initTokenPicker('bridgeToken', [{
+    address: null, symbol: sym, decimals: net?.decimals ?? 18, balance: '0', usd: null,
+  }]);
+  initOptionPicker('bridgeRouterSelect',
+    [...($('#bridgeRouterSelect')?.options || [])].map((o) => o.textContent));
+
   // Update bridge router selector with available routers for current chain pair
   updateBridgeRouterOptions();
   from.addEventListener('change', updateBridgeRouterOptions);
   to.addEventListener('change', updateBridgeRouterOptions);
+  // The router list is rebuilt when the chain pair changes, so repaint the
+  // picker's trigger too or it keeps showing the old provider.
+  $('#bridgeRouterSelect')?.addEventListener('change', () => {
+    const sel = $('#bridgeRouterSelect');
+    const symEl = document.getElementById('bridgeRouterSelectBtn')?.querySelector('[data-symbol]');
+    if (symEl) symEl.textContent = sel.selectedOptions[0]?.textContent || '—';
+  });
 }
 
 function updateBridgeRouterOptions() {

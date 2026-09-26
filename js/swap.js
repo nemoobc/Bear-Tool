@@ -11,6 +11,8 @@ import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById, ERC20_ABI } from './network.js';
 import { SWAP_ROUTERS, getSwapRoutersForChain, getBestSwapRouter, CHAIN_NAMES } from './routers.js';
+import { initTokenPicker } from './token-picker.js';
+import { resolveMax } from './max-ui.js';
 
 const { ethers } = globalThis;
 
@@ -144,13 +146,34 @@ export function bindSwapEvents() {
       btn.classList.add('active');
     });
   });
-  // MAX button
+  // MAX button. It used to fill the field with the entire balance, which on the
+  // native token means the swap cannot pay its own gas — the transaction is
+  // rejected and the user has no idea why. resolveMax subtracts the fee first
+  // and truncates, and it leaves the field empty with an explanation when the
+  // balance cannot cover the fee at all.
   const maxBtn = $('#btnSwapMax');
   if (maxBtn) {
-    maxBtn.addEventListener('click', () => {
+    maxBtn.addEventListener('click', async () => {
       const sel = $('#swapFrom');
       const t = get('tokens').find(x => (x.address || 'native') === sel.value);
-      if (t) $('#swapFromAmount').value = parseFloat(ethers.formatUnits(t.balance, t.decimals)).toFixed(6);
+      if (!t) return;
+      const r = await resolveMax({
+        token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+        provider: get('provider'),
+        from: get('address'),
+        pct: 100,
+      });
+      const field = $('#swapFromAmount');
+      const note = $('#swapMaxNote');
+      if (!r.ok) {
+        field.value = '';
+        if (note) { note.textContent = r.message; note.classList.add('show'); }
+        toast('MAX is not available here', 'error');
+        return;
+      }
+      field.value = r.amount;
+      if (note) { note.textContent = r.message; note.classList.add('show'); }
+      field.dispatchEvent(new Event('input', { bubbles: true }));
     });
   }
 }
@@ -186,6 +209,12 @@ export function loadSwapTokens() {
   from.innerHTML = opts;
   to.innerHTML = opts;
   if (from.options.length > 1) to.selectedIndex = 1;
+
+  // Show an in-app chooser with logos on top of the native select, which stays
+  // authoritative. A native select's option list is an OS popup that escapes
+  // the page on a phone; the picker's list is clamped inside the app.
+  initTokenPicker('swapFrom', tokens);
+  initTokenPicker('swapTo', tokens);
 
   // update balance displays + auto-route quote on token change
   const updateBalance = () => {
