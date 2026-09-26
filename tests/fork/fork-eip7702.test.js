@@ -5,7 +5,7 @@
 // reason — the app still falls back to the non-7702 path.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, compileSource, forkSkipReason, ANVIL_ACCOUNT, ANVIL_KEY, stopFork } from './fork-helper.mjs';
+import { startFork, compileSource, forkSkipReason, ANVIL_ACCOUNT, ANVIL_KEY, stopFork, withDeadline } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -81,7 +81,7 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
       authorizationList: [authorization],
       data: '0x'
     });
-    receipt = await tx.wait();
+    receipt = await withDeadline(tx.wait(), 45_000, '7702 tx receipt');
   } catch (err) {
     // anvil without EIP-7702 support — honest skip (app falls back)
     return;
@@ -120,7 +120,7 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
     maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? fee.gasPrice,
     data: helper.interface.encodeFunctionData('execute', [calls])
   });
-  const execReceipt = await execTx.wait();
+  const execReceipt = await withDeadline(execTx.wait(), 45_000, '7702 tx receipt');
   assert.equal(execReceipt.status, 1, 'batch execute through delegation must succeed');
   // Poll the balance instead of a single read: anvil's fork state can lag
   // one block behind, so eth_getBalance may briefly return the pre-tx value

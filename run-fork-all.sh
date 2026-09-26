@@ -9,7 +9,7 @@ run_net() {
   local n="$1" port="$2"
   {
     echo "=== [$n] fork start $(date +%T) ==="
-    FORK_NETWORK="$n" FORK_PORT="$port" timeout 600 npm run test:fork:net 2>&1
+    FORK_NETWORK="$n" FORK_PORT="$port" timeout 900 npm run test:fork:net 2>&1
     echo "EXIT($n):$?"
   } > "logs/fork-$n.log" 2>&1
 }

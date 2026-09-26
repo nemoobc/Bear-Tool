@@ -190,11 +190,52 @@ export async function compileSource(source, contractName) {
 }
 
 // ── deploy helpers ──
+/**
+ * Retry a call that failed for transport reasons only.
+ *
+ * These tests fork public RPC endpoints, and four forks run in parallel, so a
+ * dropped connection looks like a contract failure: the node answers
+ * estimateGas with "missing revert data" and no revert reason, which is what a
+ * node says when it could not run the call at all. Retrying that is honest.
+ * Retrying a revert that carries an actual reason string is not — that is the
+ * contract refusing, and re-running it would just hide a real result.
+ */
+/**
+ * Bound a promise. A capability probe that waits forever is not a probe, it is
+ * a hang: when anvil accepts a transaction it never mines, `tx.wait()` never
+ * settles, and the surrounding try/catch never sees an error to handle.
+ */
+export function withDeadline(promise, ms = 30_000, label = 'operation') {
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} did not settle within ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
+export async function withRpcRetry(fn, { attempts = 3, delayMs = 2500, label = 'call' } = {}) {
+  let last;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      const msg = String(e?.message || e);
+      const hasReason = /\brevert(ed)?\b/i.test(msg) && /reason=/.test(msg);
+      const transport = /missing revert data|could not coalesce|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket hang up|network error|fetch failed|timeout/i.test(msg);
+      if (hasReason || !transport || i === attempts) throw e;
+      await new Promise((r) => setTimeout(r, delayMs * i));
+      process.stderr.write(`[fork] ${label}: retrying after a transport error (${i}/${attempts - 1}) — ${msg.slice(0, 90)}\n`);
+    }
+  }
+  throw last;
+}
+
 export async function deployContract(signer, abi, bytecode, args = []) {
   const { ethers } = await import('ethers');
   const factory = new ethers.ContractFactory(abi, bytecode, signer);
-  const contract = await factory.deploy(...args);
-  await contract.waitForDeployment();
+  const contract = await withRpcRetry(() => factory.deploy(...args), { label: 'contract deploy' });
+  await withRpcRetry(() => contract.waitForDeployment(), { label: 'deployment receipt' });
   return contract;
 }
 

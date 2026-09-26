@@ -15,7 +15,7 @@
 // tx, so each step sends its own fresh authorizationList (see fork-eip7702).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, compileSource, forkSkipReason, stopFork } from './fork-helper.mjs';
+import { startFork, compileSource, forkSkipReason, stopFork, withDeadline } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -40,7 +40,11 @@ async function supports7702State() {
       maxFeePerGas: fee.maxFeePerGas ?? fee.gasPrice,
       maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? fee.gasPrice,
     });
-    await tx.wait();
+    // Bounded on purpose. Anvil can accept a type-4 transaction and never mine
+    // it; an unbounded tx.wait() then hangs the whole run with no error, and
+    // the catch below never runs. A probe that cannot answer in time has its
+    // answer: this build does not persist the state.
+    await withDeadline(tx.wait(), 20_000, '7702 probe receipt');
     await new Promise((r) => setTimeout(r, 1500));
     const after = await provider.getCode(probe.address);
     // Only trustworthy if the account started clean AND the delegate applied.
