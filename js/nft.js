@@ -108,12 +108,26 @@ export async function loadNfts() {
       // .nft-empty spans the grid and centres on both axes — see the CSS note.
       // The gallery is empty for two very different reasons, so say which:
       // the wallet holds no NFT here, versus the network cannot be enumerated.
+      // The hint used to end with "or import the collection contract below",
+      // and there was nothing below: this view has exactly one control, the
+      // gallery itself. A sentence pointing at a control that does not exist is
+      // the same failure as the old placeholder claiming "No NFTs found" and
+      // "Connect wallet" at once — the UI promising something it cannot do. So
+      // it now says what is actually true and offers the one action that is
+      // actually available.
       grid.innerHTML =
         '<div class="nft-empty" role="status">' +
           '<div class="nft-empty-title">NFT not found</div>' +
-          '<div class="nft-empty-hint">This wallet holds no NFT on the current network. ' +
-          'Switch network, or import the collection contract below.</div>' +
+          '<div class="nft-empty-hint">This wallet holds no NFT on ' +
+            '<span id="nftEmptyNet"></span>. The list is read from this network alone — ' +
+            'an NFT you hold on another chain will not appear here.</div>' +
+          '<button class="btn btn-sm btn-secondary" id="nftSwitchNetwork">Switch network</button>' +
         '</div>';
+      const netName = document.getElementById('nftEmptyNet');
+      if (netName) netName.textContent = net.name + ' (chain ' + net.chainId + ')';
+      document.getElementById('nftSwitchNetwork')?.addEventListener('click', () => {
+        document.getElementById('networkPill')?.click();
+      });
     }
   } catch {
     grid.innerHTML =

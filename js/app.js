@@ -8,13 +8,15 @@
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider,
          addCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
-         addRpcOverride, applyRpcOverrides, providerEndpoint } from './network.js';
+         addRpcOverride, applyRpcOverrides, providerEndpoint,
+         getRpcOverrides } from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
          fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue, titleCase } from './ui.js';
 import { runIntro, initTheme } from './theme.js';
-import { get, set, on, setUnlockHandler, addActivity, loadActivity } from './state.js';
+import { get, set, on, setUnlockHandler, addActivity, loadActivity,
+         reconcileActivity } from './state.js';
 import { fetchAllPrices, fetchPriceHistory, fetchOHLC } from './price.js';
 import { waitForReceipt } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
@@ -1992,6 +1994,13 @@ async function reconnectRpc() {
     updateTopbar();
     paintActiveRpc();
     if (get('address')) loadDashboard();
+    // A row left 'pending' by a closed tab must be settled against the chain
+    // before the history is shown, or a finished transfer reads as in-flight
+    // forever. Fire-and-forget: the view already rendered, and a node that
+    // cannot answer must not block the dashboard.
+    reconcileActivity(get('provider')).then((r) => {
+      if (r.settled || r.failed) { emit('activity'); renderActivity(); }
+    }).catch(() => { /* the honest state is 'pending', not a guess */ });
   } catch (e) {
     toast('Could not connect to the new RPC: ' + (e?.message || e), 'error');
   }
