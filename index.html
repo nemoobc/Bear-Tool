@@ -272,11 +272,14 @@
                     <input class="input" id="swapFromAmount" type="number" placeholder="0.0" min="0" step="any">
                     <button class="btn btn-ghost btn-sm swap-max-btn" id="btnSwapMax" title="Max amount">MAX</button>
                   </div>
-                  <!-- Was inside the Bridge heading's <svg>, where a <p> gets no
+                  <!-- Was inside the Bridge heading's inline SVG, where a paragraph gets no
                        layout box at all: it rendered at 0x0, so the app computed a
                        careful explanation of exactly what MAX reserved and then put
                        it where nobody could read it - in the wrong view besides.
-                       It lives here instead, under the control that produces it. -->
+                       It lives here instead, under the control that produces it.
+                       Tags are spelled out in words on purpose: a literal tag name
+                       in a comment makes every grep-and-count over this file
+                       miscount, which is how a real imbalance got hidden here. -->
                   <p class="max-note" id="swapMaxNote" role="status" aria-live="polite"></p>
                 </div>
                 <div class="swap-balance" id="swapFromBalance">Balance: 0</div>
