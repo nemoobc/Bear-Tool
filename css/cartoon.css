@@ -1162,7 +1162,10 @@ body::before {
 .swap-field { position: relative; }
 .swap-field label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: var(--sp-4); }
 .swap-input-row { display: flex; gap: var(--sp-8); align-items: stretch; }
-.swap-token-select { flex: 0 0 140px; min-height: var(--touch-min); }
+/* 0 0 pinned the control at 140px so it could not shrink, which is what
+   pushed the picker panel off the right edge on a 320px phone. 0 1 lets it
+   give way, and min-width:0 is what actually permits the shrink. */
+.swap-token-select { flex: 0 1 140px; min-width: 0; min-height: var(--touch-min); }
 .swap-amount-wrap { flex: 1; position: relative; display: flex; }
 .swap-amount-wrap .input { flex: 1; padding-right: 60px; }
 .swap-max-btn {
