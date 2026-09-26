@@ -404,7 +404,7 @@ const REACHABLE_ON_MOBILE = {
   deploy: 'Dashboard quick action (Tools)',
   nft: 'Dashboard quick action',
   bridge: 'Second press of Swap',
-  approval: 'Settings → Security Center → Approvals',
+  approval: 'Dashboard quick action (Approvals)',
 };
 
 function syncMobileNav() {
@@ -493,7 +493,11 @@ function refreshView(view) {
   if (view === 'nft') loadNfts();
   if (view === 'activity') renderActivity();
   if (view === 'dapps') renderDapps($('#dappsContainer'));
-  if (view === 'settings') renderSecurityCenter($('#securityCenter'));
+  // The Security Center moved from Settings to Approvals, so it renders with
+  // this view. Settings is five things and ends at the delete; this is where
+  // the reference material about what a dApp or a token can do to you belongs.
+  if (view === 'approval') renderSecurityCenter($('#securityCenter'));
+
 }
 
 // ── dApp bridge ──────────────────────────────────────────────────────────
@@ -1085,6 +1089,55 @@ function getNetworkLogo(name, size = 24) {
 }
 
 // ── network modal ──
+/**
+ * The single writer of settings.testnet. Two switches show it — the one in
+ * Settings and the one beside the network list it filters — and when they were
+ * wired separately they drifted: the picker wrote the setting and the Settings
+ * switch kept showing the old value, so the app remembered one thing and the
+ * page claimed another. One writer, both controls read back from here.
+ *
+ * Hiding testnets can strand the app on a chain that nothing lists any more, so
+ * the move off a testnet happens first and the toast says so, rather than
+ * leaving the wallet pointing at a network that has just been filtered away.
+ *
+ * @param {boolean} on
+ * @param {() => void} [redraw] re-render whatever is showing the filtered list
+ */
+function setTestnetVisible(on, redraw) {
+  const settings = get('settings');
+  settings.testnet = on;
+  set('settings', { ...settings });
+  saveSettings();
+
+  if (!on) {
+    // Look the active chain up in the UNFILTERED list. getNetworkById() and
+    // getAllNetworks() already hide testnets the moment this is off, so they
+    // would report the active chain as Ethereum and skip the move.
+    const active = [...NETWORKS, ...getCustomNetworks()].find((n) => n.id === get('networkId'));
+    if (active?.type === 'testnet') {
+      set('networkId', 'ethereum');
+      localStorage.setItem('bear.networkId', 'ethereum');
+      updateTopbar();
+      if (get('address')) loadDashboard();
+      toast('Testnets hidden — moved to Ethereum', 'info');
+      syncTestnetSwitches();
+      redraw?.();
+      return;
+    }
+  }
+  toast(on ? 'Testnets shown' : 'Testnets hidden', 'success');
+  syncTestnetSwitches();
+  redraw?.();
+}
+
+/** Both switches show the stored setting, never their own last-known value. */
+function syncTestnetSwitches() {
+  const on = (get('settings') || {}).testnet !== false;
+  for (const el of [$('#setTestnet'), $('#netShowTestnet')]) {
+    if (el && el.checked !== on) el.checked = on;
+  }
+}
+
 function showNetworkModal() {
   const nets = getAllNetworks();
   const html = `
@@ -1123,33 +1176,11 @@ function showNetworkModal() {
   openModal(html);
   applyTranslations();
 
-  // Applies the moment it is flipped. Hiding testnets can strand the app on a
-  // chain that nothing lists any more, so if that is where we are standing, the
-  // move to Ethereum happens first and the toast says so.
+  // Applies the moment it is flipped. Both this switch and the one in Settings
+  // call setTestnetVisible, so the setting has exactly one writer and the two
+  // controls can never disagree about it.
   $('#netShowTestnet')?.addEventListener('change', (e) => {
-    const on = !!e.target.checked;
-    const settings = get('settings');
-    settings.testnet = on;
-    set('settings', { ...settings });
-    saveSettings();
-
-    if (!on) {
-      // Look the active chain up in the UNFILTERED list. getNetworkById() and
-      // getAllNetworks() already hide testnets the moment this is off, so they
-      // would report the active chain as Ethereum and skip the move.
-      const active = [...NETWORKS, ...getCustomNetworks()].find((n) => n.id === get('networkId'));
-      if (active?.type === 'testnet') {
-        set('networkId', 'ethereum');
-        localStorage.setItem('bear.networkId', 'ethereum');
-        updateTopbar();
-        if (get('address')) loadDashboard();
-        toast('Testnets hidden — moved to Ethereum', 'info');
-        showNetworkModal();
-        return;
-      }
-    }
-    toast(on ? 'Testnets shown' : 'Testnets hidden', 'success');
-    showNetworkModal();
+    setTestnetVisible(!!e.target.checked, () => showNetworkModal());
   });
 
   // network search
@@ -1936,17 +1967,27 @@ function bindViews() {
     startAutoLock();
     toast('Auto-lock set to ' + (minutes === 0 ? 'never' : minutes + ' min'), 'success');
   });
+  // The testnet switch, in Settings. The network picker has the same switch
+  // beside the list it filters; both go through setTestnetVisible, so this is
+  // the second control for one setting, not a second opinion about it.
+  $('#setTestnet')?.addEventListener('change', (e) => {
+    setTestnetVisible(e.target.checked);
+  });
   // One delete, in the Safety group, where the consequences are spelled out
   // beside it. It used to also sit at the very bottom of the page below the
   // whole Security Center, so a destructive action appeared twice on one screen
   // and the second copy was a long scroll past six other sections.
   $('#btnClearAllData')?.addEventListener('click', clearAllData);
-  // The testnet switch and the custom RPC field are no longer on this page.
-  // Their handlers went with them rather than being left as dead code: a
-  // control wired to a field that is not there is a claim the app cannot keep.
+  // The custom RPC field is no longer on this page, and its handler went with
+  // it rather than being left as dead code: a control wired to a field that is
+  // not there is a claim the app cannot keep.
   // Auto-lock is a dropdown — reflect the saved value (not the HTML default)
   const autoLockEl = $('#setAutoLock');
   if (autoLockEl) autoLockEl.value = String(get('settings').autoLock ?? 5);
+  // Both testnet switches, from the stored setting rather than from the markup.
+  // A switch that boots showing "on" while the setting says "off" is a control
+  // that will be flipped by someone who was told the opposite.
+  syncTestnetSwitches();
 }
 
 // ── approval manager ──

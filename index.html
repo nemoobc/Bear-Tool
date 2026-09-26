@@ -137,6 +137,12 @@
             <button class="quick-action-btn" id="quickReceive"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="3" x2="12" y2="15"/><polyline points="7 10 12 15 17 10"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></span><span class="qa-label">Receive</span></button>
             <button class="quick-action-btn" data-view="nft"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span><span class="qa-label">NFT</span></button>
             <button class="quick-action-btn" data-view="deploy"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span><span class="qa-label">Tools</span></button>
+            <!-- Approvals has no bottom-bar slot. It used to reach a phone through
+                 Settings, but the Security Center that held the link now lives in
+                 this very view, and Settings is meant to be five things and end at
+                 the delete. So the route is here, beside the other things a user
+                 chooses to go and do on purpose. -->
+            <button class="quick-action-btn" data-view="approval"><span class="qa-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span class="qa-label">Approvals</span></button>
           </div>
           <div class="card">
             <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> <span data-i18n="dashboard.assets">My Assets</span></div>
@@ -402,6 +408,22 @@
             </div>
             <button class="btn btn-primary btn-block" id="btnApprovalScan">Scan Approvals</button>
             <div id="approvalList" class="mt-16"></div>
+          </div>
+
+          <!-- The Security Center lives here, not in Settings.
+               Settings is five things — how it looks, how long it holds a key,
+               and the delete — and it ends at the delete button. The Security
+               Center is six more sections of reference material, and having it
+               there meant the page was 2500px long, the delete was buried in the
+               middle of it, and nothing about the page said where it ended.
+
+               Approvals is where it belongs on a phone anyway: this is the view
+               a phone used to reach through Settings, and every part of the
+               Center is about what a dApp or a token can do to you. Nothing is
+               lost by moving it; it is just where you would look for it. -->
+          <div class="card mt-16">
+            <div class="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> <span data-i18n="sec.title">Security Center</span></div>
+            <div id="securityCenter"></div>
           </div>
         </section>
 
@@ -769,14 +791,42 @@
                 </select>
               </div>
 
+              <!-- The testnet switch lives in BOTH Settings and the network
+                   picker, and they are the same switch: one function
+                   (setTestnetVisible) writes the setting and both controls read
+                   it back from the same place. Two controls for one setting is
+                   normally a bug waiting to happen — one gets changed and the
+                   other keeps lying — so the rule here is that neither control
+                   owns anything. Move it, and move both.
+
+                   Settings is where a person looks for a preference, and this is
+                   the one that was reported missing from here. The picker copy
+                   stays because a filter you cannot reach from the thing it
+                   filters is a trap: search the list, and the switch that turns
+                   the filter off is gone. -->
               <div class="field">
-                <label data-i18n="set.group.data">Your data</label>
+                <div class="field-row">
+                  <div>
+                    <label for="setTestnet" data-i18n="set.testnet">Testnet mode</label>
+                    <p class="small dim" data-i18n="set.testnet.hint">Show test networks in the network list. Hiding them while you are on one moves you to Ethereum first.</p>
+                  </div>
+                  <!-- The whole row is the label, so the hit area is the row and
+                       not the 26px switch alone. -->
+                  <label class="switch" for="setTestnet">
+                    <input type="checkbox" id="setTestnet">
+                    <span class="slider" aria-hidden="true"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-group set-group-danger">
+              <h4 class="set-group-h" data-i18n="set.group.data">Your data</h4>
+              <div class="field">
                 <p class="small dim" data-i18n="set.data.hint">Everything lives in this browser only. Deleting removes every wallet, every setting and your whole history from here. It cannot be undone, and there is no copy anywhere else.</p>
                 <button class="btn btn-danger btn-block" id="btnClearAllData">🗑️ <span data-i18n="set.data.clear">Clear all data</span></button>
               </div>
             </div>
-
-            <div id="securityCenter"></div>
           </div>
         </section>
 

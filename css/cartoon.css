@@ -2021,37 +2021,63 @@ body::before {
 .theme-btn:hover { background: var(--cream); }
 .theme-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); }
 
-/* ── toggle switch (settings) ── */
+/* ── toggle switch ──
+   The tap target and the drawn track are deliberately TWO boxes, and they used
+   to be one. The touch floor (44px) is min-height, and min-height beats height,
+   so a 26px track silently became 48×44 — which under border-radius:999px is a
+   circle, not a pill, with the 20px knob stranded at top:3px instead of
+   centred. The rule that made the switch usable to a thumb had become the
+   reason it looked broken, and the taller box also pushed it out of the row.
+
+   So: .switch is the 44px target and nothing else, .slider is a 28px pill
+   centred inside it, and the knob is centred with margin-top so that the
+   :checked transform stays free to own translateX alone. */
 .switch-label { display: inline-block; }
 .switch {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   width: 48px;
-  height: 26px;
-  vertical-align: middle;
-}
-.switch input { opacity: 0; width: 0; height: 0; }
-.switch .slider {
-  position: absolute;
+  height: var(--touch-min);
+  min-height: var(--touch-min);
+  flex: 0 0 auto;
   cursor: pointer;
+}
+.switch input {
+  position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.switch .slider {
+  position: relative;
+  display: block;
+  width: 48px;
+  height: 28px;
   background: var(--ink-soft);
   border-radius: 999px;
   transition: background 0.2s;
+  pointer-events: none;
 }
 .switch .slider::before {
   content: '';
   position: absolute;
-  height: 20px;
+  top: 50%;
+  left: 4px;
   width: 20px;
-  left: 3px;
-  top: 3px;
+  height: 20px;
+  margin-top: -10px;
   background: var(--white);
   border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   transition: transform 0.2s;
 }
 .switch input:checked + .slider { background: var(--mint); }
-.switch input:checked + .slider::before { transform: translateX(22px); }
+.switch input:checked + .slider::before { transform: translateX(20px); }
+.switch input:focus-visible + .slider { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 /* dropdown options must never be clipped by a parent container */
 .view, .card, .field { overflow: visible; }
@@ -2945,7 +2971,10 @@ body::before {
 .check-target:hover { background: var(--cream); }
 .check-target:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
 .gas-btn { min-height: 36px; }
-.switch { min-height: 28px; }
+/* .switch is NOT listed here: it carries --touch-min in its own block, because
+   the switch is the one control whose height IS its hit area and the two must
+   never be allowed to disagree. The 28px written here overrode the 44px the
+   media query below set, and the switch was 28px tall on a phone. */
 
 /* …and the real target where a thumb is actually doing the pressing. Every
    entry below was MEASURED in a browser at 390px, not assumed. The list grew
@@ -3046,6 +3075,17 @@ body::before {
   color: var(--ink-soft);
 }
 .set-group .field:last-child { margin-bottom: 12px; }
+
+/* The delete group is visually set apart because it is the end of the page and
+   the only irreversible thing on it. It reads as a conclusion, not as another
+   group of preferences you might scroll past. */
+.set-group-danger {
+  background: #fff4f4;
+  border-color: #f0c4c4;
+  margin-bottom: 0;
+}
+.set-group-danger .set-group-h { color: #b23b3b; }
+.theme-dark .set-group-danger { background: #2a1d24; border-color: #5a2f38; }
 /* A switch and its explanation sit side by side, so the label is the target and
    the explanation does not push the control off the right edge. */
 .set-group .field-row {

@@ -174,13 +174,7 @@ export async function openView(page, view) {
     return appClick(page, '#chooseBridge');
   }
 
-  if (view === 'approval') {
-    await appClick(page, '#mobileNav .mobile-nav-item[data-view="settings"]');
-    await page.waitForSelector('#secGoApprovals', { timeout: 10_000 });
-    return appClick(page, '#secGoApprovals');
-  }
-
-  // send / nft / deploy — Dashboard quick actions
+  // send / nft / deploy / approval — Dashboard quick actions
   await appClick(page, '#mobileNav .mobile-nav-item[data-view="dashboard"]');
   return appClick(page, `.quick-action-btn[data-view="${view}"]`);
 }

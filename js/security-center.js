@@ -69,9 +69,8 @@ export function renderSecurityCenter(container) {
     <div class="sec-block">
       <h4 class="sec-h">Token approvals</h4>
       <p class="small dim">An approval you have already granted keeps working until it is revoked on
-      chain — revoking a permission here is not the same thing. The Approvals view reads every live
-      allowance straight from the chain and lets you set it back to zero.</p>
-      <button class="btn btn-sm" id="secGoApprovals">Review live approvals</button>
+      chain — revoking a permission here is not the same thing. The scanner at the top of this very
+      view reads every live allowance straight from the chain and lets you set it back to zero.</p>
     </div>
 
     <div class="sec-block">
@@ -149,13 +148,6 @@ function wire(container) {
       toast('Disconnected ' + b.dataset.disconnect, 'info');
       renderSecurityCenter(container);
     });
-  });
-
-  // Approvals has no bottom-bar button, so this is how a phone reaches it.
-  // Delegating to the sidebar item keeps one route into switchView() instead of
-  // a second, parallel one that could drift.
-  container.querySelector('#secGoApprovals')?.addEventListener('click', () => {
-    document.querySelector('.sidebar .nav-item[data-view="approval"]')?.click();
   });
 
   container.querySelectorAll('[data-revoke-perm]').forEach((b) => {
