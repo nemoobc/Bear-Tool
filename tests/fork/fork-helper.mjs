@@ -139,6 +139,18 @@ export async function startFork() {
 
 export async function stopFork() {
   if (anvilProcess) { anvilProcess.kill(); anvilProcess = null; }
+  // A provider left polling keeps the event loop alive, so the test file
+  // finishes its assertions and then never exits — which the runner reports as
+  // a timeout on the FILE, not on any test. This is reachable whenever a
+  // bounded wait is abandoned: the poller behind tx.wait() is still running,
+  // and nothing cancels it. Turning polling off and destroying the provider
+  // releases the timer.
+  try {
+    if (provider) {
+      provider.polling = false;
+      if (typeof provider.destroy === 'function') provider.destroy();
+    }
+  } catch { /* a provider that cannot be destroyed must not block teardown */ }
   provider = null; signer = null; network = null;
 }
 
