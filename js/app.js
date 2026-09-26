@@ -7,7 +7,8 @@
 
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider,
-         addCustomNetwork, getCustomNetworks, CHAIN_PRESETS } from './network.js';
+         addCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
+         addRpcOverride, applyRpcOverrides } from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
@@ -43,6 +44,9 @@ window.addEventListener('DOMContentLoaded', () => {
     loadDashboard();
     if ($('#view-activity').classList.contains('active')) renderActivity();
   });
+  // Re-apply stored per-network RPC overrides before anything builds a
+  // provider, or the wallet quietly talks to the public endpoint.
+  try { applyRpcOverrides(); } catch { /* a corrupt store must not block boot */ }
   syncMobileNav();
   bindNav();
   bindTopbar();
@@ -1951,7 +1955,65 @@ function renderActivity() {
 }
 
 // ── settings ──
-function saveSettingsHandler() {
+/**
+ * Is this RPC URL safe to put in front of a signing wallet?
+ *
+ * https is required for anything remote, because a transaction signed here is
+ * broadcast in clear over plain HTTP to whatever answers — that is not a
+ * theoretical risk, it is the transaction. Loopback is exempt because the
+ * traffic never leaves the machine, and because it is the only way the app's
+ * own fork workflow (run-fork-all.sh and its anvils on localhost) can be used
+ * through the UI at all. The previous rule demanded https unconditionally,
+ * which silently threw away "Custom RPC added for Ethereum" and left the
+ * balance at zero with no clue why.
+ */
+export function isSafeRpcUrl(url) {
+  const s = String(url || '').trim();
+  if (/^https:\/\//i.test(s)) return true;
+  if (!/^http:\/\//i.test(s)) return false;
+  let host;
+  try { host = new URL(s).hostname.toLowerCase(); } catch { return false; }
+  return host === 'localhost'
+    || host === '127.0.0.1'
+    || host === '::1'
+    || host === '[::1]'
+    || host.endsWith('.localhost');
+}
+
+/**
+ * Point the wallet at the current network's first RPC again.
+ *
+ * Two things hold on to the old endpoint: the provider, and any live signer —
+ * an ethers Wallet carries its own provider reference, so leaving it alone
+ * means the next transaction is signed and broadcast to the RPC the user just
+ * replaced. Both are rebuilt here, and a failure leaves the wallet locked
+ * rather than half-migrated.
+ */
+async function reconnectRpc() {
+  const net = getNetworkById(get('networkId'));
+  if (!net) return;
+  try {
+    const provider = await getProvider(net.chainId);
+    set('provider', provider);
+    if (get('unlocked')) {
+      const secret = wallet.getSession();
+      if (secret) {
+        const signer = wallet.signerFromSecret(secret);
+        set('signer', signer);
+        set('address', signer.address);
+      } else {
+        set('unlocked', false);
+        set('signer', null);
+      }
+    }
+    updateTopbar();
+    if (get('address')) loadDashboard();
+  } catch (e) {
+    toast('Could not connect to the new RPC: ' + (e?.message || e), 'error');
+  }
+}
+
+async function saveSettingsHandler() {
   const settings = get('settings');
   settings.currency = $('#setCurrency').value;
   settings.lang = $('#setLang').value;
@@ -1961,10 +2023,20 @@ function saveSettingsHandler() {
   if (testnetEl) settings.testnet = testnetEl.checked;
   const rpc = $('#setRpc').value.trim();
   if (rpc) {
-    if (!/^https:\/\//.test(rpc)) return toast('Custom RPC must be an https:// URL', 'error');
+    if (!isSafeRpcUrl(rpc)) {
+      return toast('Use https:// — or http:// for a local node (localhost / 127.0.0.1)', 'error');
+    }
     const net = getNetworkById(get('networkId'));
     if (net) {
-      net.rpc.unshift(rpc);
+      // Persist, then apply. Unshifting onto the in-memory list alone looked
+      // like it worked and was gone after the next reload.
+      addRpcOverride(net.id, rpc);
+      net.rpc = [rpc, ...net.rpc.filter((u) => u !== rpc)];
+      // Adding an RPC has to actually take effect, or the toast is a lie:
+      // "Custom RPC added for Ethereum" appeared while the balance stayed at
+      // zero, because the provider was built against the previous URL and
+      // nothing rebuilt it.
+      await reconnectRpc();
       toast('Custom RPC added for ' + net.name, 'success');
     }
   }

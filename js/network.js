@@ -293,6 +293,52 @@ export function removeCustomNetwork(id) {
   return list;
 }
 
+// Per-network custom RPC overrides. A built-in network's rpc list lives in a
+// module constant, so unshifting onto it in memory produced a setting that
+// vanished on the next reload: the user added an RPC, saw "Custom RPC added",
+// refreshed, and was back on the public endpoint with no trace of what they had
+// set. These are stored per network id and re-applied on load.
+const RPC_OVERRIDE_KEY = 'bear.rpcOverrides';
+
+export function getRpcOverrides() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RPC_OVERRIDE_KEY) || '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch { return {}; }
+}
+
+/** Put `url` at the front of `netId`'s endpoint list, and remember it. */
+export function addRpcOverride(netId, url) {
+  const all = getRpcOverrides();
+  const list = Array.isArray(all[netId]) ? all[netId] : [];
+  const next = [url, ...list.filter((u) => u !== url)];
+  all[netId] = next;
+  try { localStorage.setItem(RPC_OVERRIDE_KEY, JSON.stringify(all)); } catch { /* private mode */ }
+  return next;
+}
+
+export function removeRpcOverride(netId, url) {
+  const all = getRpcOverrides();
+  if (Array.isArray(all[netId])) {
+    all[netId] = all[netId].filter((u) => u !== url);
+    if (!all[netId].length) delete all[netId];
+  }
+  try { localStorage.setItem(RPC_OVERRIDE_KEY, JSON.stringify(all)); } catch { /* private mode */ }
+  return all[netId] || [];
+}
+
+/** Push every stored override onto the in-memory network it belongs to. */
+export function applyRpcOverrides() {
+  const all = getRpcOverrides();
+  for (const [id, urls] of Object.entries(all)) {
+    const net = NETWORKS.find((n) => n.id === id)
+      || getCustomNetworks().find((n) => n.id === id);
+    if (!net || !Array.isArray(urls)) continue;
+    net.rpc = [...urls.filter((u) => !net.rpc.includes(u)), ...net.rpc];
+  }
+  return all;
+}
+
 export function getAllNetworks() {
   const all = [...NETWORKS, ...getCustomNetworks()];
   // Settings → Testnet mode OFF hides every testnet from choosers.
