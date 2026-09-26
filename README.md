@@ -15,7 +15,7 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 | Area | What it does |
 |---|---|
 | 🐻 **Wallet** | Create (12-word seed) / import (seed or private key) with optional wallet name (auto-names Wallet, Wallet 1, …), PBKDF2-310k + AES-GCM encrypted keystore in localStorage, multi-account (m/44'/60'/0'/0/i), auto-lock, export secret. Refresh keeps the wallet unlocked (sessionStorage); closing the tab locks it again |
-| 🌐 **Networks** | 12 EVM networks built in: 6 mainnet (Ethereum, BSC, Polygon, Arbitrum, OP, Base) + 6 testnet (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet), RPC fallback chain. **Add Network is a picker, not a form** — 15 further EVM chains (Celo, Gnosis, Avalanche, Sonic, Linea, Scroll, Blast, Mantle, Moonbeam, Cronos, Aurora, Polygon zkEVM, Mode, Metis, Hoodi) are one tap and fill themselves in; every preset RPC was probed to confirm it answers `eth_chainId` with the chain it claims, and saving re-checks that live. Custom RPC still supported. Settings → **Testnet mode** toggle hides testnets |
+| 🌐 **Networks** | 12 EVM networks built in: 6 mainnet (Ethereum, BSC, Polygon, Arbitrum, OP, Base) + 6 testnet (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet), RPC fallback chain. **Add Network is a picker, not a form** — 15 further EVM chains (Celo, Gnosis, Avalanche, Sonic, Linea, Scroll, Blast, Mantle, Moonbeam, Cronos, Aurora, Polygon zkEVM, Mode, Metis, Hoodi) are one tap and fill themselves in; every preset RPC was probed to confirm it answers `eth_chainId` with the chain it claims, and saving re-checks that live. Custom RPC still supported, and it is **used exactly as entered** — if it stops answering, the app says so by name and stops, rather than quietly falling through to a different node. That failure mode was real: a fork endpoint that was slow to answer got skipped, the wallet connected to a public node instead, and the only symptom was a funded account reporting a balance it never had. Settings also shows **which node is live**. Settings → **Testnet mode** toggle hides testnets |
 | 🪙 **Assets** | Native balance plus a bundled ERC-20 watchlist: **19 tokens on Ethereum mainnet** (USDT, USDC, DAI, WETH, WBTC, LINK, UNI, AAVE, SHIB, MATIC, ARB, OP, PEPE, CRV, SNX, SUSHI, COMP, MKR, LDO) and 1–2 on each other supported chain — the list is a convenience, not a limit. **+ Add Token** sits under the list; paste an ERC-20 contract address and its name, symbol and decimals are read off the contract and shown before you commit, so a wrong paste is obvious instead of landing as an unlabelled row |
 | ✈️ **Send** | Native + ERC-20, gas speed (slow/normal/fast), live preview + est. gas, paste button, address validation + poisoning detection |
 | 🔄 **Swap** | Real quotes only — auto-route KyberSwap → Uniswap V3 → Uniswap V2 (on-chain verified routers, incl. Sepolia V2), slippage control, flip. No simulation: no route = honest error. The Swap nav button is also the Bridge entry (tap it twice to choose) |
@@ -25,9 +25,52 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 | 🧙 **Deploy** | Wizard for ERC-20 / ERC-721 / ERC-1155 — real in-browser solc compile (CDN fallback if the primary mirror is blocked) |
 | 📜 **Activity** | Local tx history with explorer links (sidebar item next to Dashboard) |
 | 🌐 **DApps** | Web3 DApps browser — 10 curated DApps with a text filter (name/category/URL) and category chips, every card keyboard-operable with an accessible name. iframe for sites that permit framing (Aave, Compound, Snapshot); Uniswap, OpenSea, Blur, Lido, Rocket Pool, Etherscan and ENS ship `X-Frame-Options` / `frame-ancestors` clickjacking protection, so **no** in-app browser can embed them — those are labelled `↗ new tab` and open externally instead of showing a blank frame. Paste any URL to open it in-app. See [DApps & framing](#-dapps--why-most-dapps-open-in-a-new-tab) |
-| 📱 **Mobile parity** | The bottom bar is **generated from the desktop sidebar**, so every view exists on a phone: 4 primary tabs (Home, Swap, Activity, NFT) plus **More**, which opens a sheet containing the whole navigation — EIP-7702, Approvals, Tools, DApps and Settings included. The bar used to hold 6 hand-written items against a 9-item sidebar, which put those three desktop-only |
-| 🖼️ **NFT** | NFT gallery (on-chain metadata + images), OpenSea WL check + mint estimate (price/gas/total), list/cancel/fulfill via Seaport, accept highest offer auto-detect. **OpenSea needs an API key** — see below |
+| 📱 **Mobile parity** | The bottom bar is **generated from the desktop sidebar**, so it cannot drift from it: **Dashboard · Activity · Swap · DApps · Settings**, five slots, no "More". A sixth button whose contents you had to guess was the wrong trade for a thumb. The five views that no longer fit are still reachable without a sheet — **Send**, **NFT** and **Tools** from Dashboard quick actions, **Bridge** from a second press of Swap, **Approvals** from Settings → Security Center. Those routes are written down in `REACHABLE_ON_MOBILE` in `app.js`, so the next person to remove a bottom-bar button can see what they just cut off |
+| 🖼️ **NFT** | NFT gallery (on-chain metadata + images) that loads on a **locked** wallet too — enumeration only reads the chain with an address that is already public, so requiring the password left the gallery silently empty after a refresh. OpenSea WL check + mint estimate (price/gas/total), list/cancel/fulfill via Seaport, accept highest offer auto-detect. **OpenSea needs an API key** — see below |
+| 🛡 **Security Center** | Settings → Security makes the whole model visible: what a dApp can and cannot reach, connected sites and their per-method grants, both site lists, the live guardrails with the real numbers, live token approvals, browsing data, stored keys. It also states the one thing that is easy to get wrong in a wallet's favour — **a cross-origin page cannot detect this wallet at all** |
+| ⚡ **MAX** | One button, no arithmetic, and it never guesses. Reserve = fee × gas limit at the live gas price, then the amount is **truncated**, never rounded up, so the reserved remainder is the fee and not a penny of it. Proven against real funds on a fork: 100 → MAX writes 99.999977 → sent exactly 99.999977, fee exactly the reserve |
 | 🎨 **Theme** | Full cartoon: chunky borders, soft shadows, 5s skippable logo intro, spinning bear loader |
+
+---
+
+## 🧭 Where everything is
+
+| | Desktop | Phone |
+|---|---|---|
+| Dashboard · Activity · Swap · DApps · Settings | sidebar | the five bottom-bar slots |
+| Send · NFT · Tools | sidebar | Dashboard quick actions |
+| Bridge | second press of Swap | second press of Swap |
+| Approvals | sidebar | Settings → Security Center → Review live approvals |
+| EIP-7702, contract wizard, OpenSea panel | Tools | Dashboard → Tools |
+
+Two rules keep that table true rather than aspirational:
+
+- **`MOBILE_PRIMARY` in `app.js` picks the slots, `REACHABLE_ON_MOBILE` beside it
+  records how the rest is reached.** A view with no route in that second map is a
+  view that exists on desktop and not on a phone — the exact bug the bar was
+  rebuilt to remove.
+- **The bar is generated from the sidebar**, so a new sidebar view cannot be
+  forgotten on mobile. It used to be six hand-written buttons against a nine-item
+  sidebar, which put EIP-7702, Approvals and Tools on desktop only.
+
+### Touch targets
+
+`--touch-min` is **44px** and the floor is applied in **one** place —
+`css/cartoon.css`, in the `@media (pointer: coarse), (max-width: 768px)` block,
+with each control's measured "before" in a comment.
+
+The `768px` is the point of that rule. The phone *layout* (bottom bar, no
+sidebar) starts at 768px, so between 561 and 768 the app was showing a
+finger-sized layout with mouse-sized controls. Two breakpoints for one decision
+is the bug. The separate 560px queries are a different question — two controls
+no longer sharing a line — and are not a second floor.
+
+Measured in a browser after the change, across all ten views:
+
+| Viewport | Horizontal overflow | Targets under 44px |
+|---|---|---|
+| 320 · 390 · 560 · 768 | 0 | 0 |
+| 1280 · 1440 (mouse) | 0 | 0 required — 32px desktop floor |
 
 ---
 
@@ -51,7 +94,20 @@ npm install   # devDependency: ethers (for tests only)
 npm run verify
 ```
 
-`verify` = syntax check all JS + **366 unit tests** (365 pass, 1 skip) covering wallet create/import/encrypt/decrypt, network presets, EIP-7702, session persistence, address poisoning, nav invariants, the dApp pre-load security gate, the signing guardrails, the injected-provider refusals, and MAX amount arithmetic. Plus browser E2E (`npm run test:e2e`, 20 spec files) and on-chain fork tests for 12 networks (`run-fork-all.sh`, 11 fork tests per network).
+`verify` = syntax check all JS + the unit suite, covering wallet
+create/import/encrypt/decrypt, network presets, EIP-7702, session persistence,
+address poisoning, nav invariants, the dApp pre-load security gate, the signing
+guardrails, the injected-provider refusals, and MAX amount arithmetic. Plus
+browser E2E (`npm run test:e2e`) and on-chain fork tests for 12 networks
+(`run-fork-all.sh`).
+
+**A green terminal run is not the acceptance test here.** Every layout, touch
+target and empty state in this README was found by measuring a real rendered box
+in a real browser and comparing the number against the threshold — nine bugs
+that a passing test suite had no way to see, including a select that rendered
+**1px** wide, a checkbox label at **23px**, and an NFT empty state that had never
+been loaded at all because `refreshView` had no `nft` branch. Numbers quoted in
+this file are measured, not intended.
 
 ## 📁 Structure
 
@@ -78,7 +134,7 @@ Bear-Tool/
 │   ├── deploy.js       # deploy wizard: real in-browser solc compile → gas → deploy
 │   ├── contracts.js    # standard contract sources for the deploy wizard
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin)
-│   ├── dapps.js        # DApps browser: filterable grid + sandboxed iframe
+│   ├── dapps.js        # DApps catalogue: filterable grid, category chips
 │   ├── nft.js          # NFT gallery (best-effort enumeration)
 │   ├── opensea.js      # NFT market actions
 │   ├── opensea-api.js  # OpenSea v2 client (needs a user-supplied API key)
@@ -88,7 +144,8 @@ Bear-Tool/
 │   ├── theme.js        # 5s intro animation
 │   ├── dapp-safety.js  # pre-load URL gate: schemes, homographs, lure shapes, user lists
 │   ├── dapp-sessions.js# connected sites, per-method grants, block/trust lists
-│   ├── dapp-browser.js # the in-app browser: tabs, history, omnibox, bookmarks, menu
+│   ├── dapp-browser.js # the in-app browser: tabs, history, omnibox, bookmarks,
+│   │                   #        pre-load gate sheet, external-open notice
 │   ├── dapp-bridge.js  # window.ethereum for same-origin pages, with refusals
 │   ├── security.js     # calldata decoding, unlimited-approval detection, URL secret hygiene
 │   ├── security-center.js # the Settings page that makes all of the above visible
@@ -138,6 +195,22 @@ Bear-Tool/
   `is_suspicious`) each render as pass / warn / fail with the reason. There is
   deliberately no single "safe" badge, and the panel states that no automated
   check can prove a mint is safe.
+- **A custom RPC is never silently replaced.** `getProvider` walks a list of
+  endpoints and returns the first that answers, which for a user-entered override
+  is the wrong behaviour: a local fork that was slow on its first call got
+  skipped, the wallet connected to a **public node** instead, and the account
+  reported a balance it was never funded with while `estimateGas` failed with
+  `missing revert data`. Every symptom traced to that one substitution. An
+  override is now user intent — it is tried, and if it fails it **throws with the
+  URL and the reason** instead of answering from somewhere else. Settings shows
+  which node is live, because a provider whose origin is invisible is a provider
+  nobody can debug.
+- **The NFT gallery used to never load.** `loadNfts` was imported and never
+  called — `refreshView` had no `nft` branch — so the view showed its static
+  placeholder forever, and that placeholder claimed "No NFTs found" **and**
+  "Connect wallet to view your NFTs" simultaneously. It also required `unlocked`,
+  so a restored read-only wallet saw the same thing. Both fixed; the outcome is
+  now stated by the code that fetched it.
 - Mainnet sends/swaps/deploys require typed confirmation.
 - This is a reference implementation — audit before real funds.
 
