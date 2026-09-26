@@ -62,10 +62,28 @@ test('mobile nav: every sidebar view is reachable from the phone', () => {
   assert.ok(sidebarViews.length >= 8, `sidebar must list the views, got ${sidebarViews.length}`);
   assert.match(jsApp, /const items = \[\.\.\.\$all\('\.sidebar \.nav-item'\)\]/,
     'syncMobileNav must read the sidebar as its single source of truth');
-  // Anything not in the primary four must be reachable through the More sheet.
-  assert.match(jsApp, /const rest = items\.filter\(\(i\) => !primary\.includes\(i\.view\)\)/,
-    'views outside the primary row must fall through to the More sheet');
-  assert.match(jsApp, /id="mobileMoreBtn"/, 'the More button must be generated');
+  // Five fixed slots, in the order the user named them, and no More.
+  const mSlots = jsApp.match(/const MOBILE_PRIMARY = \[([^\]]+)\]/);
+  assert.ok(mSlots, 'MOBILE_PRIMARY must exist');
+  const slots = [...mSlots[1].matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(slots, ['dashboard', 'activity', 'swap', 'dapps', 'settings'],
+    `the bottom bar must be exactly those five, in that order — got ${JSON.stringify(slots)}`);
+  assert.ok(!jsApp.includes('mobileMoreBtn'),
+    'the More button is gone; a sixth slot behind a guess is what it replaced');
+  assert.ok(!jsApp.includes('showMoreSheet'),
+    'the More sheet has no callers and must not linger as a second, parallel route');
+
+  // The invariant that replaced "there is a More button": a view is reachable on
+  // a phone if it is a slot OR REACHABLE_ON_MOBILE names a route for it. This is
+  // stronger than the old check — that one only proved a button existed, and
+  // would have been satisfied by a More sheet that listed the views without
+  // making any of them actually reachable.
+  const mReach = jsApp.match(/const REACHABLE_ON_MOBILE = \{([\s\S]*?)\n\};/);
+  assert.ok(mReach, 'REACHABLE_ON_MOBILE must exist next to MOBILE_PRIMARY');
+  const routes = new Set([...mReach[1].matchAll(/^\s*([a-z0-9-]+):/gm)].map((m) => m[1]));
+  const unreachable = sidebarViews.filter((v) => !slots.includes(v) && !routes.has(v));
+  assert.deepEqual(unreachable, [],
+    `sidebar views with no route on a phone: ${unreachable.join(', ')} — a view that exists on desktop and not on mobile is the bug this map exists to prevent`);
   for (const v of ['approval', 'deploy', 'dapps', 'settings']) {
     assert.ok(sidebarViews.includes(v), `${v} must be a sidebar view`);
   }

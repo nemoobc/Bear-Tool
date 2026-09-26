@@ -8,7 +8,7 @@
 //   #6  pasting a contract address detects name/symbol/decimals
 //   #7  DApps filter by text and category, cards are keyboard operable
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, createWallet, appClick } from './helpers.js';
+import { gotoApp, skipIntro, createWallet, appClick , openView} from './helpers.js';
 
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // Ethereum mainnet
 
@@ -310,21 +310,19 @@ test.describe('Mobile navigation parity', () => {
     await skipIntro(page);
     await createWallet(page);
     const sidebarViews = await page.locator('.sidebar .nav-item').evaluateAll((els) => els.map((e) => e.dataset.view));
-    await page.locator('#mobileMoreBtn').click();
-    await page.waitForSelector('#navSheet', { timeout: 10_000 });
-    const sheet = await page.locator('#navSheet .nav-sheet-item').evaluateAll((els) => els.map((e) => e.dataset.view));
-    const primary = await page.locator('#mobileNav .mobile-nav-item[data-view]').evaluateAll((els) => els.map((e) => e.dataset.view));
-    const unreachable = sidebarViews.filter((v) => !sheet.includes(v) && !primary.includes(v));
-    expect(unreachable, 'no view may be desktop-only').toEqual([]);
-    // Tools (which now carries the EIP-7702 suite), Approvals and DApps must all
-    // be one tap away on a phone.
-    for (const v of ['deploy', 'approval', 'dapps']) {
-      expect(sheet, `${v} must be reachable on mobile`).toContain(v);
+    // Parity is no longer "the sheet lists it" — a sheet could list a view and
+    // still leave it unreachable, which is the bug this assertion used to be
+    // satisfied by. It is now proved by opening each view on a phone.
+    const slots = await page.locator('#mobileNav .mobile-nav-item').evaluateAll((els) => els.map((e) => e.dataset.view));
+    for (const v of sidebarViews) {
+      await openView(page, v);
+      await expect(page.locator('#view-' + v), `${v} must not be desktop-only`).toHaveClass(/active/);
     }
-    // And the EIP-7702 forms must be inside Tools on mobile too.
-    await page.locator('#navSheet .nav-sheet-item[data-view="deploy"]').click();
+    // Tools (which carries the EIP-7702 suite) must work on mobile too.
+    await openView(page, 'deploy');
     await expect(page.locator('#btnDelegate')).toHaveCount(1);
     await expect(page.locator('#deployStandard')).toHaveCount(1);
+    expect(slots).toEqual(['dashboard', 'activity', 'swap', 'dapps', 'settings']);
   });
 
   test('#1 Approvals, Tools, DApps and Settings all open on a phone', async ({ page }) => {
@@ -332,12 +330,13 @@ test.describe('Mobile navigation parity', () => {
     await skipIntro(page);
     await createWallet(page);
     for (const v of ['approval', 'deploy', 'dapps', 'settings']) {
-      await page.locator('#mobileMoreBtn').click();
-      await page.waitForSelector('#navSheet', { timeout: 10_000 });
-      await page.locator(`#navSheet .nav-sheet-item[data-view="${v}"]`).click();
+      await openView(page, v);
       await expect(page.locator('#view-' + v), `${v} must become the active view`).toHaveClass(/active/);
-      // A view behind "More" has no bar button, so More itself lights up.
-      await expect(page.locator('#mobileMoreBtn')).toHaveClass(/active/);
+      // A slot highlights only for its own view. A view reached from the
+      // Dashboard or from Settings is not one of the five, so nothing lights up
+      // — which is honest, rather than a bar pretending to be somewhere else.
+      const lit = await page.locator('#mobileNav .mobile-nav-item.active').evaluateAll((els) => els.map((e) => e.dataset.view));
+      expect(lit.length === (v === 'settings' ? 1 : 0), `${v}: bar highlight was ${JSON.stringify(lit)}`).toBe(true);
     }
   });
 });

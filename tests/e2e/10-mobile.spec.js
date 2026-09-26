@@ -1,6 +1,6 @@
 // 10 — Mobile viewport: bottom nav replaces sidebar, views switch.
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, createWallet , appClick} from './helpers.js';
+import { gotoApp, skipIntro, createWallet , appClick, openView} from './helpers.js';
 
 test.use({ viewport: { width: 390, height: 844 } });
 
@@ -25,14 +25,21 @@ test.describe('Mobile', () => {
       await appClick(page, `.mobile-nav-item[data-view="${v}"]`);
       await expect(page.locator('#view-' + v), `#view-${v} must activate`).toHaveClass(/active/);
     }
-    // Settings is not a bar item any more — reach it through the More sheet.
-    await expect(page.locator('#mobileNav .mobile-nav-item[data-view="settings"]')).toHaveCount(0);
-    await appClick(page, '#mobileMoreBtn');
-    await page.waitForSelector('#navSheet', { timeout: 10_000 });
-    await appClick(page, '#navSheet .nav-sheet-item[data-view="settings"]');
+    // The bar is five fixed slots, in this order, and there is no More button.
+    const slots = await page.locator('#mobileNav .mobile-nav-item').evaluateAll((els) =>
+      els.map((e) => e.dataset.view || '(none)'));
+    expect(slots).toEqual(['dashboard', 'activity', 'swap', 'dapps', 'settings']);
+    await expect(page.locator('#mobileMoreBtn')).toHaveCount(0);
+    await expect(page.locator('#navSheet')).toHaveCount(0);
+    // A slot lights up for its own view and nothing lights up for a view that
+    // is reached from the Dashboard or from Settings — the bar is not broken,
+    // that view simply is not one of the five.
+    await appClick(page, '#mobileNav .mobile-nav-item[data-view="settings"]');
     await expect(page.locator('#view-settings')).toHaveClass(/active/);
-    // A view behind More has no bar button, so More itself carries the active state.
-    await expect(page.locator('#mobileMoreBtn')).toHaveClass(/active/);
+    await expect(page.locator('#mobileNav .mobile-nav-item[data-view="settings"]')).toHaveClass(/active/);
+    await openView(page, 'approval');
+    await expect(page.locator('#view-approval')).toHaveClass(/active/);
+    await expect(page.locator('#mobileNav .mobile-nav-item.active')).toHaveCount(0);
   });
 
   test('mobile swap second tap opens chooser → bridge', async ({ page }) => {

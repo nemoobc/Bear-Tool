@@ -11,7 +11,7 @@
 //     (the NFT carousel and the browser tab strip are meant to scroll)
 //   - only the ACTIVE view is measured, since hidden views have no layout
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, createWallet, appClick } from './helpers.js';
+import { gotoApp, skipIntro, createWallet, appClick, openView } from './helpers.js';
 
 const VIEWS = [
   'dashboard', 'send', 'swap', 'bridge',
@@ -33,39 +33,6 @@ const VIEWPORTS = [
 // a phone, so clicking .nav-item there waits for a box that never exists. The
 // phone route is the generated bottom bar, then the More sheet — which the app
 // builds from the same sidebar list, so no view is unreachable.
-async function openView(page, view) {
-  const side = page.locator(`.sidebar .nav-item[data-view="${view}"]`);
-  if (await side.isVisible().catch(() => false)) {
-    await appClick(page, `.sidebar .nav-item[data-view="${view}"]`);
-    return;
-  }
-  const bar = page.locator(`.mobile-nav-item[data-view="${view}"]`);
-  if (await bar.isVisible().catch(() => false)) {
-    await appClick(page, `.mobile-nav-item[data-view="${view}"]`);
-    return;
-  }
-  // Two views are deliberately not in the sidebar, and assuming otherwise is
-  // what made the first two runs of this file fail at every size: the walk
-  // waited for a nav item that does not exist. The sidebar has exactly eight
-  // entries. Send is a dashboard quick action, and Bridge lives under a
-  // Swap/Bridge chooser that a second press of Swap opens.
-  if (view === 'send') {
-    await openView(page, 'dashboard');
-    await appClick(page, '.quick-action-btn[data-view="send"]');
-    return;
-  }
-  if (view === 'bridge') {
-    await openView(page, 'swap');
-    await appClick(page, '.sidebar .nav-item[data-view="swap"], .mobile-nav-item[data-view="swap"]');
-    await page.waitForSelector('#chooseBridge', { timeout: 10_000 });
-    await appClick(page, '#chooseBridge');
-    return;
-  }
-  await appClick(page, '#mobileMoreBtn');
-  await page.waitForSelector(`#navSheet .nav-sheet-item[data-view="${view}"]`, { timeout: 10_000 });
-  await appClick(page, `#navSheet .nav-sheet-item[data-view="${view}"]`);
-}
-
 /** The view must actually be the active one, or the measurement is of nothing. */
 async function assertViewActive(page, view) {
   await page.waitForFunction(

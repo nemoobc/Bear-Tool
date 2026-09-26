@@ -149,3 +149,38 @@ export async function expireSession(page) {
     }
   });
 }
+// Open a view the way a user can, on ANY viewport.
+//
+// The bar is five fixed slots (Dashboard, Activity, Swap, DApps, Settings) with
+// no More button, so a test cannot assume "click the sidebar, else the bar".
+// The five views outside the slots have real routes and this knows all of them:
+//
+//   send, nft, deploy → a Dashboard quick action
+//   bridge           → a second press of Swap (the chooser)
+//   approval         → Settings → Security Center → Review live approvals
+//
+// This is the same table the app keeps in REACHABLE_ON_MOBILE. When a route
+// changes, it changes here and in one place in the app, not in seven specs.
+export async function openView(page, view) {
+  const side = page.locator(`.sidebar .nav-item[data-view="${view}"]`);
+  if (await side.isVisible().catch(() => false)) return side.click();
+
+  const slot = page.locator(`#mobileNav .mobile-nav-item[data-view="${view}"]`);
+  if (await slot.isVisible().catch(() => false)) return slot.click();
+
+  if (view === 'bridge') {
+    await appClick(page, '#mobileNav .mobile-nav-item[data-view="swap"]');
+    await page.waitForSelector('#chooseBridge', { timeout: 10_000 });
+    return appClick(page, '#chooseBridge');
+  }
+
+  if (view === 'approval') {
+    await appClick(page, '#mobileNav .mobile-nav-item[data-view="settings"]');
+    await page.waitForSelector('#secGoApprovals', { timeout: 10_000 });
+    return appClick(page, '#secGoApprovals');
+  }
+
+  // send / nft / deploy — Dashboard quick actions
+  await appClick(page, '#mobileNav .mobile-nav-item[data-view="dashboard"]');
+  return appClick(page, `.quick-action-btn[data-view="${view}"]`);
+}

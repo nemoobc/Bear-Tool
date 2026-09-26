@@ -16,7 +16,7 @@
 //    seven, and the suites read inputValue().
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { gotoApp, skipIntro, createWallet, appClick } from './helpers.js';
+import { gotoApp, skipIntro, createWallet, appClick, openView } from './helpers.js';
 
 const app   = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
 const ui    = readFileSync(new URL('../../js/ui.js', import.meta.url), 'utf8');
@@ -39,9 +39,8 @@ async function goView(page, v) {
   if (await side.isVisible().catch(() => false)) return side.click();
   const mob = page.locator(`#mobileNav .mobile-nav-item[data-view="${v}"]`);
   if (await mob.isVisible().catch(() => false)) return mob.click();
-  await page.locator('#mobileMoreBtn').click();
-  await page.waitForSelector('#navSheet', { timeout: 10_000 });
-  return page.locator(`#navSheet .nav-sheet-item[data-view="${v}"]`).click();
+  // Five fixed slots, no More sheet: the shared helper knows the real routes.
+  return openView(page, v);
 }
 
 test.describe('Casing — static', () => {

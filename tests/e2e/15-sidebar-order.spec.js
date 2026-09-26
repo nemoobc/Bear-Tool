@@ -10,7 +10,7 @@
 //      very thing it is a peer of, instead of in the middle of the main group.
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { gotoApp, skipIntro, createWallet, appClick } from './helpers.js';
+import { gotoApp, skipIntro, createWallet, appClick , openView} from './helpers.js';
 
 const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
 const i18n = readFileSync(new URL('../../js/i18n.js', import.meta.url), 'utf8');
@@ -125,11 +125,11 @@ test.describe('Sidebar — in the browser', () => {
     // the original regression.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(400);
-    await page.locator('#mobileMoreBtn').click();
-    await page.waitForSelector('#navSheet', { timeout: 10_000 });
-    const sheet = await page.locator('#navSheet .nav-sheet-item').evaluateAll((els) => els.map((e) => e.dataset.view));
-    expect(sheet, 'DApps must be reachable on a phone').toContain('dapps');
-    expect(sheet).toContain('deploy');
-    expect(sheet).toContain('approval');
+    // No sheet to inspect any more, so reachability is proved the only way that
+    // means anything: actually open each one on a phone and check it activates.
+    for (const v of ['dapps', 'deploy', 'approval']) {
+      await openView(page, v);
+      await expect(page.locator('#view-' + v), `${v} must open on a phone`).toHaveClass(/active/);
+    }
   });
 });
