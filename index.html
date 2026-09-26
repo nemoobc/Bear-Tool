@@ -595,7 +595,7 @@
                     <div class="field">
                       <label for="openSeaApiKey"><span data-i18n="os.guide.s1l">OpenSea API key</span> <span class="req" data-i18n="os.req">wajib</span></label>
                       <div class="os-key-row">
-                        <input class="input" id="openSeaApiKey" type="password" autocomplete="off" placeholder="paste key…" aria-describedby="openSeaKeyState">
+                        <input class="input" id="openSeaApiKey" type="password" autocomplete="off" placeholder="paste key…" data-i18n-placeholder="os.ph.key" aria-describedby="openSeaKeyState">
                         <button class="btn btn-sm btn-secondary" type="button" id="btnRevealOsKey" aria-pressed="false" title="Show / hide key">👁</button>
                         <button class="btn btn-sm btn-secondary" type="button" id="btnTestOsKey" data-i18n="os.guide.testkey">Test</button>
                       </div>
@@ -608,7 +608,7 @@
                     <p class="small dim" data-i18n="os.guide.s2d">Salah satu saja cukup &mdash;_example_: <code>opensea.io/collection/cryptopunks</code> &middot; <code>cryptopunks</code> &middot; <code>0xBC4C…f13D</code></p>
                     <div class="field">
                       <label for="openSeaContract" data-i18n="os.field.collection">Koleksi (link / slug / address)</label>
-                      <input class="input" id="openSeaContract" placeholder="opensea.io/collection/… atau 0x… atau slug" spellcheck="false" autocomplete="off">
+                      <input class="input" id="openSeaContract" placeholder="opensea.io/collection/… atau 0x… atau slug" data-i18n-placeholder="os.ph.collection" spellcheck="false" autocomplete="off">
                     </div>
                   </li>
 
@@ -617,7 +617,7 @@
                     <p class="small dim" data-i18n="os.guide.s3d">Kosongkan saja kalau wallet sudah terhubung. Kalau wallet terdaftar sebagai holder, muncul harga ask + gas + total + daftar sinyal keamanan. Kalau tidak, tampil sebatas itu saja.</p>
                     <div class="field">
                       <label for="openSeaWlAddress" data-i18n="os.field.wladdr">Wallet untuk cek eligibility</label>
-                      <input class="input" id="openSeaWlAddress" placeholder="0x… (kosong = wallet aktif)" spellcheck="false" autocomplete="off">
+                      <input class="input" id="openSeaWlAddress" placeholder="0x… (kosong = wallet aktif)" data-i18n-placeholder="os.ph.wallet" spellcheck="false" autocomplete="off">
                     </div>
                     <button class="btn btn-sm btn-primary" id="btnCheckWL" data-i18n="os.btn.check">✔ Cek eligibility</button>
                   </li>
@@ -631,7 +631,7 @@
                 <summary data-i18n="os.adv.title">Jual / batalkan NFT (opsional)</summary>
                 <div class="field">
                   <label for="openSeaTokenId" data-i18n="os.field.tokenid">Token ID</label>
-                  <input class="input" id="openSeaTokenId" type="number" placeholder="e.g. 1234">
+                  <input class="input" id="openSeaTokenId" type="number" placeholder="e.g. 1234" data-i18n-placeholder="os.ph.tokenid">
                 </div>
                 <div class="field">
                   <label for="openSeaPrice" data-i18n="os.field.listprice">List price (ETH)</label>
