@@ -57,11 +57,25 @@ test.describe('dApp browser', () => {
 
   test('a second tab opens and switching keeps both', async ({ page }) => {
     await openBrowser(page);
+    // Put the first tab on a real page first. Two fresh tabs are BOTH called
+    // "New tab", so asserting distinct names on an untouched pair would fail
+    // for a reason that has nothing to do with tabs working.
+    await page.fill('#dbrUrl', 'https://app.aave.com/');
+    await page.press('#dbrUrl', 'Enter');
+    await page.waitForTimeout(600);
+
     await appClick(page, '#dbrNew');
     await page.waitForTimeout(300);
     await expect(page.locator('.dbr-tabs .dbr-tab')).toHaveCount(2);
     const names = await page.locator('.dbr-tab-nm').allTextContents();
-    expect(new Set(names).size).toBe(2);
+    expect(new Set(names).size, `tabs should be distinguishable, got ${names}`).toBe(2);
+
+    // The second tab is on its home page, and the first still holds its page.
+    await expect(page.locator('.dbr-tab.on')).toHaveCount(1);
+    await expect(page.locator('#dbrHomePage')).toBeVisible();
+    await page.locator('.dbr-tab').first().click();
+    await page.waitForTimeout(400);
+    await expect(page.locator('#dbrUrl')).toHaveValue(/aave\.com/);
   });
 
   test('a homograph is refused with no way to proceed', async ({ page }) => {

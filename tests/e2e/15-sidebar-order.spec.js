@@ -35,7 +35,11 @@ test.describe('Sidebar — static', () => {
     expect(swap, 'Swap must appear in the sidebar').toBeGreaterThan(-1);
     expect(firstDivider).toBeGreaterThan(-1);
     expect(swap, 'Swap must sit above the first divider').toBeLessThan(firstDivider);
-    expect(sidebar.slice(swap, swap + 200), 'Swap keeps its highlight class')
+    // The class sits in the opening tag, which is BEFORE data-view — so the
+    // window has to start at the tag, not at the attribute. Slicing forward
+    // from data-view could never find it, which made this assert nothing.
+    const tagStart = sidebar.lastIndexOf('<div class="nav-item', swap);
+    expect(sidebar.slice(tagStart, swap + 200), 'Swap keeps its highlight class')
       .toMatch(/nav-item-highlight/);
   });
 

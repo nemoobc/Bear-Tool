@@ -20,9 +20,20 @@ test.describe('MAX amount', () => {
     await createWallet(page);
   });
 
+  // The token list is filled asynchronously after the wallet restores, so
+  // seeding before it lands writes a balance onto a list that is about to be
+  // replaced — and the test then measures whatever the reload left behind.
+  async function waitForTokens(page) {
+    await page.waitForFunction(() => {
+      const sel = document.querySelector('#sendToken');
+      return sel && sel.options.length > 0;
+    }, null, { timeout: 20_000 });
+  }
+
   async function seedBalances(page) {
     // Give the wallet a real native balance and a token balance, so both the
     // gas-paying and the non-gas-paying branch can be exercised.
+    await waitForTokens(page);
     await page.evaluate(async (wei) => {
       const { set, get } = await import('/js/state.js');
       const provider = get('provider');
@@ -42,6 +53,7 @@ test.describe('MAX amount', () => {
     await seedBalances(page);
     await appClick(page, '.nav-item[data-view="send"]');
     await page.waitForSelector('#sendAmount', { timeout: 10_000 });
+    await waitForTokens(page);
 
     await appClick(page, '.pct-btn[data-pct="100"]');
     await page.waitForTimeout(900);
@@ -57,6 +69,7 @@ test.describe('MAX amount', () => {
     await seedBalances(page);
     await appClick(page, '.nav-item[data-view="send"]');
     await page.waitForSelector('#sendAmount', { timeout: 10_000 });
+    await waitForTokens(page);
 
     await appClick(page, '.pct-btn[data-pct="100"]');
     await page.waitForTimeout(900);
@@ -73,6 +86,7 @@ test.describe('MAX amount', () => {
     await seedBalances(page);
     await appClick(page, '.nav-item[data-view="send"]');
     await page.waitForSelector('#sendAmount', { timeout: 10_000 });
+    await waitForTokens(page);
 
     await appClick(page, '.pct-btn[data-pct="50"]');
     await page.waitForTimeout(900);
@@ -91,6 +105,7 @@ test.describe('MAX amount', () => {
     await seedBalances(page);
     await appClick(page, '.nav-item[data-view="send"]');
     await page.waitForSelector('#sendAmount', { timeout: 10_000 });
+    await waitForTokens(page);
 
     // Pick a token that is not the gas token.
     const picked = await page.evaluate(() => {
@@ -148,6 +163,7 @@ test.describe('MAX is honest about a balance that cannot pay the fee', () => {
     });
     await appClick(page, '.nav-item[data-view="send"]');
     await page.waitForSelector('#sendAmount', { timeout: 10_000 });
+    await waitForTokens(page);
 
     await appClick(page, '.pct-btn[data-pct="100"]');
     await page.waitForTimeout(900);

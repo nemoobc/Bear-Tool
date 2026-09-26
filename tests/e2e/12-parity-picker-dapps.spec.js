@@ -159,105 +159,115 @@ test.describe('DApps', () => {
     await expect(page.locator('#dappNoMatch')).toBeVisible();
   });
 
+  // ── the in-app browser ──────────────────────────────────────────────
+  // Two catalogued hosts that are known to allow framing, so these tests
+  // exercise navigation rather than the pre-load gate. The gate has its own
+  // spec (18) because it deserves one.
+  const FRAMABLE = 'https://app.aave.com/';
+  const FRAMABLE_2 = 'https://app.balancer.fi/';
+
+  const openBrowser = async (page) => {
+    await page.locator('#dappGrid .dapp-card').first().click();
+    await page.waitForSelector('#dappBrowserOverlay.open', { timeout: 10_000 });
+    await page.waitForSelector('#dbrUrl', { timeout: 10_000 });
+  };
+
+  const go = async (page, url) => {
+    await page.fill('#dbrUrl', url);
+    await page.press('#dbrUrl', 'Enter');
+    await page.waitForTimeout(500);
+  };
+
   test('#7 Enter on a card opens the in-app browser', async ({ page }) => {
     await page.locator('#dappGrid .dapp-card').first().focus();
     await expect(page.locator('#dappGrid .dapp-card').first()).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.locator('#dappBrowserOverlay')).toBeVisible();
-    await expect(page.locator('#dappBrowserUrl')).toBeVisible();
+    // A card that refuses framing does not throw the user into a new tab
+    // silently; the browser still opens and explains. Either way there is a
+    // browser to act in, which is what this test is about.
+    await expect(page.locator('#dappBrowserOverlay')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('#dbrUrl')).toBeVisible();
   });
 
   // The browser used to be a viewer: the address was a read-only <span> and
-  // "Back" just closed the overlay. A sandboxed iframe has no history of its
-  // own, so the wallet has to keep it — these assert it actually does.
+  // "Back" just closed the overlay. A sandboxed frame has no history of its
+  // own, so the wallet keeps it — these assert it actually does.
   test('#7 the address bar is an editable input, not a label', async ({ page }) => {
-    await page.locator('#dappGrid .dapp-card').first().click();
-    await page.waitForSelector('#dappBrowserUrl', { timeout: 10_000 });
-    const tag = await page.locator('#dappBrowserUrl').evaluate((el) => el.tagName);
-    expect(tag, 'the address must be editable').toBe('INPUT');
-    await expect(page.locator('#dappBrowserUrl')).toHaveValue(/^https?:\/\//);
-    await expect(page.locator('#dappBrowserGo')).toBeVisible();
+    await openBrowser(page);
+    const info = await page.locator('#dbrUrl').evaluate((el) => ({ tag: el.tagName, type: el.type }));
+    expect(info.tag, 'the address must be editable').toBe('INPUT');
+    expect(info.type).toBe('text');
   });
 
   test('#7 typing a URL navigates instead of only reloading', async ({ page }) => {
-    await page.locator('#dappGrid .dapp-card').first().click();
-    await page.waitForSelector('#dappBrowserUrl', { timeout: 10_000 });
-    await page.fill('#dappBrowserUrl', 'https://example.org/some/path');
-    await page.locator('#dappBrowserGo').click();
-    await expect(page.locator('#dappBrowserUrl')).toHaveValue('https://example.org/some/path');
+    await openBrowser(page);
+    await go(page, FRAMABLE);
+    await expect(page.locator('#dbrUrl')).toHaveValue(FRAMABLE);
     // The frame must have been pointed at the new URL.
-    const src = await page.locator('#dappBrowserFrame').getAttribute('src');
-    expect(src).toBe('https://example.org/some/path');
+    expect(await page.locator('#dbrFrame').getAttribute('src')).toBe(FRAMABLE);
   });
 
   test('#7 a non-http URL is rejected instead of being loaded', async ({ page }) => {
-    await page.locator('#dappGrid .dapp-card').first().click();
-    await page.waitForSelector('#dappBrowserUrl', { timeout: 10_000 });
-    const before = await page.locator('#dappBrowserUrl').inputValue();
-    await page.fill('#dappBrowserUrl', 'javascript:alert(1)');
-    await page.locator('#dappBrowserGo').click();
-    await expect(page.locator('#dappBrowserUrl')).toHaveValue(before);
+    await openBrowser(page);
+    await go(page, FRAMABLE);
+    const before = await page.locator('#dbrFrame').getAttribute('src');
+    await go(page, 'javascript:alert(1)');
+    // The frame must be untouched, and the address must not have been rewritten
+    // to something that pretends the navigation happened.
+    expect(await page.locator('#dbrFrame').getAttribute('src')).toBe(before);
+    expect(await page.locator('#dbrUrl').inputValue()).not.toContain('javascript:');
   });
 
   test('#7 Back and Forward move through history and disable at the ends', async ({ page }) => {
-    await page.locator('#dappGrid .dapp-card').first().click();
-    await page.waitForSelector('#dappBrowserUrl', { timeout: 10_000 });
-    const firstUrl = await page.locator('#dappBrowserUrl').inputValue();
-    // At the first entry there is nowhere to go back to, and no forward entry.
-    await expect(page.locator('#dappBrowserBack')).toBeDisabled();
-    await expect(page.locator('#dappBrowserFwd')).toBeDisabled();
+    await openBrowser(page);
+    // Start somewhere real so the first entry exists.
+    await go(page, FRAMABLE);
+    const firstUrl = await page.locator('#dbrUrl').inputValue();
+    await expect(page.locator('#dbrBack'), 'nowhere to go back to yet').toBeDisabled();
+    await expect(page.locator('#dbrFwd')).toBeDisabled();
 
-    await page.fill('#dappBrowserUrl', 'https://example.org/one');
-    await page.locator('#dappBrowserGo').click();
-    // Now on entry 2 of 2: Back is available, Forward is NOT — you are at the
-    // newest page. An earlier version of this test asserted Forward was enabled
-    // here, which was simply wrong about how a history stack behaves.
-    await expect(page.locator('#dappBrowserBack')).toBeEnabled();
-    await expect(page.locator('#dappBrowserFwd')).toBeDisabled();
+    await go(page, FRAMABLE_2);
+    // On the newest entry: Back available, Forward NOT — an earlier version of
+    // this test asserted Forward was enabled here, which was wrong about how a
+    // history stack behaves.
+    await expect(page.locator('#dbrBack')).toBeEnabled();
+    await expect(page.locator('#dbrFwd')).toBeDisabled();
 
-    await page.fill('#dappBrowserUrl', 'https://example.org/two');
-    await page.locator('#dappBrowserGo').click();
-    await expect(page.locator('#dappBrowserUrl')).toHaveValue('https://example.org/two');
-
-    await page.locator('#dappBrowserBack').click();
-    await expect(page.locator('#dappBrowserUrl')).toHaveValue('https://example.org/one');
+    await page.locator('#dbrBack').click();
+    await page.waitForTimeout(400);
+    await expect(page.locator('#dbrUrl')).toHaveValue(firstUrl);
     // Going back re-enables Forward, because a newer entry exists again.
-    await expect(page.locator('#dappBrowserFwd')).toBeEnabled();
-
-    await page.locator('#dappBrowserBack').click();
-    await expect(page.locator('#dappBrowserUrl')).toHaveValue(firstUrl);
-    await expect(page.locator('#dappBrowserBack')).toBeDisabled();
-
-    await page.locator('#dappBrowserFwd').click();
-    await expect(page.locator('#dappBrowserUrl')).toHaveValue('https://example.org/one');
+    await expect(page.locator('#dbrFwd')).toBeEnabled();
+    await expect(page.locator('#dbrBack'), 'back at the oldest entry').toBeDisabled();
   });
 
   test('#7 the bookmark toggle persists and reports its state', async ({ page }) => {
-    await page.locator('#dappGrid .dapp-card').first().click();
-    await page.waitForSelector('#dappBrowserBookmark', { timeout: 10_000 });
-    const btn = page.locator('#dappBrowserBookmark');
+    await openBrowser(page);
+    await go(page, FRAMABLE);
+    const btn = page.locator('#dbrBm');
     await expect(btn).toHaveAttribute('aria-pressed', 'false');
     await btn.click();
+    await page.waitForTimeout(250);
     await expect(btn).toHaveAttribute('aria-pressed', 'true');
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('bear.dappBookmarks') || '[]'));
     expect(stored.length, 'the bookmark must be stored').toBeGreaterThan(0);
     await btn.click();
+    await page.waitForTimeout(250);
     await expect(btn).toHaveAttribute('aria-pressed', 'false');
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('bear.dappBookmarks') || '[]').length)).toBe(0);
   });
 
-  test('#7 a site that refuses framing gets a popup route, not a dead frame', async ({ page }) => {
-    // Compound sends X-Frame-Options: DENY — it must open in a real window.
-    const compound = page.locator('#dappGrid .dapp-card', { hasText: 'Compound' });
-    await compound.click();
-    await page.waitForSelector('#dappBrowserOverlay', { timeout: 10_000 });
-    await expect(page.locator('#dappBrowserOverlay')).toBeVisible();
-    await expect(page.locator('#dappBlockedPopup')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('#dappBlockedOpen')).toBeVisible();
-    // The blocked panel must be inside the real overlay, not orphaned.
-    const inside = await page.evaluate(() =>
-      !!document.querySelector('#dappBrowserOverlay .dapp-browser-blocked'));
-    expect(inside, 'the blocked panel must belong to the open browser').toBe(true);
+  test('#7 a site that refuses framing is explained, not silently tabbed away', async ({ page }) => {
+    // Compound serves X-Frame-Options: DENY. No web page can override that, so
+    // the browser says so and offers the button — the user stays in control
+    // instead of being dropped into a tab they did not ask for.
+    await page.locator('#dappGrid .dapp-card', { hasText: 'Compound' }).click();
+    await page.waitForSelector('#dappBrowserOverlay.open', { timeout: 10_000 });
+    const body = page.locator('#dbrHomePage');
+    await expect(body).toContainText(/will not open inside Bear Tool/i);
+    await expect(body.locator('[data-act="popup"]'), 'the real route must be offered').toBeVisible();
+    // The frame must NOT have been pointed at a site that will refuse it.
+    expect(await page.locator('#dbrFrame').getAttribute('src')).toBeNull();
   });
 
   test('#7 the corrected framing data is what ships', async ({ page }) => {

@@ -73,7 +73,18 @@ test.describe('Casing — static', () => {
     // If the capitalised form leaked into state, network filters would break.
     expect(app).toMatch(/type === 'mainnet'/);
     expect(app).toMatch(/type === 'testnet'/);
-    expect(html).toMatch(/data-type="\$\{escapeHtml\(p\.type\)\}"/);
+    // The old third assertion looked for a data-type attribute in index.html.
+    // No such attribute exists anywhere — the rows are built in JS — so it
+    // asserted something that was never implemented rather than the invariant
+    // it meant to protect. The real invariant is that every preset stores a
+    // LOWER-CASE type, because the filters compare against 'mainnet'.
+    const types = [...app.matchAll(/type:\s*'([a-z]+)'/g)].map((m) => m[1]);
+    expect(types.length, 'presets must declare a type').toBeGreaterThan(0);
+    for (const t of new Set(types)) {
+      expect(['mainnet', 'testnet'], `preset type "${t}" must be lower-case`).toContain(t);
+    }
+    // And nothing may write the title-cased form back into state.
+    expect(app).not.toMatch(/\.type\s*=\s*titleCase\(/);
   });
 });
 
@@ -151,7 +162,8 @@ test.describe('Pickers — in the browser', () => {
     await page.locator('#swapFromBtn').click();
     await page.waitForSelector('#swapFromPanel .token-row', { timeout: 10_000 });
     const bare = await page.evaluate(() => [...document.querySelectorAll('#swapFromPanel .token-row')]
-      .filter((r) => !r.querySelector('.token-row-logo img, .token-row-logo .token-logo-mark, .token-row-logo .net-logo'))
+      .filter((r) => !r.querySelector(
+        '.token-row-logo img, .token-row-logo svg, .token-row-logo .net-logo'))
       .map((r) => r.dataset.value));
     expect(bare, 'these rows have no logo').toEqual([]);
     // The trigger itself is decorated too.
