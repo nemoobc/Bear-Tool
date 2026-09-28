@@ -246,8 +246,17 @@ export function isValidAddress(addr) {
 
 // address poisoning detection: similar prefix/suffix
 export function isSuspiciousSimilar(a, b) {
-  if (!a || !b || a === b) return false;
-  const al = a.toLowerCase(), bl = b.toLowerCase();
+  if (!a || !b) return false;
+  // Compare case-insensitively BEFORE deciding whether the two are the same
+  // address. The equality check used to run on the raw strings, so an address
+  // typed in a different case from the one already in the activity log was not
+  // recognised as itself: it skipped the early return, then matched its own prefix
+  // and suffix, and the guard reported the user's own wallet as poisoned. The
+  // caller in send.js compares a stored lowercase address against whatever the
+  // user typed, so this was reachable by pasting the same address back in — and a
+  // warning that fires on your own address is how people learn to ignore warnings.
+  const al = String(a).toLowerCase(), bl = String(b).toLowerCase();
+  if (al === bl) return false;
   const prefix = 6, suffix = 4;
   return al.slice(0, prefix) === bl.slice(0, prefix) && al.slice(-suffix) === bl.slice(-suffix);
 }
