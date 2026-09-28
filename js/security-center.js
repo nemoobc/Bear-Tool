@@ -80,7 +80,7 @@ export function renderSecurityCenter(container) {
       ${row('dApp page', 'Runs in its own origin: no cookies, no storage, no referrer, no clipboard, no camera or mic.')}
       ${row('Reads your balance', '<strong>Needs permission</strong> — per site, revocable below.')}
       ${row('Signs a message', '<strong>Needs a second, separate grant</strong>, per method.')}
-      ${row('Moves funds', 'Always a full confirmation with the decoded calldata. Never automatic.')}
+      ${row('Moves funds', 'Your own actions — Send, Swap, Bridge, Rescue, Batch — always show a confirmation with the details first, and never run automatically. <strong>A dApp page is different</strong>: it asks once for the methods it needs, and after that grant it can call them without asking you again. Revoke it below to force the question to come back.')}
       ${row('A cross-origin dApp detecting this wallet', '<strong>Not possible.</strong> No page on another site can see this wallet. Injection needs a native wrapper, a proxy or an extension — a web page cannot do it.')}
     </div>
 
@@ -98,14 +98,20 @@ export function renderSecurityCenter(container) {
 
     <div class="sec-block">
       <h4 class="sec-h">Before a signature</h4>
-      <p class="small dim">Applied to every transaction. These are decoders and heuristics over public
-      calldata, not a third-party malware scan — but nothing is signed without the raw calldata being shown.</p>
-      ${row('Unlimited approval', 'Flagged, with the spender named. This is the step that empties wallets.')}
-      ${row('Operator grant (setApprovalForAll)', 'Flagged: that address can take any NFT you own.')}
-      ${row('Off-chain permit', 'Flagged: authorises a spender now, spends later.')}
-      ${row('Unreadable selector', 'Flagged, with the raw hex shown for you to judge.')}
-      ${row('First-time contract', 'Flagged when you have history with other contracts.')}
-      ${row(`Typed confirmation above ${(Number(BIG_VALUE_WEI) / 1e18).toFixed(0)} native unit`, 'Amount must be typed rather than clicked through.')}
+      <p class="small dim">Every signing or spending call from a dApp is scanned before you
+      confirm it, and anything these detectors flag is shown in that confirmation with the
+      reason. They read public calldata — no third party, no upload, no telemetry. They are
+      decoders and heuristics, so they can miss something; that is why the raw calldata is shown
+      alongside them rather than instead of them.</p>
+      <p class="small dim">They do <strong>not</strong> run on transactions you start yourself from
+      Send, Swap, Bridge, Deploy or the 7702 tools — those have their own confirmations with the
+      decoded details, and this scanner is specific to the dApp path.</p>
+      ${row('Unlimited approval', 'Look for the spender in the confirmation. This is the step that empties wallets.')}
+      ${row('Operator grant (setApprovalForAll)', 'Check whether an <span class="mono">operator</span> address is being authorised — it can take any NFT you own.')}
+      ${row('Off-chain permit', 'An <span class="mono">approve</span> in a signature, not a transaction: authorises a spender now, spends later.')}
+      ${row('Unreadable selector', 'Raw hex in the confirmation means nothing decoded it. Do not guess.')}
+      ${row('First-time contract', 'A destination you have never transacted with before.')}
+      ${row(`Value above ${(Number(BIG_VALUE_WEI) / 1e18).toFixed(0)} native unit`, 'Treat any large transfer as final. It cannot be reversed.')}
       ${row('Methods exposed to a page', `${ALLOWED_METHODS.size} allowed, ${CONFIRMED_METHODS.size} of which always need confirmation.`)}
     </div>
 

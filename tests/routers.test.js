@@ -18,54 +18,60 @@ test('routers: exports SWAP_ROUTERS', () => {
 test('routers: exports BRIDGE_ROUTERS', () => {
   assert.match(src, /export\s+(const|let)\s+BRIDGE_ROUTERS/);
 });
-test('routers: has KyberSwap', () => {
-  assert.match(src, /id:\s*'kyberswap'/);
-});
-test('routers: has 1inch', () => {
-  assert.match(src, /id:\s*'1inch'/);
-});
-test('routers: has ParaSwap', () => {
-  assert.match(src, /id:\s*'paraswap'/);
-});
-test('routers: has SushiSwap', () => {
-  assert.match(src, /id:\s*'sushiswap'/);
-});
-test('routers: has Uniswap V3', () => {
-  assert.match(src, /id:\s*'uniswap_v3'/);
-});
-test('routers: has Uniswap V2', () => {
-  assert.match(src, /id:\s*'uniswap_v2'/);
-});
-test('routers: has Camelot', () => {
-  assert.match(src, /id:\s*'camelot'/);
-});
-test('routers: has Aerodrome', () => {
-  assert.match(src, /id:\s*'aerodrome'/);
-});
-test('routers: has LI.FI bridge', () => {
+// These assertions used to check that specific venues were PRESENT. That is the
+// wrong direction: presence is not a property worth locking, and it is how a
+// registry ends up carrying a router with no contract behind it. Camelot
+// 0xc873fEcbd354f5A56E00E710B9cEFf27455E8AA2 and Aerodrome
+// 0xcF77a3Ba9A5CA399B7c97c74d54e3b4f7CdeC441 are well-formed addresses with
+// NO CODE on Arbitrum and Base, and both were asserted present for as long as
+// the file existed.
+//
+// So the checks are now: the venues that were verified to answer stay, and the
+// ones that were measured dead or key-gated are asserted GONE — which is the
+// assertion that actually protects the user.
+const PRESENT = [
+  ['KyberSwap', 'kyberswap'],       // 200 unauthenticated
+  ['ParaSwap', 'paraswap'],         // 200 unauthenticated
+  ['SushiSwap', 'sushiswap'],
+  ['Uniswap V3', 'uniswap_v3'],
+  ['Uniswap V2', 'uniswap_v2'],
+  ['QuickSwap', 'quickswap'],
+  ['BaseSwap', 'baseswap'],
+];
+for (const [label, id] of PRESENT) {
+  test(`routers: keeps ${label}`, () => {
+    assert.match(src, new RegExp(`id:\\s*'${id}'`));
+  });
+}
+
+test('routers: keeps LI.FI as the one bridge route', () => {
+  // /v1/quote returns a full transactionRequest with no credential, which is the
+  // only thing bridge.js can actually execute. A previous note in this project
+  // claimed LI.FI had started requiring a key; it had not, and that claim would
+  // have deleted a working feature.
   assert.match(src, /id:\s*'lifi'/);
 });
-test('routers: has Socket bridge', () => {
-  assert.match(src, /id:\s*'socket'/);
-});
-test('routers: has Stargate bridge', () => {
-  assert.match(src, /id:\s*'stargate'/);
-});
-test('routers: has Across bridge', () => {
-  assert.match(src, /id:\s*'across'/);
-});
-test('routers: has Hop bridge', () => {
-  assert.match(src, /id:\s*'hop'/);
-});
-test('routers: has Wormhole bridge', () => {
-  assert.match(src, /id:\s*'wormhole'/);
-});
-test('routers: has Bungee bridge', () => {
-  assert.match(src, /id:\s*'bungee'/);
-});
-test('routers: has Synapse bridge', () => {
-  assert.match(src, /id:\s*'synapse'/);
-});
+
+const REMOVED = [
+  ['1inch', 'answers 401 without a credential'],
+  ['camelot', '0xc873fEcbd354f5A56E00E710B9cEFf27455E8AA2 has no code on Arbitrum'],
+  ['aerodrome', '0xcF77a3Ba9A5CA399B7c97c74d54e3b4f7CdeC441 has no code on Base'],
+  ['socket', '403 without a credential'],
+  ['bungee', '403 without a credential'],
+  ['stargate', 'the API host does not resolve'],
+  ['across', '404'],
+  ['hop', '530, service down'],
+  ['wormhole', '522'],
+  ['synapse', '404'],
+  ['openocean', 'the API host does not resolve'],
+];
+for (const [id, why] of REMOVED) {
+  test(`routers: no longer lists ${id} — ${why}`, () => {
+    assert.doesNotMatch(src, new RegExp(`id:\\s*'${id}'`),
+      `${id} must not be offered as a route: ${why}`);
+  });
+}
+
 test('routers: exports getSwapRoutersForChain', () => {
   assert.match(src, /export\s+function\s+getSwapRoutersForChain/);
 });
@@ -80,27 +86,46 @@ test('routers: exports getBestBridgeRouter', () => {
 });
 test('routers: all chains are numbers', () => {
   const chains = [...src.matchAll(/chains:\s*\[([\d,\s]+)\]/g)];
-  assert.ok(chains.length >= 15, `Expected >=15 router entries, got ${chains.length}`);
+  assert.ok(chains.length >= 8, `Expected >=8 router entries, got ${chains.length}`);
+  // Every chainId in the registry must be a plain integer — a stray string or a
+  // trailing comma typo silently excludes a venue from every chain filter.
+  for (const [, body] of chains) {
+    for (const part of body.split(',')) {
+      const s = part.trim();
+      if (!s) continue;
+      assert.match(s, /^\d+$/, `chainId "${s}" is not a plain integer`);
+    }
+  }
 });
 
 // ── Swap uses router registry ──
 test('swap.js: imports from routers.js', () => {
   assert.match(swapSrc, /from\s+['"]\.\/routers\.js['"]/);
 });
-test('swap.js: has 1inch quote function', () => {
-  assert.match(swapSrc, /oneinchQuote/);
+test('swap.js: no longer calls 1inch', () => {
+  assert.doesNotMatch(swapSrc, /oneinch/i,
+    'api.1inch.dev answers 401 without a credential');
 });
 test('swap.js: has ParaSwap quote function', () => {
   assert.match(swapSrc, /paraswapQuote/);
 });
-test('swap.js: has SushiSwap quote function', () => {
-  assert.match(swapSrc, /sushiswapQuote/);
+test('swap.js: quotes V2-family venues through one builder', () => {
+  // SushiSwap, QuickSwap, BaseSwap and Uniswap V2 all implement the same
+  // interface, so they share v2Quote(). A per-venue function per venue is how
+  // five of them end up, four of them untested.
+  assert.match(swapSrc, /async function v2Quote\(/);
+  assert.match(swapSrc, /async function v3Quote\(/);
+  assert.doesNotMatch(swapSrc, /sushiswapQuote/,
+    'SushiSwap is a V2-family venue now, reached through the generic builder');
 });
 test('swap.js: router selector reads swapRouterSelect', () => {
   assert.match(swapSrc, /swapRouterSelect/);
 });
-test('swap.js: auto route order includes all 6 routers', () => {
-  assert.match(swapSrc, /kyberswap.*1inch.*paraswap.*sushiswap.*uniswap_v3.*uniswap_v2/s);
+test('swap.js: auto route order comes from the registry', () => {
+  // A hand-written ladder is how a removed router lingers: it stays in the
+  // try-order even after the registry stops listing it.
+  assert.match(swapSrc, /SWAP_ROUTERS\.map\(\(r\) => r\.id\)/);
+  assert.doesNotMatch(swapSrc, /routerOrder\s*=\s*\[[^\]]*'1inch'/);
 });
 
 // ── HTML has router selectors ──

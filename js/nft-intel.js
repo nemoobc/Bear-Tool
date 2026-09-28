@@ -144,6 +144,32 @@ export async function checkEligibility({ slug, address }) {
     if (page === HOLDER_PAGE_LIMIT - 1) truncated = true;
   }
 
+  // Zero holders is ambiguous, and OpenSea makes it worse by answering 200 with
+  // an empty list rather than 404. Measured 2026-09-27:
+  //
+  //   GET /api/v2/collections/zz-not-real-qq99            -> 404
+  //   GET /api/v2/collections/zz-not-real-qq99/holders    -> 200 {"holders": [], "next": null}
+  //
+  // So a slug that does not exist is indistinguishable from one with no holders,
+  // and this function was reporting the second for the first: "Not among the 0
+  // recorded holders." That is a confident, false statement about a whitelist —
+  // it tells the user a collection exists and is empty, when it does not exist
+  // at all, and they have no way to tell which happened.
+  //
+  // One extra request, only on the zero-holder path, separates them.
+  if (scanned === 0 && !truncated) {
+    let exists = null;
+    try { exists = await osGet(`/collections/${encodeURIComponent(slug)}`); }
+    catch (e) { return { eligible: false, error: e.message, code: e.code }; }
+    if (!exists) {
+      return {
+        eligible: false,
+        error: `OpenSea has no collection called "${slug}". Check the link or the contract address.`,
+        evidence: 'collection-missing',
+      };
+    }
+  }
+
   return {
     eligible: false,
     holds: 0,

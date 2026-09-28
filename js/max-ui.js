@@ -39,8 +39,13 @@ export async function currentGasPriceWei(provider) {
  * answers, and falls back to a per-kind default when it does not. Never
  * pretends an estimate succeeded when it did not.
  */
-export async function gasLimitFor({ provider, isNative, from, to, tokenAddress, data }) {
-  if (isNative) return { limit: defaultGasLimit(true), source: 'default' };
+export async function gasLimitFor({ provider, isNative, from, to, tokenAddress, data, fallback }) {
+  // A native transfer is the only flow where 21k is the right answer. A swap or
+  // a bridge on the native token needs 250k-400k, and reserving 21k there built
+  // a transaction that provably could not pay for itself — the exact failure
+  // MAX exists to remove. The caller says what it is about to do; if it stays
+  // silent we keep the old per-kind default rather than guess high.
+  if (isNative && !fallback) return { limit: defaultGasLimit(true), source: 'default' };
   if (provider && from && to) {
     try {
       const limit = await provider.estimateGas({ from, to: tokenAddress, data: data || '0x' });
@@ -48,7 +53,7 @@ export async function gasLimitFor({ provider, isNative, from, to, tokenAddress, 
       if (limit && limit > 21000n && limit < 5_000_000n) return { limit, source: 'estimated' };
     } catch { /* fall through */ }
   }
-  return { limit: defaultGasLimit(false), source: 'default' };
+  return { limit: fallback || defaultGasLimit(false), source: 'default' };
 }
 
 /**
@@ -59,14 +64,18 @@ export async function gasLimitFor({ provider, isNative, from, to, tokenAddress, 
  * @param {string} [o.from]
  * @param {string} [o.to]
  * @param {number} [o.pct]      100 = MAX; 25/50/75 take a share of the spendable amount
+ * @param {bigint} [o.gasLimit] what the caller is about to do. Swap and bridge
+ *   must pass a realistic figure (a native swap is ~280k, a bridge more): MAX
+ *   reserving the 21k of a plain transfer on those paths produced a transaction
+ *   that could not pay for itself, which is the one thing MAX is for.
  * @returns {Promise<{amount:string, ok:boolean, message:string, gasWei:bigint, spendable:bigint, source:string}>}
  */
-export async function resolveMax({ token, provider, from, to, pct = 100 }) {
+export async function resolveMax({ token, provider, from, to, pct = 100, gasLimit }) {
   const isNative = !token?.address;
   const decimals = token?.decimals ?? 18;
   const symbol = token?.symbol || '';
   const price = await currentGasPriceWei(provider);
-  const { limit, source } = await gasLimitFor({ provider, isNative, from, to, tokenAddress: token?.address });
+  const { limit, source } = await gasLimitFor({ provider, isNative, from, to, tokenAddress: token?.address, fallback: gasLimit });
   const gasWei = gasCost({ gasLimit: limit, gasPriceWei: price });
 
   // The balance the caller passed in is a CACHED one — it was last written when
@@ -98,13 +107,46 @@ export async function resolveMax({ token, provider, from, to, pct = 100 }) {
     return { amount: '', ok: false, message: r.message, gasWei, spendable: 0n, source, balanceSource };
   }
 
-  const p = Math.max(0, Math.min(100, Number(pct) || 100));
+  // `Number(pct) || 100` looks harmless and is not: 0 is falsy, so a 0% button —
+  // or a missing data-pct attribute, which parses to NaN — silently became 100%
+  // and the field was filled with the whole spendable balance. Only a genuine
+  // "no percentage given" may mean 100; an explicit 0 must stay 0.
+  const raw = Number(pct);
+  const p = pct == null || pct === '' || !Number.isFinite(raw)
+    ? 100
+    : Math.max(0, Math.min(100, Math.round(raw)));
   // Integer maths on purpose: a float multiply can round the share up past the
   // spendable amount, which is the same failure as rounding the total up.
   const share = p === 100 ? spendable : (spendable * BigInt(p)) / 100n;
 
-  const r = computeMax({ balance, decimals, gasWei, paysGas: isNative, symbol });
-  const amount = formatDown(share, decimals, 6);
+  // computeMax formats internally, so a bad `decimals` throws from inside it,
+  // before the guard below. A token's decimals come from the contract and a
+  // custom network's from localStorage with no validation at all, and an
+  // uncaught throw in this handler left the MAX button dead with no message.
+  let r;
+  try {
+    r = computeMax({ balance, decimals, gasWei, paysGas: isNative, symbol });
+  } catch (e) {
+    const why = e?.message || String(e);
+    return {
+      amount: '', ok: false, message: `Token decimals are invalid (${why}) — fix the network or token and retry.`,
+      gasWei, spendable: 0n, source, balanceSource,
+    };
+  }
+  // A token's `decimals` comes from the contract, and a custom network's from
+  // localStorage with no validation at all (network.js addCustomNetwork). If
+  // that value is not a sane integer, formatDown throws — report it as a normal
+  // "not available" result rather than letting the form die.
+  let amount;
+  try {
+    amount = formatDown(share, decimals, 6);
+  } catch (e) {
+    const why = e?.message || String(e);
+    return {
+      amount: '', ok: false, message: `Token decimals are invalid (${why}) — fix the network or token and retry.`,
+      gasWei, spendable: 0n, source, balanceSource,
+    };
+  }
   const message = p === 100
     ? r.message
     : `${p}% of what is sendable — ${amount} ${symbol}. ${r.message}`;

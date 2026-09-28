@@ -5,9 +5,11 @@
 // ChainId guard: default = active chain, 0 blocked on mainnet.
 // ═══════════════════════════════════════════════════════════════
 
+const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
+
 import { $, toast, confirmTx, escapeHtml } from './ui.js';
 import { get, addActivity, requireUnlock, emit } from './state.js';
-import { runTx, waitForReceipt } from './safetx.js';
+import { runTx, waitForReceipt, withTimeout } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
 import * as wallet from './wallet.js';
 import { renderDeployedRegistry, revokeDelegation } from './eip7702-tools.js';
@@ -103,7 +105,10 @@ export async function doEip7702(action) {
       chainId, address: impl, nonce: authNonce
     });
     const feeData = await provider.getFeeData();
-    const tx = await signer.sendTransaction({
+    // withTimeout bounds the WAIT only — it cannot change the authorization, the
+    // nonce, the implementation address or the fee fields. Without it a node
+    // that never answers leaves the button spinning and the flow dead.
+    const tx = await withTimeout(signer.sendTransaction({
       // MUST be explicit — without it ethers v6 infers an EIP-1559 type-2 tx
       // from the fee fields and silently drops the authorizationList, so the
       // delegation never takes effect while the tx still reports success.
@@ -112,7 +117,7 @@ export async function doEip7702(action) {
       authorizationList: [authorization],
       maxFeePerGas: feeData.maxFeePerGas,
       maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
-    });
+    }), BROADCAST_TIMEOUT_MS, 'delegate broadcast');
     toast(action === 'delegate' ? 'Delegation tx sent! ⚡' : 'Revoke tx sent! ⚡', 'info');
     addActivity({ hash: tx.hash, type: 'eip7702-' + action, status: 'pending', ts: Date.now(), detail: impl });
     const { receipt, timedOut } = await waitForReceipt(tx);

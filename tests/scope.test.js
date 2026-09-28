@@ -12,8 +12,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const DIR = path.resolve(new URL('../js/', import.meta.url).pathname);
+// fileURLToPath, NOT `new URL(...).pathname`. The pathname form returns a
+// percent-encoded POSIX-ish string: on Windows it comes back as "/C:/Users/…",
+// and path.resolve() then joins it onto the CWD, yielding the doubled prefix
+// ENOENT scandir 'C:\C:\Users\…\js'. This suite only ever ran on Android, so
+// the bug was invisible until the tests were run on Windows.
+const DIR = path.resolve(fileURLToPath(new URL('../js/', import.meta.url)));
 const GLOBALS = new Set([
   'console','Math','JSON','Object','Array','String','Number','Boolean','Date','Promise','Set','Map',
   'BigInt','Error','TypeError','RangeError','parseInt','parseFloat','isNaN','isFinite','setTimeout',

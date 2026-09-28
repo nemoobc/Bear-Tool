@@ -385,6 +385,28 @@ export async function getProvider(chainId) {
   for (const url of urls) {
     try {
       const p = new ethers.JsonRpcProvider(url, Number(chainId), { staticNetwork: true });
+      // `staticNetwork: true` tells ethers to TRUST the chainId above and skip
+      // eth_chainId entirely — so `p.getNetwork()` returns the number we
+      // declared, and every chain check built on it (bridge's four TOCTOU
+      // re-checks, deploy's registry entry) compares a constant with itself.
+      // A wrong or hostile endpoint would then be filed under a chain the
+      // contract does not exist on. Ask the node, and refuse it if it disagrees.
+      try {
+        // eth_chainId is a local lookup, and the blockNumber probe above already
+        // proved the socket works — so a 3s budget is generous. It must not
+        // double the time the user waits before the next candidate is tried.
+        const got = await withTimeout(p.send('eth_chainId', []), 3000, url);
+        if (BigInt(got) !== BigInt(chainId)) {
+          failures.push(`${url} (reports chain ${got}, expected ${chainId})`);
+          continue;
+        }
+      } catch (e) {
+        // A node that cannot answer eth_chainId is one we cannot verify — but
+        // refusing outright would break every endpoint that simply does not
+        // implement it, which is far more common than a node that lies.
+        // Unverifiable is not the same as known-wrong: note it and continue.
+        failures.push(`${url} (chain id unverified: ${e?.shortMessage || e?.message || e})`);
+      }
       // Bounded probe: an endpoint that accepts the connection but never
       // answers would otherwise hang here forever, leaving the UI spinning.
       // One budget, for every attempt, including the first. I gave the first
@@ -416,8 +438,22 @@ export async function getDelegation(provider, address) {
   const code = await provider.getCode(address);
   if (!code || code === '0x') return null;
   if (code.startsWith(EIP7702.DELEGATION_PREFIX)) {
-    // 0xef0100 (8 chars) + 40-hex address
-    return '0x' + code.slice(8);
+    // 0xef0100 (8 chars) then the delegation target.
+    const raw = code.slice(8);
+    // A revoke does NOT clear the code to 0x. Per EIP-7702 it rewrites the
+    // designation to the zero address, so eth_getCode comes back as 0xef0100
+    // followed by zeros. Reporting that as "delegated to 0x0000…0000" is wrong
+    // twice over: the status line would call a revoked account still
+    // delegated, and revokeDelegation() — which reads any non-null answer as
+    // "still delegated" — would report a SUCCESSFUL revoke as a failure. The
+    // user would be told their revoke did not work, and be right not to.
+    //
+    // Only the first 20 bytes are the target. Comparing the whole remainder
+    // would miss a revoked account if the node emits the wider 32-byte zero
+    // form, which several clients do.
+    const target20 = '0x' + raw.slice(0, 40).toLowerCase();
+    if (target20 === EIP7702.ZERO_ADDRESS) return null;
+    return '0x' + raw;
   }
   return null; // regular contract or plain EOA
 }

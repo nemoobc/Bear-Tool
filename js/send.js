@@ -22,13 +22,18 @@ export function bindSendEvents() {
   // used toFixed(), which rounds — so even a share could land a hair above the
   // balance. Both are gone: the amount now comes from resolveMax, which
   // subtracts the fee first and truncates.
-  document.querySelectorAll('.pct-btn').forEach(btn => {
+  // Scoped to the send row on purpose. Swap and Bridge have their own .pct-btn
+  // rows (20/50/70/MAX); a document-wide selector bound the send handler to all
+  // twelve of them, so tapping Swap "20%" also filled the SEND field — reading
+  // an absent data-pct as NaN, which resolveMax then read as 100%.
+  document.querySelectorAll('#sendPctBtns .pct-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const pct = parseInt(btn.dataset.pct, 10);
+      if (!Number.isFinite(pct)) return;
       const sel = $('#sendToken');
       const t = get('tokens').find(x => (x.address || 'native') === sel.value);
       if (!t) return;
-      document.querySelectorAll('.pct-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('#sendPctBtns .pct-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
       const r = await resolveMax({

@@ -17,7 +17,7 @@ import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity,
          reconcileActivity } from './state.js';
 import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate } from './price.js';
-import { waitForReceipt } from './safetx.js';
+import { waitForReceipt, withTimeout } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
 import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
@@ -30,6 +30,10 @@ import { t, setLang, applyTranslations } from './i18n.js';
 import { renderDapps, POPULAR_DAPPS } from './dapps.js';
 import { dappBrowserOnLock } from './dapp-browser.js';
 import { renderSecurityCenter } from './security-center.js';
+// scanTransaction finally has a caller. It has been written and tested since
+// before the Security Center existed, and nothing invoked it — which is why
+// that panel had to be rewritten to say the checks are not applied.
+import { scanTransaction } from './security.js';
 import { createProvider, announceLock, announceAccounts, disconnectOrigin, PROVIDER_FLAG } from './dapp-bridge.js';
 import { siteAllowed } from './dapp-sessions.js';
 import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers, cancelListing, listNft, parseOpenSeaInput } from './opensea-api.js';
@@ -158,7 +162,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnAddCustomToken')?.addEventListener('click', () => {
     const currentChain = get('networkId') ? (getNetworkById(get('networkId'))?.chainId || 1) : 1;
     openModal(`
-      <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+      <button class="modal-close" type="button" data-close-modal>✕</button>
       <h2>Add Custom Token</h2>
       <div class="field"><label for="customTokenAddr">Contract Address</label>
         <input class="input" id="customTokenAddr" placeholder="0x... paste an ERC-20 address" autocomplete="off" spellcheck="false"></div>
@@ -463,7 +467,7 @@ function switchView(view) {
 // Second click on the Swap nav item — pick between same-chain swap and bridge.
 function showSwapBridgeChooser() {
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <button class="modal-close" type="button" data-close-modal>✕</button>
     <div class="tx-confirm">
       <img src="assets/bear.svg" alt="Bear Tool">
       <div class="question">Swap or Bridge?</div>
@@ -506,6 +510,55 @@ function refreshView(view) {
 // Settings → Security for what the user is told.
 let bearProvider = null;
 
+// Run the transaction detectors over a dApp's request. security.js has had
+// scanTransaction — unlimited approval, operator grant, off-chain permit,
+// unreadable selector, first-time contract, large value — written and tested
+// since before this existed, and nothing ever called it. The Security Center was
+// rewritten to admit that; this is the other half, which is to actually run it.
+function scanSignCall(method, params) {
+  try {
+    const tx = Array.isArray(params) ? (params[0] || {}) : {};
+    const known = (get('tokens') || []).map((t) => t.address).filter(Boolean);
+    // scanTransaction returns { risk, findings, approval } — an object, not a
+    // list. Returning it whole and then calling .find() on it is the kind of
+    // mistake the browser test exists to catch: it threw "findings.find is not
+    // a function" the first time a dApp actually sent a transaction.
+    const r = scanTransaction({
+      to: tx.to,
+      data: tx.data,
+      value: tx.value ?? 0,
+      knownContracts: known,
+    });
+    return Array.isArray(r?.findings) ? r.findings : [];
+  } catch {
+    // A detector that throws must not become a way to block signing.
+    return [];
+  }
+}
+
+// Describe what is being asked for, in words, before anyone signs it.
+function describeSignCall(method, params) {
+  const p = Array.isArray(params) ? (params[0] || {}) : {};
+  const rows = [{ k: 'Method', v: method }];
+  if (method === 'personal_sign') {
+    let text = '';
+    try { text = String(typeof p === 'string' ? p : (p && p.message) || ''); } catch { /* not a string */ }
+    rows.push({ k: 'Message', v: text ? text.slice(0, 160) : '(binary)' });
+  } else if (String(method).startsWith('eth_signTypedData')) {
+    rows.push({ k: 'Typed data', v: typeof p === 'string' ? p.slice(0, 160) + '…' : JSON.stringify(p).slice(0, 160) + '…' });
+  } else {
+    if (p.to) rows.push({ k: 'To', v: String(p.to) });
+    if (p.value && BigInt(p.value) > 0n) rows.push({ k: 'Value', v: formatNativeValue(p.value) });
+    if (p.data && p.data !== '0x') rows.push({ k: 'Calldata', v: String(p.data).slice(0, 74) + '…' });
+    else rows.push({ k: 'Calldata', v: 'none — a plain transfer' });
+  }
+  return rows;
+}
+
+function formatNativeValue(wei) {
+  try { return ethers.formatEther(BigInt(wei)) + ' native'; } catch { return String(wei); }
+}
+
 function installBridge() {
   if (globalThis[PROVIDER_FLAG]) return bearProvider;
   bearProvider = createProvider({
@@ -535,6 +588,29 @@ function installBridge() {
           ],
           confirmText: 'Authorise',
         });
+      }
+      if (kind === 'sign') {
+        // A signing or spending call, confirmed every time. This is where the
+        // detectors that already exist in security.js finally run: they were
+        // written, tested and never called from anywhere, while the Security
+        // Center described them as "applied to every transaction".
+        const findings = scanSignCall(method, params);
+        const worst = findings.find((f) => f.level === 'fail') || findings.find((f) => f.level === 'warn');
+        const okToSign = await confirmTx({
+          title: worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') + method + '?' : '✍️ ' + method + '?',
+          danger: !!(worst && worst.level === 'fail'),
+          rows: [
+            { k: 'Site', v: origin },
+            ...describeSignCall(method, params),
+            ...(findings.length
+              ? [{ k: 'Flags', v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }]
+              : []),
+            ...(worst ? [{ k: 'Why', v: worst.detail }] : []),
+          ],
+          confirmText: worst && worst.level === 'fail' ? 'Send anyway' : 'Sign',
+          cancelText: 'Cancel',
+        });
+        if (!okToSign) return null;
       }
       // Plain calls: hand the request to the node the wallet is already using.
       const provider = get('provider');
@@ -850,13 +926,13 @@ function showWelcomeModal() {
 
 function showUnlockModal() {
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <button class="modal-close" type="button" data-close-modal>✕</button>
     <div class="tx-confirm">
       <img src="assets/bear.svg" alt="Bear Tool">
       <div class="question">${escapeHtml(t('unlock.title'))}</div>
       <div class="field">
         <label for="unlockPw">Password</label>
-        <input class="input" id="unlockPw" type="password" placeholder="••••••••">
+        <input class="input" id="unlockPw" type="password">
       </div>
       <button class="btn btn-primary btn-block" id="unlockBtn">${escapeHtml(t('unlock.button'))}</button>
     </div>
@@ -888,20 +964,25 @@ function showCreateModal() {
   openModal(`
     <h2>🐻 Create Wallet</h2>
     <div class="field">
-      <label for="createName">Wallet name (optional)</label>
-      <input class="input" id="createName" type="text" placeholder="Wallet" maxlength="40">
+      <label for="createName">Wallet (optional)</label>
+      <input class="input" id="createName" type="text" maxlength="40">
     </div>
     <div class="field">
       <label for="createPw">Password (min 8 chars)</label>
-      <input class="input" id="createPw" type="password" placeholder="••••••••">
+      <input class="input" id="createPw" type="password">
     </div>
     <div class="field">
       <label for="createPw2">Repeat password</label>
-      <input class="input" id="createPw2" type="password" placeholder="••••••••">
+      <input class="input" id="createPw2" type="password">
     </div>
     <div class="danger-box">⚠️ You will see your seed phrase ONCE. Write it down. Anyone with it controls your funds.</div>
     <button class="btn btn-primary btn-block btn-lg" id="createBtn">Create</button>
+    <button class="btn btn-ghost btn-block mt-8" id="createBack" type="button">Back</button>
   `, { wide: true });
+  // Back out to the welcome screen. openModal replaces the sheet in place, so
+  // this is a plain re-open — no closeModal() first, or the overlay would blink
+  // closed and open again.
+  $('#createBack').onclick = () => { showWelcomeModal(); };
   $('#createBtn').onclick = async () => {
     const p1 = $('#createPw').value, p2 = $('#createPw2').value;
     if (p1.length < 8) return toast('Password too short (min 8)', 'error');
@@ -916,62 +997,107 @@ function showCreateModal() {
 
 function showSeedPhrase(mnemonic, address) {
   const words = mnemonic.split(' ');
-  // Pick 3 random word indices for verification
-  const indices = [];
-  while (indices.length < 3) {
-    const r = Math.floor(Math.random() * words.length);
-    if (!indices.includes(r)) indices.push(r);
-  }
-  // One of the 3 is the "question" — user must pick the correct word
-  const qIdx = indices[Math.floor(Math.random() * 3)];
-  const correctWord = words[qIdx];
-  const distractors = [];
-  while (distractors.length < 2) {
-    const w = words[Math.floor(Math.random() * words.length)];
-    if (w !== correctWord && !distractors.includes(w)) distractors.push(w);
-  }
-  const choices = [...distractors];
-  choices.splice(Math.floor(Math.random() * 3), 0, correctWord);
 
+  // TIGA posisi acak harus dikonfirmasi, bukan satu. Versi lamaieb 取 satu
+  // indeks dari tiga lalu memakai hanya itu — `indices[0]`/`indices[1]`
+  // dihitung lalu dibuang, jadi verifikasi cuma 1 dari 12 kata. anyone yang
+  // kebetulan melihat satu kata bisa lolos. Tiga posisi, tiga klik.
+  const ask = [];
+  while (ask.length < 3) {
+    const r = Math.floor(Math.random() * words.length);
+    if (!ask.includes(r)) ask.push(r);
+  }
+
+  let qPos = 0;                 // pertanyaan ke berapa (0-based)
+  const done = [];              // kata yang sudah benar, urutan dijawab
+  let busy = false;             // kunci klik ganda saat transisi
+
+  const answer = () => words[ask[qPos]];
+
+  // Tiga pilihan: satu benar + dua dari mnemonic lain, posisi benar diacak
+  // ulang tiap pertanyaan supaya tidak selalu di slot yang sama.
+  const rollChoices = () => {
+    const correct = answer();
+    const pool = [];
+    while (pool.length < 2) {
+      const w = words[Math.floor(Math.random() * words.length)];
+      if (w !== correct && !pool.includes(w)) pool.push(w);
+    }
+    const c = [...pool];
+    c.splice(Math.floor(Math.random() * 3), 0, correct);
+    return c;
+  };
+
+  // Tidak ada tombol ✕ lagi. Dulu ada, dan menutupnya membiarkan wallet
+  // ter-generate tapi tidak pernah `saveSession` — seed hilang, tidak ada error,
+  // tidak ada jalan pulih. Sekarang satu-satunya jalan keluar yang aman:
+  // konfirmasi lengkap, atau "Start over" yang mengulang dari awal dengan
+  // wallet BARU (wallet terlantar tidak pernah disimpan, jadi tidak menggantung).
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
     <h2>🔑 Your Seed Phrase</h2>
     <div class="danger-box">Write these 12 words DOWN. Never share them. Never type them into any website.</div>
     <div class="card" style="box-shadow:none;background:var(--cream)">
-      <div class="mono" style="font-size:1.1rem;line-height:2">${words.map((w, i) => `<b>${i + 1}.</b> ${escapeHtml(w)}`).join(' ')}</div>
+      <div class="seed-words">${words.map((w, i) => `<div class="seed-word"><b>${i + 1}.</b><span>${escapeHtml(w)}</span></div>`).join('')}</div>
     </div>
     <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(mnemonic)}">📋 Copy seed phrase</button>
     <div class="field">
-      <label>Select word #${qIdx + 1} to confirm</label>
-      <div class="seed-choices" id="seedChoices">
-        ${choices.map((w, i) => `<button class="btn btn-ghost seed-choice-btn" data-word="${escapeHtml(w)}" data-idx="${i}">${escapeHtml(w)}</button>`).join('')}
-      </div>
+      <p class="question-label" id="seedQLabel">Select word #${ask[qPos] + 1} to confirm</p>
+      <div class="seed-choices" id="seedChoices" role="group" aria-labelledby="seedQLabel"></div>
     </div>
+    <p class="small text-center" id="seedProg">Confirmation 1 of 3</p>
     <button class="btn btn-primary btn-block" id="seedDone" disabled>I saved it</button>
-  `);
+    <button class="btn btn-ghost btn-block mt-8" id="seedRestart">Back</button>
+  `, { wide: true });
 
-  let verified = false;
-  $all('.seed-choice-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      $all('.seed-choice-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      if (btn.dataset.word.toLowerCase() === correctWord.toLowerCase()) {
-        verified = true;
-        btn.style.background = 'var(--mint)';
-        btn.style.color = 'var(--white)';
-        $('#seedDone').disabled = false;
+  const paint = () => {
+    $('#seedChoices').innerHTML = rollChoices()
+      .map(w => `<button class="btn btn-ghost seed-choice-btn" data-word="${escapeHtml(w)}">${escapeHtml(w)}</button>`)
+      .join('');
+    $('#seedQLabel').textContent = `Select word #${ask[qPos] + 1} to confirm`;
+    $('#seedProg').textContent = `Confirmation ${qPos + 1} of 3`;
+  };
+  paint();
+
+  // Delegasi, bukan listener per tombol: paint() mengganti innerHTML, jadi
+  // listener yang menempel di tombol lama akan hilang bersama tombolnya.
+  $('#seedChoices').addEventListener('click', (e) => {
+    const btn = e.target.closest('.seed-choice-btn');
+    if (!btn || busy) return;
+    if (btn.dataset.word === answer()) {
+      busy = true;
+      btn.classList.add('correct');
+      done.push(btn.dataset.word);
+      $('#seedDone').disabled = done.length < 3;
+      if (done.length < 3) {
+        setTimeout(() => { qPos++; busy = false; paint(); }, 420);
       } else {
-        verified = false;
-        btn.style.background = 'var(--danger)';
-        btn.style.color = 'var(--white)';
-        toast('Wrong word! Try again.', 'error');
-        $('#seedDone').disabled = true;
+        setTimeout(() => { busy = false; }, 420);
       }
-    });
+    } else {
+      // Salah: tandai merah, lalu ACAK ULANG pilihan untuk pertanyaan yang
+      // sama. Pertanyaannya tidak berubah, cuma susunan jawabannya.
+      btn.classList.add('wrong');
+      $all('#seedChoices .seed-choice-btn').forEach(b => { if (b !== btn) b.disabled = true; });
+      // busy is set here for the same reason it is on the correct branch: the
+      // 620ms reshuffle is async, and without it a second tap on the same wrong
+      // button queued a second repaint and a second toast on top of the first.
+      // The button is re-enabled below because it is the one the user has to
+      // press again — the guard, not the disabled attribute, is what stops the
+      // repeat.
+      busy = true;
+      toast('Wrong word — same spot, fresh options.', 'error');
+      setTimeout(() => { busy = false; paint(); }, 620);
+    }
   });
 
+  $('#seedRestart').onclick = () => {
+    // Balik ke form create. Wallet lama tidak pernah disimpan (tidak ada
+    // saveSession di jalur ini) jadi tidak ada yang menggantung di belakang.
+    showCreateModal();
+  };
+
   $('#seedDone').onclick = () => {
-    if (!verified) return;
+    if (done.length < 3) return;
     set('signer', ethers.Wallet.fromPhrase(mnemonic));
     set('address', address);
     set('unlocked', true);
@@ -988,20 +1114,25 @@ function showImportModal() {
   openModal(`
     <h2>📥 Import Wallet</h2>
     <div class="field">
-      <label for="importName">Wallet name (optional)</label>
-      <input class="input" id="importName" type="text" placeholder="Wallet" maxlength="40">
+      <label for="importName">Wallet (optional)</label>
+      <input class="input" id="importName" type="text" maxlength="40">
     </div>
     <div class="field">
-      <label for="importSecret">Seed phrase (12/24 words) or private key</label>
-      <textarea class="textarea" id="importSecret" placeholder="word1 word2 ..."></textarea>
+      <label for="importSecret">Paste Seed Phrase Or Private Key</label>
+      <textarea class="textarea" id="importSecret"></textarea>
     </div>
     <div class="field">
       <label for="importPw">New password</label>
-      <input class="input" id="importPw" type="password" placeholder="••••••••">
+      <input class="input" id="importPw" type="password">
     </div>
     <div class="danger-box">⚠️ Never import a seed phrase on a website you don't trust. This tool is 100% client-side.</div>
     <button class="btn btn-primary btn-block btn-lg" id="importBtn">Import</button>
+    <button class="btn btn-ghost btn-block mt-8" id="importBack" type="button">Back</button>
   `, { wide: true });
+  // Back out to the welcome screen. openModal replaces the sheet in place, so
+  // this is a plain re-open — no closeModal() first, or the overlay would blink
+  // closed and open again.
+  $('#importBack').onclick = () => { showWelcomeModal(); };
   $('#importBtn').onclick = async () => {
     const secret = $('#importSecret').value.trim();
     const pw = $('#importPw').value;
@@ -1141,7 +1272,7 @@ function syncTestnetSwitches() {
 function showNetworkModal() {
   const nets = getAllNetworks();
   const html = `
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <button class="modal-close" type="button" data-close-modal>✕</button>
     <h2>🌐 Networks</h2>
     <div class="field" style="margin-bottom:12px">
       <input class="input" id="netSearchInput" type="text" placeholder="🔍 Search networks..." style="width:100%">
@@ -1279,10 +1410,11 @@ function showAddNetworkModal() {
     </div>`;
 
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <button class="modal-close" type="button" data-close-modal>✕</button>
     <h2>➕ Add Network</h2>
-    <p class="dim small">Pick a chain — the fields fill themselves in. Only change the RPC if you have a private endpoint.</p>
+    <p class="dim small">Pick a chain — the fields fill themselves in. Or paste any RPC link and we detect the chain for you.</p>
     <div class="field"><input class="input" id="cnSearch" type="text" placeholder="🔍 Search ${presets.length} chains by name or chain ID..." autocomplete="off"></div>
+    <button class="btn btn-secondary btn-block" id="cnCustomBtn" type="button">🔗 Enter a custom RPC link</button>
     <div id="cnPresetList" style="max-height:38vh;overflow-y:auto">
       <div id="cnMainnetWrap">
         <div class="mb-8"><span class="badge badge-mainnet">MAINNET</span></div>
@@ -1303,22 +1435,92 @@ function showAddNetworkModal() {
           <div class="asset-symbol" id="cnChainLabel">—</div>
         </div>
       </div>
-      <div class="field mt-16"><label for="cnRpc">RPC URL</label><input class="input" id="cnRpc" placeholder="https://..."></div>
+      <div class="field mt-16"><label for="cnRpc">RPC URL</label><input class="input" id="cnRpc" placeholder="https://..." autocomplete="off" spellcheck="false"></div>
+      <div class="field" id="cnNameField" style="display:none"><label for="cnName">Network name</label><input class="input" id="cnName" placeholder="e.g. My Local Node" autocomplete="off" maxlength="40"></div>
+      <div class="small" id="cnDetect" style="min-height:1.2em"></div>
       <div class="danger-box">⚠️ Custom RPC = you trust this provider with your address and balance data.</div>
       <button class="btn btn-primary btn-block" id="cnSave">Add Network</button>
     </div>
   `);
 
   let picked = null;
+  let custom = false;          // pasted an RPC instead of choosing a preset
+  let detectTimer = null;
+  let detectSeq = 0;           // ignore a probe that a newer keystroke superseded
   const form = $('#cnForm');
-  const show = () => { if (picked) form.style.display = ''; };
+  const show = () => { if (picked || custom) form.style.display = ''; };
+
+  // Ask the endpoint what chain it is, then name it from the catalogue. A
+  // pasted link is the only route by which an unknown chainId can arrive, and a
+  // typo there is exactly what sends a wallet to the wrong chain — so the id
+  // always comes from the node, never from what the user typed.
+  const detectFrom = async (url) => {
+    const seq = ++detectSeq;
+    const out = $('#cnDetect');
+    if (!isSafeRpcUrl(url)) { out.textContent = ''; return; }
+    out.textContent = 'Detecting chain…';
+    try {
+      const res = await fetch(url, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      });
+      const json = await res.json();
+      if (seq !== detectSeq) return;               // a newer paste won
+      const chainId = json?.result != null ? parseInt(json.result, 16) : null;
+      if (!Number.isFinite(chainId)) throw new Error('no chain id');
+      const known = presets.find((p) => Number(p.chainId) === chainId);
+      picked = known
+        ? { name: known.name, chainId, type: known.type, symbol: known.symbol,
+            rpc: [url], explorer: known.explorer, icon: known.icon, color: '#9B5DE5', decimals: 18 }
+        : { name: '', chainId, type: 'mainnet', symbol: 'ETH', rpc: [url],
+            explorer: '', icon: '🛰️', color: '#9B5DE5', decimals: 18 };
+      $('#cnIcon').textContent = picked.icon;
+      $('#cnNameLabel').textContent = known ? picked.name : `Chain ${chainId}`;
+      $('#cnChainLabel').textContent = known
+        ? `Chain ${chainId} · ${picked.symbol}`
+        : `Chain ${chainId} · not in the catalogue`;
+      if (known) {
+        out.textContent = `✅ Detected ${known.name} (chain ${chainId})`;
+        $('#cnNameField').style.display = 'none';
+        $('#cnName').value = '';
+      } else {
+        // Unknown chain: the number is known, the name is not. Let the user
+        // name it rather than inventing a label that will be wrong later.
+        out.textContent = `✅ Detected chain ${chainId} — not in the catalogue, name it below`;
+        $('#cnNameField').style.display = '';
+        $('#cnName').focus();
+      }
+      $all('.chain-preset').forEach((r) => { r.style.borderLeft = ''; });
+    } catch {
+      if (seq !== detectSeq) return;
+      out.textContent = '⚠️ Could not reach that RPC';
+      picked = null;
+    }
+  };
+
+  $('#cnCustomBtn').onclick = () => {
+    custom = true; picked = null;
+    show();
+    $('#cnRpc').focus();
+  };
+  $('#cnRpc').addEventListener('input', (e) => {
+    if (!custom) return;
+    clearTimeout(detectTimer);
+    const url = e.target.value.trim();
+    detectTimer = setTimeout(() => detectFrom(url), 600);
+  });
 
   const pick = (el) => {
     const d = el.dataset;
+    custom = false;
+    clearTimeout(detectTimer); detectSeq++;   // drop any probe still in flight
     picked = {
       name: d.name, chainId: Number(d.chain), type: d.type, symbol: d.symbol,
       rpc: [d.rpc], explorer: d.explorer, icon: d.icon, color: '#9B5DE5', decimals: 18
     };
+    $('#cnNameField').style.display = 'none';
+    $('#cnName').value = '';
+    $('#cnDetect').textContent = '';
     $('#cnIcon').textContent = d.icon;
     $('#cnNameLabel').textContent = d.name;
     $('#cnChainLabel').textContent = `Chain ${d.chain} · ${d.symbol}`;
@@ -1352,9 +1554,24 @@ function showAddNetworkModal() {
   });
 
   $('#cnSave').onclick = async () => {
-    if (!picked) return toast('Pick a chain first', 'error');
-    const rpc = $('#cnRpc').value.trim();
-    // The shared rule, not an inline /^https:\/\// test. That regex was here and
+    // The two failure modes here used to be reported with the wrong words, and
+    // the name check ran after the lock was dropped. Both are fixed together:
+    // the name is the only thing that makes an unknown chain identifiable in the
+    // network list, so it is checked up front with the lock held, and the
+    // "nothing picked" message now distinguishes "you skipped the form" from
+    // "your pasted RPC did not answer" instead of telling the user to pick a
+    // chain they had already picked.
+    if (!picked) {
+      return toast(custom
+        ? 'That RPC did not answer eth_chainId — check the URL and try again'
+        : 'Pick a chain first', 'error');
+    }
+    let displayName = picked.name;
+    if (custom && !displayName) {
+      displayName = $('#cnName').value.trim();
+      if (!displayName) return toast('Name the network before adding it', 'error');
+    }
+    const rpc = $('#cnRpc').value.trim();    // The shared rule, not an inline /^https:\/\// test. That regex was here and
     // it was wrong twice: it refused http://localhost:8545, so a node on this
     // same machine — a perfectly normal thing to point a wallet at — was
     // impossible to add, while it waved through anything else beginning with
@@ -1381,6 +1598,8 @@ function showAddNetworkModal() {
     } finally {
       btn.disabled = false; btn.textContent = 'Add Network';
     }
+    // An unknown chain has no catalogue name, so the one the user typed is used.
+    if (custom && !picked.name) picked.name = displayName;
     addCustomNetwork({ ...picked, rpc: [rpc] });
     closeModal();
     toast(`${picked.name} added!`, 'success');
@@ -1394,13 +1613,13 @@ function showAccountModal() {
   const accounts = wallet.getAccounts();
   const idx = wallet.getActiveAccountIndex();
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <button class="modal-close" type="button" data-close-modal>✕</button>
     <h2>🐻 Accounts</h2>
     ${accounts.map((a, i) => `
       <div class="asset-row ${i === idx ? 'active' : ''}" data-acc="${i}">
         <div class="asset-icon">🐻</div>
         <div class="asset-info">
-          <div class="asset-name">${escapeHtml(a.name || `Account ${i + 1}`)} ${i === idx ? '(active)' : ''}</div>
+          <div class="asset-name">${escapeHtml(a.name || `Account ${i + 1}`)}</div>
           <div class="mono">${escapeHtml(a.address)}</div>
         </div>
       </div>`).join('')}
@@ -1438,12 +1657,12 @@ function showAccountModal() {
     try {
       const secret = await wallet.exportSecret(pw);
       openModal(`
-        <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+        <button class="modal-close" type="button" data-close-modal>✕</button>
         <h2>📤 Your Secret</h2>
         <div class="danger-box">Never share this. Anyone with it controls your funds.</div>
         <div class="card" style="box-shadow:none"><div class="mono">${escapeHtml(secret)}</div></div>
         <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(secret)}">📋 Copy</button>
-        <button class="btn btn-primary btn-block" onclick="document.getElementById('modalOverlay').classList.remove('open')">Close</button>
+        <button class="btn btn-primary btn-block" type="button" data-close-modal>Close</button>
       `);
     } catch { toast('Wrong password', 'error'); }
   };
@@ -1543,7 +1762,8 @@ async function loadDashboard() {
     loadNfts().catch((e) => console.warn('[BearTool] NFT scan failed:', e?.message || e));
     // M5-HERO: coin price panel removed per user request
   } catch (e) {
-    assetList.innerHTML = `<p class="small text-center">Error: ${escapeHtml(e.message)}</p>`;
+    console.warn('[BearTool] asset list failed:', e);
+    assetList.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Reading your assets'))}</p>`;
   }
 }
 
@@ -1567,6 +1787,7 @@ function holdingUsd(t) {
 // the Swap/Bridge pickers cannot drift apart. Re-exported here because several
 // call sites in this file still use the old local names.
 import { tokenLogoHTML, getCachedLogo, cacheLogo, guardTokenLogos, readLogoCache as loadLogoCache } from './token-logo.js';
+import { explainError } from './errors.js';
 const MANUAL_LOGO_SYMS = new Set(['eth', 'ether', 'usdc', 'usdt', 'dai', 'wbtc', 'link', 'uni', 'aave', 'reth', 'cbeth', 'wsteth', 'frax']);
 
 async function fetchCoinGeckoLogo(sym) {
@@ -1658,7 +1879,7 @@ function showTokenActions(el) {
   if (!Number.isFinite(holding)) holding = 0;
 
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <button class="modal-close" type="button" data-close-modal>✕</button>
     <div class="token-modal-header">
       <div class="token-modal-icon">${getLogoSVG(symbol)}</div>
       <div class="token-modal-info">
@@ -1697,7 +1918,7 @@ function showTokenActions(el) {
       </button>
     </div>
     <div class="token-modal-footer">
-      <button class="btn btn-ghost btn-block" onclick="document.getElementById('modalOverlay').classList.remove('open')">Close</button>
+      <button class="btn btn-ghost btn-block" type="button" data-close-modal>Close</button>
     </div>
   `);
 
@@ -1768,7 +1989,7 @@ function showReceiveModal(address, symbol) {
     }
   } catch { /* QR unavailable — address is still shown below */ }
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <button class="modal-close" type="button" data-close-modal>✕</button>
     <h2>Receive ${escapeHtml(symbol)}</h2>
     ${qrSvg ? `<div class="receive-qr text-center mb-16" role="img" aria-label="QR code for ${escapeHtml(symbol)}">${qrSvg}</div>` : ''}
     <div class="text-center mb-16">
@@ -2058,7 +2279,8 @@ async function scanApprovals() {
     set('approvals', approvals);
     renderApprovals(approvals, scannedFrom);
   } catch (e) {
-    list.innerHTML = `<p class="small text-center">Error: ${escapeHtml(e.message)}</p>`;
+    console.warn('[BearTool] list failed:', e);
+    list.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Reading the list'))}</p>`;
   }
 }
 
@@ -2097,7 +2319,7 @@ function renderApprovals(approvals, scannedFrom = null) {
     try {
       const signer = get('signer').connect(get('provider'));
       const c = new ethers.Contract(a.token.address, ERC20_ABI, signer);
-      const tx = await c.approve(a.spender, 0);
+      const tx = await withTimeout(c.approve(a.spender, 0), 15000, 'revoke broadcast');
       toast('Revoke tx sent!', 'info');
       const { timedOut } = await waitForReceipt(tx);
       if (timedOut) {
@@ -2122,7 +2344,6 @@ function renderActivity() {
     </div>`;
     return;
   }
-  const net = getNetworkById(get('networkId'));
   // Activity icon mapping
   const actIcon = (type) => {
     const t = (type || '').toLowerCase();
@@ -2144,15 +2365,104 @@ function renderActivity() {
     };
     return `<div class="activity-icon ${cls}">${svgs[cls] || svgs.send}</div>`;
   };
-  list.innerHTML = get('activity').map(a => `
-    <div class="activity-item">
+  list.innerHTML = get('activity').map((a, i) => `
+    <div class="activity-item activity-item--openable" role="button" tabindex="0"
+         data-act-index="${i}">
       ${actSvg(a.type)}
       <div class="activity-details">
         <div class="activity-action">${escapeHtml(a.type)} — ${escapeHtml(a.status)}</div>
         <div class="activity-meta">${escapeHtml(a.detail)} · ${escapeHtml(fmtTime(a.ts))}</div>
       </div>
-      ${a.hash && a.hash.startsWith('0x') ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(net.explorer)}/tx/${escapeHtml(a.hash)}" target="_blank" rel="noopener">View</a>` : ''}
     </div>`).join('');
+  // Tapping a row opens the full record. There is deliberately no explorer link
+  // inside the row: role="button" makes the whole subtree presentational, so a
+  // nested <a> loses its role while staying in the tab order (a link announced
+  // as a button), and an aria-label here would replace the row's own amount,
+  // status and timestamp in the accessibility tree. The detail sheet carries
+  // the Explorer link instead, where it has a real label to sit on.
+  const openRow = (row) => {
+    if (!row) return;
+    showActivityDetail(get('activity')[Number(row.dataset.actIndex)]);
+  };
+  $all('.activity-item--openable').forEach(row => {
+    row.addEventListener('click', () => openRow(row));
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRow(row); }
+    });
+  });
+}
+
+// Full history for one activity row: what was recorded locally, then what the
+// chain says. The two are complementary — the local record knows what the user
+// intended, the chain knows what actually happened (gas, block, nonce), and a
+// mismatch between them is exactly what someone reads this panel to find.
+async function showActivityDetail(a) {
+  if (!a) return;
+  const net = getNetworkById(get('networkId'));
+  const row = (k, v, mono = false) =>
+    `<div class="dsig-row"><div class="dsig-k">${escapeHtml(k)}</div><div class="dsig-v${mono ? ' mono' : ''}">${v}</div></div>`;
+  const val = (v) => escapeHtml(v == null || v === '' ? '—' : String(v));
+
+  const local = [
+    row('Action', escapeHtml(a.type || '—')),
+    row('Status', escapeHtml(a.status || '—')),
+    row('Detail', escapeHtml(a.detail || '—')),
+    row('Time', escapeHtml(fmtTime(a.ts))),
+    a.hash ? row('Tx hash', `${escapeHtml(a.hash)}
+      <button class="copy-btn" data-copy="${escapeHtml(a.hash)}" title="Copy hash" aria-label="Copy transaction hash"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`, true) : '',
+    net?.explorer && a.hash ? row('Explorer', `<a href="${escapeHtml(net.explorer)}/tx/${escapeHtml(a.hash)}" target="_blank" rel="noopener">View on explorer ↗</a>`) : '',
+  ].join('');
+
+  openModal(`
+    <button class="modal-close" type="button" data-close-modal aria-label="Close">✕</button>
+    <h2>Transaction history</h2>
+    <div class="dsig-list">${local}</div>
+    <div id="actChain">${spinner(40, 'Reading chain…')}</div>
+  `, { wide: true });
+
+  const box = $('#actChain');
+  const hasHash = a.hash && a.hash.startsWith('0x');
+  if (!hasHash) { box.innerHTML = `<p class="small dim">No transaction hash recorded for this entry.</p>`; return; }
+  const provider = get('provider');
+  if (!provider) {
+    box.innerHTML = `<p class="small dim">Connect a network to read this transaction from the chain.</p>`;
+    return;
+  }
+  try {
+    const [tx, receipt] = await Promise.all([
+      provider.getTransaction(a.hash),
+      provider.getTransactionReceipt(a.hash).catch(() => null),
+    ]);
+    if (!tx && !receipt) { box.innerHTML = `<p class="small dim">Not found on ${escapeHtml(net?.name || 'this network')} yet — it may still be pending.</p>`; return; }
+    const gasPrice = tx?.gasPrice ?? 0n;
+    const used = receipt?.gasUsed ?? 0n;
+    const fee = used * (receipt?.effectiveGasPrice ?? gasPrice);
+    // Block timestamp is the honest "when it actually landed", unlike the local
+    // record's ts, which is only when the user pressed send.
+    const blk = receipt?.blockNumber ? await provider.getBlock(receipt.blockNumber).catch(() => null) : null;
+    const sym = net?.symbol || 'ETH';
+    // data-copy carries the real value, so the existing global handler does the
+    // clipboard work — no bespoke listener needed for these two.
+    const copyable = (v) => v
+      ? `<span class="mono">${escapeHtml(v)}</span> <button class="copy-btn" data-copy="${escapeHtml(v)}" title="Copy" aria-label="Copy address"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`
+      : '—';
+    const chain = [
+      receipt ? row('Block', val(receipt.blockNumber)) : '',
+      blk?.timestamp ? row('Confirmed at', val(fmtTime(blk.timestamp * 1000))) : '',
+      receipt ? row('Status', receipt.status === 1 ? '✅ Success' : '❌ Reverted') : '',
+      row('From', copyable(tx?.from)),
+      row('To', copyable(tx?.to)),
+      tx ? row('Value', escapeHtml(ethers.formatEther(tx.value)) + ' ' + escapeHtml(sym)) : '',
+      row('Nonce', val(tx?.nonce)),
+      row('Gas used', receipt ? val(used.toString()) : '—'),
+      receipt ? row('Gas price', val(ethers.formatUnits(receipt.effectiveGasPrice ?? gasPrice, 'gwei')) + ' gwei') : '',
+      receipt ? row('Fee paid', escapeHtml(ethers.formatEther(fee)) + ' ' + escapeHtml(sym)) : '',
+    ].filter(Boolean).join('');
+    box.innerHTML = `<h3 class="mb-8">On chain</h3><div class="dsig-list">${chain}</div>`;
+  } catch (e) {
+    console.warn('[BearTool] chain read failed:', e);
+    box.innerHTML = `<p class="small" style="color:var(--danger)">${escapeHtml(explainError(e, 'Reading the chain'))}</p>`;
+  }
 }
 
 // ── settings ──
@@ -2223,12 +2533,12 @@ async function reconnectRpc() {
 
 function clearAllData() {
   openModal(`
-    <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+    <button class="modal-close" type="button" data-close-modal>✕</button>
     <h2>🗑️ Delete Wallet?</h2>
     <div class="danger-box">This deletes ALL wallets, settings, and activity from this browser. Irreversible!</div>
     <div class="flex gap-8" style="justify-content:center">
       <button class="btn btn-danger btn-lg" id="clearBtn">Delete Wallet</button>
-      <button class="btn btn-ghost btn-lg" onclick="document.getElementById('modalOverlay').classList.remove('open')">No</button>
+      <button class="btn btn-ghost btn-lg" type="button" data-close-modal>No</button>
     </div>
   `);
   $('#clearBtn').onclick = () => {
@@ -2271,8 +2581,8 @@ function renderAddressBook() {
         <div class="ab-item-address">${escapeHtml(wallet.shortAddress(item.address))}</div>
       </div>
       <div class="ab-item-actions">
-        <button class="copy-btn" data-copy="${escapeHtml(item.address)}" title="Copy"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
-        <button class="copy-btn ab-delete" data-idx="${i}" title="Delete"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button class="copy-btn" data-copy="${escapeHtml(item.address)}" title="Copy" aria-label="Copy address"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <button class="copy-btn ab-delete" data-idx="${i}" title="Delete" aria-label="Delete this backup"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     </div>`).join('');
   // Delete handlers

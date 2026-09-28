@@ -6,6 +6,8 @@
 // Original implementation — no copying.
 // ═══════════════════════════════════════════════════════════════
 
+import { explainError } from './errors.js';
+
 export function $(sel) { return document.querySelector(sel); }
 export function $all(sel) { return document.querySelectorAll(sel); }
 
@@ -34,7 +36,12 @@ export function toast(msg, type = 'info') {
   const wrap = $('#toast-wrap');
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.textContent = msg;
+  // Errors pass through the translator on the way out, here rather than at each of
+  // the 110 places that raise one. The alternative was a template string per call
+  // site, which is how the same raw revert reached the user in six different
+  // shapes. The translator is idempotent, so a message that is already a sentence
+  // is left exactly as written — "Enter amount to swap" still arrives as itself.
+  el.textContent = type === 'error' ? explainError(msg) : String(msg ?? '');
   wrap.appendChild(el);
   setTimeout(() => {
     el.style.opacity = '0';
@@ -45,6 +52,10 @@ export function toast(msg, type = 'info') {
 
 // ── modal (a11y: aria-labelledby, focus trap, Escape, restore focus) ──
 let lastFocused = null;
+// Set by the dialogs that are really a promise in disguise (confirmTx,
+// promptPassword). closeModal() invokes it so every exit path — buttons, ✕,
+// backdrop, Escape — resolves the awaiting caller instead of stranding it.
+let onClose = null;
 
 function getFocusable(box) {
   if (!box) return [];
@@ -59,6 +70,17 @@ export function openModal(html, { fullscreen = false, wide = false } = {}) {
   box.classList.toggle('welcome-screen', fullscreen);
   box.classList.toggle('modal-wide', wide);
   overlay.classList.toggle('welcome-screen', fullscreen);
+  // The overlay keeps its own 20px inset, so a `wide` sheet — which is already
+  // full-bleed below 768px — still floated with a visible gap around it and read
+  // as a card sitting on a page rather than a full screen. Mark the overlay so
+  // the mobile media query can drop that inset for exactly these sheets.
+  overlay.classList.toggle('modal-overlay-wide', wide);
+  // Capture the opener BEFORE the innerHTML rewrite below. That rewrite detaches
+  // whatever held focus, so reading document.activeElement afterwards always
+  // returned <body> — and closeModal() then called body.focus(), a no-op that
+  // dumped focus at the top of the document. This is what broke the Back chain
+  // (WCAG 2.4.3).
+  lastFocused = document.activeElement;
   box.innerHTML = html;
   // aria-labelledby → first heading (WCAG 4.1.2)
   const heading = box.querySelector('h1, h2, h3');
@@ -71,13 +93,17 @@ export function openModal(html, { fullscreen = false, wide = false } = {}) {
   overlay.classList.add('open');
   // scroll lock
   document.body.style.overflow = 'hidden';
-  // remember who opened it, then move focus inside (WCAG 2.4.3)
-  lastFocused = document.activeElement;
+  // move focus inside the dialog
   box.tabIndex = -1;
   const first = getFocusable(box)[0];
   (first || box).focus();
-  // close on overlay click (outside modal)
-  overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+  // Close on backdrop click, and on anything inside carrying data-close-modal.
+  // This is an ASSIGNMENT, not addEventListener: #modalOverlay is one persistent
+  // node in index.html, so a listener added here would stack on every open and
+  // one ✕ click would run closeModal() N times.
+  overlay.onclick = (e) => {
+    if (e.target === overlay || e.target?.closest?.('[data-close-modal]')) closeModal();
+  };
   return box;
 }
 
@@ -85,8 +111,19 @@ export function closeModal() {
   const overlay = $('#modalOverlay');
   if (!overlay) return;
   overlay.classList.remove('open', 'welcome-screen');
+  document.body?.classList?.remove('modal-open');
   $('#modalBox')?.classList.remove('welcome-screen', 'modal-wide');
   document.body.style.overflow = '';
+  // Settle whatever promise this modal was holding, BEFORE the focus restore.
+  // confirmTx/promptPassword resolved only from their own buttons, so closing
+  // with ✕, the backdrop or Escape left the promise pending forever and the
+  // caller's await never returned — with a button left spinning on setBtnDots.
+  // Escape is the only keyboard route out, and a phone has no Escape.
+  if (onClose) {
+    const fn = onClose;
+    onClose = null;
+    fn();
+  }
   // restore focus to opener (WCAG 2.4.3)
   if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus();
   lastFocused = null;
@@ -238,27 +275,31 @@ export function animateValue(el, target, { duration = 800, formatter = v => v } 
 //
 // Danger is still expressed - the bear's question is prefixed, the button turns
 // red, and the rows say what is about to happen. What is gone is the puzzle.
-export function confirmTx({ title, rows, confirmText = 'Confirm', danger = false }) {
+export function confirmTx({ title, rows, confirmText = 'Confirm', cancelText = 'Cancel', danger = false }) {
   return new Promise((resolve) => {
     const rowsHtml = rows.map(r =>
       `<div class="row"><span class="k">${escapeHtml(r.k)}</span><span class="v">${escapeHtml(r.v)}</span></div>`
     ).join('');
     openModal(`
-      <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+      <button class="modal-close" type="button" data-close-modal>✕</button>
       <div class="tx-confirm">
         <img src="assets/bear.svg" alt="Bear asks">
         <div class="question">${danger ? '⚠️ ' : ''}${escapeHtml(title)}</div>
         <div class="tx-detail">${rowsHtml}</div>
         <div class="flex gap-8">
-          <button class="btn btn-ghost" id="confirmNo">Cancel</button>
+          <button class="btn btn-ghost" id="confirmNo">${escapeHtml(cancelText)}</button>
           <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="confirmYes">${escapeHtml(confirmText)}</button>
         </div>
       </div>
     `);
     const yes = $('#confirmYes');
     const no = $('#confirmNo');
-    yes.onclick = () => { closeModal(); resolve(true); };
-    no.onclick = () => { closeModal(); resolve(false); };
+    // Cancelled is the answer to every question, not an unanswered one. Any
+    // close path that is not "Yes" resolves false.
+    const settle = (v) => { onClose = null; closeModal(); resolve(v); };
+    onClose = () => settle(false);
+    yes.onclick = () => settle(true);
+    no.onclick = () => settle(false);
   });
 }
 
@@ -266,11 +307,11 @@ export function confirmTx({ title, rows, confirmText = 'Confirm', danger = false
 export function promptPassword(title = 'Enter password') {
   return new Promise((resolve) => {
     openModal(`
-      <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('open')">✕</button>
+      <button class="modal-close" type="button" data-close-modal>✕</button>
       <h2>🔒 ${escapeHtml(title)}</h2>
       <div class="field">
         <label for="pwInput">Password</label>
-        <input class="input" id="pwInput" type="password" placeholder="••••••••">
+        <input class="input" id="pwInput" type="password">
       </div>
       <div class="flex gap-8">
         <button class="btn btn-ghost" id="pwCancel">Cancel</button>
@@ -279,7 +320,8 @@ export function promptPassword(title = 'Enter password') {
     `);
     const input = $('#pwInput');
     input.focus();
-    const done = (val) => { closeModal(); resolve(val); };
+    const done = (val) => { onClose = null; closeModal(); resolve(val); };
+    onClose = () => done(null);
     $('#pwOk').onclick = () => done(input.value);
     $('#pwCancel').onclick = () => done(null);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(input.value); });

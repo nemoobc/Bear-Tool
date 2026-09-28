@@ -25,11 +25,14 @@
 import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
 import { resolveMax } from './max-ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx, waitForReceipt } from './safetx.js';
+import { runTx, waitForReceipt, withTimeout } from './safetx.js';
+const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
+
 import { getAllNetworks, getNetworkById } from './network.js';
 import { t } from './i18n.js';
 import { BRIDGE_ROUTERS, getBridgeRoutersForChain, CHAIN_NAMES } from './routers.js';
 import { initTokenPicker, initNetworkPicker, initOptionPicker } from './token-picker.js';
+import { explainError } from './errors.js';
 
 const { ethers } = globalThis;
 
@@ -87,7 +90,7 @@ export function bindBridgeEvents() {
   // Bridge had no MAX at all, unlike Send and Swap — so "send it all" meant
   // typing the number by hand and getting it wrong. Same rule as everywhere
   // else: subtract the fee when the token being bridged is the one paying it.
-  $('#btnBridgeMax')?.addEventListener('click', async () => {
+  const applyPct = async (pct) => {
     const tokSel = $('#bridgeToken');
     const t = (get('tokens') || []).find(x => (x.address || 'native') === tokSel?.value);
     const field = $('#bridgeAmount');
@@ -97,17 +100,25 @@ export function bindBridgeEvents() {
       token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
       provider: get('provider'),
       from: get('address'),
-      pct: 100,
+      pct,
+      // Bridging is heavier than a transfer; the 21k native default would have
+      // MAX subtract a fee the transaction can never cover.
+      gasLimit: 300000n,
     });
     if (!r.ok) {
       field.value = '';
       if (note) { note.textContent = r.message; note.classList.add('show'); }
-      toast('MAX is not available here', 'error');
+      toast(pct === 100 ? 'MAX is not available here' : `${pct}% is not available here`, 'error');
       return;
     }
     field.value = r.amount;
     if (note) { note.textContent = r.message; note.classList.add('show'); }
     field.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  // 20% / 50% / 70% / MAX — one delegated listener for the static row.
+  $('#bridgePctBtns')?.addEventListener('click', (e) => {
+    const btn = e.target.closest?.('[data-bridge-pct]');
+    if (btn) applyPct(Number(btn.dataset.bridgePct));
   });
 
   ['#bridgeFromChain', '#bridgeToChain', '#bridgeToken', '#bridgeAmount'].forEach(sel => {
@@ -320,7 +331,7 @@ export async function doBridge() {
   } catch (e) {
     if (seq !== quoteSeq) return;
     set('bridgeQuote', null);
-    box.innerHTML = `<div class="quote-error">⚠️ No route available — no bridge will happen. (${escapeHtml(e?.message || 'network error')})</div>
+    box.innerHTML = `<div class="quote-error">⚠️ ${escapeHtml(explainError(e, 'Bridge quote'))} No bridge will be started.</div>
       <div class="quote-error-detail">${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)}</div>`;
   }
 }
@@ -423,7 +434,13 @@ export async function doBridgeExec() {
     if (!connected?.sendTransaction) return toast('No signer available', 'error');
     if (connected.address && !sameAddr(connected.address, context.address)) return toast(t('bridge.account_changed'), 'error');
 
-    const tx = await connected.sendTransaction({ to, data, value, chainId });
+// Every broadcast is wrapped. Only send.js bounded its broadcast with a
+// timeout; the bridge, swap and 7702 paths would wait on a node that never
+// answers, leaving the button spinning and the flow dead. 15s matches
+// send.js: a broadcast either gets a hash or it is not happening.
+    const tx = await withTimeout(
+      connected.sendTransaction({ to, data, value, chainId }),
+      BROADCAST_TIMEOUT_MS, 'bridge broadcast');
     toast('Bridge tx sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'bridge', status: 'pending', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}` });
     const { receipt, timedOut } = await waitForReceipt(tx);

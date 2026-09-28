@@ -18,8 +18,8 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 | 🌐 **Networks** | 12 EVM networks built in: 6 mainnet (Ethereum, BSC, Polygon, Arbitrum, OP, Base) + 6 testnet (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet), RPC fallback chain. **Add Network is a picker, not a form** — 15 further EVM chains (Celo, Gnosis, Avalanche, Sonic, Linea, Scroll, Blast, Mantle, Moonbeam, Cronos, Aurora, Polygon zkEVM, Mode, Metis, Hoodi) are one tap and fill themselves in; every preset RPC was probed to confirm it answers `eth_chainId` with the chain it claims, and saving re-checks that live. Custom RPC still supported, and it is **used exactly as entered** — if it stops answering, the app says so by name and stops, rather than quietly falling through to a different node. That failure mode was real: a fork endpoint that was slow to answer got skipped, the wallet connected to a public node instead, and the only symptom was a funded account reporting a balance it never had. Settings also shows **which node is live**. Settings → **Testnet mode** toggle hides testnets |
 | 🪙 **Assets** | Native balance plus a bundled ERC-20 watchlist: **19 tokens on Ethereum mainnet** (USDT, USDC, DAI, WETH, WBTC, LINK, UNI, AAVE, SHIB, MATIC, ARB, OP, PEPE, CRV, SNX, SUSHI, COMP, MKR, LDO) and 1–2 on each other supported chain — the list is a convenience, not a limit. **+ Add Token** sits under the list; paste an ERC-20 contract address and its name, symbol and decimals are read off the contract and shown before you commit, so a wrong paste is obvious instead of landing as an unlabelled row |
 | ✈️ **Send** | Native + ERC-20, gas speed (slow/normal/fast), live preview + est. gas, paste button, address validation + poisoning detection |
-| 🔄 **Swap** | Real quotes only — auto-route KyberSwap → Uniswap V3 → Uniswap V2 (on-chain verified routers, incl. Sepolia V2), slippage control, flip. No simulation: no route = honest error. The Swap nav button is also the Bridge entry (tap it twice to choose) |
-| 🌉 **Bridge** | LI.FI quotes (real API, fetch timeout), native-only fail-closed, all chains — reaches `#view-bridge` from the Swap chooser, no separate nav item |
+| 🔄 **Swap** | Real quotes only. The try-order is **derived from the router registry**, not a hard-coded ladder: aggregators first (KyberSwap, ParaSwap), then every on-chain venue listed for the chain (Uniswap V3, Uniswap V2, SushiSwap, QuickSwap, BaseSwap). Every address in the registry was verified on-chain per chain — see `js/routers.js`. Slippage control, flip. No simulation: no route = honest error. The Swap nav button is also the Bridge entry (tap it twice to choose) No simulation: no route = honest error. The Swap nav button is also the Bridge entry (tap it twice to choose) |
+| 🌉 **Bridge** | LI.FI quotes (real API, fetch timeout), native-only fail-closed, on the networks Bear Tool actually supports — the registry does not claim chains the app cannot open. Measured 2026-09-27: LI.FI, KyberSwap and ParaSwap all answer with no credential; 1inch (401) and Bungee/Socket (403) need a key and are not offered — reaches `#view-bridge` from the Swap chooser, no separate nav item |
 | ⚡ **EIP-7702** | Delegate to implementation (chainId 0 = all chains, replay warning), revoke, batch atomic call, rescue atomic, claim + forward airdrop. Batch/Rescue/Claim each require deploying their helper contract first (step 1 in the Tools view) — no silent auto-deploy |
 | 🔐 **Approvals** | Scan popular/custom token approvals, detect UNLIMITED, revoke to 0 |
 | 🧙 **Deploy** | Wizard for ERC-20 / ERC-721 / ERC-1155 — real in-browser solc compile (CDN fallback if the primary mirror is blocked) |
@@ -94,12 +94,84 @@ npm install   # devDependency: ethers (for tests only)
 npm run verify
 ```
 
-`verify` = syntax check all JS + the unit suite, covering wallet
-create/import/encrypt/decrypt, network presets, EIP-7702, session persistence,
-address poisoning, nav invariants, the dApp pre-load security gate, the signing
-guardrails, the injected-provider refusals, and MAX amount arithmetic. Plus
-browser E2E (`npm run test:e2e`) and on-chain fork tests for 12 networks
-(`run-fork-all.sh`).
+`verify` = syntax check all JS, then the unit suite, then the on-chain fork
+suite, then the browser suite. That last part used to be a separate script, which
+meant "everything is green" could be true while nothing had ever touched a chain —
+the approval, swap, deploy and 7702 tests are the only ones that can catch a
+contract-level mistake. They skip themselves, with a stated reason, unless anvil
+is reachable (`CI=1`, or `FORK_RPC_URL` / `FORK_PORT`), so on a machine with no
+foundry the gate reports skips rather than pretending to have passed.
+
+**The browser suite needs Playwright browsers installed.** It used to be
+`bash tests/e2e/run.sh`, and that script used `python3 -m http.server`, `curl`,
+`seq` and a backgrounded subshell — every one of them a POSIX shape, so on
+`cmd.exe` it failed before reaching a single spec while still sitting in
+`package.json` looking like part of the suite. 21 specs went unrun for as long as
+that was true. It is now `node tools/e2e.mjs`, which starts the server in-process
+and closes it in a `finally`, so the same command works on every platform. On a
+machine with no browser installed the runner exits **5** with an explanation
+rather than a stack trace — 5 is neither pass nor app-failure, and the gate does
+not swallow it, because a gate that reports green without running anything is the
+failure mode this paragraph is about.
+
+```bash
+npx playwright install chromium   # once, on a machine that can run a browser
+```
+
+`npm test` on its own is still the fast loop. The fork suite needs anvil and
+takes minutes: it compiles real Solidity with solc 0.8.28 and runs against a
+forked chain. `npm run test:fork` runs one network (`FORK_NETWORK`).
+
+Coverage includes wallet create/import/encrypt/decrypt, network presets,
+EIP-7702, session persistence, address poisoning, nav invariants, the dApp
+pre-load security gate, the signing guardrails, the injected-provider
+refusals, and MAX amount arithmetic. Plus browser E2E (`npm run test:e2e`).
+
+### Why some tests call the app instead of rebuilding it
+
+A swap test that declares its own ABI and calls the router itself proves the
+*address* is right. It cannot prove the app works, because the app's own code is
+never executed. That distinction was not theoretical here — four bugs got through
+a green suite of 617 unit tests and a 12-network fork sweep, and every one of them
+surfaced only after a test was changed to call the real module:
+
+| Found by | Bug |
+|---|---|
+| calling `js/swap.js` | `UNISWAP_V2_ABI` and `UNISWAP_V3_ABI` were referenced but never defined. Every quote and every swap threw `ReferenceError`, on every chain. The swap feature was entirely dead, and the registry rewrite's own test had checked that swap.js no longer declared router *addresses* — and read that as the rewrite being complete. |
+| calling `v2Quote` | Native ↔ wrapped resolved to a path of `[WETH, WETH]`, which every V2 router rejects with `IDENTICAL_ADDRESSES`. Swapping ETH for WETH — an ordinary thing to try, and both are offered by the token picker — returned a raw contract error. |
+| calling `js/wallet.js` | `isSuspiciousSimilar` compared the two addresses with `===` *before* lowercasing. The one caller passes a stored lowercase address against whatever the user typed, so re-pasting your own address in different case made the guard report **your own wallet as poisoned**. |
+
+That last one is why the fix is in the product rather than the test: a warning that
+fires on your own address teaches people to ignore warnings, so the two that follow
+it get ignored too.
+
+Three rules came out of it, and they are enforced in `tests/`:
+
+1. **A test that rebuilds the call proves the fixture, not the feature.** Anything
+   callable without a DOM gets called directly (`fork-swap-app.test.js`,
+   `journey.test.js`).
+2. **A gate is not trustworthy because it is green.** It is trustworthy because it
+   goes red when deliberately damaged. Three gates written here were green while
+   unable to fail: a lexical rule so loose it matched almost every name, a
+   `readdirSync` that never descended into `tests/fork/`, and a checker that had
+   silently stopped parsing 1627 lines of `app.js`. Each was found by breaking
+   something on purpose and re-running.
+3. **A transform feeding a detector is tested against its own input.** The
+   stripper that prepares code for the undefined-symbol scan is asserted to be
+   length-preserving, because a version that was not ate a third of `app.js` and
+   the detector reported "nothing found" over code it had never read.
+
+The same discipline applies to fixtures: an assertion that goes red because the
+*input* is malformed is not a finding. A mistyped address once produced a failure
+that read exactly like a missed phishing check, and was neither.
+
+Two portability traps in this suite are worth knowing about, because both were
+invisible until it ran on a second operating system. Test paths come from
+`fileURLToPath(new URL(…, import.meta.url))`, never from `URL.pathname` — the
+latter returns a percent-encoded POSIX string, which on Windows is `/C:/Users/…`
+and resolves to `C:\C:\Users\…`. And no file defaults a path to a Termux-only
+absolute location. `tests/audit-regression.test.js` fails the build if either
+comes back.
 
 **A green terminal run is not the acceptance test here.** Every layout, touch
 target and empty state in this README was found by measuring a real rendered box
@@ -127,7 +199,7 @@ Bear-Tool/
 │   ├── price.js        # CoinGecko + DexScreener price cache
 │   ├── safetx.js       # double-submit lock + error boundary + button loading
 │   ├── send.js         # send view: preview, gas estimate, poisoning warnings
-│   ├── swap.js         # swap view: auto-route KyberSwap → Uniswap V3 → V2 (real quotes only)
+│   ├── swap.js         # swap view: auto-route over the registry (real quotes only)
 │   ├── bridge.js       # bridge view: LI.FI quote (real API, no simulation)
 │   ├── eip7702.js      # delegate/revoke (chainId guard), batch, rescue, claim
 │   ├── eip7702-tools.js# helper-contract batch/rescue/airdrop flows

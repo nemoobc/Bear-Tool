@@ -26,7 +26,39 @@
 export function toBig(v, fb = 0n) {
   if (typeof v === 'bigint') return v;
   if (typeof v === 'number') { try { return BigInt(Math.trunc(v)); } catch { return fb; } }
-  if (typeof v === 'string' && v.trim()) { try { return BigInt(v.trim()); } catch { return fb; } }
+  if (typeof v === 'string' && v.trim()) {
+    const t = v.trim();
+    // Hex — raw JSON-RPC hands back "0x..." and BigInt parses it. Rejecting it
+    // here would send a perfectly good value to the 0n fallback, which is the
+    // exact silent-zero bug this function is being fixed for.
+    if (/^0x[0-9a-fA-F]+$/.test(t)) { try { return BigInt(t); } catch { return fb; } }
+    // Plain integer — the common case.
+    if (/^[+-]?\d+$/.test(t)) { try { return BigInt(t); } catch { return fb; } }
+    // Scientific notation ("1e18", "2.5E-3"). BigInt rejects these outright, so
+    // they used to fall through to the 0n fallback — which meant a balance
+    // arriving as "1e18" read as an EMPTY wallet, and MAX wrote 0. Silently,
+    // and wrong. That is the one case the fallback must never produce.
+    const sci = /^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(t);
+    if (sci) {
+      const [, sign, ip, fp = '', exp] = sci;
+      const shift = BigInt(exp);
+      const fracLen = BigInt(fp.length);
+      const mant = BigInt(ip + fp);
+      // mantissa × 10^(exp − fraction length), truncating if that is negative.
+      const scaled = shift >= fracLen ? mant * 10n ** (shift - fracLen) : mant / 10n ** (fracLen - shift);
+      return sign === '-' ? -scaled : scaled;
+    }
+    // Decimal without an exponent ("1.5"). Truncate toward zero, as the number
+    // branch above does — never round up, which is rule 2 of this file.
+    const dec = /^([+-]?)(\d+)(?:\.(\d*))?$/.exec(t);
+    if (dec) {
+      const [, sign, ip, fp = ''] = dec;
+      const mant = BigInt(ip + fp);
+      const scaled = fp.length ? mant / 10n ** BigInt(fp.length) : mant;
+      return sign === '-' ? -scaled : scaled;
+    }
+    return fb;
+  }
   return fb;
 }
 
@@ -82,20 +114,29 @@ export function maxSpendable({ balance, gasWei, paysGas, keepBuffer = true }) {
 export function formatDown(wei, decimals = 18, dp = 6) {
   const v = toBig(wei);
   if (v <= 0n) return '0';
-  const neg = v < 0n;
-  const abs = neg ? -v : v;
-  const base = 10n ** BigInt(decimals);
+  // Validate BEFORE any `**`. `10n ** -1n` and `BigInt(6.5)` both throw, and
+  // an unhandled throw here killed the whole MAX button — the form became
+  // unusable. A custom network's `decimals` is attacker-shaped: addCustomNetwork
+  // in network.js stores it with no validation at all, so it can arrive as
+  // 2.5, -1 or NaN straight off the localStorage record.
+  const d = Number(decimals);
+  if (!Number.isSafeInteger(d) || d < 0 || d > 255) {
+    throw new RangeError(`decimals must be an integer in 0..255, got ${decimals}`);
+  }
+  const keepDigits = Math.max(0, Math.min(Math.trunc(Number(dp) || 0), d));
+  const abs = v;                       // v <= 0 already returned, so abs === v
+  const base = 10n ** BigInt(d);
   const whole = abs / base;
   const frac = abs % base;
-  const keep = BigInt(Math.max(0, Math.min(dp, decimals)));
+  const keep = BigInt(keepDigits);
   let fracStr = '';
   if (keep > 0n) {
     // Truncate the fraction to `keep` digits. Never round — see rule 2.
-    const div = 10n ** (BigInt(decimals) - keep);
+    const div = 10n ** (BigInt(d) - keep);
     const trimmed = frac / div;
     fracStr = trimmed.toString().padStart(Number(keep), '0').replace(/0+$/, '');
   }
-  return (neg ? '-' : '') + whole.toString() + (fracStr ? '.' + fracStr : '');
+  return whole.toString() + (fracStr ? '.' + fracStr : '');
 }
 
 /** The input a MAX button should write, plus an explanation when it is empty. */

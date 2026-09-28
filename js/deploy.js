@@ -121,7 +121,7 @@ export async function doDeploy() {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'DEPLOY ON MAINNET!' : `Deploy ${std.contract} on ${net.name}?`,
       rows: [...plan.summary, { k: 'Network', v: net.name }, { k: 'Est. cost', v: costLabel }],
-      confirmText: 'Deploy',
+      confirmText: 'Sign',
       danger: net.type === 'mainnet',
     });
     if (!ok) { setDeployStatus('Deploy cancelled.'); return; }
@@ -136,12 +136,19 @@ export async function doDeploy() {
     const { receipt, timedOut } = await waitForReceipt(tx);
     const address = await contract.getAddress();
 
-    saveDeployed('token', address, {
+    // Recorded only once the chain has confirmed it. It used to run before the
+    // revert check, so a deploy whose transaction reverted was still filed as a
+    // working token: the address exists (CREATE always yields one) but there is
+    // no code at it, and every later screen would treat it as real. A timed-out
+    // transaction is different — the address is real and the deploy may well
+    // land, so that one is still recorded, just with the state left unresolved.
+    const record = () => saveDeployed('token', address, {
       chainId: net.chainId, standard: std.id, name: plan.name, symbol: plan.symbol,
       deployer: get('address'), txHash: tx?.hash
     });
 
     if (timedOut && !receipt) {
+      record();
       setDeployStatus(`TX ${escapeHtml(String(tx?.hash || '').slice(0, 12))}… sent but still unconfirmed. Contract address: <strong>${escapeHtml(address)}</strong>`, 'warn');
       toast('Deploy sent — still confirming', 'info');
       return;
@@ -155,10 +162,12 @@ export async function doDeploy() {
       setDeployStatus('Deploy transaction reverted.', 'error');
       return toast('Deploy failed (tx reverted)', 'error');
     }
+    record();
 
     const link = explorerTxLink(net, tx?.hash);
-    setDeployStatus(`<strong>${escapeHtml(plan.name)} deployed</strong><br>
-      <span class="mono">${escapeHtml(address)}</span><br>
+    setDeployStatus(`<strong>${escapeHtml(plan.name)}</strong> deployed<br>
+      <span class="mono">${escapeHtml(address)}</span>
+      <button class="copy-btn" data-copy="${escapeHtml(address)}" title="Copy contract address" aria-label="Copy contract address"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button><br>
       <span class="small">${escapeHtml(net.name)} · ${plan.summary.map(r => escapeHtml(r.v)).join(' · ')}</span>` +
       (link ? ` <a href="${escapeHtml(link)}" target="_blank" rel="noopener">View tx ↗</a>` : ''), 'ok');
     toast(`${plan.symbol} deployed! 🎉`, 'success');

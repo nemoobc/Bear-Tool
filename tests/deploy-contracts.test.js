@@ -10,6 +10,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// This is an ES module, so there is no __dirname. Define it from import.meta.url
+// — and via fileURLToPath, not .pathname, which on Windows comes back as
+// "/C:/Users/…" and produces "C:\C:\Users\…".
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 globalThis.localStorage = {
   getItem: () => null, setItem: () => {}, removeItem: () => {}
@@ -86,9 +92,16 @@ test('deploy: form validation rejects junk and builds constructor args', () => {
 
 // ── part 2: real compilation (network, opt-in) ──
 test('deploy: real solc compiles every template to real bytecode', { skip: process.env.BEAR_SOLC !== '1' && 'set BEAR_SOLC=1 (downloads ~9 MB compiler)' }, async () => {
-  const file = process.env.BEAR_SOLC_FILE || path.join('/data/data/com.termux/files/usr/tmp/opencode', 'soljson-0828.js');
+  // Same rule as tests/fork/fork-helper.mjs: a list of plausible local copies,
+  // not one Termux-only absolute path that exists on exactly one machine.
+  const candidates = [
+    process.env.BEAR_SOLC_FILE,
+    path.join(__dirname, '..', 'soljson-0828.js'),
+    path.join(__dirname, '..', 'vendor', 'soljson-0828.js'),
+  ].filter(Boolean);
+  const file = candidates.find((f) => fs.existsSync(f));
   let code;
-  if (fs.existsSync(file)) {
+  if (file) {
     code = fs.readFileSync(file, 'utf8');
   } else {
     const res = await fetch(solcJs.SOLC_URL);

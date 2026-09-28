@@ -60,13 +60,47 @@ function blackHole() {
   return srv;
 }
 
-// answers any request with a fixed JSON-RPC result
-function tinyRpc(result = '0x10') {
+// A live endpoint answers each method on its own terms — in particular
+// eth_chainId must report the chain it is actually on. Answering every method
+// with one canned value models a node that confidently lies about its identity,
+// which is a different scenario and is covered separately below.
+//
+// The old stub ignored the request body entirely and replied with one canned
+// value for everything, so it never had to look at what was asked. Reading the
+// method means actually parsing the HTTP request, because a single `data` event
+// carries the headers and the body together — JSON.parse() on that whole chunk
+// throws every time, and the stub silently degrades to the canned answer. The
+// buffer below is what makes per-method answers possible at all.
+function tinyRpc(result = '0x10', { chainId = null, chainIdError = false } = {}) {
   const srv = net.createServer(sock => {
-    sock.on('data', () => {
-      const body = JSON.stringify({ jsonrpc: '2.0', id: 1, result });
-      sock.write(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: keep-alive\r\n\r\n${body}`);
+    let buf = '';
+    sock.on('data', (chunk) => {
+      buf += chunk.toString();
+      let headEnd = buf.indexOf('\r\n\r\n');
+      if (headEnd < 0) return;                       // headers still arriving
+      const length = Number((/content-length:\s*(\d+)/i.exec(buf.slice(0, headEnd)) || [])[1] || 0);
+      const body = buf.slice(headEnd + 4, headEnd + 4 + length);
+      if (body.length < length) return;              // body still arriving
+      buf = buf.slice(headEnd + 4 + length);         // keep any pipelined request
+
+      let method = '', id = 1;
+      try { method = JSON.parse(body)?.method || ''; id = JSON.parse(body)?.id ?? 1; }
+      catch { /* not JSON-RPC */ }
+
+      const payload = (method === 'eth_chainId' && chainIdError)
+        // An endpoint that genuinely does not implement the method.
+        ? { error: { code: -32601, message: 'Method not supported' } }
+        : { result: (method === 'eth_chainId' && chainId != null) ? chainId : result };
+
+      // The id must be echoed, not hardcoded. A node that always answers "id: 1"
+      // only works until the client asks a second question: ethers increments
+      // the id per request, and a mismatched reply is not a slow node, it is a
+      // dropped one ("missing response for request").
+      const out = JSON.stringify({ jsonrpc: '2.0', id, ...payload });
+      sock.write(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n` +
+                 `Content-Length: ${out.length}\r\nConnection: keep-alive\r\n\r\n${out}`);
     });
+    sock.on('error', () => {});
   });
   srv._bearSockets = new Set();
   srv.on('connection', s => { srv._bearSockets.add(s); s.on('close', () => srv._bearSockets.delete(s)); });
@@ -95,7 +129,7 @@ test('a black-holed RPC is abandoned within the budget, not waited on forever', 
 
 test('a dead RPC first does not block a live RPC second', { timeout: 30000 }, async () => {
   const dead = blackHole();
-  const good = tinyRpc();
+  const good = tinyRpc('0x10', { chainId: '0x' + CHAIN.toString(16) });
   const deadPort = await listen(dead);
   const goodPort = await listen(good);
   useNetwork([`http://127.0.0.1:${deadPort}`, `http://127.0.0.1:${goodPort}`]);
@@ -110,4 +144,37 @@ test('unknown networkId falls back to a usable network (no undefined.chainId cra
   const stale = getNetworkById('ethereum-sepolia');
   assert.ok(stale, 'stale id must not return undefined');
   assert.ok(stale.chainId && Array.isArray(stale.rpc) && stale.rpc.length, 'fallback must be usable');
+});
+
+// `staticNetwork: true` tells ethers to trust the chainId we declared and skip
+// eth_chainId entirely, which left every downstream chain check comparing a
+// constant with itself — bridge's post-await re-verification, and the chainId a
+// deployed contract is filed under. getProvider now asks the node.
+test('an RPC that reports a different chain is refused, not silently accepted', { timeout: 30000 }, async () => {
+  const liar = tinyRpc('0x1', { chainId: '0x1' });   // alive, and confidently mainnet
+  const port = await listen(liar);
+  useNetwork([`http://127.0.0.1:${port}`]);
+  let err = null;
+  try { await getProvider(CHAIN); } catch (e) { err = e; }
+  await kill(liar);
+  localStorage.removeItem('bear.customNetworks');
+  assert.ok(err, 'a node on the wrong chain must not produce a provider');
+  assert.match(err.message, /All RPCs failed/i);
+  assert.match(err.message, /reports chain/i,
+    'the failure must name the mismatch — "reports chain 0x1, expected 949494"');
+});
+
+test('an RPC that cannot answer eth_chainId is used unverified, not rejected', { timeout: 30000 }, async () => {
+  // An endpoint that simply does not implement the method is a configuration
+  // problem, not an attack. Refusing it would break working setups, and the
+  // blockNumber probe has already proved the socket is alive.
+  const noChainId = tinyRpc('0x10', { chainIdError: true });
+  const port = await listen(noChainId);
+  useNetwork([`http://127.0.0.1:${port}`]);
+  let provider = null, err = null;
+  try { provider = await getProvider(CHAIN); } catch (e) { err = e; }
+  await kill(noChainId);
+  localStorage.removeItem('bear.customNetworks');
+  assert.equal(err, null, 'an unverifiable endpoint must not be treated as a hostile one');
+  assert.ok(provider, 'it must still be usable');
 });

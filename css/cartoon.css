@@ -16,6 +16,14 @@
   --fur: #FFD97A;
   --fur-dark: #F5A623;
   --white: #FFFFFF;
+  /* Declared because rules below use `var(--danger)` with NO fallback: an
+     undeclared custom property makes the whole declaration invalid at computed
+     value time, so the background fell back to transparent while the white
+     text still applied — white text on the cream modal, i.e. invisible. Four
+     other rules already carry `var(--danger, #c62828)`-style fallbacks; giving
+     the token a real value stops those from disagreeing with each other. */
+  --danger: #C62828;
+  --ok: #2E7D32;
   --shadow: 4px 4px 0 var(--ink);
   --shadow-sm: 2px 2px 0 var(--ink);
   --border: 3px solid var(--ink);
@@ -25,7 +33,37 @@
   --font: 'Fredoka', 'Baloo 2', sans-serif;
   --ink-soft: #6B6478; /* secondary text — ≥4.5:1 on cream & white (WCAG 1.4.3) */
   /* spacing */
-  --sp-4: 4px; --sp-8: 8px; --sp-12: 12px; --sp-16: 16px; --sp-20: 20px; --sp-24: 24px;
+  --sp-4: 4px; --sp-6: 6px; --sp-8: 8px; --sp-10: 10px; --sp-12: 12px;
+  --sp-14: 14px; --sp-16: 16px; --sp-20: 20px; --sp-24: 24px;
+
+  /* ── Declared, not assumed ─────────────────────────────────────────────
+     Every one of these was used somewhere below with `var(--name)` and NO
+     fallback, while never being defined. An undeclared custom property makes
+     the whole declaration invalid at computed-value time, so the property
+     silently fell back to its initial value — which is how --danger turned the
+     "wrong word" feedback into white text on a transparent background over the
+     cream modal, i.e. invisible. Sixteen more of the same class were hiding in
+     here: pale tints that rendered transparent, a spacing scale with holes, a
+     page background that defaulted to white inside a cream app, and an active
+     chip whose colour never resolved. tests/audit-regression.test.js fails if
+     any of them is used without a fallback again.
+
+     The tints are alpha over whatever surface is behind them, so they stay
+     correct in dark theme without a second declaration. */
+  --honey-15: rgba(255, 201, 60, 0.15);
+  --berry-15: rgba(255, 107, 107, 0.15);
+  --berry-dark: #D64545;          /* border under the active nav pill */
+  --mint-bg: rgba(6, 214, 160, 0.16);
+  --lavender-bg: rgba(155, 93, 229, 0.16);
+  --peach-bg: rgba(255, 138, 61, 0.16);
+  --peach: rgba(255, 138, 61, 0.22);
+  --sea: #15707C;                 /* icon colour, reads 4.4:1 on --sky */
+  --lavender: #7B4FB5;            /* icon colour, reads 6:1 on --lavender-bg */
+  --coin-color: #B54708;          /* active chip fill: white text reads 5.9:1.
+                                      --honey here would have been 1.7:1. */
+  --text-secondary: var(--ink-soft);
+  --bg: var(--cream);             /* page surface, follows the theme */
+  --font-mono: 'Courier New', monospace;
   /* sizing */
   --topbar-h: 56px;
   --sidebar-w: 220px;
@@ -56,6 +94,11 @@ body::before {
 }
 
 #app { position: relative; z-index: 1; min-height: 100vh; }
+
+/* The dotted backdrop is decoration for the app surface. It was briefly hidden
+   while a modal was open, on the theory that its 2px honey dots were landing
+   on the password field. They were not — that was the field's own
+   `••••••••` placeholder, which is gone now. The backdrop stays. */
 
 /* focus-visible: keyboard focus on ALL interactive elements (WCAG 2.4.7) */
 :focus-visible {
@@ -339,14 +382,18 @@ body::before {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  /* 2px put the "Loading assets..." label and the dot row almost on top of
+     each other. 8px lets the label read as a line of its own. */
+  gap: 8px;
 }
 .spinner-label { font-weight: 700; font-size: 0.9rem; }
 .spinner-count { font-weight: 700; font-size: 0.8rem; color: var(--ink-soft); }
 
-.spinner-dots { display: inline-flex; align-items: center; gap: 5px; }
+/* 5px between 8px dots read as one smudge rather than three. 11px on a 9px
+   dot gives each its own space while the group still reads as one unit. */
+.spinner-dots { display: inline-flex; align-items: center; gap: 11px; }
 .spinner-dots span {
-  width: 8px; height: 8px;
+  width: 9px; height: 9px;
   border-radius: 50%;
   background: var(--orange);
   animation: dot-bounce 1s cubic-bezier(.28,.84,.42,1) infinite;
@@ -721,6 +768,20 @@ body::before {
     max-height: 100%;
     border-radius: 0;
     box-shadow: none;
+    border-left: none;
+    border-right: none;
+  }
+  /* The overlay keeps its own 20px inset, and that inset is what the sheet
+     above still had to live inside — so the sheet went edge-to-edge but
+     stopped 20px short on every side, showing a ring of page background.
+     That is the "ada kotak tapi kurang full" report. Only `wide` sheets drop
+     the inset; small dialogs (password, confirm) keep it. Placed after the
+     rule above on purpose: a test asserts this media query opens directly
+     with `.modal.modal-wide`. */
+  .modal-overlay.modal-overlay-wide {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
   }
 }
 @keyframes modal-in { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
@@ -1197,16 +1258,6 @@ body::before {
 .swap-token-select { flex: 0 1 140px; min-width: 0; min-height: var(--touch-min); }
 .swap-amount-wrap { flex: 1; position: relative; display: flex; }
 .swap-amount-wrap .input { flex: 1; padding-right: 60px; }
-.swap-max-btn {
-  position: absolute;
-  right: var(--sp-8);
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 4px 10px;
-  font-size: 0.7rem;
-  min-height: auto;
-  border-radius: 8px;
-}
 .swap-balance {
   font-size: 0.75rem;
   color: var(--ink-soft);
@@ -1230,9 +1281,13 @@ body::before {
   font-size: 0.8rem;
   cursor: pointer;
   transition: all 0.12s;
-}
+
+  /* No colour was declared, so this inherited black: 21:1 on the white
+     button in light theme and 1.32:1 on the #16213e that --white
+     becomes in dark theme. Same omission .pct-btn had. */
+  color: var(--ink);}
 .slippage-btn:hover { background: var(--cream); }
-.slippage-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); }
+.slippage-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); color: #2D2A32; }
 
 .quote-box {
   background: var(--cream);
@@ -1354,6 +1409,16 @@ body::before {
   flex: 1;
   padding: 6px 4px;
   min-height: 32px;
+  /* The text colour was simply never declared, so it inherited black: 21:1 on the
+     white button in light theme, and 1.32:1 on the #16213e that --white becomes
+     in dark theme. Black on dark navy. var(--ink) follows the theme, and the
+     border on the very next line already used it. */
+  color: var(--ink);
+  /* Without a width floor, flex: 1 alone let the four buttons share whatever
+     the parent had left: in the swap row — which also holds the token picker
+     and the amount field — they measured 34-39px wide at 360px, under the 44px
+     the file's own --touch-min sets. */
+  min-width: var(--touch-min);
   border: 2px solid var(--ink);
   border-radius: 8px;
   background: var(--white);
@@ -1364,7 +1429,12 @@ body::before {
   transition: all 0.12s;
 }
 .pct-btn:hover { background: var(--cream); }
-.pct-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); }
+/* Honey does not flip with the theme — it is the same #FFC93C in both — so the
+   text on it must not either. Taking var(--ink) here put #e0e0e0 on #FFC93C in
+   dark theme: 1.6:1, measured. One rule, not a second block for the colour: a
+   split rule meant a source-level check read the first half and saw no colour
+   at all, which is a fine way to ship a regression nobody can see. */
+.pct-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); color: #2D2A32; }
 /* MAX is the one that spends the account down, so it gets its own weight
    rather than sitting in a row of equal-looking quarters. */
 .pct-max {
@@ -1372,6 +1442,9 @@ body::before {
   letter-spacing: 0.02em;
   border-color: var(--ink);
   background: var(--honey);
+  /* Same reason as .pct-btn.active: a fixed bright fill needs a fixed dark text.
+     Measured 1.6:1 with var(--ink) in dark theme, 9.7:1 with this. */
+  color: #2D2A32;
 }
 .pct-max.active { background: var(--ink); color: var(--white); }
 .gas-btns { display: flex; gap: var(--sp-4); }
@@ -1387,9 +1460,13 @@ body::before {
   font-size: 0.8rem;
   cursor: pointer;
   transition: all 0.12s;
-}
+
+  /* No colour was declared, so this inherited black: 21:1 on the white
+     button in light theme and 1.32:1 on the #16213e that --white
+     becomes in dark theme. Same omission .pct-btn had. */
+  color: var(--ink);}
 .gas-btn:hover { background: var(--cream); }
-.gas-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); }
+.gas-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); color: #2D2A32; }
 
 /* ═══════════ EIP-7702 WIZARD ═══════════ */
 .eip7702-wizard { margin-top: var(--sp-12); }
@@ -1485,12 +1562,27 @@ body::before {
 }
 .password-toggle {
   position: absolute;
-  right: 4px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 38px;
+  min-height: 38px;
+  /* This sits INSIDE the field (the input reserves 48px for it). With no
+     border or fill of its own it read as a small round smudge floating over
+     the input rather than a control — so give it the same cartoon affordance
+     as every other .btn and let it look deliberate. */
+  background: var(--white);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
 }
+.password-toggle:hover { background: var(--cream); }
+.password-toggle:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 
 /* approval controls */
 .approval-controls { display: flex; gap: var(--sp-12); margin-bottom: var(--sp-12); }
@@ -1536,27 +1628,7 @@ body::before {
   flex-direction: column;
   gap: var(--sp-8);
 }
-.activity-item {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-12);
-  padding: var(--sp-12);
-  border: 2px solid var(--ink);
-  border-radius: var(--radius);
-  background: var(--white);
-  transition: all 0.12s;
-}
-.activity-item:hover { background: var(--cream); }
-.activity-icon {
-  width: 40px; height: 40px;
-  border-radius: 50%;
-  border: 2px solid var(--ink);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-  flex-shrink: 0;
-}
+/* Rows that open the detail sheet. The class is applied in app.js and had no
 .activity-icon.send { background: var(--sky); }
 .activity-icon.swap { background: var(--honey); }
 .activity-icon.bridge { background: var(--grape); }
@@ -1600,22 +1672,82 @@ body::before {
   to { transform: translateY(0); }
 }
 
+/* The 12 seed words used to run together in one inline flow, so a line break
+   could split a word from its number and nothing lined up column-wise. A grid
+   keeps "3." pinned to its own word at every width, and the numbers stop
+   drifting into the middle of the line. */
+.seed-words {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  font-family: var(--font-mono, monospace);
+  font-size: 1.05rem;
+  line-height: 1.9;
+  color: var(--ink);
+}
+@media (min-width: 560px) {
+  .seed-words { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.seed-word { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.seed-word > b {
+  flex: 0 0 auto;
+  min-width: 1.9em;
+  text-align: right;
+  color: var(--ink-soft);
+  font-weight: 600;
+  user-select: none;
+}
+.seed-word > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
 /* ═══════════ COPY BTN ═══════════ */
 .copy-btn {
-  background: none;
-  border: none;
+  /* Two sizes share this class. The big one — "Copy seed phrase" — is a
+     btn-block with text and needs to look like a button; the small ones are
+     six inline icon buttons holding a 12-14px SVG next to a hash, an address
+     or a contract name. Giving the small ones the big treatment turned each of
+     them into a 44x44 empty box, which is the same as having no affordance at
+     all because it reads as a rendering mistake, not a control. The big
+     treatment is therefore scoped to .btn-block, and this base rule is the
+     compact one. */
+  background: var(--white);
+  border: 2px solid var(--ink);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 4px 6px;
   cursor: pointer;
-  padding: 4px;
-  color: var(--ink-soft);
-  transition: color 0.15s;
-  min-width: var(--touch-min);
-  min-height: var(--touch-min);
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+  min-width: 28px;
+  min-height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
 }
-.copy-btn:hover { color: var(--ink); }
-.copy-btn.copied { color: var(--ink); background: var(--mint); border-radius: 6px; }
+.copy-btn:hover { background: var(--cream); transform: translateY(-1px); }
+/* The one button that has to read as a first-class control. */
+.copy-btn.btn-block {
+  border: var(--border);
+  font-size: 1rem;
+  padding: 12px 22px;
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  gap: 8px;
+  border-radius: 12px;
+}
+/* Mint is a fill, not a text colour. #FFFFFF on #06D6A0 measures 1.89:1, well
+   under the 4.5:1 WCAG 1.4.3 minimum — the ring below and the "copied" state
+   below it were both white-on-mint and both failed. --ink reads 7.48:1 on mint
+   in light theme, and in dark theme these surfaces are --cream, where --ink
+   flips to #e0e0e0 and stays high-contrast too. */
+.copy-btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.copy-btn.copied { color: var(--ink); background: var(--mint); border-color: var(--mint); }
 
 /* ═══════════ WALLET STATUS ═══════════ */
 .wallet-status {
@@ -1946,6 +2078,10 @@ body::before {
   flex-direction: column;
   gap: var(--sp-8);
 }
+/* Rows that open the detail sheet. The class is applied in app.js and had no
+   rule at all, so a tabindex="0" row measured cursor:auto and looked identical
+   to plain text — only the pre-existing :hover transform hinted at it. */
+.activity-item--openable { cursor: pointer; }
 .activity-item {
   display: flex;
   align-items: flex-start;
@@ -1956,7 +2092,9 @@ body::before {
   background: var(--white);
   transition: transform 0.15s;
 }
-.activity-item:hover { transform: translateY(-1px); }
+/* The cream wash came from the earlier duplicate block and the lift from
+   the later one; both were live at once, each half-overriding the other. */
+.activity-item:hover { transform: translateY(-1px); background: var(--cream); }
 .activity-icon {
   width: 36px;
   height: 36px;
@@ -2096,6 +2234,8 @@ body::before {
   --mint: #06D6A0;
   --fur: #FFD97A;
   --fur-dark: #F5A623;
+  --danger: #FF6B6B;
+  --ok: #7BD389;
   --shadow: 4px 4px 0 rgba(0,0,0,0.3);
   --shadow-sm: 2px 2px 0 rgba(0,0,0,0.3);
 }
@@ -2104,6 +2244,35 @@ body::before {
   opacity: 0.08;
 }
 .theme-dark .btn { color: #2D2A32; }
+/* …but NOT for a ghost button. .btn-ghost's background is var(--white), and
+   --white flips to #16213e in dark theme, so the dark ink above landed on a dark
+   surface: measured 1.21:1 on #btnSendPaste and 1.32:1 on #btnSwapFlip — buttons
+   that are present, focusable and unreadable. The coloured buttons keep their
+   dark text because their fill stays light; a ghost button's fill does not. */
+.theme-dark .btn-ghost { color: var(--ink); }
+
+/* Every control whose fill is one of the bright palette colours — honey, mint,
+   berry — keeps that same colour in dark theme, because those tokens do not
+   flip. var(--ink) does flip, to #e0e0e0, so each of these ended up as light
+   grey on a bright fill: 1.6:1, measured on the "Slow" gas button and the
+   "0.1%" slippage button. Fourteen rules had the shape; fixing them one at a
+   time is how two of them got fixed and twelve did not, so they are named here
+   once. Anything whose background is a theme token rather than a palette colour
+   is deliberately absent: those already follow the theme correctly. */
+.theme-dark :is(
+  .skip-link,
+  .nav-item.active,
+  .nav-sheet-item.active,
+  .mobile-nav-item.active,
+  .dapp-chip.active,
+  .badge-mainnet,
+  .badge-testnet,
+  .copy-btn.copied,
+  .seed-choice-btn.correct,
+  .dapp-browser-go,
+  .gas-btn.active,
+  .slippage-btn.active
+) { color: #2D2A32; }
 .theme-dark .topbar { background: var(--white); }
 .theme-dark .sidebar { background: var(--white); }
 .theme-dark .card { background: var(--white); }
@@ -2381,6 +2550,27 @@ body::before {
 .seed-choice-btn.active {
   transform: translateY(0);
 }
+/* Jawaban seed: warna lewat KELAS, bukan inline style.
+   Inline `btn.style.background` kalah oleh `background: ... !important` di
+   .seed-choice-btn (baris di atas) — hasilnya background tetap krem sementara
+   `color: var(--white)` tetap berlaku, jadi teks putih di atas krem = HILANG.
+   Both properties are !important here so nothing below can out-rank them. */
+.seed-choice-btn.correct {
+  background: var(--mint) !important;
+  /* --ink, not --white: #FFF on #06D6A0 is 1.89:1. This is the only positive
+     feedback in the seed-recovery flow, so failing to read it is not cosmetic. */
+  color: var(--ink) !important;
+  border-color: var(--mint) !important;
+}
+.seed-choice-btn.wrong {
+  background: var(--danger) !important;
+  color: var(--white) !important;
+  border-color: var(--danger) !important;
+}
+.seed-choice-btn:disabled {
+  cursor: default;
+  opacity: 1;
+}
 
 /* ═══════════ DEPLOYED CONTRACT REGISTRY ═══════════ */
 .registry-list {
@@ -2636,7 +2826,7 @@ body::before {
 
 /* Chain preset rows in the "Add Network" picker. */
 .chain-preset { cursor: pointer; }
-.chain-preset:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
+.chain-preset:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 
 /* ═══════════ DAPPS: filters + frameable badge ═══════════ */
 .dapps-filters { display: flex; flex-direction: column; gap: var(--sp-8); margin: var(--sp-8) 0; }
@@ -2647,8 +2837,8 @@ body::before {
   font: inherit; font-size: 12px; font-weight: 600; color: var(--text-secondary);
 }
 .dapp-chip.active { background: var(--honey); color: var(--ink); border-color: var(--ink); }
-.dapp-chip:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
-.dapp-card:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
+.dapp-chip:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.dapp-card:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .dapp-frame-note { font-size: 10px; opacity: .65; margin-top: 2px; }
 .dapp-note { text-align: center; padding: 8px 12px; color: var(--text-secondary); font-size: 12px; }
 .dapp-note code { font-size: 11px; }
@@ -2694,7 +2884,7 @@ body::before {
   font: inherit; font-weight: 600; cursor: pointer; text-align: left;
 }
 .token-picker-trigger:hover { background: var(--cream); }
-.token-picker-trigger:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
+.token-picker-trigger:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .token-picker-logo {
   flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px;
@@ -2806,22 +2996,24 @@ body::before {
 /* ═══════════ MAX amount: the fee has to come from somewhere ═══════════ */
 .amount-row { display: flex; gap: 8px; align-items: stretch; }
 .amount-row .input { flex: 1 1 auto; min-width: 0; }
-/* The bridge MAX sits in normal flow beside its input. It must NOT borrow
-   .swap-max-btn, which is absolutely positioned on purpose to float over the
-   swap input: in a static .amount-row that positioning is relative to some
-   ancestor further up, and the button lands ~90px below its own row, on top
-   of the router control. Measured at 390px: row at y=313, button at y=400. */
-.amount-max-btn { flex: 0 0 auto; align-self: center; position: static; }
 .max-note {
-  display: none; margin: 8px 0 0; font-size: .75rem; line-height: 1.4;
+  /* The note was display:none until MAX filled the field, so the first press
+     shoved everything below it down the page. Reserve the row up front and
+     fade it in instead: the message appears without moving the form. */
+  margin: 8px 0 0; font-size: .75rem; line-height: 1.4;
   padding: 7px 10px; border-radius: 8px;
+  min-height: 34px;
   background: rgba(88, 160, 255, .1); color: var(--ink-soft);
   border-left: 3px solid rgba(88, 160, 255, .5);
   /* It is a footnote to the amount above it, not a panel of its own. */
   max-width: 100%; overflow-wrap: anywhere;
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.15s ease;
 }
+.max-note.show { opacity: 1; visibility: visible; }
 .max-note b, .max-note strong { color: var(--ink); font-weight: 700; }
-.max-note.show { display: block; }
+/* The old `.max-note.show { display: block }` is gone on purpose: the note now
+   always occupies its reserved row, so display must not flip back on. */
 
 /* ═══════════ Security Center ═══════════ */
 .sec-block { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px dashed var(--border); }
@@ -2906,6 +3098,21 @@ body::before {
 .dsig-pass .dsig-mark { color: #0f7a52; }
 .dsig-warn .dsig-mark { color: #8a6a00; }
 .dsig-fail .dsig-mark { color: #b23b3b; }
+/* The activity-detail sheet in showActivityDetail() emits .dsig-row/.dsig-k/
+   .dsig-v, and no rule existed for any of them — every field rendered as two
+   full-width stacked lines and the 66-char tx hash took four lines of
+   break-all. Same grid shape as .sec-row above, so the panel reads as a record
+   instead of a text dump. */
+.dsig-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 30%) 1fr;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: .82rem;
+  align-items: baseline;
+}
+.dsig-k { font-weight: 700; color: var(--ink); }
+.dsig-v { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 560px) {
   .dbr-secure { order: 9; }
   .dbr-urlwrap { order: 10; flex-basis: 100%; }
@@ -2942,7 +3149,6 @@ body::before {
 
 /* A floor for everyone, including a mouse: 26px is under the 28px minimum
    pointer guidelines ask for, and a MAX button is pressed in a hurry. */
-.swap-max-btn,
 .amount-row .btn,
 .dapp-chip,
 .dbr-chip {
@@ -2992,7 +3198,6 @@ body::before {
    one tracks the layout, not the crowding — the 560px queries below it are
    about two controls failing to share a line, which is a different question. */
 @media (pointer: coarse), (max-width: 768px) {
-  .swap-max-btn,
   .amount-row .btn,
   .dapp-chip,
   .dbr-chip,

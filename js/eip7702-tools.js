@@ -4,9 +4,11 @@
 // Loads solc.js lazily from CDN for on-chain contract compilation.
 // ═══════════════════════════════════════════════════════════════
 
+const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
+
 import { $, toast, confirmTx, escapeHtml, setBtnDots } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx, waitForReceipt } from './safetx.js';
+import { runTx, waitForReceipt, withTimeout } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
 import * as wallet from './wallet.js';
 import { saveDeployed, findDeployed, listDeployed, removeDeployed } from './registry.js';
@@ -131,24 +133,27 @@ async function delegateAndExecute(targetAddress, implAddress, calldata, opts = {
     const sponsorSigner = opts.sponsorSigner || targetSigner;
 
     // Send delegation + calldata in one tx
-    const tx = await sponsorSigner.sendTransaction({
+    // withTimeout bounds the WAIT only. It cannot change the authorization, the
+    // nonce, the calldata or the fee fields — it just stops the button spinning
+    // forever on a node that never answers.
+    const tx = await withTimeout(sponsorSigner.sendTransaction({
       to: targetAddress,
       authorizationList: [authorization],
       data: calldata,
       maxFeePerGas: feeData.maxFeePerGas,
       maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
-    });
+    }), BROADCAST_TIMEOUT_MS, 'delegate broadcast');
     return tx;
   } else {
     // Already delegated — just send the calldata
     const signer = opts.sponsorSigner || opts.targetSigner;
     const feeData = await provider.getFeeData();
-    const tx = await signer.sendTransaction({
+    const tx = await withTimeout(signer.sendTransaction({
       to: targetAddress,
       data: calldata,
       maxFeePerGas: feeData.maxFeePerGas,
       maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
-    });
+    }), BROADCAST_TIMEOUT_MS, 'calldata broadcast');
     return tx;
   }
 }
@@ -213,14 +218,23 @@ async function executeBatch() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const valid = batchCalls.filter(b => b.to && b.data);
   if (!valid.length) return toast('Add at least one valid call', 'error');
-  if (!wallet.isValidAddress(valid[0].to)) return toast('Invalid target address', 'error');
+  // Every address, not just the first. Checking valid[0].to meant a malformed
+  // entry at position 2..n sailed straight into the helper's multicall — the
+  // contract is not a validator, and a revert there costs the whole batch
+  // rather than the one bad call. Reported by position so it can be found.
+  const bad = valid.map((b, i) => (wallet.isValidAddress(b.to) ? null : i + 1)).filter(Boolean);
+  if (bad.length) {
+    return toast(bad.length === 1
+      ? `Call #${bad[0]} has an invalid target address`
+      : `Invalid target address in calls ${bad.join(', ')}`, 'error');
+  }
 
   const net = getNetworkById(get('networkId'));
-  if (net.type === 'mainnet') {
+  {
     const ok = await confirmTx({
-      title: 'BATCH CALL ON MAINNET!',
+      title: net.type === 'mainnet' ? 'BATCH CALL ON MAINNET!' : `Batch ${valid.length} calls on ${net.name}?`,
       rows: [{ k: 'Calls', v: String(valid.length) }, { k: 'Network', v: net.name }],
-      confirmText: 'Execute', danger: true
+      confirmText: 'Execute', danger: net.type === 'mainnet'
     });
     if (!ok) return;
   }
@@ -294,18 +308,34 @@ async function executeRescue() {
   if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
   if (type !== 'eth' && !wallet.isValidAddress(tokenAddr)) return toast('Invalid token contract address', 'error');
   if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+  // Validated: take it out of the document. From here on the signer holds it.
+  wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
+
+  // The 7702 authorization MUST be signed by the target itself — the nonce and
+  // the delegation check are both read from `target`. This build has no field
+  // for the target's key, so the only signer it holds is the unlocked wallet.
+  // Without this guard the code used get('signer') unconditionally: the
+  // signature belonged to the OPEN wallet while the nonce came from `target`,
+  // and had those two happened to agree the delegation would have been applied
+  // to the open wallet — a permanent, unapproved account change pointing it at a
+  // rescue contract, with the sponsor already having paid the gas. Refuse
+  // rather than guess which wallet was meant.
+  const unlockedAddr = get('address');
+  if (!unlockedAddr || target.toLowerCase() !== String(unlockedAddr).toLowerCase()) {
+    return toast('Rescue requires the target wallet itself to be unlocked — this build cannot sign for a second address.', 'error');
+  }
 
   const net = getNetworkById(get('networkId'));
-  if (net.type === 'mainnet') {
+  {
     const ok = await confirmTx({
-      title: 'RESCUE ON MAINNET!',
+      title: net.type === 'mainnet' ? 'RESCUE ON MAINNET!' : `Rescue from ${wallet.shortAddress(target)}?`,
       rows: [
         { k: 'Locked wallet', v: wallet.shortAddress(target) },
         { k: 'SAFE destination', v: wallet.shortAddress(safe) },
         { k: 'Token type', v: type.toUpperCase() },
         { k: 'Network', v: net.name }
       ],
-      confirmText: 'Rescue', danger: true
+      confirmText: 'Rescue', danger: net.type === 'mainnet'
     });
     if (!ok) return;
   }
@@ -386,17 +416,19 @@ async function executeClaim() {
   if (!claimData || !claimData.startsWith('0x')) return toast('Invalid claim calldata (must start with 0x)', 'error');
   if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
   if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+  // Validated: take it out of the document. From here on the signer holds it.
+  wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
 
   const net = getNetworkById(get('networkId'));
-  if (net.type === 'mainnet') {
+  {
     const ok = await confirmTx({
-      title: 'CLAIM AIRDROP ON MAINNET!',
+      title: net.type === 'mainnet' ? 'CLAIM AIRDROP ON MAINNET!' : `Claim on ${net.name}?`,
       rows: [
         { k: 'Airdrop contract', v: wallet.shortAddress(contractAddr) },
         { k: 'Forward to', v: wallet.shortAddress(safe) },
         { k: 'Network', v: net.name }
       ],
-      confirmText: 'Claim', danger: true
+      confirmText: 'Claim', danger: net.type === 'mainnet'
     });
     if (!ok) return;
   }
@@ -460,6 +492,19 @@ async function executeClaim() {
 // Batch/Rescue/Claim all need a helper contract on this chain. This card says
 // out loud whether it exists, where, and lets the user deploy it up front
 // instead of discovering the requirement when the action fails.
+/** Clear a private-key field once its value has been read and accepted.
+ *
+ *  The sponsor key is typed into a plain <input type=password> and read straight
+ *  out of the DOM. Nothing removed it afterwards, so a sponsor key sat in the
+ *  live document for the rest of the session — readable by any injected script,
+ *  any accidental screenshot, and any later copy/paste of the field. This is
+ *  called only after validation has passed, so a mistyped key is not thrown away
+ *  before the user can correct it. */
+export function wipeKeyField(sel) {
+  const el = $(sel);
+  if (el) { el.value = ''; el.blur?.(); }
+}
+
 export function renderHelperStatus() {
   const list = $('#helperStatusList');
   if (!list) return;
@@ -514,14 +559,29 @@ export async function deployBatchHelper() {
     const provider = get('provider') || await getProvider(net.chainId);
     set('provider', provider);
     const signer = get('signer').connect(provider);
+    // Sign/Cancel before anything is sent. These helpers deploy straight to
+    // the chain with no confirmation at all, so a stray tap could put a
+    // contract on mainnet unreviewed.
+    const ok = await confirmTx({
+      title: net.type === 'mainnet' ? 'DEPLOY HELPER ON MAINNET!' : 'Deploy batch helper?',
+      rows: [
+        { k: 'Contract', v: 'batch' },
+        { k: 'Network', v: net.name },
+        { k: 'From', v: get('address') },
+      ],
+      confirmText: 'Sign',
+      danger: net.type === 'mainnet',
+    });
+    if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
     const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
     const contract = await deployContract(signer, abi, bytecode);
     const addr = await contract.getAddress();
     saveDeployed('batch', addr, { chainId: Number(net.chainId), deployer: get('address'), abi });
     addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `batch → ${addr}` });
     toast('Batch helper deployed: ' + wallet.shortAddress(addr), 'success');
-    renderHelperStatus();
     renderDeployedRegistry();
+    showDeployedResult('batch', 'Batch helper', addr, net);
+    renderHelperStatus();
   } catch (e) {
     toast(e?.message || String(e), 'error');
   } finally {
@@ -538,6 +598,8 @@ export async function deployRescueHelper() {
   if (!wallet.isValidAddress(target)) return toast('Fill a valid locked wallet address first', 'error');
   if (!wallet.isValidAddress(safe)) return toast('Fill a valid SAFE address first', 'error');
   if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+  // Validated: take it out of the document. From here on the signer holds it.
+  wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
 
   const net = getNetworkById(get('networkId'));
   const btn = $('#btnDeployRescueHelper');
@@ -546,12 +608,26 @@ export async function deployRescueHelper() {
     const provider = get('provider') || await getProvider(net.chainId);
     set('provider', provider);
     const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+    const ok = await confirmTx({
+      title: net.type === 'mainnet' ? 'DEPLOY HELPER ON MAINNET!' : 'Deploy rescue helper?',
+      rows: [
+        { k: 'Contract', v: 'rescue' },
+        { k: 'Network', v: net.name },
+        { k: 'SAFE', v: safe },
+        { k: 'Rescuer', v: target },
+        { k: 'Sponsor', v: wallet.shortAddress(sponsorSigner.address) },
+      ],
+      confirmText: 'Sign',
+      danger: net.type === 'mainnet',
+    });
+    if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
     const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
     const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, target]);
     const addr = await contract.getAddress();
     saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, abi });
     addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
     toast('Rescue helper deployed: ' + wallet.shortAddress(addr), 'success');
+    showDeployedResult('rescue', 'Rescue helper', addr, net);
     renderHelperStatus();
     renderDeployedRegistry();
   } catch (e) {
@@ -566,6 +642,8 @@ export async function deployAirdropClaimer() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const sponsorKey = $('#claimSponsorKey').value.trim();
   if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+  // Validated: take it out of the document. From here on the signer holds it.
+  wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
 
   const net = getNetworkById(get('networkId'));
   const btn = $('#btnDeployAirdropClaimer');
@@ -575,12 +653,25 @@ export async function deployAirdropClaimer() {
     set('provider', provider);
     const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
     const targetAddress = get('address');
+    const ok = await confirmTx({
+      title: net.type === 'mainnet' ? 'DEPLOY HELPER ON MAINNET!' : 'Deploy airdrop claimer?',
+      rows: [
+        { k: 'Contract', v: 'airdropClaimer' },
+        { k: 'Network', v: net.name },
+        { k: 'Target', v: targetAddress },
+        { k: 'Sponsor', v: wallet.shortAddress(sponsorSigner.address) },
+      ],
+      confirmText: 'Sign',
+      danger: net.type === 'mainnet',
+    });
+    if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
     const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
     const contract = await deployContract(sponsorSigner, abi, bytecode, [targetAddress]);
     const addr = await contract.getAddress();
     saveDeployed('airdrop', addr, { chainId: Number(net.chainId), target: targetAddress, abi });
     addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `airdrop → ${addr}` });
     toast('Airdrop claimer deployed: ' + wallet.shortAddress(addr), 'success');
+    showDeployedResult('airdrop', 'Airdrop claimer', addr, net);
     renderHelperStatus();
     renderDeployedRegistry();
   } catch (e) {
@@ -591,6 +682,23 @@ export async function deployAirdropClaimer() {
 }
 
 // ── deployed-contract registry UI ──
+// After a helper lands on-chain, name + address go on screen immediately with
+// a copy button, instead of only a toast that disappears. `data-copy` is
+// handled globally, so the button needs no listener of its own.
+function showDeployedResult(type, label, addr, net) {
+  const box = $('#helperResult');
+  if (!box) return;
+  box.innerHTML = `<div class="asset-row">
+      <div class="asset-info">
+        <div class="asset-name">${escapeHtml(label)} deployed</div>
+        <div class="asset-symbol"><span class="mono">${escapeHtml(addr)}</span></div>
+        <div class="small dim">${escapeHtml(net?.name || '')}</div>
+      </div>
+      <button class="copy-btn" data-copy="${escapeHtml(addr)}" title="Copy contract address" aria-label="Copy contract address"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    </div>`;
+  box.classList.remove('hidden');
+}
+
 export function renderDeployedRegistry() {
   const list = $('#deployedRegistryList');
   if (!list) return;
@@ -694,7 +802,7 @@ export async function revokeDelegation() {
     const nonce = await provider.getTransactionCount(target);
     const authorization = signer.authorizeSync({ chainId: net.chainId, address: EIP7702.ZERO_ADDRESS, nonce });
     const feeData = await provider.getFeeData();
-    const tx = await signer.sendTransaction({
+    const tx = await withTimeout(signer.sendTransaction({
       // MUST be explicit: ethers v6 otherwise infers an EIP-1559 type-2 tx from
       // the fee fields and SILENTLY DROPS the authorizationList. The tx then
       // mines fine, receipt.status === 1, the UI reports "Delegation revoked!"
@@ -704,7 +812,7 @@ export async function revokeDelegation() {
       authorizationList: [authorization],
       maxFeePerGas: feeData.maxFeePerGas,
       maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
-    });
+    }), BROADCAST_TIMEOUT_MS, 'revoke broadcast');
     addActivity({ hash: tx.hash, type: 'eip7702-revoke', status: 'pending', ts: Date.now(), detail: `revoke → ${target}` });
     toast('Revoke tx sent! ⚡', 'info');
     const { receipt, timedOut } = await waitForReceipt(tx);

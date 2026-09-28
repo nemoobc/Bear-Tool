@@ -8,6 +8,7 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ethers } from 'ethers';
 import {
   gotoApp, skipIntro, importWallet, expectUnlocked, openSendView, appClick,
@@ -20,7 +21,13 @@ import {
 // answers. Fix: restart the fork for THIS network right before each test —
 // every test gets a fresh, non-stale fork. Ports never overlap between
 // sequential single-worker tests.
-const REPO = new URL('../../', import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: the pathname of a file: URL is a
+// percent-encoded POSIX string, and on Windows it comes back as "/C:/Users/…",
+// which cwd then resolves to "C:\C:\Users\…". run-fork-web.sh is a bash
+// script and never ran on Windows, so the bug was invisible — but the path is
+// still wrong on any host where the checkout has a space or a non-ASCII
+// character in it, because the percent-encoding is not decoded.
+const REPO = fileURLToPath(new URL('../../', import.meta.url));
 function freshFork(netId) {
   execFileSync('bash', ['run-fork-web.sh', 'restart-one', netId], {
     cwd: REPO, stdio: 'pipe', timeout: 90_000,

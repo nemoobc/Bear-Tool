@@ -24,6 +24,20 @@ import { siteAllowed, addSite, removeSite, hasPermission, grantPermission } from
 
 export const PROVIDER_FLAG = '__bearToolProvider';
 
+// The methods confirmed on EVERY call, not once per site. Signing and spending
+// are irreversible and unbounded in frequency; a permission that survives past
+// the first use is not a permission, it is a standing authorisation. Chain
+// switches are deliberately absent — they are reversible and prompt fatigue is a
+// real way to make people click through the prompts that matter.
+const PER_CALL_CONFIRM = new Set([
+  'eth_sendTransaction',
+  'personal_sign',
+  'eth_signTypedData',
+  'eth_signTypedData_v1',
+  'eth_signTypedData_v3',
+  'eth_signTypedData_v4',
+]);
+
 export function makeProviderError(code, message) {
   const e = new Error(message);
   e.code = code;
@@ -106,6 +120,26 @@ export function createProvider(cfg) {
       const granted = await cfg.onRequest?.({ method, params, kind: 'permission', origin });
       if (!granted) throw makeProviderError(4001, `The user refused ${method} for ${origin}.`);
       grantPermission(origin, method);
+    }
+
+    // 5. A one-time grant is enough for a chain switch, and nagging on every
+    //    switch would train people to click through prompts. It is not enough for
+    //    the calls that move funds or produce a signature: those are confirmed
+    //    EVERY time, with the decoded details, because the whole risk of a
+    //    one-time grant is that the page can then spend as often as it likes
+    //    without asking again.
+    //
+    //    The distinction used to be theoretical — CONFIRMED_METHODS listed
+    //    eth_sendTransaction and eth_signTypedData, and then the call went
+    //    straight through the moment the permission existed. The list said
+    //    "always needs confirmation" and the code did the opposite.
+    if (PER_CALL_CONFIRM.has(method)) {
+      // Not named `approved`: this module already has a module-level function of
+      // that name (the consent helper, used at line ~85), and a local boolean
+      // shadowing it is a trap — the next edit inside this block that reaches
+      // for the helper gets a boolean instead.
+      const okToSign = await cfg.onRequest?.({ method, params, kind: 'sign', origin });
+      if (!okToSign) throw makeProviderError(4001, `The user refused ${method} for ${origin}.`);
     }
 
     return cfg.onRequest?.({ method, params, kind: 'call', origin });

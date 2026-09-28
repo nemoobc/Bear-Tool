@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { toast, setBtnLoading, setBtnDots } from './ui.js';
+import { explainError } from './errors.js';
 
 const pending = new Set();
 
@@ -35,13 +36,35 @@ export function withTimeout(promise, ms, label = 'operation') {
 
 // Wait for a receipt, but never forever. Callers get an explicit "timedOut"
 // signal so they can tell the user to track the hash instead of hanging.
+//
+// ethers v6 THROWS on a reverted transaction (CALL_EXCEPTION, receipt attached)
+// rather than returning it with status 0. Letting that escape did two harmful
+// things: every `receipt.status === 1 ? 'success' : 'failed'` branch in
+// send/swap/bridge/eip7702 became unreachable dead code, and the hash was thrown
+// away — a revert left the user with nothing to look up and a "pending" row in
+// their history that nothing ever corrected. A revert is an ON-CHAIN OUTCOME,
+// not a failure to broadcast, so it is reported as one.
 export async function waitForReceipt(tx, { timeoutMs = CONFIRM_TIMEOUT_MS, label = 'confirmation' } = {}) {
   const hash = tx?.hash;
   try {
     const receipt = await withTimeout(tx.wait(), timeoutMs, label);
-    return { receipt, hash, timedOut: false };
+    return { receipt, hash, timedOut: false, reverted: receipt?.status === 0 };
   } catch (e) {
     if (e?.code === 'BEAR_TIMEOUT') return { receipt: null, hash, timedOut: true };
+    // Reverted on chain: broadcast happened, the receipt exists, and the user
+    // needs its hash. `timedOut:false` because it did not time out.
+    if (e?.code === 'CALL_EXCEPTION' && e.receipt) {
+      return { receipt: e.receipt, hash: hash || e.transactionHash, timedOut: false, reverted: true };
+    }
+    // Replaced (speed-up, drop-and-replace, underpriced retry) also arrives as
+    // an error. Surface both hashes — the dropped one and the one that took its
+    // place — so the history can point at the truth.
+    if (e?.code === 'TRANSACTION_REPLACED') {
+      return {
+        receipt: null, hash, timedOut: false, reverted: false, replaced: true,
+        replacement: e.replacement?.hash || null,
+      };
+    }
     throw e;
   }
 }
@@ -67,7 +90,7 @@ export function withErrorBoundary(fn, context = 'operation') {
       return await fn(...args);
     } catch (e) {
       console.error(`[BearTool] ${context} failed:`, e);
-      toast(`${context} failed: ${e.message}`, 'error');
+      toast(explainError(e, context), 'error');
       return null;
     }
   };
@@ -88,7 +111,7 @@ export async function runTx(key, btn, fn, { loadingLabel = 'Processing...', dots
     return await fn();
   } catch (e) {
     console.error(`[BearTool] ${key} failed:`, e);
-    toast(`${key} failed: ${e.message}`, 'error');
+    toast(explainError(e, key), 'error');
     return null;
   } finally {
     pending.delete(key);

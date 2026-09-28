@@ -261,7 +261,24 @@ export function closeAllPickers() { closeOpen(); }
 // there is no document. Touching `document` at module scope made the import
 // throw and took 17 unit tests down with it.
 if (typeof document !== 'undefined' && typeof window !== 'undefined') {
-  document.addEventListener('click', () => closeOpen());
+  // Tapping elsewhere closes it. Guarded on the wrapper instead of leaning on
+  // stopPropagation inside each handler: a click landing on a node that stops
+  // propagation for its own reasons would otherwise dismiss the list from
+  // under the user's finger.
+  document.addEventListener('click', (e) => {
+    if (OPEN && OPEN.wrap?.contains?.(e.target)) return;
+    closeOpen();
+  });
   window.addEventListener('resize', () => closeOpen());
-  window.addEventListener('scroll', () => closeOpen(), true);
+  // Only a scroll of the PAGE takes the viewport out from under a panel that
+  // is clamped to it. Scrolling the coin list itself is the entire point of a
+  // long list, so events originating inside the open panel are ignored — with
+  // the old bare handler the panel opened and was gone the moment the list was
+  // touched, or as soon as a tap on the trigger carried any momentum with it.
+  // Capture stays: the panel must be noticed even if the scroll starts inside a
+  // nested scroller.
+  window.addEventListener('scroll', (e) => {
+    if (OPEN && e.target && OPEN.panel?.contains?.(e.target)) return;
+    closeOpen();
+  }, true);
 }

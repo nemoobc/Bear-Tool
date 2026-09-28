@@ -3,7 +3,7 @@
 // verify real on-chain state: totalSupply, ownerOf, balanceOf, transfer.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, deployErc20, deployErc721, deployErc1155, forkSkipReason, ANVIL_ACCOUNT, stopFork } from './fork-helper.mjs';
+import { startFork, deployErc20, deployErc721, deployErc1155, forkSkipReason, ANVIL_ACCOUNT, stopFork, waitForTx } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -32,7 +32,7 @@ test('fork: deploy ERC-20 → totalSupply + balance + transfer', { skip }, async
   // real transfer on the fork
   const to = '0x000000000000000000000000000000000000dEaD';
   const tx = await token.transfer(to, 12345n * 10n ** 18n);
-  const receipt = await tx.wait();
+  const receipt = await waitForTx(tx, 'transfer after deploy');
   assert.equal(receipt.status, 1, 'transfer must succeed on-chain');
   assert.equal(await token.balanceOf(to), 12345n * 10n ** 18n, 'recipient must receive the tokens');
   assert.equal(await token.balanceOf(ANVIL_ACCOUNT), supply - 12345n * 10n ** 18n, 'sender balance must decrease');
@@ -47,7 +47,7 @@ test('fork: deploy ERC-721 → mint + ownerOf', { skip }, async () => {
   const addr = await nft.getAddress();
 
   const tx = await nft.mint(ANVIL_ACCOUNT); // template exposes mint(address), not safeMint
-  const receipt = await tx.wait();
+  const receipt = await waitForTx(tx, 'mint NFT');
   assert.equal(receipt.status, 1, 'mint must succeed on-chain');
   assert.equal(await nft.ownerOf(1n), ANVIL_ACCOUNT, 'token 1 must belong to the minter');
   assert.equal(await nft.balanceOf(ANVIL_ACCOUNT), 1n, 'minter must hold 1 NFT');
@@ -59,7 +59,7 @@ test('fork: deploy ERC-1155 → mint + balanceOf', { skip }, async () => {
   const multi = await deployErc1155(signer);
 
   const tx = await multi.mint(ANVIL_ACCOUNT, 7n, 42n); // template: mint(to,id,value)
-  const receipt = await tx.wait();
+  const receipt = await waitForTx(tx, 'mint ERC-1155');
   assert.equal(receipt.status, 1, 'mint must succeed on-chain');
   assert.equal(await multi.balanceOf(ANVIL_ACCOUNT, 7n), 42n, 'balance must be 42 for token id 7');
 });

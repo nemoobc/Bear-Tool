@@ -2,7 +2,7 @@
 // Send native + ERC-20 on an anvil fork: balances must actually move.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, deployErc20, forkSkipReason, ANVIL_ACCOUNT, stopFork } from './fork-helper.mjs';
+import { startFork, deployErc20, forkSkipReason, ANVIL_ACCOUNT, stopFork, waitForTx } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -51,7 +51,7 @@ test('fork: send ERC-20 — balances move on-chain', { skip }, async () => {
   const amount = 500n * 10n ** 18n;
 
   const tx = await token.transfer(to, amount);
-  const receipt = await tx.wait();
+  const receipt = await waitForTx(tx, 'send native');
   assert.equal(receipt.status, 1, 'ERC-20 send must succeed');
   assert.equal(await token.balanceOf(to), amount, 'recipient must hold the sent amount');
   assert.equal(await token.balanceOf(ANVIL_ACCOUNT), 1000000n * 10n ** 18n - amount, 'sender balance must decrease');

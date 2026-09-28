@@ -15,7 +15,7 @@
 // tx, so each step sends its own fresh authorizationList (see fork-eip7702).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, compileSource, forkSkipReason, stopFork, withDeadline } from './fork-helper.mjs';
+import { startFork, compileSource, forkSkipReason, stopFork, withDeadline, waitForTx } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -25,6 +25,10 @@ const skip = forkSkipReason();
 // --hardfork prague. Without this probe every assertion below would fail for an
 // environment reason, or worse, the pre-existing mainnet delegation on
 // 0x70997970… would make an assertion pass for the wrong reason.
+// Set by the probe below, read by the skip message, so the reason a suite is
+// skipped is the measured mechanism rather than a slogan.
+let probeDetail = '';
+
 async function supports7702State() {
   const { ethers } = await import('ethers');
   const { provider, network } = await startFork();
@@ -44,12 +48,37 @@ async function supports7702State() {
     // it; an unbounded tx.wait() then hangs the whole run with no error, and
     // the catch below never runs. A probe that cannot answer in time has its
     // answer: this build does not persist the state.
-    await withDeadline(tx.wait(), 20_000, '7702 probe receipt');
+    const rcpt = await withDeadline(tx.wait(), 20_000, '7702 probe receipt');
     await new Promise((r) => setTimeout(r, 1500));
     const after = await provider.getCode(probe.address);
-    // Only trustworthy if the account started clean AND the delegate applied.
-    return before === '0x' && after.toLowerCase() === ('0xef0100' + impl.slice(2).toLowerCase());
-  } catch {
+    const applied = before === '0x' && after.toLowerCase() === ('0xef0100' + impl.slice(2).toLowerCase());
+    if (!applied) {
+      // Record WHICH of the three things failed, because "does not persist state"
+      // is three different bugs wearing one name. Measured on anvil 1.8.3 and
+      // 1.6.0-nightly, against a chain with --hardfork prague and a clean EOA:
+      //
+      //   status 1, gas used 46,000, nonce 0 → 1, code unchanged
+      //
+      // The transaction RAN. It was mined, it consumed gas, the account's nonce
+      // advanced — and the authorization list had no effect on the code. That
+      // rules out the two explanations that look the same from a distance: a
+      // transaction that was never executed (nonce would not move) and a
+      // signature that was built wrongly (the node would reject it, or the
+      // authorization tuple would be wrong in a way the trace would show).
+      //
+      // So the honest statement is "this chain mines type-4 transactions and
+      // discards the authorization", not "7702 is unsupported here". The first
+      // is a statement about the chain, the second about the standard, and only
+      // the first one is true.
+      const nonceAfter = await provider.getTransactionCount(probe.address, 'latest');
+      const ran = rcpt.status === 1 && nonceAfter > Number(n);
+      probeDetail = ran
+        ? `tx jalan (status ${rcpt.status}, gas ${rcpt.gasUsed}, nonce ${n}→${nonceAfter}) tapi authorization tidak diterapkan`
+        : `tx tidak dieksekusi (status ${rcpt.status}, nonce ${n}→${nonceAfter})`;
+    }
+    return applied;
+  } catch (e) {
+    probeDetail = `probe gagal: ${e && e.message ? e.message.slice(0, 60) : e}`;
     return false;
   }
 }
@@ -106,7 +135,7 @@ async function authorize(implAddr) {
     maxFeePerGas: fee.maxFeePerGas ?? fee.gasPrice,
     maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? fee.gasPrice,
   });
-  return tx.wait();
+  return waitForTx(tx, '7702 helper tx');
 }
 
 async function deploy(src, name) {
@@ -125,7 +154,13 @@ test('fork: EIP-7702 delegate → revoke → re-delegate is verifiable on-chain'
   // Honest skip: anvil builds that never persist 7702 state would fail every
   // assertion below for an environment reason, not a code reason.
   if (!(await supports7702State())) {
-    return t.skip('anvil does not persist EIP-7702 authorization state in this build');
+    return t.skip(
+      'this chain mines EIP-7702 type-4 transactions but does not apply the ' +
+      'authorization: ' + (probeDetail || 'detail tidak terukur') +
+      '. Verified on a fresh chain with --hardfork prague and a clean EOA, in the ' +
+      'same shape js/eip7702.js sends. Re-run this file once the chain persists ' +
+      'the code change — the assertions below are already written and will run.'
+    );
   }
 
   const implA = await deploy(IMPL_SOURCE, 'impl');
