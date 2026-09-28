@@ -49,6 +49,15 @@ window.addEventListener('DOMContentLoaded', () => {
     loadDashboard();
     if ($('#view-activity').classList.contains('active')) renderActivity();
   });
+  // Unlocking repaints whatever the user is actually looking at.
+  //
+  // Every path that sets an address — create, import, unlock, switch account,
+  // and the session restore at boot — called loadDashboard() and nothing else.
+  // So any view opened while locked stayed blank, and it stayed blank AFTER the
+  // unlock too: the view became active, refreshView() bailed out on the missing
+  // address, and no unlock path ever re-ran the render for the active view. The
+  // dashboard is skipped because each of those call sites already loads it.
+  on('address', (addr) => { if (addr) repaintActiveView(); });
   // Re-apply stored per-network RPC overrides before anything builds a
   // provider, or the wallet quietly talks to the public endpoint.
   try { applyRpcOverrides(); } catch { /* a corrupt store must not block boot */ }
@@ -487,7 +496,16 @@ function showSwapBridgeChooser() {
   $('#chooseBridge').onclick = () => { closeModal(); switchView('bridge'); };
 }
 
-function refreshView(view) {
+export function refreshView(view) {
+  // The dApp catalogue is a hardcoded list (POPULAR_DAPPS) and needs no wallet.
+  //
+  // It used to sit below the address guard, which made an empty page out of it.
+  // Measured on the deployed site, no wallet: the view was active and displayed,
+  // #dappsContainer had an innerHTML of length 0, #dappGrid was never created,
+  // and the console was completely silent — no error, no lock prompt, nothing to
+  // tell the user why the DApps screen was blank. Browsing a catalogue of links
+  // is not a wallet operation, so it is rendered before the guard.
+  if (view === 'dapps') renderDapps($('#dappsContainer'));
   if (!get('address')) return;
   if (view === 'dashboard') loadDashboard();
   if (view === 'send') loadSendTokens();
@@ -496,12 +514,32 @@ function refreshView(view) {
   if (view === 'deploy') { loadEip7702(); bindOpenSeaPanel(); }
   if (view === 'nft') loadNfts();
   if (view === 'activity') renderActivity();
-  if (view === 'dapps') renderDapps($('#dappsContainer'));
   // The Security Center moved from Settings to Approvals, so it renders with
   // this view. Settings is five things and ends at the delete; this is where
   // the reference material about what a dApp or a token can do to you belongs.
   if (view === 'approval') renderSecurityCenter($('#securityCenter'));
 
+}
+
+/**
+ * Re-render the view the user is actually looking at.
+ *
+ * Called on unlock, because every path that sets an address — create, import,
+ * unlock, switch account, session restore at boot — loaded the dashboard and
+ * nothing else. A view opened while locked therefore stayed blank, and it stayed
+ * blank after the unlock too: it was already active, refreshView() had bailed on
+ * the missing address, and nothing re-ran it. The dashboard is excluded because
+ * each of those call sites already loads it.
+ *
+ * Exported so a test can drive it. It reads the active view from the DOM rather
+ * than from a variable, which is the same source of truth switchView() uses to
+ * decide what is visible — the two cannot drift.
+ */
+export function repaintActiveView() {
+  const active = $('.view.active')?.id?.replace(/^view-/, '');
+  if (!active || active === 'dashboard') return false;
+  refreshView(active);
+  return true;
 }
 
 // ── dApp bridge ──────────────────────────────────────────────────────────
