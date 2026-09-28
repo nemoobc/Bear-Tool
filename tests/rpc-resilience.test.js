@@ -178,3 +178,62 @@ test('an RPC that cannot answer eth_chainId is used unverified, not rejected', {
   assert.equal(err, null, 'an unverifiable endpoint must not be treated as a hostile one');
   assert.ok(provider, 'it must still be usable');
 });
+
+// The test above covers a wrong-chain endpoint when it is the ONLY one, because
+// then the loop runs out and throws "All RPCs failed". It says nothing about the
+// case that actually bites a user: an override they stored, plus the public
+// endpoints that follow it.
+//
+// There the mismatch hit `continue`, which steps over the guard that turns an
+// override failure into a loud error — that guard lives in the catch block, and
+// a continue never reaches it. The loop then walked on to a public node, and the
+// app carried on against a chain the user never chose. Measured in a real
+// browser: with `bear.rpcOverrides = {"ethereum":["http://127.0.0.1:8545"]}` and a
+// live anvil on that port, getProvider returned the public endpoint and block
+// 26075508 — a real Ethereum block — while anvil answered HTTP 200 on block 2.
+// The override was stored, read back, and first in the list, and still unused.
+//
+// The cost is not a wrong number on screen. Public endpoints that work for the
+// author are frequently rate-limited, region-blocked or simply down for the
+// person using the app, and an override is chosen precisely because the defaults
+// do not work. Silently going back to the defaults fails every on-chain call with
+// no visible reason.
+test('a wrong-chain override is reported, not replaced by a public endpoint', { timeout: 30000 }, async () => {
+  const liar = tinyRpc('0x10', { chainId: '0x1' });   // alive, and confidently mainnet
+  const fallback = tinyRpc('0x10', { chainId: '0x' + CHAIN.toString(16) });
+  const liarPort = await listen(liar);
+  const fallbackPort = await listen(fallback);
+  const liarUrl = `http://127.0.0.1:${liarPort}`;
+  useNetwork([`http://127.0.0.1:${fallbackPort}`]);
+  localStorage.setItem('bear.rpcOverrides', JSON.stringify({ 'custom-test': [liarUrl] }));
+
+  let provider = null, err = null;
+  try { provider = await getProvider(CHAIN); } catch (e) { err = e; }
+  const used = provider ? endpointOf(provider) : null;
+
+  await kill(liar); await kill(fallback);
+  localStorage.removeItem('bear.customNetworks');
+  localStorage.removeItem('bear.rpcOverrides');
+
+  assert.equal(provider, null,
+    `the override the user stored was ignored and ${used} was used instead — that is a ` +
+    'silent substitution of the endpoint they chose, and every on-chain call then runs ' +
+    'against a chain they did not pick');
+  assert.ok(err, 'a wrong-chain override must be reported, not swallowed');
+  assert.match(err.message, /did not answer|reports chain/i,
+    'the message must name the problem — the same wording Settings already uses');
+  // A wrapped message reads like a stutter and hides which half is the cause.
+  // It shipped once: the refusal was thrown from inside the try and the catch
+  // re-wrapped it, so the user saw the sentence twice plus the hint twice.
+  const times = (re) => (err.message.match(re) || []).length;
+  assert.equal(times(/did not answer/gi), 1, `the refusal is stated twice:\n${err.message}`);
+  assert.equal(times(/Fix Settings/gi), 1, `the fix hint is stated twice:\n${err.message}`);
+  assert.match(err.message, /reports chain 0x1, expected 949494/i,
+    'the message must say what the node reported and what was expected');
+});
+
+// getProvider does not expose which URL it settled on, so read the one place the
+// code records it (network.js attaches bearEndpoint before returning).
+function endpointOf(provider) {
+  try { return provider.bearEndpoint; } catch { return '(tidak diketahui)'; }
+}

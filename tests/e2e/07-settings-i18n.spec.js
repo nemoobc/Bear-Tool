@@ -8,16 +8,21 @@ test.describe('Settings & i18n', () => {
     await skipIntro(page);
     await createWallet(page);
     await appClick(page, '.nav-item[data-view="settings"]');
-    // Five, and five is the point: what the app looks like, how long it holds a
-    // key, and the delete. The testnet filter and the custom RPC field are not
-    // here any more - the filter lives in the network picker beside the list it
-    // filters, and a node belongs with the network it points at.
+      // Five, and five is the point: what the app looks like, how long it holds a
+      // key, the testnet filter, and the delete. The custom RPC field is not here —
+      // a node belongs with the network it points at.
     await expect(page.locator('#setLang')).toBeVisible();
     await expect(page.locator('#setCurrency')).toBeVisible();
     await expect(page.locator('.theme-btn')).toHaveCount(3);
     await expect(page.locator('#setAutoLock')).toBeVisible();
     await expect(page.locator('#btnClearAllData')).toBeVisible();
-    await expect(page.locator('#setTestnet')).toHaveCount(0);
+      // Testnet mode IS in Settings, deliberately. It moved to the picker, was
+      // reported missing from Settings, and was put back: two controls for one
+      // setting, kept safe by a single writer. settings-shape.test.js lists the
+      // five things Settings must hold and setTestnet is one of them, and
+      // ui-nav.test.js requires both placements to be live. This assertion said 0,
+      // which is why it failed against a document that was right all along.
+      await expect(page.locator('#setTestnet')).toHaveCount(1);
     await expect(page.locator('#setRpc')).toHaveCount(0);
   });
 
@@ -82,6 +87,11 @@ test.describe('Settings & i18n', () => {
     // Turn testnets off from the picker, where the filter lives. It applies on
     // the click - there is no Save step, which is what made the old Settings
     // switch look like it worked while the setting stayed true.
+    // Choosing a network closes the picker, so the filter inside it has no box to
+    // click — which is why the tests below reopen the pill first, and this one did
+    // not. The app is right to close it; the test was reaching into a closed panel.
+    await appClick(page, '#networkPill');
+    await page.waitForSelector('#netShowTestnet', { timeout: 10_000 });
     await appClick(page, '#netShowTestnet');
     await expect(page.locator('#networkName')).toHaveText(/Ethereum/i);
     await expect(page.locator('#netListTestnet [data-net="sepolia"]')).toHaveCount(0);

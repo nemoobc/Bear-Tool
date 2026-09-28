@@ -201,6 +201,42 @@ test.describe('dApp browser', () => {
     expect(stored).not.toContain('incog');
   });
 
+  // The other half of the Escape rule, and the half with no coverage at all.
+  //
+  // Escape in the address bar means "undo what I was typing" — the field goes back to
+  // the page you are on and blurs. Escape in an address bar nobody has touched must
+  // instead close the browser, because opening the browser focuses that field: a
+  // blanket "address bar eats Escape" rule turns the keyboard shortcut into a no-op
+  // the moment the overlay appears. The two are told apart by whether the field still
+  // holds what the page it is on does.
+  test('Escape in the address bar cancels an edit instead of closing the browser', async ({ page }) => {
+    await openBrowser(page);
+    const url = page.locator('#dbrUrl');
+    // Land somewhere real first, so there is a current page for the edit to be
+    // undone back to. It has to be a CATALOGUE address: the app vets what it opens,
+    // and an arbitrary host never becomes the tab's URL, which leaves nothing to undo
+    // back to — the first version of this test used example.com and watched the
+    // field come back empty. app.aave.com is what the parity spec uses for the same
+    // reason.
+    //
+    // go()/FRAMABLE live in that other file, not this one: an earlier version of
+    // this test called them here and reported a bare ReferenceError, which says
+    // nothing at all about the browser.
+    await url.fill('https://app.aave.com/');
+    await url.press('Enter');
+    await page.waitForTimeout(1200);
+    const landed = await url.inputValue();
+    expect(landed, 'the page must actually have loaded, or there is nothing to undo back to')
+      .toBe('https://app.aave.com/');
+    await url.click();
+    await url.fill('https://somewhere-else.example');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    await expect(url, 'the edit must be undone').toHaveValue(landed);
+    await expect(page.locator('#dappBrowserOverlay'),
+      'a cancelled edit must not also throw away the tab').toBeVisible();
+  });
+
   test('Escape closes the browser', async ({ page }) => {
     await openBrowser(page);
     await page.keyboard.press('Escape');

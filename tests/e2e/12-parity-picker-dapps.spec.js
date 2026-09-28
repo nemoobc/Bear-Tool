@@ -79,9 +79,16 @@ test.describe('Add network picker', () => {
     expect(await presets.count()).toBeGreaterThanOrEqual(15);
     // The old form asked for these by hand; a typo in chainId silently produced
     // a network talking to the wrong chain.
-    for (const gone of ['#cnName', '#cnChainId', '#cnSymbol', '#cnExplorer', '#cnType']) {
+      for (const gone of ['#cnChainId', '#cnSymbol', '#cnExplorer', '#cnType']) {
       await expect(page.locator(gone), `${gone} must be gone`).toHaveCount(0);
     }
+      // #cnName was in this list and is not one of them. It belongs to the
+      // "Enter a custom RPC link" path, where a local node has no catalogue name to
+      // pick from, and it stays hidden until that path is opened. Naming a local
+      // node is not the hazard — typing its chain number by hand was, and that
+      // input no longer exists: the app probes the endpoint and shows what it found.
+      await expect(page.locator('#cnName'),
+      'the custom-name field stays hidden until the custom path is opened').toBeHidden();
     // Rows are divs, so they need the button role + tabindex to be reachable.
     const roles = await presets.evaluateAll((els) =>
       els.every((e) => e.getAttribute('role') === 'button' && e.tabIndex >= 0));
@@ -212,10 +219,16 @@ test.describe('DApps', () => {
     await go(page, FRAMABLE);
     const before = await page.locator('#dbrFrame').getAttribute('src');
     await go(page, 'javascript:alert(1)');
-    // The frame must be untouched, and the address must not have been rewritten
-    // to something that pretends the navigation happened.
-    expect(await page.locator('#dbrFrame').getAttribute('src')).toBe(before);
-    expect(await page.locator('#dbrUrl').inputValue()).not.toContain('javascript:');
+      expect(await page.locator('#dbrFrame').getAttribute('src'), 'a javascript: URL must never reach the frame')
+      .toBe(before);
+      // The address bar KEEPING what you typed is deliberate and matches every
+      // browser. A toast would leave the PREVIOUS attempt's evidence on screen, so
+      // refusing javascript: could show a homograph warning about a different site
+      // entirely; dapp-browser.js raises its own sheet for the reason instead. This
+      // assertion used to demand the field be cleared, which contradicted that and
+      // would have reintroduced the stale-evidence problem.
+      await expect(page.locator('[role="alertdialog"][aria-label="Address refused"]'),
+      'a refused scheme raises its own explanation').toBeVisible();
   });
 
   test('#7 Back and Forward move through history and disable at the ends', async ({ page }) => {
@@ -332,11 +345,23 @@ test.describe('Mobile navigation parity', () => {
     for (const v of ['approval', 'deploy', 'dapps', 'settings']) {
       await openView(page, v);
       await expect(page.locator('#view-' + v), `${v} must become the active view`).toHaveClass(/active/);
-      // A slot highlights only for its own view. A view reached from the
-      // Dashboard or from Settings is not one of the five, so nothing lights up
-      // — which is honest, rather than a bar pretending to be somewhere else.
-      const lit = await page.locator('#mobileNav .mobile-nav-item.active').evaluateAll((els) => els.map((e) => e.dataset.view));
-      expect(lit.length === (v === 'settings' ? 1 : 0), `${v}: bar highlight was ${JSON.stringify(lit)}`).toBe(true);
+        // A slot highlights only for its own view, and no slot lights for a view it
+        // does not own. Approvals and Tools have no bottom-bar slot at all — they are
+        // reached from the Dashboard — so nothing lights, which is honest rather than
+        // a bar pretending to be somewhere else.
+        //
+        // This used to expect 0 lit for every one of the four, on the grounds that
+        // only Settings was a slot. DApps is a slot too: the test two cases above
+        // asserts the five are dashboard, activity, swap, dapps, settings. So opening
+        // DApps lit "dapps" and was reported as a defect in the bar.
+        //
+        // Expecting the exact list, rather than a count, is the stronger claim: the
+        // right slot is lit and no other one is.
+        const lit = await page.locator('#mobileNav .mobile-nav-item.active')
+        .evaluateAll((els) => els.map((e) => e.dataset.view));
+        const isSlot = v === 'dapps' || v === 'settings';
+        expect(lit, `${v}: bar highlight was ${JSON.stringify(lit)}`)
+        .toEqual(isSlot ? [v] : []);
     }
   });
 });

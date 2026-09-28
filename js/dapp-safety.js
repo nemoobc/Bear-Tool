@@ -114,6 +114,46 @@ export function classifyInput(input) {
   return { kind: 'search', url: s };
 }
 
+/**
+ * Find the catalogue entry a typed query means, or null.
+ *
+ * This was an inline `catalog.find(...includes(q))` in the browser's navigate().
+ * `includes` is true for an empty needle against every string, and for a
+ * one-character needle against nearly every name, so the address bar navigated on
+ * noise. Measured against the shipped catalogue: "a" opened Uniswap, "e" Curve,
+ * "o" Compound, "x" Etherscan, and pressing Enter in an EMPTY address bar opened
+ * Uniswap — classifyInput had already returned reason:'empty' for that one, and the
+ * caller ignored it. Dropping the user into a dApp browser, the one surface here
+ * that can ask for a signature, because a key was struck, is not a behaviour a
+ * wallet should have.
+ *
+ * So: nothing to search for means nothing opens, one character is still a
+ * keystroke on the way to something else, and an exact name is preferred over a
+ * prefix and a prefix over a substring, because the catalogue's own order must not
+ * decide which dApp opens.
+ *
+ * @param {Array<{name:string,category?:string,url:string}>} catalog
+ * @param {string} query
+ * @returns {object|null}
+ */
+export function matchCatalog(catalog, query) {
+  if (!Array.isArray(catalog) || !catalog.length) return null;
+  const q = String(query ?? '').trim().toLowerCase();
+  if (q.length < 2) return null;                 // empty, whitespace, one keystroke
+  const label = (d) => `${d.name || ''} ${d.category || ''}`.trim().toLowerCase();
+  const name = (d) => String(d.name || '').trim().toLowerCase();
+
+  // 1. exact name — "Swap" must not be beaten by "CoW Swap" that happens to sit first
+  const exact = catalog.find((d) => name(d) === q);
+  if (exact) return exact;
+  // 2. name starts with it
+  const prefix = catalog.find((d) => name(d).startsWith(q));
+  if (prefix) return prefix;
+  // 3. anywhere in the name or the category — "compound", "lending"
+  const anywhere = catalog.find((d) => label(d).includes(q));
+  return anywhere || null;
+}
+
 /** True when `host` or its parent matches an entry in a user host list. */
 export function matchHostList(host, base, list) {
   if (!host || !Array.isArray(list) || !list.length) return false;

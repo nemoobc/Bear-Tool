@@ -9,6 +9,7 @@
 //   2. Swap sat below a divider together with Tools and Approvals, after the
 //      very thing it is a peer of, instead of in the middle of the main group.
 import { test, expect } from '@playwright/test';
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { gotoApp, skipIntro, createWallet, appClick , openView} from './helpers.js';
 
@@ -19,6 +20,13 @@ const sidebar = html.slice(html.indexOf('<nav class="sidebar"'), html.indexOf('<
 
 function sidebarViews() {
   return [...sidebar.matchAll(/<div class="nav-item[^"]*"[^>]*data-view="([a-z0-9-]+)"/g)].map((m) => m[1]);
+}
+
+// A duplicate-id check that can actually see one. Kept as a function so the
+// assertions below can feed it a planted duplicate: a gate is not trustworthy
+// because it is green, it is trustworthy because it goes red when damaged.
+function duplicateIds(ids) {
+  return [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
 }
 
 test.describe('Sidebar — static', () => {
@@ -81,7 +89,12 @@ test.describe('Sidebar — static', () => {
     const close = (html.match(/<\/section>/g) || []).length;
     expect(open, 'every <section> must be closed').toBe(close);
     const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
-    expect([...new Set(ids.filter((x) => ids.indexOf(x) !== x))], 'duplicate ids').toEqual([]);
+    // This was `ids.filter((x) => ids.indexOf(x) !== x)`. indexOf returns an INDEX
+    // and it was compared against a STRING, so the predicate was true for every
+    // element: all 177 ids survived, the result was never empty, and the test
+    // failed on every run while blaming "duplicate ids" for a document that has
+    // none. A false alarm that looks exactly like a structural bug.
+    expect(duplicateIds(ids), 'duplicate ids').toEqual([]);
   });
 });
 
@@ -131,5 +144,17 @@ test.describe('Sidebar — in the browser', () => {
       await openView(page, v);
       await expect(page.locator('#view-' + v), `${v} must open on a phone`).toHaveClass(/active/);
     }
+  });
+});
+
+test.describe('the duplicate-id detector', () => {
+  test('sees a duplicate that is really there', () => {
+    // If this ever passes, the structural check is blind again and the duplicate
+    // it exists to catch would ship unnoticed.
+    assert.deepEqual(duplicateIds(['sendToken', 'sendToken', 'btnDeploy']), ['sendToken']);
+  });
+
+  test('reports nothing when there is nothing to report', () => {
+    assert.deepEqual(duplicateIds(['a', 'b', 'c']), []);
   });
 });

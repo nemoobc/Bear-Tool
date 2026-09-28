@@ -30,7 +30,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { escapeHtml, toast } from './ui.js';
-import { inspectUrl, classifyInput, VERDICT, renderSignalList, baseHost, matchHostList } from './dapp-safety.js';
+import { inspectUrl, classifyInput, VERDICT, renderSignalList, baseHost, matchHostList, matchCatalog } from './dapp-safety.js';
 import { sanitizeForStore, isSecretishUrl } from './security.js';
 import { getSecurityConfig, addBlockedHost, addTrustedHost, clearBrowsingData, listBlocked, listTrusted } from './dapp-sessions.js';
 
@@ -48,6 +48,8 @@ let seq = 1;
 let tabs = [];
 let activeId = null;
 let overlay = null;
+// Where the keyboard was before the overlay opened, so closing it hands focus back.
+let lastFocused = null;
 let el = {};
 let loadedUrl = '';        // what the frame is actually showing right now
 
@@ -355,8 +357,16 @@ function navigate(rawUrl, name) {
     // Search locally first. The query never leaves the device unless the user
     // presses the explicit external-search button, so typing a project name
     // into a wallet does not become a tracking beacon.
+    // An empty address bar must do nothing at all. classifyInput already said so —
+    // it returns reason:'empty' — and this searched anyway. `includes('')` is true
+    // against every entry, so pressing Enter in a blank field opened the first dApp
+    // in the catalogue: Uniswap, measured. This is the one surface in the app that can
+    // ask for a signature, and a stray keystroke must not drop anyone into it.
+    if (verdict.reason === 'empty') return false;
     const q = verdict.url || '';
-    const hit = catalog.find((d) => (d.name + ' ' + d.category).toLowerCase().includes(q.toLowerCase()));
+    // matchCatalog, not an inline includes(): a one-character query matched nearly
+    // every name, and the catalogue's own order decided which dApp opened.
+    const hit = matchCatalog(catalog, q);
     if (hit) { return navigate(hit.url, hit.name); }
     toast('No DApp in the catalogue matches “' + q.slice(0, 40) + '”. Type a full address to open it.', 'info');
     return false;
@@ -663,20 +673,58 @@ function wire() {
     el.blocked.querySelector('[data-act="back"]')?.addEventListener('click', () => { el.blocked.hidden = true; paint(); });
   });
 
-  overlay.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { if (!el.menuPop.hidden) { el.menuPop.hidden = true; return; } if (el.blocked.hidden) close(); }
-    // Ctrl/Cmd+T new tab, Ctrl/Cmd+L focus the address bar — the two everyone
-    // reaches for first.
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't') { e.preventDefault(); addTab(); }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') { e.preventDefault(); el.url.focus(); }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') { e.preventDefault(); closeTab(activeId); }
-  });
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-}
+// On document, not on the overlay.
+//
+// The listener used to hang off the overlay element, which means it only ever fires
+// for keystrokes that land INSIDE it. Measured, after opening a dApp and pressing
+// Escape twice: focus sat on a plain <div> with no id, the address bar was not the
+// active element, and the overlay stayed open both times. So the whole keyboard
+// surface of the in-app browser was unreachable — Escape, Ctrl+T, Ctrl+L, Ctrl+W —
+// not because the logic was wrong but because nothing was listening where the
+// keystrokes actually go.
+//
+// openModal in ui.js already gets this right: it binds on document and guards on the
+// overlay being open. This is the same fix, and it is deliberately the same shape.
+document.addEventListener('keydown', (e) => {
+  if (!overlay || overlay.hidden) return;
 
-// ═══════════════════════════════════════════════════════════════
-// PUBLIC API
-// ═══════════════════════════════════════════════════════════════
+  if (e.key === 'Escape') {
+    // A menu is the one thing that eats the first press: it is a popup sitting on
+    // top of everything.
+    if (!el.menuPop.hidden) { el.menuPop.hidden = true; return; }
+    // An address bar that is mid-edit swallows Escape — the input's own handler
+    // restores the page you are on and blurs, which is the right answer for "I typed
+    // the wrong thing". An untouched one must not, and neither must an EMPTY one:
+    // the field starts empty on the browser home screen, so comparing only against
+    // the page URL read "" !== undefined as "being typed" and swallowed the key
+    // exactly when the overlay opened. Both are excluded.
+    const current = active()?.url || '';
+    const beingTyped = el.url.value !== '' && el.url.value !== current;
+    if (e.target === el.url && beingTyped) return;
+    // Otherwise leave — including when the "this site refuses framing" screen is
+    // up, which is what most real dApps produce. It carries only "Open in a new tab"
+    // and "Back", so before this there was no keyboard way out of the overlay at all.
+    close();
+    return;
+  }
+
+  // Ctrl/Cmd+T new tab, Ctrl/Cmd+L focus the address bar — the two everyone reaches
+  // for first.
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't') { e.preventDefault(); addTab(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') { e.preventDefault(); el.url.focus(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') { e.preventDefault(); closeTab(activeId); }
+});
+  if (!tabs.length) {
+    if (!restoreSession()) {
+      const t = newTab();
+      tabs.push(t);
+      activeId = t.id;
+    }
+  }
+  paint();
+  if (url) navigate(url, name);
+  return { navigate, close };
+}
 
 /** The catalogue is injected rather than imported, so this module never has to
  *  know about the discovery view and the gate stays testable on its own. */
@@ -686,8 +734,21 @@ export function initDappBrowser(cfg = {}) {
 
 export function openDappBrowser(url, name) {
   if (!overlay) build();
+  // Take focus, or the keyboard never arrives.
+  //
+  // Measured, with a probe rather than by reading: after opening a dApp, focus sat
+  // on a plain <div> with no id and the address bar was not the active element. The
+  // keydown listener is now on document, so the shortcuts no longer depend on this —
+  // but landing the cursor in the address bar is what a browser does when one opens,
+  // and it is what makes Ctrl+L and typing work for someone who never touches a
+  // mouse. Record where focus came from so closing hands it back; without that, a
+  // keyboard user loses their place and the next Tab starts again at the top.
+  lastFocused = document.activeElement;
   overlay.hidden = false;
-  requestAnimationFrame(() => overlay.classList.add('open'));
+  requestAnimationFrame(() => {
+    overlay.classList.add('open');
+    try { el.url?.focus(); } catch { /* not built yet */ }
+  });
   if (!tabs.length) {
     if (!restoreSession()) {
       const t = newTab();
@@ -726,6 +787,7 @@ export function openExternalNotice(url, name, reason) {
   const v = inspectUrl(url, catalog, securityOpts());
   if (v.verdict === VERDICT.BLOCKED || v.verdict === VERDICT.DANGER) {
     // Vet before offering the button: a new tab is still a page to trust.
+      try { el.url?.focus(); } catch { /* not built yet */ }
     reportSheet(v, { canProceed: false });
     return { navigate, close };
   }
@@ -776,6 +838,13 @@ function close() {
   overlay.classList.remove('open');
   overlay.hidden = true;
   el.url.blur();
+  // Hand the keyboard back to wherever the user was before the overlay opened.
+  // Without this, closing a dApp drops focus onto <body> and the next Tab starts
+  // again at the top of the page — so a keyboard user loses their place every time.
+  if (lastFocused && typeof lastFocused.focus === 'function' && document.contains(lastFocused)) {
+    try { lastFocused.focus(); } catch { /* it went away while we were open */ }
+  }
+  lastFocused = null;
 }
 
 export function dappBrowserIsOpen() {

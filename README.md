@@ -102,21 +102,10 @@ contract-level mistake. They skip themselves, with a stated reason, unless anvil
 is reachable (`CI=1`, or `FORK_RPC_URL` / `FORK_PORT`), so on a machine with no
 foundry the gate reports skips rather than pretending to have passed.
 
-**The browser suite needs Playwright browsers installed.** It used to be
-`bash tests/e2e/run.sh`, and that script used `python3 -m http.server`, `curl`,
-`seq` and a backgrounded subshell — every one of them a POSIX shape, so on
-`cmd.exe` it failed before reaching a single spec while still sitting in
-`package.json` looking like part of the suite. 21 specs went unrun for as long as
-that was true. It is now `node tools/e2e.mjs`, which starts the server in-process
-and closes it in a `finally`, so the same command works on every platform. On a
-machine with no browser installed the runner exits **5** with an explanation
-rather than a stack trace — 5 is neither pass nor app-failure, and the gate does
-not swallow it, because a gate that reports green without running anything is the
-failure mode this paragraph is about.
-
-```bash
-npx playwright install chromium   # once, on a machine that can run a browser
-```
+**The browser suite needs Playwright browsers installed** (`npx playwright install
+chromium`). The 21 specs are driven by `tools/e2e.mjs`, which serves the app itself
+and works on any platform. It is in `verify`, and it exits **5** — neither pass nor
+failure — on a machine with no browser, rather than passing without running.
 
 `npm test` on its own is still the fast loop. The fork suite needs anvil and
 takes minutes: it compiles real Solidity with solc 0.8.28 and runs against a
@@ -127,43 +116,27 @@ EIP-7702, session persistence, address poisoning, nav invariants, the dApp
 pre-load security gate, the signing guardrails, the injected-provider
 refusals, and MAX amount arithmetic. Plus browser E2E (`npm run test:e2e`).
 
-### Why some tests call the app instead of rebuilding it
+### Tests call the app, they do not rebuild it
 
 A swap test that declares its own ABI and calls the router itself proves the
-*address* is right. It cannot prove the app works, because the app's own code is
-never executed. That distinction was not theoretical here — four bugs got through
-a green suite of 617 unit tests and a 12-network fork sweep, and every one of them
-surfaced only after a test was changed to call the real module:
+*address* is right. It cannot prove the app works, because the app's code is never
+run. Three bugs got through a green suite of 617 unit tests and a 12-network fork
+sweep, and all three surfaced only once a test called the real module:
 
 | Found by | Bug |
 |---|---|
-| calling `js/swap.js` | `UNISWAP_V2_ABI` and `UNISWAP_V3_ABI` were referenced but never defined. Every quote and every swap threw `ReferenceError`, on every chain. The swap feature was entirely dead, and the registry rewrite's own test had checked that swap.js no longer declared router *addresses* — and read that as the rewrite being complete. |
-| calling `v2Quote` | Native ↔ wrapped resolved to a path of `[WETH, WETH]`, which every V2 router rejects with `IDENTICAL_ADDRESSES`. Swapping ETH for WETH — an ordinary thing to try, and both are offered by the token picker — returned a raw contract error. |
-| calling `js/wallet.js` | `isSuspiciousSimilar` compared the two addresses with `===` *before* lowercasing. The one caller passes a stored lowercase address against whatever the user typed, so re-pasting your own address in different case made the guard report **your own wallet as poisoned**. |
+| calling `js/swap.js` | Two ABI constants were used but never declared, so every quote and every swap threw. Swapping was dead on every chain. |
+| calling `v2Quote` | Swapping ETH for WETH produced a route of one token twice, and the router's raw error reached the user. |
+| calling `js/wallet.js` | The phishing guard compared addresses case-sensitively, so pasting your own address again reported **your own wallet as poisoned**. |
 
-That last one is why the fix is in the product rather than the test: a warning that
-fires on your own address teaches people to ignore warnings, so the two that follow
-it get ignored too.
+Two things came out of that, both enforced in `tests/`:
 
-Three rules came out of it, and they are enforced in `tests/`:
-
-1. **A test that rebuilds the call proves the fixture, not the feature.** Anything
-   callable without a DOM gets called directly (`fork-swap-app.test.js`,
-   `journey.test.js`).
-2. **A gate is not trustworthy because it is green.** It is trustworthy because it
-   goes red when deliberately damaged. Three gates written here were green while
-   unable to fail: a lexical rule so loose it matched almost every name, a
-   `readdirSync` that never descended into `tests/fork/`, and a checker that had
-   silently stopped parsing 1627 lines of `app.js`. Each was found by breaking
-   something on purpose and re-running.
-3. **A transform feeding a detector is tested against its own input.** The
-   stripper that prepares code for the undefined-symbol scan is asserted to be
-   length-preserving, because a version that was not ate a third of `app.js` and
-   the detector reported "nothing found" over code it had never read.
-
-The same discipline applies to fixtures: an assertion that goes red because the
-*input* is malformed is not a finding. A mistyped address once produced a failure
-that read exactly like a missed phishing check, and was neither.
+- A gate is trusted because it goes **red when deliberately damaged**, not because
+  it is green. Three gates here were green while unable to fail, including a
+  syntax checker that had silently stopped checking a third of the source.
+- A test that goes red because its *input* is malformed is not a finding. One
+  mistyped address produced a failure that read exactly like a missed phishing
+  check.
 
 Two portability traps in this suite are worth knowing about, because both were
 invisible until it ran on a second operating system. Test paths come from

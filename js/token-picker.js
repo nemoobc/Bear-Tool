@@ -65,7 +65,9 @@ function openPanel(picker) {
 // drew its own CSS circles with a letter, which is why the Swap list did not
 // look like the dashboard.
 function logoHtml(token, size = 22) {
-  return tokenLogoHTML(token.symbol || '', size);
+  // The address travels with the symbol: marks are cached per contract, so a
+  // counterfeit ticker in this picker does not inherit the real project's mark.
+  return tokenLogoHTML(token.symbol || '', size, { address: token.address });
 }
 
 function readLogoCache() {

@@ -136,24 +136,31 @@ export async function importWallet(input, password, name) {
 }
 
 // unlock: decrypt keystore, return signer for active account
-export async function unlockWallet(password) {
+export async function unlockWallet(password, index) {
   const keystore = getKeystore();
   if (!keystore) throw new Error('No wallet found. Create or import one first.');
   const secret = await decryptData(keystore, password);
-  return signerFromSecret(secret);
+  return signerFromSecret(secret, index);
 }
 
 // unlock + return the decrypted secret so the caller can persist the session
-export async function unlockSession(password) {
+export async function unlockSession(password, index) {
   const keystore = getKeystore();
   if (!keystore) throw new Error('No wallet found. Create or import one first.');
   const secret = await decryptData(keystore, password);
-  return { signer: signerFromSecret(secret), secret };
+  return { signer: signerFromSecret(secret, index), secret };
 }
 
-// derive the active-account signer from a raw secret (seed phrase or key)
-export function signerFromSecret(secret) {
-  const idx = getActiveAccountIndex();
+// Derive a signer from a raw secret (seed phrase or key).
+//
+// `index` defaults to the active account, and is passed explicitly when a caller
+// needs a signer for an account it has NOT switched to yet. That distinction is
+// the whole point: deriving must not be a side effect of choosing. When the
+// switcher set the active index first and asked for the password afterwards, a
+// cancelled prompt or a typo left localStorage pointing at an account the topbar
+// was still not showing — and the next unlock signed with it.
+export function signerFromSecret(secret, index = getActiveAccountIndex()) {
+  const idx = Number(index);
   const accounts = getAccounts();
   if (!accounts[idx]) throw new Error('Account not found.');
   let wallet;

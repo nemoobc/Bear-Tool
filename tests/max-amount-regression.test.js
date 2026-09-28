@@ -90,19 +90,44 @@ test('MAX with a 1e18-formatted balance fills the field, it does not empty it', 
 });
 
 // ── 0% must stay 0%: `Number(pct) || 100` treated 0 as "no value given" ───
+// A provider that can be asked for a fee.
+//
+// These three cases are about the PERCENTAGE arithmetic and the DECIMALS guard,
+// not about reading a fee, and they used to pass `provider: null` — which worked
+// only because an unreadable fee used to come back as 0n. Zero is a real number
+// that reads as a free transaction, so resolveMax now refuses when the fee is
+// unknown (see max-ui-gate.test.js), and with no provider it also cannot read a
+// live balance: the number would come entirely from the cached one.
+//
+// So the stub answers with a fee, and these tests go back to testing what they
+// were written for. The refusal itself is covered where it belongs.
+const feeProvider = {
+  async getFeeData() { return { maxFeePerGas: 1_000_000_000n, gasPrice: 1_000_000_000n }; },
+  async getBlockNumber() { return 1n; },
+  async getBalance() { return 0n; },
+  async estimateGas() { return 21000n; },
+};
+
 test('a 0% share writes nothing — it must not fall through to 100%', async () => {
   const tok = { balance: '1000000000000000000', decimals: 18, address: null, symbol: 'T' };
-  const zero = await resolveMax({ token: tok, provider: null, from: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', pct: 0 });
+  const zero = await resolveMax({ token: tok, provider: feeProvider, from: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', pct: 0 });
   assert.equal(zero.ok, true, 'a 0% share is valid, just empty');
   assert.equal(zero.amount, '0', `0% must write 0, not the whole balance (${zero.amount})`);
-  const full = await resolveMax({ token: tok, provider: null, from: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', pct: 100 });
-  assert.equal(full.amount, '1', '100% is the whole balance here — the two must differ');
+  const full = await resolveMax({ token: tok, provider: feeProvider, from: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', pct: 100 });
+  // The invariant is that 0% and 100% differ, and that 100% is a real amount. It
+  // used to be asserted as exactly '1', which only held while the fee read as 0 —
+  // MAX now leaves room for the fee by design, so 100% is the balance less that
+  // room. Asserting the literal would have pinned the very behaviour that made
+  // MAX unsafe.
+  assert.equal(full.ok, true, `100% must still work: ${full.message}`);
+  assert.notEqual(full.amount, zero.amount, '0% and 100% produced the same amount');
+  assert.ok(Number(full.amount) > 0, `100% must write a real amount, got ${JSON.stringify(full.amount)}`);
 });
 
 test('a fractional percentage is clamped, never thrown', async () => {
   const res = await resolveMax({
     token: { balance: '1000000000000000000', decimals: 18, address: null, symbol: 'T' },
-    provider: null, from: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', pct: 33.333,
+    provider: feeProvider, from: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', pct: 33.333,
   });
   assert.equal(res.ok, true, 'a fractional pct must not throw out of the handler');
   assert.ok(res.amount !== undefined);
@@ -112,7 +137,7 @@ test('a fractional percentage is clamped, never thrown', async () => {
 test('resolveMax: invalid token decimals return a "not available" result, not a thrown handler', async () => {
   const res = await resolveMax({
     token: { balance: '1000000000000000000', decimals: 2.5, address: null, symbol: 'BAD' },
-    provider: null,
+    provider: feeProvider,
     from: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
     pct: 100,
   });

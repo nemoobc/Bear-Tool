@@ -25,14 +25,42 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '..');
 const PORT = Number(process.env.BEAR_PORT || 8080);
 const BASE_URL = process.env.BEAR_BASE_URL || `http://127.0.0.1:${PORT}`;
+
+// The first endpoint that actually answers, and the block it reports. A real
+// POST with eth_blockNumber, because an OPTIONS preflight says nothing about
+// whether the node answers — and because the app's own path is a POST.
+async function pickRpc() {
+  const urls = String(process.env.E2E_RPC_URLS || [
+    'https://ethereum-rpc.publicnode.com',
+    'https://eth.drpc.org',
+  ]).split(',').map((x) => x.trim()).filter(Boolean);
+  const tried = [];
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const j = await r.json();
+      if (j && j.result) return { ok: true, url, block: parseInt(j.result, 16) };
+      tried.push(url + ' (no result)');
+    } catch (e) {
+      tried.push(url + ' (' + (e?.name || 'error') + ')');
+    }
+  }
+  return { ok: false, tried };
+}
 
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
@@ -120,6 +148,59 @@ try {
   const cli = path.join(root, 'node_modules', '@playwright', 'test', 'cli.js');
   if (!existsSync(cli)) {
     throw new Error(`@playwright/test tidak terpasang — npm install (diper_PLAYWRIGHT_PATH: ${cli})`);
+  }
+
+  // Does this machine have a chain for the specs to talk to?
+  //
+  // Measured: on a box where all four public Ethereum endpoints answered in
+  // ~100ms, the specs still failed — every one of them, at exactly the 45s test
+  // timeout. The reason is not reachability. The app boots against REAL mainnet
+  // with a freshly generated wallet, which holds nothing, so the token list is
+  // empty and every "wait for the token dropdown" step times out.
+  //
+  // That produces a wall of failures that says nothing about the app, and it is
+  // indistinguishable from a real regression: the untouched HEAD produced MORE of
+  // them than the patched tree did. A gate that fails identically with and
+  // without the change under test measures nothing.
+  //
+  // So the precondition is checked up front and stated plainly, instead of being
+  // discovered 45 seconds at a time.
+  // await matters: without it this is a Promise, `rpc.ok` is undefined, the guard
+  // takes the failure branch, and the error it then reports is about `tried`
+  // being undefined — a complaint about the pre-flight instead of the network.
+  const rpc = await pickRpc();
+  if (!rpc.ok) {
+    console.error('');
+    console.error('  E2E TIDAK BISA MENGUKUR FITUR ON-CHAIN DI MESIN INI.');
+    console.error('  Tidak ada endpoint RPC yang menjawab: ' + rpc.tried.join(', '));
+    console.error('  Gejalanya: setiap spec yang butuh saldo atau token gagal pada timeout,');
+    console.error('  bukan pada assertion — dan HEAD yang tidak disentuh gagal lebih banyak lagi.');
+    console.error('  Jalankan dengan rantai berbiaya: FORK_PORT=<port anvil fork> node tools/e2e.mjs');
+    throw { silent: true, code: 5 };
+  }
+  console.log(`  rpc  ${rpc.url}  (block ${rpc.block})`);
+
+  // Point the app at a funded local chain when there is one.
+  //
+  // The specs import a funded key (helpers.fundedWallet) because a freshly
+  // generated wallet holds nothing. That only means something if the app is
+  // talking to a chain where the well-known tokens exist — so the chain has to be
+  // a FORK, not a bare anvil, or the token contract reads fail and the list is
+  // empty again. The override is seeded through storageState because that is
+  // applied before any app code runs, which is the only point at which
+  // localStorage is still empty.
+  const local = String(process.env.E2E_RPC || '').trim();
+  if (local) {
+    const stateFile = path.join(os.tmpdir(), 'bear-e2e-storage.json');
+    writeFileSync(stateFile, JSON.stringify({
+      cookies: [],
+      origins: [{
+        origin: BASE_URL,
+        localStorage: [{ name: 'bear.rpcOverrides', value: JSON.stringify({ ethereum: [local] }) }],
+      }],
+    }));
+    process.env.BEAR_STORAGE_STATE = stateFile;
+    console.log(`  chain ${local}  (seeded as an RPC override for every page)`);
   }
 
   // Check for an installed browser BEFORE launching, because the failure otherwise

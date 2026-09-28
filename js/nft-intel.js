@@ -284,25 +284,51 @@ export async function contractSafety(provider, contract, opt = {}) {
     else add('pass', 'Not paused', 'paused() is false.');
   } catch { /* not pausable */ }
 
-  // 4. Honeypot: can this wallet actually transfer an NFT out? Simulate a
-  //    transfer to a throwaway address. A contract that mints fine but blocks
-  //    sells is the classic trap, and only a simulation catches it.
-  let sellOk = null, sellErr = null;
-  try {
-    const iface = new ethers.Interface([
-      'function transferFrom(address from, address to, uint256 tokenId)',
-    ]);
-    const data = iface.encodeFunctionData('transferFrom', [
-      '0x000000000000000000000000000000000000dEaD',
-      '0x000000000000000000000000000000000000dEaD', 0,
-    ]);
-    await provider.call({ from: '0x000000000000000000000000000000000000dEaD', to: contract, data });
-    sellOk = true;
-  } catch (e) { sellOk = false; sellErr = e?.shortMessage || e?.message || 'reverted'; }
-  if (sellOk === true) {
-    add('pass', 'Transfers not blocked (simulated)', 'A transferFrom simulation succeeded, so this is not an obvious honeypot.');
-  } else if (sellOk === false) {
-    add('warn', 'Transfer simulation reverted', 'A transferFrom simulation reverted (' + String(sellErr).slice(0, 90) + '). That can be a honeypot, or just a contract that needs an owner-side approval. Treat as a risk.');
+  // 4. Honeypot: can the actual holder of a token transfer it out? A contract
+  //    that mints fine but blocks sells is the classic trap, and only a
+  //    simulation catches it.
+  //
+  //    It has to be simulated from an address that OWNS the token. The previous
+  //    version simulated from a burn address holding nothing, so ERC-721's
+  //    _isApprovedOrOwner reverted on every contract — an honest one and a trap
+  //    alike — and the signal said "That can be a honeypot… Treat as a risk"
+  //    every single time. A warning that is always on is not a finding; it reads
+  //    as evidence and teaches the user to skip the panel.
+  //
+  //    nftIntel() already knows who holds the token, so the question is
+  //    answerable. When it is not known, the honest answer is that the check did
+  //    not run — not an accusation.
+  const RECIPIENT = '0x000000000000000000000000000000000000dEaD';
+  const holder = opt?.intel?.owner || null;
+  const tokenId = opt?.intel?.tokenId;
+  let usable = null;
+  if (holder) {
+    try { usable = BigInt(String(tokenId ?? '')); } catch { usable = null; }
+  }
+  if (!holder || usable === null) {
+    add('warn', 'Transfer could not be simulated',
+      'No holder of a token in this collection is known, so a sale could not be simulated. '
+      + 'That is a limit of this check, not a sign of a problem with the contract.');
+  } else {
+    let sellOk = null, sellErr = null;
+    try {
+      const iface = new ethers.Interface([
+        'function transferFrom(address from, address to, uint256 tokenId)',
+      ]);
+      const data = iface.encodeFunctionData('transferFrom', [holder, RECIPIENT, usable]);
+      await provider.call({ from: holder, to: contract, data });
+      sellOk = true;
+    } catch (e) { sellOk = false; sellErr = e?.shortMessage || e?.message || 'reverted'; }
+    if (sellOk === true) {
+      add('pass', 'Transfers not blocked (simulated)',
+        'A transferFrom of token ' + usable + ' from its holder ' + holder
+        + ' succeeded, so this is not an obvious honeypot.');
+    } else {
+      add('warn', 'Transfer simulation reverted',
+        'A transferFrom of token ' + usable + ' from its holder ' + holder + ' reverted ('
+        + String(sellErr).slice(0, 90) + '). That can be a honeypot, or the transfer may need an '
+        + 'operator approval the holder has not given. Treat it as a risk worth checking.');
+    }
   }
 
   // 5. Supply

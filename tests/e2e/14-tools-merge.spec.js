@@ -69,16 +69,27 @@ test.describe('Tools merge — static', () => {
     expect(navItem[0]).toMatch(/data-i18n="nav\.deploy"/);
   });
 
-  test('refreshView runs the EIP-7702 loader for the Tools view', () => {
-    expect(app).toMatch(/if \(view === 'deploy'\) \{ loadEip7702\(\); \}/);
-    // and only once — a second identical branch would double-run the loader
-    const hits = app.match(/view === 'deploy'/g) || [];
-    expect(hits.length, 'exactly one deploy branch in refreshView').toBe(1);
-  });
+    // These used to pin the exact spacing of one line each, so a reformat broke
+    // them and nothing else. They now say what they mean: which branch, and what
+    // it calls.
+    test('refreshView runs the EIP-7702 loader for the Tools view', () => {
+      const branch = app.split("view === 'deploy'").pop().split('\n')[0];
+      expect(branch, 'a deploy branch must exist in refreshView').toContain('loadEip7702()');
+      const hits = app.match(/view === 'deploy'/g) || [];
+      expect(hits.length, 'exactly one deploy branch in refreshView').toBe(1);
+    });
 
-  test('refreshView binds the OpenSea panel on the NFT view, not Tools', () => {
-    expect(app).toMatch(/if \(view === 'nft'\) \{ bindOpenSeaPanel\(\); \}/);
-  });
+    test('refreshView binds the OpenSea panel on the Tools view, not the NFT view', () => {
+      // This demanded the OPPOSITE — the panel on the NFT view — and has failed
+      // since that decision changed. It changed deliberately:
+      // opensea-integration.test.js pins "the OpenSea panel is in the Tools view,
+      // not the NFT view", and the code does that. Two suites in one repo were
+      // asserting opposite requirements; the stale one is this.
+      const deploy = app.split("view === 'deploy'").pop().split('\n')[0];
+      expect(deploy, 'the OpenSea panel belongs on the Tools view').toContain('bindOpenSeaPanel()');
+      const nft = app.split("view === 'nft'").pop().split('\n')[0];
+      expect(nft, 'the NFT view must not re-bind the panel that lives in Tools').not.toContain('bindOpenSeaPanel()');
+    });
 });
 
 test.describe('Tools merge — in the browser', () => {
@@ -104,7 +115,13 @@ test.describe('Tools merge — in the browser', () => {
     await expect(page.locator('#view-nft')).toHaveClass(/active/);
     await expect(page.locator('#nftList')).toHaveCount(1);
     // OpenSea is a Tools concern, not a gallery one.
-    await expect(page.locator('#openSeaPanel')).toHaveCount(0);
+          // toHaveCount(0) counts the whole document, and the panel lives in the Tools
+      // section whether or not you are looking at it — .view is display:none, not
+      // absent. So this said 1 and blamed the NFT view for a panel that is not in
+      // it. What is actually claimed is that the panel is not VISIBLE here; that it
+      // is in the Tools section at all is pinned statically above and by
+      // opensea-integration.test.js.    );
+      await expect(page.locator('#openSeaPanel')).toBeHidden();
     // The empty state centres on both axes.
     await expect(page.locator('.nft-empty')).toHaveCount(1);
   });

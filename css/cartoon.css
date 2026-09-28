@@ -517,6 +517,22 @@ body::before {
 }
 .account-pill:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 
+/* The brand mark is an <img>, not a text glyph. A bare emoji took its size from
+   whatever font-size happened to be in scope and sat on the text baseline, so it
+   drifted with the platform's font and never matched the bear in the topbar.
+   An explicit box plus display:block makes it the same size everywhere and
+   removes the inline baseline gap underneath it. */
+.pill-bear {
+  width: 20px; height: 20px;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.asset-bear {
+  width: 26px; height: 26px;
+  display: block;
+}
+
 .layout {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
@@ -2889,16 +2905,19 @@ body::before {
   flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px;
 }
-.token-picker-logo img, .token-picker-logo .token-logo-mark,
-.token-row-logo img, .token-row-logo .token-logo-mark {
-  border-radius: 50%; object-fit: cover; display: block; flex: 0 0 auto;
-}
-.token-logo-mark {
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 50%; color: #fff; font-weight: 800; font-size: 11px;
-  line-height: 1; text-align: center;
-}
-.token-logo-generic { background: var(--grape, #9B5DE5); }
+  /* The mark renderer emits `token-mark` — an inline <svg> for the generated mark,
+     and `token-logo-img token-mark` on an <img> when a remote logo is cached.
+     These rules said `token-logo-mark`, which nothing has ever rendered: the class
+     was renamed and the CSS stayed behind, so three rules were dead while the class
+     that IS rendered had no styling at all. display:block in particular is what
+     keeps a mark off the text baseline. */
+  .token-picker-logo img, .token-picker-logo .token-mark,
+  .token-row-logo img, .token-row-logo .token-mark {
+    border-radius: 50%; object-fit: cover; display: block; flex: 0 0 auto;
+  }
+  .token-mark {
+    display: block; flex: 0 0 auto; border-radius: 50%;
+  }
 .token-picker-symbol {
   flex: 1 1 auto; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

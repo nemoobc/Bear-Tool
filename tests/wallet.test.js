@@ -171,3 +171,50 @@ test('deriveNextAccount: auto-names each new account', async () => {
   await wallet.deriveNextAccount('password123');
   assert.deepEqual(wallet.getAccounts().map(a => a.name), ['Wallet', 'Wallet 1', 'Wallet 2']);
 });
+
+// Choosing an account in the switcher used to move the pointer FIRST and ask for
+// the password afterwards:
+//
+//     wallet.setActiveAccount(i);
+//     const pw = await promptPassword(...);
+//     if (!pw) return;            // cancelled — the pointer has already moved
+//     ... catch { toast('Wrong password') }   // wrong — same
+//
+// setActiveAccount writes localStorage immediately, so cancelling the prompt left
+// the stored active index pointing at an account the topbar was still not showing.
+// The next unlock — after a lock, a reload, or an expired session — then derived
+// that other account's key. In a wallet the worst outcome is not a wrong number on
+// screen: it is the displayed address and the signing address being different
+// accounts, and nothing in the UI saying so.
+//
+// The invariant, stated where it can be enforced: deriving a signer for an account
+// must not change which account is active. Only an explicit commit may.
+test('a failed or cancelled account switch leaves the active account untouched', async () => {
+  store.clear();
+  await wallet.createWallet('password123', 'Main');
+  await wallet.deriveNextAccount('password123', 'Second');
+  assert.equal(wallet.getAccounts().length, 2);
+  wallet.setActiveAccount(0);
+  assert.equal(wallet.getActiveAccountIndex(), 0);
+
+  // A wrong password must leave the pointer exactly where it was. The message is
+  // not asserted: a wrong password surfaces as a bare DOMException ("The operation
+  // failed for an operation-specific reason"), which says nothing about the cause,
+  // and pinning a test to that string would only lock the unhelpful wording in.
+  await assert.rejects(() => wallet.unlockWallet('not-the-password', 1));
+  assert.equal(wallet.getActiveAccountIndex(), 0,
+    'a wrong password moved the active account — the next unlock would use a different account than the one on screen');
+
+  // The right password derives the requested account WITHOUT switching to it.
+  const signer = await wallet.unlockWallet('password123', 1);
+  assert.equal(signer.address, wallet.getAccounts()[1].address,
+    'unlockWallet(password, index) must derive the requested account');
+  assert.equal(wallet.getActiveAccountIndex(), 0,
+    'deriving a signer must not switch the active account; only the commit may');
+
+  // The commit is the one and only thing that moves it.
+  wallet.setActiveAccount(1);
+  assert.equal(wallet.getActiveAccountIndex(), 1);
+  assert.equal((await wallet.unlockWallet('password123')).address, wallet.getAccounts()[1].address,
+    'with no index, the active account is the one used');
+});

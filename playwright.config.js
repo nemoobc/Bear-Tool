@@ -24,6 +24,12 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL: process.env.BEAR_BASE_URL || 'http://localhost:8080',
+    // Seeded by tools/e2e.mjs when a local chain is available, so the app boots
+    // pointed at a funded fork instead of real mainnet. Without it every spec that
+    // needs a balance times out at the 45s mark, and that failure is
+    // indistinguishable from a regression — the untouched HEAD produced MORE of
+    // them than the patched tree did.
+    ...(process.env.BEAR_STORAGE_STATE ? { storageState: process.env.BEAR_STORAGE_STATE } : {}),
     viewport: { width: 1280, height: 800 },
     launchOptions: {
       args: [

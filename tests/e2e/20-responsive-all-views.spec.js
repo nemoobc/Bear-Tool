@@ -87,6 +87,56 @@ const MEASURE = (viewId) => `(() => {
   };
 })()`;
 
+// The detector, proving it can fail.
+//
+// Five viewports and ten views of "nothing overflows" is worth nothing until the
+// thing doing the measuring has been shown to catch a planted failure. There is
+// already one in this repo that never could: 15-sidebar-order compared
+// ids.indexOf(x) — an index — with a string, so the predicate was true for every
+// element, all 177 ids survived, and the duplicate check reported none for a
+// document that has none while being structurally incapable of reporting any.
+//
+// This reuses MEASURE itself rather than a copy, so the proof cannot drift away
+// from the thing it is proving.
+test('the overflow detector catches a planted overflow and excuses a scroller', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoApp(page);
+  await skipIntro(page);
+  await createWallet(page);
+  await openView(page, 'dashboard');
+  await assertViewActive(page, 'dashboard');
+
+  const clean = await page.evaluate(MEASURE('dashboard'));
+  expect(clean.overflowingCount, 'the real dashboard should not be overflowing').toBe(0);
+
+  // A fixed-width banner on a 390px phone: the exact class of thing this file is
+  // for. Without it, a green sweep proves nothing.
+  await page.evaluate(() => {
+    const d = document.createElement('div');
+    d.id = '__planted';
+    d.style.cssText = 'width:1400px;height:40px';
+    document.getElementById('view-dashboard').prepend(d);
+  });
+  const dirty = await page.evaluate(MEASURE('dashboard'));
+  expect(dirty.overflowingCount, 'a planted overflow must be caught').toBeGreaterThan(0);
+  expect(dirty.overflowing.join(' '), 'and reported by name').toContain('__planted');
+
+  // The case the detector is meant to excuse, and which a naive version would
+  // report: the same width inside a container that scrolls sideways on purpose.
+  await page.evaluate(() => {
+    document.getElementById('__planted')?.remove();
+    const w = document.createElement('div');
+    w.id = '__plantedScroller';
+    w.style.cssText = 'overflow-x:auto;width:100%';
+    const inner = document.createElement('div');
+    inner.style.cssText = 'width:1400px;height:40px';
+    w.appendChild(inner);
+    document.getElementById('view-dashboard').prepend(w);
+  });
+  const excused = await page.evaluate(MEASURE('dashboard'));
+  expect(excused.overflowingCount, 'a deliberate sideways scroller is not an overflow').toBe(0);
+});
+
 test.describe('Every view — phone and desktop', () => {
   for (const vp of VIEWPORTS) {
     test(`no view overflows at ${vp.name}`, async ({ page }) => {

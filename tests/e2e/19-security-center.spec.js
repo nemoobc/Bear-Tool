@@ -12,7 +12,7 @@ test.describe('Security Center', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await appClick(page, '.nav-item[data-view="settings"]');
+    await appClick(page, '.nav-item[data-view="approval"]');
     await page.waitForSelector('#securityCenter .sec-block', { timeout: 10_000 });
   });
 
@@ -82,7 +82,7 @@ test.describe('Security Center', () => {
     await page.evaluate(() => localStorage.setItem('bear.openseaKey', 'test-key-123'));
     await page.reload({ waitUntil: 'domcontentloaded' });
     await skipIntro(page);
-    await appClick(page, '.nav-item[data-view="settings"]');
+    await appClick(page, '.nav-item[data-view="approval"]');
     await page.waitForSelector('#secClearKey', { timeout: 10_000 });
     await expect(page.locator('#secKeyRow')).toContainText(/saved/i);
 
@@ -131,17 +131,26 @@ test.describe('injected provider', () => {
   });
 
   test('locking the wallet makes the provider answer nothing', async ({ page }) => {
-    await page.evaluate(() => {
-      window.__bearLocked = true;
-      const btn = document.querySelector('#lockBtn');
-      if (btn) btn.click();
-    });
-    await page.waitForTimeout(500);
-    const code = await page.evaluate(async () => {
-      try { await window.ethereum.request({ method: 'eth_chainId' }); return 'answered'; }
-      catch (e) { return e.code; }
-    });
-    expect(code).toBe(4100);
+      // This used to set a global the app has never heard of — `__bearLocked`
+      // appears nowhere in js/ — and then click `#lockBtn` "if present". That
+      // button only exists inside the account modal, which was not open, so the
+      // click was skipped and the wallet was never locked at all. The provider
+      // answered and the test failed, which at least means it was not passing for
+      // the wrong reason.
+      //
+      // Lock it the way a person does: open the account menu, press Lock. That runs
+      // the app's own path — unlocked false, signer dropped, bridgeLocked() — which
+      // is the thing actually worth proving. A wallet whose provider keeps answering
+      // while locked is worse than one with no provider at all.
+      await appClick(page, '#accountPill');
+      await page.waitForSelector('#lockBtn', { timeout: 10_000 });
+      await appClick(page, '#lockBtn');
+      await page.waitForTimeout(600);
+      const code = await page.evaluate(async () => {
+        try { await window.ethereum.request({ method: 'eth_chainId' }); return 'answered'; }
+        catch (e) { return e.code; }
+      });
+      expect(code, 'a locked wallet must refuse the provider outright — 4100 is the unauthorised code').toBe(4100);
   });
 });
 

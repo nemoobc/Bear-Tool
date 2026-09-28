@@ -33,15 +33,43 @@ const readArr = (k) => {
 };
 const writeArr = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
 
+// Origin normalisation, one place, used on the way in AND on the way out.
+//
+// Writes lowercased and reads did not, so an entry stored by anything that did not
+// — an older build, a hand-edited value, a browser profile copied between machines
+// — appeared in the connected-sites list while being invisible to siteAllowed()
+// and hasPermission(). The wallet's own idea of "who may see me" then disagreed
+// with the list on screen, which is the failure the header of this file says it is
+// trying to avoid.
+//
+// The trailing slash is the same bug with the same fix: https://dapp.com and
+// https://dapp.com/ are one origin to a browser, so a site that redirects between
+// them — extremely common — used to lose the session and every permission on it.
+const normOrigin = (v) => {
+  const s = String(v || '').trim().toLowerCase();
+  if (!/^https?:\/\//i.test(s)) return '';
+  return s
+    // Each scheme has its own default port, and only its own: http:80 and
+    // https:443. Stripping :80 from an https origin would collapse two genuinely
+    // different sites onto one, which is a session belonging to someone else.
+    .replace(/^(http):\/\/([^/]*):80(?=\/|$)/, '$1://$2')
+    .replace(/^(https):\/\/([^/]*):443(?=\/|$)/, '$1://$2')
+    // An origin is scheme + host + port. The path, query and fragment are not part
+    // of it, so they are dropped rather than kept: a site at /dashboard and one at
+    // /trade are one origin to a browser, and storing them as two sessions meant a
+    // link from one to the other silently disconnected the user.
+    .replace(/^(https?:\/\/[^/?#]+)[/?#].*$/, '$1');
+};
+
 // ═══ connected sites ═════════════════════════════════════════════════════
 
 /** @returns {Array<{origin:string,name:string,chainId:number|null,at:number,perms:string[]}>} */
 export function listSites() {
   return readArr(LS.sites)
-    .filter((s) => s && typeof s.origin === 'string' && /^https?:\/\//i.test(s.origin))
+    .filter((s) => s && typeof s.origin === 'string' && normOrigin(s.origin))
     .map((s) => ({
-      origin: s.origin,
-      name: s.name || s.origin,
+      origin: normOrigin(s.origin),
+      name: s.name || normOrigin(s.origin),
       chainId: Number.isInteger(s.chainId) ? s.chainId : null,
       at: Number.isFinite(s.at) ? s.at : 0,
       perms: Array.isArray(s.perms) ? s.perms : [],
@@ -49,8 +77,9 @@ export function listSites() {
 }
 
 export function siteAllowed(origin) {
-  if (!origin) return false;
-  return listSites().some((s) => s.origin === String(origin).toLowerCase());
+
+  const o = normOrigin(origin);
+  return !!o && listSites().some((s) => s.origin === o);
 }
 
 /**
@@ -58,8 +87,8 @@ export function siteAllowed(origin) {
  * list must not create a second row, or the list becomes noise.
  */
 export function addSite(origin, { name = '', chainId = null, perms = [] } = {}) {
-  const o = String(origin || '').toLowerCase();
-  if (!/^https?:\/\//i.test(o)) return false;
+  const o = normOrigin(origin);
+    if (!o) return false;
   const list = listSites();
   const i = list.findIndex((s) => s.origin === o);
   if (i >= 0) {
@@ -73,7 +102,7 @@ export function addSite(origin, { name = '', chainId = null, perms = [] } = {}) 
 }
 
 export function removeSite(origin) {
-  const o = String(origin || '').toLowerCase();
+  const o = normOrigin(origin);
   writeArr(LS.sites, listSites().filter((s) => s.origin !== o));
   syncWindow();
 }
@@ -85,7 +114,7 @@ export function clearSites() {
 
 /** Per-origin permission grants, so revoking one is possible without a nuke. */
 export function grantPermission(origin, method) {
-  const o = String(origin || '').toLowerCase();
+  const o = normOrigin(origin);
   const list = listSites();
   const s = list.find((x) => x.origin === o);
   if (!s) return false;
@@ -96,12 +125,12 @@ export function grantPermission(origin, method) {
 }
 
 export function hasPermission(origin, method) {
-  const s = listSites().find((x) => x.origin === String(origin || '').toLowerCase());
+  const s = listSites().find((x) => x.origin === normOrigin(origin));
   return !!s && s.perms.includes(method);
 }
 
 export function revokePermission(origin, method) {
-  const o = String(origin || '').toLowerCase();
+  const o = normOrigin(origin);
   const list = listSites();
   const s = list.find((x) => x.origin === o);
   if (!s) return false;
@@ -118,9 +147,29 @@ const hostOfOrigin = (v) => String(v || '').toLowerCase().replace(/^https?:\/\//
 export function listBlocked() { return readArr(LS.blocked).map(hostOfOrigin).filter(Boolean); }
 export function listTrusted() { return readArr(LS.trusted).map(hostOfOrigin).filter(Boolean); }
 
+// The user's own matcher, kept in step with the gate that actually runs.
+//
+// This was `listBlocked().includes(h)` — an exact string compare — while
+// dapp-safety.js's matchHostList, the one inspectUrl() really uses, matches the
+// host, its base host, and both directions of parent/subdomain. Nothing in the
+// app called isBlocked, so it was not a live hole, but a function called
+// isBlocked sitting next to a real blocklist and answering a different question
+// is a trap: the next person to wire it up inherits a rule where reporting
+// "app.uniswap.org" does nothing for "deep.app.uniswap.org".
+//
+// Mirrors matchHostList, in both directions, so the two cannot drift.
+// dapp-blocklist-match.test.js asserts they agree on every host shape.
+const matchesHostList = (host, list) => {
+  if (!host || !Array.isArray(list) || !list.length) return false;
+  const clean = list
+    .map((x) => String(x || '').toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim())
+    .filter(Boolean);
+  return clean.some((x) => host === x || host.endsWith('.' + x) || x.endsWith('.' + host));
+};
+
 export function isBlocked(host) {
   const h = hostOfOrigin(host);
-  return !!h && listBlocked().includes(h);
+  return matchesHostList(h, listBlocked());
 }
 
 export function addBlockedHost(host) {

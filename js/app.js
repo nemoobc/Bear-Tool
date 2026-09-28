@@ -247,7 +247,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (mine !== probeSeq) return;
         reset();
         document.getElementById('tokenDetect').style.display = '';
-        document.getElementById('tdNote').textContent = 'Could not read that contract: ' + (e?.shortMessage || e?.message || 'unknown');
+        document.getElementById('tdNote').textContent = explainError(e, 'Reading that contract');
       }
     };
 
@@ -774,7 +774,7 @@ function bindOpenSeaPanel() {
           + `<ul class="intel-signals">${renderSignals(safety.signals)}</ul>`
           + `<p class="small dim">${escapeHtml(safety.note)}</p>`;
     } catch (e) {
-      statusEl.textContent = '⚠️ ' + (e?.message || 'Analisis gagal.');
+      statusEl.textContent = '⚠️ ' + explainError(e, 'Eligibility check');
     }
   });
 
@@ -816,7 +816,7 @@ function bindOpenSeaPanel() {
       const net = getNetworkById(get('networkId'));
       await listNft({ contractAddress: contract, tokenId, price, chainId: net?.chainId || 1 });
       s.textContent = '✅ Listing submitted!';
-    } catch (e) { s.textContent = '⚠️ ' + (e?.message || 'List failed'); }
+    } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'Listing'); }
   });
   // Cancel listing
   $('#btnOpenSeaCancel')?.addEventListener('click', async () => {
@@ -829,7 +829,7 @@ function bindOpenSeaPanel() {
       const net = getNetworkById(get('networkId'));
       await cancelListing({ contractAddress: contract, tokenId, chainId: net?.chainId || 1 });
       s.textContent = '✅ Listing cancelled!';
-    } catch (e) { s.textContent = '⚠️ ' + (e?.message || 'Cancel failed'); }
+    } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'Cancelling the listing'); }
   });
   // Accept top offer — needs contract (+token ID); a full asset link works too
   $('#btnAcceptTopOffer')?.addEventListener('click', async () => {
@@ -1617,7 +1617,7 @@ function showAccountModal() {
     <h2>🐻 Accounts</h2>
     ${accounts.map((a, i) => `
       <div class="asset-row ${i === idx ? 'active' : ''}" data-acc="${i}">
-        <div class="asset-icon">🐻</div>
+        <div class="asset-icon"><img class="asset-bear" src="assets/bear.svg" alt="" aria-hidden="true"></div>
         <div class="asset-info">
           <div class="asset-name">${escapeHtml(a.name || `Account ${i + 1}`)}</div>
           <div class="mono">${escapeHtml(a.address)}</div>
@@ -1629,11 +1629,17 @@ function showAccountModal() {
   `);
   $all('[data-acc]').forEach(el => el.addEventListener('click', async () => {
     const i = Number(el.dataset.acc);
-    wallet.setActiveAccount(i);
     const pw = await promptPassword('Unlock to switch account');
     if (!pw) return;
     try {
-      const signer = await wallet.unlockWallet(pw);
+      // Derive the requested account WITHOUT switching to it first. The old order
+      // wrote the new active index and then asked for the password, so cancelling
+      // the prompt or mistyping it left localStorage on an account the topbar was
+      // not showing — and the next unlock signed with that other one. Nothing in
+      // the UI said the displayed address and the signing address had diverged.
+      const signer = await wallet.unlockWallet(pw, i);
+      // The password is proven; only now does the choice become the active one.
+      wallet.setActiveAccount(i);
       set('signer', signer);
       set('address', signer.address);
       closeModal();
@@ -1786,7 +1792,7 @@ function holdingUsd(t) {
 // The cache + mark rendering now live in js/token-logo.js so the dashboard and
 // the Swap/Bridge pickers cannot drift apart. Re-exported here because several
 // call sites in this file still use the old local names.
-import { tokenLogoHTML, getCachedLogo, cacheLogo, guardTokenLogos, readLogoCache as loadLogoCache } from './token-logo.js';
+import { tokenLogoHTML, getCachedLogo, cacheLogo, guardTokenLogos, readLogoCache as loadLogoCache, logoKeyFor } from './token-logo.js';
 import { explainError } from './errors.js';
 const MANUAL_LOGO_SYMS = new Set(['eth', 'ether', 'usdc', 'usdt', 'dai', 'wbtc', 'link', 'uni', 'aave', 'reth', 'cbeth', 'wsteth', 'frax']);
 
@@ -1808,11 +1814,11 @@ async function fetchCoinGeckoLogo(sym) {
 // Never throws — logo failures just leave the default SVG in place.
 async function ensureTokenLogos(tokens) {
   const missing = (tokens || []).filter(t =>
-    t.symbol && !MANUAL_LOGO_SYMS.has(t.symbol.toLowerCase()) && !getCachedLogo(t.symbol)
+    t.symbol && !MANUAL_LOGO_SYMS.has(t.symbol.toLowerCase()) && !getCachedLogo(logoKeyFor(t))
   );
   await Promise.allSettled(missing.map(async (t) => {
     const url = await fetchCoinGeckoLogo(t.symbol);
-    if (url) cacheLogo(t.symbol, url);
+    if (url) cacheLogo(logoKeyFor(t), url);
   }));
 }
 
@@ -1828,14 +1834,16 @@ function renderAssets(tokens) {
   }
   // Show search if > 3 tokens
   $('#assetSearch').style.display = tokens.length > 3 ? '' : 'none';
-  const getLogo = (sym) => tokenLogoHTML(sym, 32);
+  // Takes the whole token, not the ticker: the mark is filed under the contract
+  // so a counterfeit ticker cannot pick up the real project's logo.
+  const getLogo = (t) => tokenLogoHTML(t.symbol, 32, { address: t.address });
   // Store tokens for filtering
   window._assetTokens = tokens;
   const filter = ($('#tokenSearchInput')?.value || '').toLowerCase();
   const filtered = filter ? tokens.filter(t => (t.symbol || '').toLowerCase().includes(filter)) : tokens;
   assetList.innerHTML = filtered.map((t, i) => `
     <div class="asset-row asset-clickable" data-token-idx="${i}" data-symbol="${escapeHtml(t.symbol || '')}" data-address="${escapeHtml(t.address || '')}" data-decimals="${t.decimals || 18}" data-balance="${escapeHtml(t.balance || '0')}" data-usd="${t.usd || 0}">
-      <div class="token-icon-svg">${getLogo(t.symbol, i)}</div>
+      <div class="token-icon-svg">${getLogo(t)}</div>
       <div class="asset-info">
         <div class="asset-name">${escapeHtml(t.symbol)}</div>
         <div class="asset-symbol">${t.address ? escapeHtml(wallet.shortAddress(t.address)) : 'Native'}</div>
@@ -1853,13 +1861,14 @@ function renderAssets(tokens) {
   // CoinGecko history call for every row, all of which failed CORS from a plain
   // static host, so the list rendered a column of empty boxes. The detail modal
   // (token-chart) still draws a real chart on demand.
-  // CoinGecko images can 404/expire — fall back to the default SVG quietly.
-  $all('.token-logo-img').forEach(img => {
-    img.addEventListener('error', () => {
-      const i = Number(img.dataset.idx || 0);
-      img.outerHTML = tokenLogoHTML('', 32, { remote: false });
-    });
-  });
+  // CoinGecko images can 404/expire. guardTokenLogos does this, and it does it
+  // with the symbol: the <img> carries data-mark-fallback, and the handler swaps
+  // in the generated mark for THAT token — the hand-tuned disc for ETH, the two
+  // letters for anything else. The loop this replaced passed an empty symbol, so
+  // a dead remote logo degraded the row to a "?" disc, throwing away the mark
+  // the rest of the file renders perfectly well. It also attached a second error
+  // handler to the same element, both trying to replace it.
+  guardTokenLogos(assetList);
   // Click handlers
   $all('.asset-clickable').forEach(el => {
     el.addEventListener('click', () => showTokenActions(el));

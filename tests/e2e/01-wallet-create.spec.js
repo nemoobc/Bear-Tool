@@ -27,12 +27,19 @@ test.describe('Wallet create', () => {
     await page.fill('#createPw2', 'password123');
     await appClick(page, '#createBtn');
     await page.waitForSelector('.seed-choice-btn');
-    const seedText = await page.locator('#modalBox .mono').textContent();
-    const words = [...seedText.matchAll(/(\d+)\.\s*(\w+)/g)].map((m) => m[2]);
-    // The app asks to confirm a random index N — the correct word is words[N-1].
-    const ask = await page.locator('#modalBox label').textContent();
-    const n = Number((ask.match(/#(\d+)/) || [])[1]);
-    const correctIdx = Number.isFinite(n) ? n - 1 : 0;
+      // The same three stale selectors the shared helper had: #modalBox .mono and
+      // #modalBox label never existed (the words render into .seed-words, the
+      // question into <p id="seedQLabel">), and a missing locator does not fail
+      // fast — textContent() waits out the whole 45s timeout. This test kept its
+      // own copy of the flow instead of calling createWallet(), so fixing the
+      // helper did nothing for it.
+      const mnemonic = await page.locator('[data-copy]').first().getAttribute('data-copy');
+      const words = mnemonic.trim().split(/\s+/);
+      expect(words, 'the copy button must carry the seed phrase').toHaveLength(12);
+      // The app asks to confirm a random index N — the correct word is words[N-1].
+      const ask = await page.locator('#seedQLabel').textContent();
+      const n = Number((ask.match(/#(\d+)/) || [])[1]);
+      const correctIdx = Number.isFinite(n) ? n - 1 : 0;
     // pick a WRONG word that is actually among the 3 choices
     const choices = await page.locator('.seed-choice-btn').evaluateAll((els) =>
       els.map((el) => el.dataset.word)
@@ -89,7 +96,12 @@ test.describe('Wallet create', () => {
     await page.waitForSelector('#unlockPw', { timeout: 10_000 });
     await page.fill('#unlockPw', 'wrongpass');
     await appClick(page, '#unlockBtn');
-    await expect(page.locator('#toast-wrap')).toContainText(/Wrong password/i);
+      // Not the wording. errors.js rewrites "Wrong password" into a sentence a
+      // person can act on — "That password did not unlock this wallet. Check it and
+      // try again." — so pinning the raw phrase here tested the copy rather than the
+      // behaviour, and failed the moment the translator improved. An error toast is
+      // the claim being made.
+      await expect(page.locator('.toast.error').last()).toBeVisible({ timeout: 15_000 });
     await unlock(page, 'password123');
     await expectUnlocked(page);
   });

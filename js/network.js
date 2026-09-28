@@ -383,6 +383,29 @@ export async function getProvider(chainId) {
   const urls = override ? [override, ...net.rpc.filter((u) => u !== override)] : net.rpc;
 
   for (const url of urls) {
+    // An override is the endpoint the user picked on purpose, and when it does
+    // not work that is the answer — not a reason to carry on against a default
+    // they did not choose. This guard used to live only inside the catch, so the
+    // `continue` below stepped over it: a wrong-chain override was recorded in
+    // `failures` and then silently replaced by a public node, and every on-chain
+    // call ran on a chain the user never asked for. Every failure path for the
+    // override goes through here now.
+    const refuse = (why) => {
+      failures.push(`${url} (${why})`);
+      if (url === override) {
+        // Marked so the catch below can recognise it. A refusal thrown from
+        // inside the try used to be caught by that same try's own catch, which
+        // re-wrapped it — the user saw the sentence and the hint twice, and the
+        // doubled text reads like a stutter rather than an error.
+        throw Object.assign(
+          new Error(
+            `Your RPC for ${net.name} did not answer: ${url} — ${why}. `
+            + 'Fix Settings → Custom RPC, or remove it to use the default endpoints.',
+          ),
+          { bearRpcRefusal: true },
+        );
+      }
+    };
     try {
       const p = new ethers.JsonRpcProvider(url, Number(chainId), { staticNetwork: true });
       // `staticNetwork: true` tells ethers to TRUST the chainId above and skip
@@ -391,21 +414,31 @@ export async function getProvider(chainId) {
       // re-checks, deploy's registry entry) compares a constant with itself.
       // A wrong or hostile endpoint would then be filed under a chain the
       // contract does not exist on. Ask the node, and refuse it if it disagrees.
+      //
+      // The answer is read into a variable and compared outside the try on
+      // purpose. Refusing from inside that block would be caught by the very
+      // catch meant to tolerate a node that simply lacks eth_chainId, and the
+      // refusal would be swallowed — which is the bug this replaces.
+      let reported = null;
+      let unverifiable = null;
       try {
-        // eth_chainId is a local lookup, and the blockNumber probe above already
-        // proved the socket works — so a 3s budget is generous. It must not
+        // eth_chainId is a local lookup, and the blockNumber probe below also
+        // proves the socket works — so a 3s budget is generous. It must not
         // double the time the user waits before the next candidate is tried.
-        const got = await withTimeout(p.send('eth_chainId', []), 3000, url);
-        if (BigInt(got) !== BigInt(chainId)) {
-          failures.push(`${url} (reports chain ${got}, expected ${chainId})`);
-          continue;
-        }
+        reported = await withTimeout(p.send('eth_chainId', []), 3000, url);
       } catch (e) {
+        unverifiable = e?.shortMessage || e?.message || e;
+      }
+      if (reported !== null && BigInt(reported) !== BigInt(chainId)) {
+        refuse(`reports chain ${reported}, expected ${chainId}`);
+        continue;
+      }
+      if (unverifiable !== null) {
         // A node that cannot answer eth_chainId is one we cannot verify — but
         // refusing outright would break every endpoint that simply does not
         // implement it, which is far more common than a node that lies.
         // Unverifiable is not the same as known-wrong: note it and continue.
-        failures.push(`${url} (chain id unverified: ${e?.shortMessage || e?.message || e})`);
+        failures.push(`${url} (chain id unverified: ${unverifiable})`);
       }
       // Bounded probe: an endpoint that accepts the connection but never
       // answers would otherwise hang here forever, leaving the UI spinning.
@@ -421,13 +454,9 @@ export async function getProvider(chainId) {
       try { Object.defineProperty(p, 'bearEndpoint', { value: url, enumerable: true }); } catch { /* frozen */ }
       return p;
     } catch (e) {
-      failures.push(`${url} (${e?.message || e})`);
-      if (url === override) {
-        throw new Error(
-          `Your RPC for ${net.name} did not answer: ${url} — ${e?.message || e}. `
-          + 'Fix Settings → Custom RPC, or remove it to use the default endpoints.',
-        );
-      }
+      // Already the answer. Wrapping it again would duplicate every sentence.
+      if (e && e.bearRpcRefusal) throw e;
+      refuse(e?.message || String(e));
     }
   }
   throw new Error(`All RPCs failed for ${net.name} — ` + failures.join('; '));

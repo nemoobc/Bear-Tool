@@ -40,15 +40,37 @@ export function readLogoCache() {
   catch { return {}; }
 }
 
-export function getCachedLogo(sym) {
-  const e = readLogoCache()[(sym || '').toLowerCase()];
+/**
+ * What a mark is filed under.
+ *
+ * A token's identity is its CONTRACT. The ticker is a label on it, and thousands
+ * of contracts share one — a counterfeit "USDC" is among the most common things a
+ * wallet turns up. The cache used to be keyed by ticker, so every one of those
+ * contracts was drawn with Circle's actual mark.
+ *
+ * That matters more here than in an ordinary app. The wallet already ships an
+ * address-poisoning guard, and it compares ADDRESSES: it cannot see a borrowed
+ * mark. So a fake token wearing the genuine logo passed the one check that
+ * existed, and the mark is precisely what a user scans the list for.
+ *
+ * A native coin has no contract, so its symbol is the only identity there is —
+ * namespaced as `sym:` so it can never collide with an address-shaped key.
+ */
+export function logoKeyFor(token) {
+  const address = String(token?.address || '').trim();
+  if (address) return address.toLowerCase();
+  return 'sym:' + String(token?.symbol || '').toLowerCase();
+}
+
+export function getCachedLogo(key) {
+  const e = readLogoCache()[String(key || '').toLowerCase()];
   return e && Date.now() - e.ts < TTL ? e.url : null;
 }
 
-export function cacheLogo(sym, url) {
+export function cacheLogo(key, url) {
   try {
     const c = readLogoCache();
-    c[(sym || '').toLowerCase()] = { url, ts: Date.now() };
+    c[String(key || '').toLowerCase()] = { url, ts: Date.now() };
     localStorage.setItem(CACHE_KEY, JSON.stringify(c));
   } catch { /* private mode / quota — the mark fallback covers it */ }
 }
@@ -88,7 +110,10 @@ function markSvg(sym, size) {
 export function tokenLogoHTML(sym, size = 32, opt = {}) {
   const remote = opt.remote !== false;
   if (remote) {
-    const url = getCachedLogo(sym);
+    // Looked up by CONTRACT when one is given, so a counterfeit ticker cannot
+    // reach the real project's mark. The symbol is still what the generated
+    // fallback draws.
+    const url = getCachedLogo(logoKeyFor({ address: opt.address, symbol: sym }));
     if (url) {
       // Falls back to the generated mark if the cached image is dead, so a
       // stale URL degrades instead of showing a broken-image icon.

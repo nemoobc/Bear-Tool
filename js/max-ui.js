@@ -19,17 +19,29 @@ import { maxSpendable, computeMax, formatDown, defaultGasLimit, gasCost, checkSp
 // assertion. One broken import took 17 tests with it.
 const { ethers } = globalThis;
 
-/** Read the current fee in wei, preferring the EIP-1559 ceiling when present. */
+/**
+ * Read the current fee in wei, preferring the EIP-1559 ceiling when present.
+ *
+ * Returns NULL when the fee cannot be read, and that is the whole point. This
+ * used to answer 0n, and zero is a real number that everything downstream
+ * trusted: maxSpendable subtracted nothing, MAX filled the entire balance, and
+ * the send then failed with "insufficient funds for gas" — the one outcome this
+ * file exists to prevent, produced by the button meant to prevent it.
+ *
+ * The silent route mattered more than the exception. `?? 0n` produced 0n with no
+ * error at all whenever a node answered getFeeData() with nulls, which is what
+ * several L2s and any node without eth_feeHistory do — the comment two lines down
+ * already said gasPrice "is null on some L2s". A caller can refuse an unknown
+ * number; it cannot notice a plausible one.
+ */
 export async function currentGasPriceWei(provider) {
-  if (!provider) return 0n;
+  if (!provider) return null;
   try {
     const fee = await provider.getFeeData();
-    // maxFeePerGas is the worst case the tx can be charged, which is the right
-    // number to reserve against. gasPrice is the fallback for chains that do
-    // not report it, and it is null on some L2s.
-    return fee.maxFeePerGas ?? fee.gasPrice ?? 0n;
+    const v = fee?.maxFeePerGas ?? fee?.gasPrice ?? null;
+    return v === null || v === undefined ? null : BigInt(v);
   } catch {
-    return 0n;
+    return null;
   }
 }
 
@@ -75,6 +87,19 @@ export async function resolveMax({ token, provider, from, to, pct = 100, gasLimi
   const decimals = token?.decimals ?? 18;
   const symbol = token?.symbol || '';
   const price = await currentGasPriceWei(provider);
+  // A token send pays its fee out of the native balance whatever this field says,
+  // so the reservation still has to exist even when the price is unknown — but
+  // then the honest answer is a refusal, not a hopeful number. See the note on
+  // currentGasPriceWei: 0n here means "we could not read it", and it used to mean
+  // exactly that while reading as a free transaction.
+  if (price === null) {
+    return {
+      amount: '', ok: false,
+      message: 'The network fee could not be read from the node, so MAX cannot leave room for it. '
+             + 'Enter the amount yourself, or try again once the node answers.',
+      gasWei: null, spendable: 0n, source: 'unknown', balanceSource: 'unread',
+    };
+  }
   const { limit, source } = await gasLimitFor({ provider, isNative, from, to, tokenAddress: token?.address, fallback: gasLimit });
   const gasWei = gasCost({ gasLimit: limit, gasPriceWei: price });
 
@@ -162,8 +187,12 @@ export async function resolveMax({ token, provider, from, to, pct = 100, gasLimi
 export async function verifySpendable({ amount, token, provider, from, to }) {
   const isNative = !token?.address;
   const price = await currentGasPriceWei(provider);
+  const feeKnown = price !== null;
   const { limit } = await gasLimitFor({ provider, isNative, from, to, tokenAddress: token?.address });
-  const gasWei = gasCost({ gasLimit: limit, gasPriceWei: price });
+  // Null when unknown, and reported as null below. A send is still checked
+  // against the balance without a fee component — that catches "more than you
+  // hold" — but the answer must not imply the transaction is free.
+  const gasWei = feeKnown ? gasCost({ gasLimit: limit, gasPriceWei: price }) : null;
 
   let amountWei = 0n;
   try {
@@ -186,5 +215,15 @@ export async function verifySpendable({ amount, token, provider, from, to }) {
         : await new ethers.Contract(token.address, ['function balanceOf(address) view returns (uint256)'], provider).balanceOf(from);
     } catch { /* keep the cached balance — a stale number beats a refusal */ }
   }
-  return { ...checkSpendable({ amountWei, balance, gasWei, paysGas: isNative }), gasWei, amountWei, balance };
+  const verdict = checkSpendable({ amountWei, balance, gasWei: gasWei ?? 0n, paysGas: isNative });
+  return {
+    ...verdict,
+    gasWei,
+    feeKnown,
+    amountWei,
+    balance,
+    ...(feeKnown ? {} : {
+      message: verdict.message + ' The network fee could not be read, so this check could not include it.',
+    }),
+  };
 }

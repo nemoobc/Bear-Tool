@@ -329,22 +329,48 @@ export function promptPassword(title = 'Enter password') {
 }
 
 // ── format helpers ──
+// Shown when a value exists but cannot be read. A dash, deliberately NOT "0.00":
+// the two claims are completely different, and only one of them is true.
+//
+// Nine call sites render balances through here — the token list, the send
+// dropdown, the token modal, the allowance rows. This function used to answer
+// '0.00' to every failure, so a token whose `decimals` could not be parsed was
+// shown as an empty balance. A user holding funds was told they held none, with
+// nothing on screen to say the number was unreadable. That is invented data, and
+// the input is attacker-shaped: addCustomNetwork in network.js stores `decimals`
+// with no validation at all, so 2.5, -1 and NaN all arrive from localStorage.
+// max-amount.js already treats that as worth a RangeError; this path swallowed it.
+const UNREADABLE = '\u2014';
+
 export function fmtAmount(wei, decimals = 18, max) {
+  // Validate before calling ethers, so the reason is the number and not whatever
+  // formatUnits happens to say about it.
+  const d = Number(decimals);
+  if (!Number.isSafeInteger(d) || d < 0 || d > 255) return UNREADABLE;
+  if (wei === null || wei === undefined || wei === '') return UNREADABLE;
+  let v;
   try {
-    const v = ethers.formatUnits(wei, decimals);
-    const num = parseFloat(v);
-    if (isNaN(num)) return '0.00';
-    // Zero always shows 2 decimals for visual consistency in the coin list
-    if (num === 0) return '0.00';
-    // Auto precision: big numbers = fewer decimals, small numbers = more
-    if (max === undefined) {
-      if (num >= 1000) max = 2;
-      else if (num >= 1) max = 4;
-      else if (num >= 0.001) max = 6;
-      else max = 8;
-    }
-    return num.toLocaleString('en-US', { maximumFractionDigits: max });
-  } catch { return '0.00'; }
+    v = ethers.formatUnits(wei, d);
+  } catch {
+    return UNREADABLE;
+  }
+  const num = parseFloat(v);
+  if (!Number.isFinite(num)) return UNREADABLE;
+  // A genuine zero keeps looking like a zero — the coin list depends on it.
+  if (num === 0) return '0.00';
+  // Auto precision: big numbers = fewer decimals, small numbers = more
+  if (max === undefined) {
+    if (num >= 1000) max = 2;
+    else if (num >= 1) max = 4;
+    else if (num >= 0.001) max = 6;
+    else max = 8;
+  }
+  const out = num.toLocaleString('en-US', { maximumFractionDigits: max });
+  // A balance too small for the chosen precision used to render as "0", which says
+  // the account is empty. 1 wei at 60 decimals is a real balance, so report it as
+  // present rather than rounding it out of existence.
+  if (parseFloat(String(out).replace(/,/g, '')) === 0) return UNREADABLE;
+  return out;
 }
 
 // ── money ────────────────────────────────────────────────────────
@@ -397,6 +423,19 @@ export function usdToDisplay(num) {
   return n * MONEY.rate;
 }
 
+// Activity rows call this with whatever the record carries. It used to be
+// `new Date(ts).toLocaleString()`: undefined printed the browser's own
+// "Invalid Date" into the list, and a bigint threw "Cannot convert a BigInt value
+// to a number" — and a throw inside a render loop takes the view with it rather
+// than the one field. Both now degrade to a dash.
 export function fmtTime(ts) {
-  return new Date(ts).toLocaleString();
+  if (ts === null || ts === undefined || ts === '') return UNREADABLE;
+  let ms;
+  try {
+    // A wei counter or a block number is a bigint; new Date() rejects those.
+    ms = typeof ts === 'bigint' ? Number(ts) : ts;
+  } catch { return UNREADABLE; }
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return UNREADABLE;
+  return d.toLocaleString();
 }

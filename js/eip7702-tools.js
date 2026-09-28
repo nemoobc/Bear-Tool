@@ -159,16 +159,37 @@ async function delegateAndExecute(targetAddress, implAddress, calldata, opts = {
 }
 
 // ── deployed-contract registry (reuse to save gas) ──
-async function contractExists(provider, address) {
-  try { return (await provider.getCode(address)) !== '0x'; } catch { return false; }
+// Exported because the policy below costs the user real gas when it is wrong, and
+// a policy nobody can call cannot be tested. An unexported `findUsableDeployed`
+// meant the only thing pinning it was a grep for its name.
+//
+// Three states, not two. "There is no code at this address" is a fact and the
+// entry is dead. "The node did not answer" is not a fact about the chain, and
+// treating it as one deleted a perfectly good record — after which the user is
+// told to deploy a helper they already paid to deploy.
+export async function contractExists(provider, address) {
+  try {
+    return { known: true, alive: (await provider.getCode(address)) !== '0x' };
+  } catch {
+    return { known: false, alive: false };
+  }
 }
 
-// Find a registry entry that is still alive on-chain. Stale entries
-// (contract gone / wrong chain) are dropped so they never get reused.
-async function findUsableDeployed(type, chainId, predicate, provider) {
+// Find a registry entry that is still alive on-chain. Stale entries (contract
+// gone / wrong chain) are dropped so they never get reused — but only when the
+// chain actually said so.
+export async function findUsableDeployed(type, chainId, predicate, provider) {
   const found = findDeployed(type, chainId, predicate);
   if (!found) return null;
-  if (await contractExists(provider, found.address)) return found;
+  const { known, alive } = await contractExists(provider, found.address);
+  if (alive) return found;
+  // Unknown is not dead. Keep the record, and say the reuse could not be
+  // verified, so the next attempt retries instead of quietly re-deploying.
+  if (!known) {
+    console.warn('[BearTool] could not verify the deployed record for ' + found.address +
+      ' — the node did not answer. Keeping it rather than deleting a record it never disproved.');
+    return { ...found, unverified: true };
+  }
   removeDeployed(type, found.address, chainId);
   return null;
 }

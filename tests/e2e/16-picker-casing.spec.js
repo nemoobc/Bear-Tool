@@ -144,7 +144,7 @@ test.describe('Pickers — in the browser', () => {
           insideX: p.left >= -0.5 && p.right <= window.innerWidth + 0.5,
           insideY: p.top >= -0.5 && p.bottom <= window.innerHeight + 0.5,
           rows: document.querySelectorAll('#swapFromPanel .token-row').length,
-          withArt: document.querySelectorAll('#swapFromPanel .token-row-logo img, #swapFromPanel .token-row-logo .token-logo-mark').length,
+          withArt: document.querySelectorAll('#swapFromPanel .token-row-logo img, #swapFromPanel .token-row-logo .token-mark').length,
         };
       });
       expect(m.insideX, 'the list must not stick out sideways').toBe(true);
@@ -232,7 +232,7 @@ test.describe('Pickers — in the browser', () => {
         inside: p.left >= -0.5 && p.right <= window.innerWidth + 0.5
              && p.top >= -0.5 && p.bottom <= window.innerHeight + 0.5,
         rows: document.querySelectorAll('#bridgeFromChainPanel .token-row').length,
-        withArt: document.querySelectorAll('#bridgeFromChainPanel .token-row-logo img, #bridgeFromChainPanel .token-row-logo .token-logo-mark, #bridgeFromChainPanel .token-row-logo .net-logo').length,
+        withArt: document.querySelectorAll('#bridgeFromChainPanel .token-row-logo img, #bridgeFromChainPanel .token-row-logo .token-mark, #bridgeFromChainPanel .token-row-logo .net-logo').length,
       };
     });
     expect(m.inside, 'the chain list must stay inside the app').toBe(true);
