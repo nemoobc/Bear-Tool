@@ -6,13 +6,16 @@
 // a real on-chain/API route or an honest error.
 // ═══════════════════════════════════════════════════════════════
 
+const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
+
 import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx, waitForReceipt } from './safetx.js';
+import { runTx, waitForReceipt, withTimeout } from './safetx.js';
 import { getNetworkById, ERC20_ABI } from './network.js';
-import { SWAP_ROUTERS, getSwapRoutersForChain, getBestSwapRouter, CHAIN_NAMES } from './routers.js';
+import { SWAP_ROUTERS, getSwapRoutersForChain, getBestSwapRouter, getRouterAddress, getQuoterAddress, CHAIN_NAMES } from './routers.js';
 import { initTokenPicker } from './token-picker.js';
 import { resolveMax } from './max-ui.js';
+import { explainError } from './errors.js';
 
 const { ethers } = globalThis;
 
@@ -22,57 +25,64 @@ const CLIENT_ID = 'bear-tool';
 const NATIVE_SENTINEL = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const CACHE_TTL = 30_000;
 
-// ── 1inch Aggregator API ──
-const ONEINCH_API = 'https://api.1inch.dev/swap/v6.0';
+// ── router ABIs ────────────────────────────────────────────────────────────
+//
+// These two were missing. Both `v2Quote` and `v3Quote` referenced them, so every
+// call threw ReferenceError and the entire swap feature was dead: no quote, no
+// swap, no venue, on any chain. It survived a long time because the fork swap
+// test built its own V2 call with its own ABI, and the unit tests read this file
+// as text instead of running it. Nothing in the suite executed this module.
+//
+// The registry rewrite is where they went: the detectors added then asserted that
+// swap.js no longer defines UNISWAP_V2_ROUTER, UNISWAP_V3_ROUTER and
+// UNISWAP_QUOTER_V3 — the local *address* tables — and read that as the rewrite
+// being complete. The address tables were the point; the ABIs went with them.
+//
+// Declared from the call sites rather than from memory, and each entry is exercised
+// on a fork by tests/fork/fork-swap-app.test.js, which calls v2Quote and
+// uniswapV2Swap from this module. If a signature here were wrong the fork test
+// fails, which is the only reason to trust an ABI written by hand.
+const UNISWAP_V2_ABI = [
+  'function WETH() view returns (address)',
+  'function factory() view returns (address)',
+  'function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)',
+  'function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)',
+  'function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)',
+  'function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)',
+];
+
+// Uniswap SwapRouter02 — the 0x68b34658… deployment, identical on every chain in
+// the registry. Its exactInputSingle takes a 7-field struct with no deadline; the
+// five-argument SwapRouter form would silently encode a different selector, so
+// this is spelled out rather than folded into a shared V2 entry.
+const UNISWAP_V3_ABI = [
+  'function WETH9() view returns (address)',
+  'function factory() view returns (address)',
+  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) payable returns (uint256 amountOut)',
+];
+
+// 1inch is gone: /swap/v6.0 answers 401 without a credential. Bungee/Socket
+// answers 403. Neither is carried as a route, because a route the wallet cannot
+// price is a dead end in a dropdown rather than a feature.
 
 // ── ParaSwap API ──
 const PARASWAP_API = 'https://api.paraswap.io';
 
-// ── Uniswap Router V2/V3 constants ──
-const UNISWAP_V2_ROUTER = {
-  1: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Ethereum
-  5: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Goerli
-  11155111: '0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3', // Sepolia (V2Router02 — different address from mainnet!)
-  10: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Optimism
-  137: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Polygon
-  42161: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Arbitrum
-};
-const UNISWAP_V3_ROUTER = {
-  1: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Ethereum
-  5: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Goerli
-  11155111: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Sepolia
-  10: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Optimism
-  137: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Polygon
-  42161: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Arbitrum
-};
-// Uniswap V3 QuoterV2 — deterministic CREATE2 address, same on every chain.
-// (Verified on-chain: code present on 1/10/137/42161/8453; Sepolia has none
-// and is rejected by the runtime code guard → honest error.)
-const UNISWAP_QUOTER_V3 = {
-  1: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
-  10: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
-  137: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
-  42161: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
-  8453: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+// Router addresses are NOT listed here. They live in routers.js, which is the
+// single source of truth and is the file that records which chains each address
+// was verified on. Keeping a second copy in this module is how the two drifted:
+// the registry advertised Uniswap V3 on Base while this map had no Base entry,
+// and the registry's Base address was one with no contract behind it.
+
+// Last-resort wrapped-native lookup for the V3 path, keyed by router ADDRESS.
+// The V3 path asks the router for WETH9() first and only reads this if that
+// reverts; the V2 path asks for WETH() and never needs a table. Keying by
+// address rather than chain is deliberate: a chain can carry more than one V3
+// router and they do not necessarily wrap the same token.
+const CHAIN_WETH_BY_ROUTER = {
+  '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45': { 1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', 10: '0x4200000000000000000000000000000000000006', 137: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', 42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' },
 };
 
-// Uniswap V2 Router ABI (minimal)
-const UNISWAP_V2_ABI = [
-  'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
-  'function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)',
-  'function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
-  'function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts)',
-  'function factory() external pure returns (address)',
-  'function WETH() external pure returns (address)',
-];
-
-// Uniswap V3 SwapRouter ABI (minimal)
-const UNISWAP_V3_ABI = [
-  'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) calldata params) external payable returns (uint256 amountOut)',
-  'function exactInput(tuple(bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum) calldata params) external payable returns (uint256 amountOut)',
-];
-
-// chainId → native wrapped token (used for V3 native substitution)
 const CHAIN_WETH = {
   1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // Ethereum WETH
   5: '0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6', // Goerli WETH
@@ -146,36 +156,42 @@ export function bindSwapEvents() {
       btn.classList.add('active');
     });
   });
-  // MAX button. It used to fill the field with the entire balance, which on the
-  // native token means the swap cannot pay its own gas — the transaction is
-  // rejected and the user has no idea why. resolveMax subtracts the fee first
-  // and truncates, and it leaves the field empty with an explanation when the
-  // balance cannot cover the fee at all.
-  const maxBtn = $('#btnSwapMax');
-  if (maxBtn) {
-    maxBtn.addEventListener('click', async () => {
-      const sel = $('#swapFrom');
-      const t = get('tokens').find(x => (x.address || 'native') === sel.value);
-      if (!t) return;
-      const r = await resolveMax({
-        token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
-        provider: get('provider'),
-        from: get('address'),
-        pct: 100,
-      });
-      const field = $('#swapFromAmount');
-      const note = $('#swapMaxNote');
-      if (!r.ok) {
-        field.value = '';
-        if (note) { note.textContent = r.message; note.classList.add('show'); }
-        toast('MAX is not available here', 'error');
-        return;
-      }
-      field.value = r.amount;
-      if (note) { note.textContent = r.message; note.classList.add('show'); }
-      field.dispatchEvent(new Event('input', { bubbles: true }));
+  // 20% / 50% / 70% / MAX. The old single MAX filled the field with the entire
+  // balance, which on the native token means the swap cannot pay its own gas —
+  // the transaction is rejected and the user has no idea why. resolveMax
+  // subtracts the fee first and truncates, and it leaves the field empty with an
+  // explanation when the balance cannot cover the fee at all. A share is taken
+  // of what is actually sendable, so 20% never rounds up past it.
+  const applyPct = async (pct) => {
+    const sel = $('#swapFrom');
+    const t = get('tokens').find(x => (x.address || 'native') === sel.value);
+    if (!t) return;
+    const r = await resolveMax({
+      token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+      provider: get('provider'),
+      from: get('address'),
+      pct,
+      // A swap is not a transfer. Reserving the 21k of a native transfer here
+      // produced a MAX amount that provably could not pay for its own gas.
+      gasLimit: 280000n,
     });
-  }
+    const field = $('#swapFromAmount');
+    const note = $('#swapMaxNote');
+    if (!r.ok) {
+      field.value = '';
+      if (note) { note.textContent = r.message; note.classList.add('show'); }
+      toast(pct === 100 ? 'MAX is not available here' : `${pct}% is not available here`, 'error');
+      return;
+    }
+    field.value = r.amount;
+    if (note) { note.textContent = r.message; note.classList.add('show'); }
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  // Delegated: the row is static, so one listener covers every button in it.
+  $('#swapPctBtns')?.addEventListener('click', (e) => {
+    const btn = e.target.closest?.('[data-swap-pct]');
+    if (btn) applyPct(Number(btn.dataset.swapPct));
+  });
 }
 
 export function loadSwapTokens() {
@@ -289,27 +305,6 @@ async function kyberBuild(slug, routeSummary, sender, recipient, slippageBps) {
   return json.data; // { data (calldata), routerAddress (address) }
 }
 
-// ── 1inch: fetch swap quote ──
-async function oneinchQuote(chainId, tokenIn, tokenOut, amountIn) {
-  const url = `${ONEINCH_API}/${chainId}/quote?src=${tokenIn}&dst=${tokenOut}&amount=${amountIn}`;
-  const res = await fetchWithTimeout(url, { headers: { 'Authorization': 'Bearer ' + (globalThis.__ONEINCH_API_KEY || '') } });
-  if (!res.ok) throw new Error(`1inch quote HTTP ${res.status}`);
-  const json = await res.json();
-  if (!json.dstAmount) throw new Error('1inch: empty quote');
-  return json; // { dstAmount, srcToken, dstToken, protocols }
-}
-
-// ── 1inch: build swap transaction ──
-async function oneinchBuild(chainId, tokenIn, tokenOut, amountIn, fromAddr, slippageBps) {
-  const slippagePct = slippageBps / 100;
-  const url = `${ONEINCH_API}/${chainId}/swap?src=${tokenIn}&dst=${tokenOut}&amount=${amountIn}&from=${fromAddr}&slippage=${slippagePct}&disableEstimate=true`;
-  const res = await fetchWithTimeout(url, { headers: { 'Authorization': 'Bearer ' + (globalThis.__ONEINCH_API_KEY || '') } });
-  if (!res.ok) throw new Error(`1inch swap HTTP ${res.status}`);
-  const json = await res.json();
-  if (!json.tx) throw new Error('1inch: empty tx');
-  return { data: json.tx.data, routerAddress: json.tx.to, amountOut: json.dstAmount };
-}
-
 // ── ParaSwap: fetch swap quote + build ──
 async function paraswapQuote(chainId, tokenIn, tokenOut, amountIn, fromAddr, slippageBps) {
   // tokenIn/Out: use NATIVE_SENTINEL for native
@@ -334,21 +329,6 @@ async function paraswapQuote(chainId, tokenIn, tokenOut, amountIn, fromAddr, sli
   if (!buildRes.ok) throw new Error(`ParaSwap build HTTP ${buildRes.status}`);
   const tx = await buildRes.json();
   return { data: tx.data, routerAddress: tx.to, amountOut: BigInt(json.priceRoute.destAmount) };
-}
-
-// ── SushiSwap: on-chain quote via getAmountsOut (Uniswap V2 compatible) ──
-async function sushiswapQuote(chainId, tokenIn, tokenOut, amountIn) {
-  const routerAddr = SWAP_ROUTERS.find(r => r.id === 'sushiswap')?.router?.[chainId];
-  if (!routerAddr) throw new Error('SushiSwap not available on this chain');
-  const provider = get('provider');
-  const code = await provider.getCode(routerAddr);
-  if (!code || code === '0x') throw new Error('SushiSwap router has no code on this chain');
-  const router = new ethers.Contract(routerAddr, UNISWAP_V2_ABI, provider);
-  const weth = CHAIN_WETH[chainId];
-  if (!weth) throw new Error('SushiSwap: no WETH mapping for this chain');
-  const path = [tokenIn === NATIVE_SENTINEL ? weth : tokenIn, tokenOut === NATIVE_SENTINEL ? weth : tokenOut];
-  const amounts = await router.getAmountsOut(amountIn, path);
-  return { amounts, router: routerAddr, path };
 }
 
 // ── get quote — AUTO-ROUTE or user-selected router ──
@@ -400,30 +380,31 @@ export async function getSwapQuote() {
         const outAmount = BigInt(quoteData.routeSummary.amountOut ?? '0');
         return { source: 'KyberSwap', built, routerAddress: built.routerAddress, outAmount };
       }
-      case '1inch': {
-        if (!globalThis.__ONEINCH_API_KEY) throw new Error('no API key');
-        const built = await oneinchBuild(net.chainId, tokenIn, tokenOut, amountInWei, userAddr, slippageBps);
-        return { source: '1inch', built: { data: built.data, routerAddress: built.routerAddress }, outAmount: BigInt(built.amountOut) };
-      }
-      case 'paraswap': {
-        const result = await paraswapQuote(net.chainId, tokenIn, tokenOut, amountInWei, userAddr, slippageBps);
-        return { source: 'ParaSwap', built: { data: result.data, routerAddress: result.routerAddress }, outAmount: result.amountOut };
-      }
-      case 'sushiswap': {
-        const v2 = await sushiswapQuote(net.chainId, tokenIn, tokenOut, amountInWei);
+      default: {
+        // Every on-chain venue goes through the same two builders, chosen by the
+        // abi field the registry carries. A venue with no builder of its own
+        // cannot be selected at all, which is why the registry only lists ones
+        // that can be executed.
+        const entry = SWAP_ROUTERS.find((r) => r.id === id);
+        if (!entry) throw new Error('unknown router: ' + id);
+        if (entry.type !== 'dex') throw new Error(`${entry.name} is not an on-chain route here`);
+        const min = (out) => (out * (10000n - BigInt(slippageBps))) / 10000n;
+        if (entry.abi === 'v3') {
+          const v3 = await v3Quote(entry.id, net.chainId, tokenIn, tokenOut, amountInWei);
+          return {
+            source: entry.name,
+            uniswap: { kind: 'v3', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin: min(v3.amountOut), fee: v3.fee, router: v3.router },
+            outAmount: v3.amountOut,
+          };
+        }
+        const v2 = await v2Quote(entry.id, net.chainId, tokenIn, tokenOut, amountInWei);
         const outAmount = v2.amounts[v2.amounts.length - 1];
-        return { source: 'SushiSwap', uniswap: { kind: 'v2', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin: (outAmount * (10000n - BigInt(slippageBps))) / 10000n, router: v2.router }, outAmount };
+        return {
+          source: entry.name,
+          uniswap: { kind: 'v2', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin: min(outAmount), router: v2.router },
+          outAmount,
+        };
       }
-      case 'uniswap_v3': {
-        const v3 = await uniswapV3Quote(net.chainId, tokenIn, tokenOut, amountInWei);
-        return { source: 'Uniswap V3', uniswap: { kind: 'v3', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin: (v3.amountOut * (10000n - BigInt(slippageBps))) / 10000n, fee: v3.fee, router: v3.router }, outAmount: v3.amountOut };
-      }
-      case 'uniswap_v2': {
-        const v2 = await uniswapV2Quote(net.chainId, tokenIn, tokenOut, amountInWei);
-        const outAmount = v2.amounts[v2.amounts.length - 1];
-        return { source: 'Uniswap V2', uniswap: { kind: 'v2', chainId: net.chainId, tokenIn, tokenOut, amountIn: amountInWei, amountOutMin: (outAmount * (10000n - BigInt(slippageBps))) / 10000n, router: v2.router }, outAmount };
-      }
-      default: throw new Error('unknown router: ' + id);
     }
   }
 
@@ -431,7 +412,22 @@ export async function getSwapQuote() {
   function showResult(result) {
     const outFormatted = ethers.formatUnits(result.outAmount, toDecimals);
     const rate = parseFloat(outFormatted) / parseFloat(amt);
-    const quoteData = { simulated: false, ...result };
+    // Stamp what this quote was actually BUILT for. The sign dialog renders
+    // whatever is in the amount field at the time it opens, while the executed
+    // calldata comes from this snapshot — so without a binding between them a
+    // user could confirm "5 ETH" and have the router spend 100: the old
+    // amountIn, silently, with the dialog vouching for the new one.
+    let amountInWei = null;
+    try { amountInWei = ethers.parseUnits(amt || '0', fromDecimals).toString(); } catch { amountInWei = null; }
+    const quoteData = {
+      simulated: false,
+      amountInWei,
+      fromToken: from,
+      toToken: to,
+      chainId: Number(getNetworkById(get('networkId'))?.chainId || 0),
+      slippageBps: Math.round(parseFloat(slippage || 0.5) * 100),
+      ...result,
+    };
     delete quoteData.outAmount;
     set('swapQuote', quoteData);
     $('#swapToAmount').value = outFormatted;
@@ -448,13 +444,20 @@ export async function getSwapQuote() {
     } catch (e) {
       set('swapQuote', null);
       $('#swapToAmount').value = '';
-      quoteBox.innerHTML = `<div class="quote-error">⚠️ ${escapeHtml(selectedRouter)} failed: ${escapeHtml(e.message)}</div>`;
+      console.warn(`[BearTool] quote via ${selectedRouter} failed:`, e);
+      quoteBox.innerHTML = `<div class="quote-error">⚠️ ${escapeHtml(explainError(e, `Quoting via ${selectedRouter}`))}</div>`;
       return;
     }
   }
 
   // AUTO mode: try all routers in priority order
-  const routerOrder = ['kyberswap', '1inch', 'paraswap', 'sushiswap', 'uniswap_v3', 'uniswap_v2'];
+  // Derived, not a hand-written list: a router added to the registry is tried
+  // here automatically, and a router removed from it cannot linger in this array.
+  // Aggregators first — they route across venues and usually price better.
+  const routerOrder = SWAP_ROUTERS.map((r) => r.id).filter((id) => {
+    const e = SWAP_ROUTERS.find((r) => r.id === id);
+    return e && e.chains.includes(Number(net.chainId));
+  });
   for (const id of routerOrder) {
     try {
       const result = await tryRouter(id);
@@ -482,6 +485,27 @@ export async function doSwap() {
   const quote = get('swapQuote');
   if (!quote) return toast('Get a quote first', 'error');
 
+  // The quote is a snapshot of one specific amount, token pair and chain, and
+  // the calldata that will be sent was built from that snapshot. The field can
+  // have moved on since — a 20% button, a paste, a swap of the token select —
+  // and then the dialog would vouch for an amount the transaction does not use.
+  // Refuse and make it re-quote rather than sign something else.
+  const fromDecimals = from === 'native' ? 18 : (tokenInfo(from)?.decimals ?? 18);
+  let wantWei = null;
+  try { wantWei = ethers.parseUnits(amt, fromDecimals).toString(); } catch { wantWei = null; }
+  if (quote.amountInWei == null || quote.amountInWei !== wantWei) {
+    return toast('Quote is stale — waiting for a fresh one', 'error');
+  }
+  if (quote.fromToken && quote.fromToken !== from) {
+    return toast('Quote is for a different token — re-quote', 'error');
+  }
+  if (quote.chainId && quote.chainId !== Number(net.chainId)) {
+    return toast('Quote is from another network — re-quote', 'error');
+  }
+  // Show the slippage the route was actually built with, not a default that
+  // was never wired to the active button.
+  const slipPct = (quote.slippageBps ?? 50) / 100;
+
   if (net.type === 'mainnet') {
     const ok = await confirmTx({
       title: 'MAINNET SWAP!',
@@ -499,7 +523,7 @@ export async function doSwap() {
       { k: 'From', v: `${amt} ${from}` },
       { k: 'To', v: `→ ${to}` },
       { k: 'Router', v: quote.source || 'Auto' },
-      { k: 'Slippage', v: `${get('slippage') || 0.5}%` }
+      { k: 'Slippage', v: `${slipPct}%` }
     ],
     confirmText: 'Sign & Swap',
     cancelText: 'Cancel Sign',
@@ -525,7 +549,14 @@ export async function doSwap() {
       const allowance = await c.allowance(userAddr, router);
       if (allowance < amountWei) {
         toast('Approving token...', 'info');
-        const txApprove = await c.approve(router, ethers.MaxUint256);
+        // The exact amount, not MaxUint256. An unlimited approval is permanent:
+        // the router keeps the right to pull the whole balance for as long as it
+        // holds, so a bug or a compromise in the router — or in anything that
+        // gets its calldata from there — can drain every future deposit into
+        // this token, with no second prompt. Approving amountWei limits the
+        // exposure to this one swap. The trade-off is a second approval once
+        // the allowance is spent, which is the correct order of those two costs.
+        const txApprove = await withTimeout(c.approve(router, amountWei), BROADCAST_TIMEOUT_MS, 'approve broadcast');
         const { timedOut: approveTimedOut } = await waitForReceipt(txApprove, { timeoutMs: 90000, label: 'approve confirmation' });
         if (approveTimedOut) {
           toast('Approve sent but not confirmed in time. Re-open Swap and try again once it lands.', 'info');
@@ -537,17 +568,17 @@ export async function doSwap() {
     let tx;
     if (quote.built) {
       // KyberSwap aggregator route
-      tx = await signer.sendTransaction({
+      tx = await withTimeout(signer.sendTransaction({
         to: quote.built.routerAddress,
         data: quote.built.data,
         value: from === 'native' ? ethers.parseEther(amt) : 0n,
-      });
+      }), BROADCAST_TIMEOUT_MS, 'swap broadcast');
     } else if (quote.uniswap.kind === 'v3') {
       const u = quote.uniswap;
-      tx = await uniswapV3Swap(signer, u.chainId, u.tokenIn, u.tokenOut, u.amountIn, u.amountOutMin, userAddr, u.fee);
+      tx = await uniswapV3Swap(signer, u.router, u.tokenIn, u.tokenOut, u.amountIn, u.amountOutMin, userAddr, u.fee);
     } else {
       const u = quote.uniswap;
-      tx = await uniswapV2Swap(signer, u.chainId, u.tokenIn, u.tokenOut, u.amountIn, u.amountOutMin, userAddr);
+      tx = await uniswapV2Swap(signer, u.router, u.tokenIn, u.tokenOut, u.amountIn, u.amountOutMin, userAddr);
     }
     toast('Swap tx sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'swap', status: 'pending', ts: Date.now(), detail: `${amt} ${from} → ${to}` });
@@ -571,58 +602,85 @@ export async function doSwap() {
 // ── Uniswap V2: getAmountsOut quote ──
 // Honest guard: the router must have code on this chain, else it is
 // skipped (a hardcoded address with no contract must never be used).
-export async function uniswapV2Quote(chainId, tokenIn, tokenOut, amountIn) {
-  const routerAddr = UNISWAP_V2_ROUTER[chainId];
-  if (!routerAddr) throw new Error('Uniswap V2 not available on this chain');
+// Generic Uniswap-V2-family quote. The registry says which chains each router is
+// deployed on, and the router itself is asked for its wrapped-native token —
+// so adding a V2 fork is one registry entry, not another hardcoded WETH list.
+export async function v2Quote(routerId, chainId, tokenIn, tokenOut, amountIn) {
+  const routerAddr = getRouterAddress(routerId, chainId);
+  if (!routerAddr) throw new Error(`${routerId} is not deployed on chain ${chainId}`);
   const provider = get('provider');
   const code = await provider.getCode(routerAddr);
-  if (!code || code === '0x') throw new Error('Uniswap V2 router has no code on this chain');
+  if (!code || code === '0x') throw new Error(`${routerId} router has no code on chain ${chainId}`);
   const router = new ethers.Contract(routerAddr, UNISWAP_V2_ABI, provider);
+  // Ask the contract rather than trusting a local table: if the router is not a
+  // V2 fork this reverts, which is the honest failure, instead of quoting a path
+  // through an address that does not implement the interface.
   const weth = await router.WETH();
-  const path = [tokenIn === NATIVE_SENTINEL ? weth : tokenIn,
-                 tokenOut === NATIVE_SENTINEL ? weth : tokenOut];
+  const inAddr = tokenIn === NATIVE_SENTINEL ? weth : tokenIn;
+  const outAddr = tokenOut === NATIVE_SENTINEL ? weth : tokenOut;
+  // Native and wrapped native are the same asset, and the token picker offers
+  // both. Quoting ETH→WETH resolves to [WETH, WETH] and the router answers
+  // IDENTICAL_ADDRESSES — a raw revert that reaches the user as a failed quote
+  // for a perfectly ordinary request. Found by tests/fork/fork-swap-app.test.js,
+  // which asked for the third direction and came back with one token twice.
+  //
+  // Say it in the user's terms instead of letting the router speak. Wrapping and
+  // unwrapping are free and one-for-one, so there is no price to quote and
+  // nothing to route.
+  if (String(inAddr).toLowerCase() === String(outAddr).toLowerCase()) {
+    const label = tokenIn === NATIVE_SENTINEL ? 'the native coin and its wrapped form'
+      : tokenOut === NATIVE_SENTINEL ? 'its wrapped form and the native coin'
+      : 'both tokens';
+    throw new Error(`${label} are the same asset — pick a different token. Wrapping or unwrapping costs nothing and needs no route.`);
+  }
+  const path = [inAddr, outAddr];
   const amounts = await router.getAmountsOut(amountIn, path);
   return { amounts, router: routerAddr, path };
 }
 
 // ── Uniswap V3: exactInputSingle quote (via provider call) ──
 // Tries common fee tiers (3000 → 500 → 10000) until one quotes.
-export async function uniswapV3Quote(chainId, tokenIn, tokenOut, amountIn, fee = 3000) {
-  const quoterAddr = UNISWAP_QUOTER_V3[chainId];
-  if (!quoterAddr) throw new Error('Uniswap V3 Quoter not available on this chain');
+// Generic V3 quote. Router and quoter are separate deployments and they are not
+// deployed on the same chains — QuoterV2 (CREATE2) exists on Base while
+// SwapRouter02 does not — so both are looked up per chain and the entry is only
+// listed for chains where the ROUTER answers. A quoter without a router quotes a
+// swap that cannot be sent.
+export async function v3Quote(routerId, chainId, tokenIn, tokenOut, amountIn, fee = 3000) {
+  const quoterAddr = getQuoterAddress(routerId, chainId);
+  const routerAddr = getRouterAddress(routerId, chainId);
+  if (!quoterAddr || !routerAddr) throw new Error(`${routerId} is not available on chain ${chainId}`);
   const provider = get('provider');
-  const code = await provider.getCode(quoterAddr);
-  if (!code || code === '0x') throw new Error('Uniswap V3 Quoter has no code on this chain');
-  // QuoterV2 ABI (minimal for quoteExactInputSingle)
+  const qcode = await provider.getCode(quoterAddr);
+  if (!qcode || qcode === '0x') throw new Error(`${routerId} quoter has no code on chain ${chainId}`);
+  const rcode = await provider.getCode(routerAddr);
+  if (!rcode || rcode === '0x') throw new Error(`${routerId} router has no code on chain ${chainId}`);
+
   const quoterABI = [
     'function quoteExactInputSingle(tuple(address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96) params) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
   ];
   const quoter = new ethers.Contract(quoterAddr, quoterABI, provider);
-  const weth = CHAIN_WETH[chainId];
-  if (!weth) throw new Error('Uniswap V3: no native token mapping for this chain');
+  const router = new ethers.Contract(routerAddr, UNISWAP_V3_ABI, provider);
+  let weth = null;
+  try { weth = await router.WETH9(); } catch { /* fall through to the table */ }
+  if (!weth) weth = CHAIN_WETH[chainId];
+  if (!weth) throw new Error(`${routerId}: no wrapped-native token on chain ${chainId}`);
+
   const fees = [fee, 500, 10000, 100];
   let lastErr;
   for (const f of fees) {
     try {
-      const params = {
+      const result = await quoter.quoteExactInputSingle({
         tokenIn: tokenIn === NATIVE_SENTINEL ? weth : tokenIn,
         tokenOut: tokenOut === NATIVE_SENTINEL ? weth : tokenOut,
-        amountIn,
-        fee: f,
-        sqrtPriceLimitX96: 0,
-      };
-      const result = await quoter.quoteExactInputSingle(params);
-      return { amountOut: result.amountOut, router: UNISWAP_V3_ROUTER[chainId], fee: f };
-    } catch (e) {
-      lastErr = e;
-    }
+        amountIn, fee: f, sqrtPriceLimitX96: 0,
+      });
+      return { amountOut: result.amountOut, router: routerAddr, fee: f };
+    } catch (e) { lastErr = e; }
   }
-  throw lastErr || new Error('Uniswap V3: no pool for any fee tier');
+  throw lastErr || new Error(`${routerId}: no pool for any fee tier`);
 }
 
-// ── Uniswap V2: execute swap ──
-export async function uniswapV2Swap(signer, chainId, tokenIn, tokenOut, amountIn, amountOutMin, to, deadline) {
-  const routerAddr = UNISWAP_V2_ROUTER[chainId];
+export async function uniswapV2Swap(signer, routerAddr, tokenIn, tokenOut, amountIn, amountOutMin, to, deadline) {
   const router = new ethers.Contract(routerAddr, UNISWAP_V2_ABI, signer);
   const weth = await router.WETH();
   const path = [tokenIn === NATIVE_SENTINEL ? weth : tokenIn,
@@ -638,11 +696,12 @@ export async function uniswapV2Swap(signer, chainId, tokenIn, tokenOut, amountIn
 }
 
 // ── Uniswap V3: execute swap ──
-export async function uniswapV3Swap(signer, chainId, tokenIn, tokenOut, amountIn, amountOutMin, to, fee = 3000) {
-  const routerAddr = UNISWAP_V3_ROUTER[chainId];
+export async function uniswapV3Swap(signer, routerAddr, tokenIn, tokenOut, amountIn, amountOutMin, to, fee = 3000) {
   const router = new ethers.Contract(routerAddr, UNISWAP_V3_ABI, signer);
-  const weth = CHAIN_WETH[chainId];
-  if (!weth) throw new Error('Uniswap V3: no native token mapping for this chain');
+  let weth = null;
+  try { weth = await router.WETH9(); } catch { /* fall through to the table */ }
+  if (!weth) weth = CHAIN_WETH_BY_ROUTER[routerAddr];
+  if (!weth) throw new Error('V3 route: no wrapped-native token known for this router');
   const params = {
     tokenIn: tokenIn === NATIVE_SENTINEL ? weth : tokenIn,
     tokenOut: tokenOut === NATIVE_SENTINEL ? weth : tokenOut,
@@ -672,26 +731,29 @@ export async function getBestQuote(chainId, tokenIn, tokenOut, amountIn) {
   } else {
     errors.push('KyberSwap: chain not supported');
   }
-  // 2. Try Uniswap V3
-  try {
-    const v3 = await uniswapV3Quote(chainId, tokenIn, tokenOut, amountIn);
-    return { source: 'Uniswap V3', data: v3, simulated: false };
-  } catch (e) { errors.push(`Uniswap V3: ${e.message}`); }
-  // 3. Try Uniswap V2
-  try {
-    const v2 = await uniswapV2Quote(chainId, tokenIn, tokenOut, amountIn);
-    const outAmount = v2.amounts[v2.amounts.length - 1];
-    return { source: 'Uniswap V2', data: { ...v2, amountOut: outAmount }, simulated: false };
-  } catch (e) { errors.push(`Uniswap V2: ${e.message}`); }
+  // 2. Then every on-chain venue the registry lists for this chain, in order.
+  //    One loop instead of a hand-written ladder, so a new registry entry is
+  //    tried without editing this function.
+  for (const r of getSwapRoutersForChain(chainId)) {
+    if (r.type !== 'dex') continue;
+    try {
+      if (r.abi === 'v3') {
+        const v3 = await v3Quote(r.id, chainId, tokenIn, tokenOut, amountIn);
+        return { source: r.name, data: v3, simulated: false };
+      }
+      const v2 = await v2Quote(r.id, chainId, tokenIn, tokenOut, amountIn);
+      const outAmount = v2.amounts[v2.amounts.length - 1];
+      return { source: r.name, data: { ...v2, amountOut: outAmount }, simulated: false };
+    } catch (e) { errors.push(`${r.name}: ${e.message}`); }
+  }
   // 4. No real route — honest failure.
   throw new Error(`No route available: ${errors.join(' · ')}`);
 }
 
 // ── get supported DEXes for a chain (real only) ──
+// From the registry, so this can no longer claim a venue for a chain where the
+// address has nothing behind it — which is exactly what the old chain-keyed maps
+// did, and why the UI and the executor could disagree.
 export function getSupportedDEXes(chainId) {
-  const dexes = [];
-  if (KYBER_CHAIN_SLUG[chainId]) dexes.push('KyberSwap');
-  if (UNISWAP_V3_ROUTER[chainId]) dexes.push('Uniswap V3');
-  if (UNISWAP_V2_ROUTER[chainId]) dexes.push('Uniswap V2');
-  return dexes;
+  return getSwapRoutersForChain(chainId).map((r) => r.name);
 }
