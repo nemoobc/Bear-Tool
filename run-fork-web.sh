@@ -47,7 +47,14 @@ start_one() {
   [ -n "$line" ] || { echo "unknown network: $n"; return 1; }
   IFS='|' read -r port chain rpc <<< "$line"
   [ -n "${2:-}" ] && rpc="$2"
-  anvil --port "$port" --chain-id "$chain" --fork-url "$rpc" --silent > "$LOG/$n.log" 2>&1 &
+  # --allow-origin is not optional here. This script exists so the WEB UI can
+  # reach these forks, and a browser will not send a JSON-RPC POST until the
+  # CORS preflight succeeds. Without the flag anvil does not answer OPTIONS and
+  # every request from the page fails as "Failed to fetch" — while curl and any
+  # node test keep working, because neither performs a preflight. That asymmetry
+  # is what made this look like a flaky app rather than a missing flag.
+  anvil --port "$port" --chain-id "$chain" --fork-url "$rpc" \
+        --allow-origin '*' --silent > "$LOG/$n.log" 2>&1 &
   echo $! >> "$PIDFILE"
 }
 

@@ -19,3 +19,11 @@ logs/
 
 # verification screenshots produced by the browser-driven audit runs
 shots/
+
+# Browser test harnesses. These are copied into the repo only while a run needs
+# them, they are __-named scaffolding rather than product code, and one of them
+# hardcodes an OpenSea API key. box sync excludes __* from the tarball, so nothing
+# tracked ever carries them.
+__*.html
+__*.mjs
+__*

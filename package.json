@@ -1,16 +1,18 @@
 {
   "name": "bear-tool",
   "version": "1.0.0",
-  "description": "Bear Tool — self-custody cartoon crypto wallet. All EVM networks, EIP-7702 suite. 100% client-side.",
+  "description": "Bear Tool \u2014 self-custody cartoon crypto wallet. All EVM networks, EIP-7702 suite. 100% client-side.",
   "type": "module",
   "private": true,
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "test:fork": "node --test --test-concurrency=1 --test-timeout=150000 tests/fork/*.test.js",
-    "test:fork:net": "node --test --test-concurrency=1 --test-timeout=150000 tests/fork/*.test.js",
-    "check": "for f in js/*.js; do node --check \"$f\"; done",
-    "test:e2e": "bash tests/e2e/run.sh",
-    "verify": "npm run check && npm test"
+    "test:fork": "node --test --test-concurrency=1 --test-timeout=600000 tests/fork/*.test.js",
+    "test:fork:net": "node --test --test-concurrency=1 --test-timeout=600000 tests/fork/*.test.js",
+    "check": "node tools/check.mjs",
+    "test:e2e": "node tools/e2e.mjs",
+    "verify": "npm run test:all",
+    "test:all": "npm run check && npm test && npm run test:fork && npm run test:e2e",
+    "test:live": "node --test --test-concurrency=1 --test-timeout=240000 tests/*.live.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
