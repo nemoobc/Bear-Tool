@@ -193,7 +193,9 @@ test('a wallet created here can be funded and can send value', { skip }, async (
   const { ethers: E } = globalThis;
   clearKeystore();
   const w = await createWallet(PW, 'On chain');
-  const signer = await unlockWallet(PW);
+  // unlockWallet hands back a key-only Wallet (provider binding is the
+  // caller's job, exactly as app flows do). sendTransaction needs the fork.
+  const signer = (await unlockWallet(PW)).connect(provider);
 
   t.diagnostic(`wallet baru: ${w.address}`);
 
