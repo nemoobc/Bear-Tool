@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Bear Tool</string>
+    <string name="title_activity_main">Bear Tool</string>
+    <string name="package_name">com.nemoobc.beartool</string>
+    <string name="custom_url_scheme">com.nemoobc.beartool</string>
+</resources>

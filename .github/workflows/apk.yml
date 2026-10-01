@@ -1,0 +1,74 @@
+name: Android APK
+
+# Build the Capacitor Android app — min/target SDK 33 (Android 13), compile 36.
+# Icon/splash rasterization runs here because sharp has no Termux prebuilt.
+# Lessons applied from the previous project: setup-android@v4 (v3 dies on the
+# removed sdkmanager "tools" package), JDK 21 (Capacitor 8).
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'android/**'
+      - 'js/**'
+      - 'css/**'
+      - 'assets/**'
+      - 'index.html'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tools/make-assets.mjs'
+      - '.github/workflows/apk.yml'
+  workflow_dispatch:
+
+jobs:
+  apk:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install platform android-36 + build-tools
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Rasterize bear assets (icon + splash)
+        run: node tools/make-assets.mjs
+
+      - name: Generate Android res from assets
+        run: npx @capacitor/assets generate --android --assetPath resources --iconBackgroundColor '#1a1a2e' --splashBackgroundColor '#1a1a2e'
+
+      - name: Build www/ and sync to the Android project
+        run: |
+          mkdir -p www
+          cp index.html www/
+          cp -r css js assets www/
+          npx cap sync android
+
+      - name: Gradle assembleDebug
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bear-tool-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
