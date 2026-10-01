@@ -15,11 +15,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 import { setMoneyRate, fmtUsd, usdToDisplay, moneyCurrency } from '../js/ui.js';
 
 const price = readFileSync(new URL('../js/price.js', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-const settings = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const settings = appSource();
 
 test('fmtUsd converts and takes the right symbol', () => {
   // Computed, not hand-written. A hardcoded expected figure is a second thing to

@@ -12,15 +12,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 
-const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+// Halaman = index.html + section view (M2: src/views/*.jsx).
+const html = appSource();
 const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 const sec = readFileSync(new URL('../js/security-center.js', import.meta.url), 'utf8');
 
 /** The markup of one <section class="view">, by id. */
 function view(id) {
   const at = html.indexOf(`id="view-${id}"`);
-  assert.ok(at > -1, `view-${id} must exist in index.html`);
+  assert.ok(at > -1, `view-${id} must exist in the page markup (index.html + src/views)`);
   const end = html.indexOf('</section>', at);
   return html.slice(at, end);
 }

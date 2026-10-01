@@ -10,11 +10,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { appSource } from './helpers/app-source.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const css = read('css/cartoon.css');
-const html = read('index.html');
+// Halaman = index.html + semua section view (M2 pindah ke src/views/*.jsx).
+const html = appSource();
 const app = read('js/app.js');
 const ui = read('js/ui.js');
 
@@ -89,7 +91,7 @@ function ancestorOf(markup, id) {
 test('the MAX note is a sibling of the button row, not a flex child of it', () => {
   for (const id of ['sendMaxNote', 'swapMaxNote', 'bridgeMaxNote']) {
     const parent = ancestorOf(bareHtml, id);
-    assert.ok(parent, `${id} must exist in index.html`);
+    assert.ok(parent, `${id} must exist in the page markup (index.html + src/views)`);
     assert.ok(!/pct-btns|input-row|amount-row/.test(parent),
       `${id} is inside "${parent}" — that is a flex row, so the note renders ` +
       `beside the buttons at a few px wide instead of under them`);

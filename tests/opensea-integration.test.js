@@ -5,9 +5,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 
 const appSrc = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-const htmlSrc = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+// Halaman = index.html + section view (M2: src/views/*.jsx).
+const htmlSrc = appSource();
 
 test('integration: app.js imports opensea-api module', () => {
   assert.match(appSrc, /from ['"]\.\/opensea-api\.js['"]/);
@@ -33,7 +35,7 @@ test('integration: refreshView handles the Tools view (EIP-7702 + OpenSea)', () 
   assert.doesNotMatch(appSrc, /if \(view === 'nft'\)\s*\{[^}]*bindOpenSeaPanel/,
     'the OpenSea panel must not bind on the NFT view');
 });
-test('integration: index.html has the Tools view with the OpenSea panel', () => {
+test('integration: page has the Tools view with the OpenSea panel', () => {
   assert.match(htmlSrc, /id="view-deploy"/);
   assert.match(htmlSrc, /id="openSeaPrice"/);
 });
@@ -48,13 +50,13 @@ test('integration: the OpenSea panel is in the Tools view, not the NFT view', ()
   assert.doesNotMatch(nft, /id="openSeaPanel"/, 'OpenSea must not be in the NFT view');
   assert.match(nft, /id="nftList"/, 'the NFT gallery must still be there');
 });
-test('integration: index.html has OpenSea panel with WL button', () => {
+test('integration: page has OpenSea panel with WL button', () => {
   assert.match(htmlSrc, /id="btnCheckWL"/);
 });
-test('integration: index.html has Accept Top Offer button', () => {
+test('integration: page has Accept Top Offer button', () => {
   assert.match(htmlSrc, /id="btnAcceptTopOffer"/);
 });
-test('integration: index.html has OpenSea status display', () => {
+test('integration: page has OpenSea status display', () => {
   assert.match(htmlSrc, /id="openSeaStatus"/);
 });
 test('integration: loadDashboard calls renderAssets', () => {

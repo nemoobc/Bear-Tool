@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { appSource } from './helpers/app-source.mjs';
 
 // This is an ES module, so there is no __dirname. Define it from import.meta.url
 // — and via fileURLToPath, not .pathname, which on Windows comes back as
@@ -143,7 +144,8 @@ test('deploy: real solc compiles every template to real bytecode', { skip: proce
 
 test('tools: "deploy the helper first" is explicit, real, and bounded', () => {
   const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
-  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  // Halaman = index.html + section view (M2: src/views/*.jsx).
+  const html = appSource();
   // The helper-status card lives in the Tools view, ABOVE the flows that need
   // it. It used to be sliced out of a separate #view-eip7702 section; that view
   // is gone now — the EIP-7702 suite was merged into #view-deploy so there is a

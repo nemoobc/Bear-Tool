@@ -10,8 +10,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 
-const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+// Halaman = index.html + section view (M2: src/views/*.jsx) — supaya setiap
+// data-i18n key di markup, termasuk yang pindah ke src/views, tetap dicek.
+const html = appSource();
 const src = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
 
 // The table is two objects; the Indonesian one starts at its `id:` marker.

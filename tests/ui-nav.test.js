@@ -7,8 +7,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 
-const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+// Halaman = index.html + section view (M2: src/views/*.jsx).
+const html = appSource();
 const nft = fs.readFileSync(new URL('../js/nft.js', import.meta.url), 'utf8');
 const jsApp = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 

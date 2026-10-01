@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { appSource } from './helpers/app-source.mjs';
 
 // ── minimal DOM stub (enough for modules that touch document) ──
 const store = new Map();
@@ -331,10 +332,10 @@ test('E2E-probe: approval scan is honest about its window and has no 10-event ca
   assert.ok(app.includes('scannedFrom'), 'scan window must be tracked and shown');
 });
 
-test('E2E-probe: every $(\'#id\') reference across ALL js files exists in index.html', async () => {
+test('E2E-probe: every $(\'#id\') reference across ALL js files exists in the page markup', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
-  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const html = appSource();
   const htmlIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
   // IDs created dynamically by wallet.js modals/forms — not static HTML.
   // Keep this list honest: an entry for an id nothing creates (or nothing
@@ -383,7 +384,7 @@ test('E2E-probe: every $(\'#id\') reference across ALL js files exists in index.
       if (!htmlIds.has(id) && !dynamicSkip.has(id)) missing.push(`${f}: #${id}`);
     }
   }
-  assert.deepEqual(missing, [], 'every static JS-referenced ID must exist in index.html (null element = innerHTML crash)');
+  assert.deepEqual(missing, [], 'every static JS-referenced ID must exist in the page markup (index.html + src/views) (null element = innerHTML crash)');
 });
 
 test('E2E-probe: runtime-injected ids are really created (dynamicSkip is not a blind pass)', async () => {

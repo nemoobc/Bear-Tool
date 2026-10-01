@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 
 const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 const price = fs.readFileSync(new URL('../js/price.js', import.meta.url), 'utf8');
@@ -64,7 +65,8 @@ test('dashboard: chart awaits are guarded against a closed/reopened modal', () =
 });
 
 // ── Home coin list + duplicate address + Swap/Bridge nav ──────────────────
-const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+// Halaman = index.html + section view (M2: src/views/*.jsx).
+const html = appSource();
 const swap = fs.readFileSync(new URL('../js/swap.js', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
 
@@ -115,7 +117,7 @@ test('password fields span the full width of their field', () => {
 });
 
 test('home: address + copy button are gone — Receive owns the address', () => {
-  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const html = appSource();
   const dash = html.slice(html.indexOf('id="view-dashboard"'), html.indexOf('id="view-send"'));
   assert.doesNotMatch(dash, /copyAddress/, 'copy-address button must be gone from home');
   assert.doesNotMatch(dash, /data-copy=/, 'home must not carry a copy payload');

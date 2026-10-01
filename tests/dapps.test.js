@@ -5,12 +5,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 
 const dappsSrc = readFileSync(new URL('../js/dapps.js', import.meta.url), 'utf8');
 // The browser moved into its own module; the browser assertions below are
 // checked against that file, and the catalogue ones against dapps.js.
 const browserSrc = readFileSync(new URL('../js/dapp-browser.js', import.meta.url), 'utf8');
-const htmlSrc = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+// Halaman = index.html + section view (M2: src/views/*.jsx).
+const htmlSrc = appSource();
 
 test('dapps: exports renderDapps function', () => {
   assert.match(dappsSrc, /export\s+function\s+renderDapps/);
@@ -47,10 +49,10 @@ test('dapps: no old standalone dappFrame id', () => {
 test('dapps: index.html has DApps nav item', () => {
   assert.match(htmlSrc, /data-view="dapps"/);
 });
-test('dapps: index.html has DApps view section', () => {
+test('dapps: page has DApps view section', () => {
   assert.match(htmlSrc, /id="view-dapps"/);
 });
-test('dapps: index.html has DApps container', () => {
+test('dapps: page has DApps container', () => {
   assert.match(htmlSrc, /id="dappsContainer"/);
 });
 

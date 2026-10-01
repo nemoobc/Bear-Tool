@@ -5,13 +5,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 
 const toolsSrc = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
-const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+// Halaman = index.html + section view (M2: src/views/*.jsx).
+const html = appSource();
 
 test('revoke: Tools card has check + revoke controls in HTML', () => {
   for (const id of ['revokeTarget', 'revokeKey', 'btnCheckDelegation', 'btnRevokeDelegation', 'revokeStatus', 'revokeStatusText']) {
-    assert.ok(html.includes(`id="${id}"`), `#${id} must exist in index.html`);
+    assert.ok(html.includes(`id="${id}"`), `#${id} must exist in the page markup (index.html + src/views)`);
   }
 });
 

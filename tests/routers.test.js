@@ -5,11 +5,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 
 const src = readFileSync(new URL('../js/routers.js', import.meta.url), 'utf8');
 const swapSrc = readFileSync(new URL('../js/swap.js', import.meta.url), 'utf8');
 const bridgeSrc = readFileSync(new URL('../js/bridge.js', import.meta.url), 'utf8');
-const htmlSrc = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+// Halaman = index.html + section view (M2: src/views/*.jsx).
+const htmlSrc = appSource();
 
 // ── Router Registry ──
 test('routers: exports SWAP_ROUTERS', () => {
@@ -129,16 +131,16 @@ test('swap.js: auto route order comes from the registry', () => {
 });
 
 // ── HTML has router selectors ──
-test('index.html: swap has router selector', () => {
+test('page: swap has router selector', () => {
   assert.match(htmlSrc, /id="swapRouterSelect"/);
 });
-test('index.html: bridge has router selector', () => {
+test('page: bridge has router selector', () => {
   assert.match(htmlSrc, /id="bridgeRouterSelect"/);
 });
-test('index.html: swap router has auto option', () => {
+test('page: swap router has auto option', () => {
   assert.match(htmlSrc, /value="auto".*Best Price/s);
 });
-test('index.html: bridge router has auto option', () => {
+test('page: bridge router has auto option', () => {
   assert.match(htmlSrc, /value="auto".*Best Route/s);
 });
 

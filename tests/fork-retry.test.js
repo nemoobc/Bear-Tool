@@ -76,3 +76,53 @@ test('withDeadline does not leave its timer running', async () => {
   await new Promise((r) => setTimeout(r, 10));
   assert.ok(true);
 });
+
+test('withDeadline sinks the loser — a late rejection is never unhandled', async () => {
+  // The mechanism behind CI run 36889949127's optimism leg:
+  // `A resource generated asynchronous activity after the test ended` with
+  // `Fork Error: Transport(… 429 …)` on eth_getTransactionReceipt. The race
+  // was decided (the deadline), the losing tx.wait() kept polling, and its
+  // rejection landed on whatever test was running afterwards.
+  const rejections = [];
+  const onRejection = (reason) => rejections.push(reason);
+  process.on('unhandledRejection', onRejection);
+  try {
+    let rejectLoser;
+    const loser = new Promise((_, reject) => { rejectLoser = reject; });
+    await assert.rejects(() => withDeadline(loser, 10, 'bounded wait'), /did not settle/);
+    // The loser settles AFTER the race was decided — exactly the CI sequence.
+    rejectLoser(new Error('Fork Error: Transport(Custom("HTTP error 429 …"))'));
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(rejections.length, 0,
+      `loser yang kalah tidak boleh jadi unhandled rejection: ${rejections.map((e) => e.message).join(' | ')}`);
+  } finally {
+    process.off('unhandledRejection', onRejection);
+  }
+});
+
+test('withRpcRetry classifies the exact transport failures CI hit as retryable', async () => {
+  // Each message below is copied from run 36889949127's logs. If the
+  // classifier drifts, the retry never engages and the leg fails on the first
+  // throttled read again — so the strings themselves are pinned here.
+  const ciShapes = [
+    // run 89, fork-swap.test.js:137 — eth_call WETH() on the V2 router
+    'missing revert data (action="call", data=null, reason=null, code=CALL_EXCEPTION, version=6.17.0)',
+    // run 90, fork-eip7702.test.js:50 — anvil's upstream was rate-limited
+    'could not coalesce error (error={ "code": -32603, "message": "Fork Error: Transport(Custom(\\"Max retries exceeded HTTP error 429 with body: …\\"))" })',
+    'HTTP error 429 with body: {"jsonrpc":"2.0","error":{"code":-32016,"message":"Your IP has exceeded its requests per second capacity"}}',
+  ];
+  for (const msg of ciShapes) {
+    let n = 0;
+    await assert.rejects(() => withRpcRetry(async () => { n++; throw new Error(msg); },
+      { attempts: 3, delayMs: 1 }), undefined, `harus tetap melempar: ${msg.slice(0, 60)}`);
+    assert.equal(n, 3, `harus dicoba 3× (transport): ${msg.slice(0, 60)}`);
+  }
+  // And the boundary: a genuine contract refusal must still fail on the first
+  // attempt, or a broken router would look like flaky RPC.
+  let n = 0;
+  await assert.rejects(() => withRpcRetry(async () => {
+    n++;
+    throw new Error('execution reverted (action="call", reason="UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT")');
+  }, { attempts: 3, delayMs: 1 }));
+  assert.equal(n, 1, 'revert ber-alasan bukan gangguan transport — jangan diulang');
+});

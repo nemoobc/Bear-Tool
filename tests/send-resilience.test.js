@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { withTimeout, waitForReceipt, RPC_TIMEOUT_MS, CONFIRM_TIMEOUT_MS } from '../js/safetx.js';
 import { getNetworkById } from '../js/network.js';
+import { appSource } from './helpers/app-source.mjs';
 
 const read = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
 const jsFiles = fs.readdirSync(new URL('../js', import.meta.url)).filter(f => f.endsWith('.js'));
@@ -130,10 +131,11 @@ test('send.js wires the paste button and the token balance / gas estimate fields
   assert.match(send, /\$\('#gasEstUsd'\)/, 'gasEstUsd must be written to');
 });
 
-test('the ids wired by send.js really exist in index.html', () => {
-  const html = read('index.html');
+test('the ids wired by send.js really exist in the page markup', () => {
+  // Halaman = index.html + section view (M2: src/views/*.jsx).
+  const html = appSource();
   for (const id of ['btnSendPaste', 'sendTokenBalance', 'gasEstValue', 'gasEstUsd', 'sendToken', 'sendTo', 'sendAmount']) {
-    assert.ok(html.includes(`id="${id}"`), `index.html is missing #${id}`);
+    assert.ok(html.includes(`id="${id}"`), `page markup is missing #${id}`);
   }
 });
 

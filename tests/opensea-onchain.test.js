@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { appSource } from './helpers/app-source.mjs';
 
 const apiSrc = readFileSync(new URL('../js/opensea-api.js', import.meta.url), 'utf8');
 
@@ -118,26 +119,27 @@ test('sepolia chain 11155111 in SEAPORT_BY_CHAIN', () => {
 });
 
 // ── HTML: NFT VIEW HAS OPENSEA PANEL ──
-const htmlSrc = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+// Halaman = index.html + section view (M2: src/views/*.jsx).
+const htmlSrc = appSource();
 
-test('index.html: NFT view has OpenSea panel', () => {
+test('page: NFT view has OpenSea panel', () => {
   assert.match(htmlSrc, /id="openSeaPanel"/);
 });
 
-test('index.html: has Check WL button', () => {
+test('page: has Check WL button', () => {
   assert.match(htmlSrc, /id="btnCheckWL"/);
 });
 
-test('index.html: WL check has a wallet address field', () => {
+test('page: WL check has a wallet address field', () => {
   assert.match(htmlSrc, /id="openSeaWlAddress"/);
   assert.match(htmlSrc, /openSeaWlAddress[\s\S]{0,200}wallet aktif/, 'placeholder should hint the active-wallet fallback');
 });
 
-test('index.html: has Accept Top Offer button', () => {
+test('page: has Accept Top Offer button', () => {
   assert.match(htmlSrc, /id="btnAcceptTopOffer"/);
 });
 
-test('index.html: has OpenSea status element', () => {
+test('page: has OpenSea status element', () => {
   assert.match(htmlSrc, /id="openSeaStatus"/);
 });
 
