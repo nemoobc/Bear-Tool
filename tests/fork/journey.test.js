@@ -236,10 +236,12 @@ test('a wallet created here can be funded and can send value', { skip }, async (
     return bal;
   };
   assert.equal(await poll(dest, amount), amount, 'tujuan tidak menerima dana');
-  const expectLeft = fund - amount - BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice);
+  // ethers v6 renamed the receipt field: effectiveGasPrice no longer exists on
+  // TransactionReceipt (undefined → BigInt() throws); gasPrice is it.
+  const expectLeft = fund - amount - BigInt(r.gasUsed) * BigInt(r.gasPrice);
   assert.equal(await poll(w.address, expectLeft), expectLeft,
     'sisa saldo tidak sesuai dengan yang dikirim dikurangi gas');
-  t.diagnostic(`wallet baru mengirim ${E.formatEther(amount)} ETH, gas ${E.formatEther(BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice))} ETH`);
+  t.diagnostic(`wallet baru mengirim ${E.formatEther(amount)} ETH, gas ${E.formatEther(BigInt(r.gasUsed) * BigInt(r.gasPrice))} ETH`);
 
   // The anvil-funded account and the created wallet are different actors; if the
   // test ever silently substituted one for the other, the whole journey would be

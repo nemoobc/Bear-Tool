@@ -233,11 +233,11 @@ for (const venue of VENUES) {
     t.diagnostic(`leg3: tx=${r3.hash} status=${r3.status} gasUsed=${r3.gasUsed} ` +
       `logs=${r3.logs.length} nativeΔ=${after3 - before3} ` +
       `wethΔ=${wethAfter3 - gotWeth} usdcΔ=${usdcAfter3 - gotUsdc}`);
-    // Explicit BigInt on both. A receipt that has crossed a JSON boundary reports
-    // gasUsed and effectiveGasPrice as strings, and string * BigInt is the
-    // "Cannot mix BigInt and other types" this assertion threw — an error about
-    // types where a number was wanted, from a test about balances.
-    const gasCost = BigInt(r3.gasUsed) * BigInt(r3.effectiveGasPrice ?? 0);
+    // Explicit BigInt, and the RIGHT FIELD: ethers v6 renamed receipt
+    // effectiveGasPrice → gasPrice (the old name is undefined here — the
+    // `?? 0` below used to turn every gasCost into a silent 0, making this a
+    // gross-balance assert while claiming to be net-of-gas).
+    const gasCost = BigInt(r3.gasUsed) * BigInt(r3.gasPrice);
     assert.ok(after3 + gasCost > before3,
       `token→native tidak mengembalikan native: saldo ${before3} → ${after3}, gas ${gasCost}`);
     t.diagnostic(`${venue.label} arah 3: native kembali ${(Number(after3 + gasCost - before3) / 1e18).toFixed(8)} setelah gas ${(Number(gasCost) / 1e18).toFixed(8)}`);
