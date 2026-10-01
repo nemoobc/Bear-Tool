@@ -237,6 +237,19 @@ for (const venue of VENUES) {
       `routerEth=${await provider.getBalance(q3.router)} ` +
       `logs=${r3.logs.map((l) => `${l.address.slice(0, 8)}:${String(l.topics[0] || '').slice(0, 10)}`).join('|')} ` +
       `nativeΔ=${after3 - before3} wethΔ=${wethAfter3 - gotWeth} usdcΔ=${usdcAfter3 - gotUsdc}`);
+    // What the ROUTER received, off the wire, plus raw vs ethers balance —
+    // arithmetic says credit=0 exactly while the receipt's gas lines up to the
+    // wei, so either the ETH went to an address this test is not watching or
+    // the balance read is lying. This distinguishes the two.
+    try {
+      const wire = await provider.getTransaction(r3.hash);
+      const dec = new E.Interface(['function swapExactTokensForETH(uint256,uint256,address[],address,uint256)'])
+        .parseTransaction({ data: wire.data });
+      const rawSigner = await provider.send('eth_getBalance', [ANVIL_ACCOUNT]);
+      const rawRouter = await provider.send('eth_getBalance', [q3.router]);
+      t.diagnostic(`leg3 wire: value=${wire.value} toParam=${dec.args[3]} signerRaw=${rawSigner} ` +
+        `signerEthers=${await provider.getBalance(ANVIL_ACCOUNT)} routerEthRaw=${rawRouter}`);
+    } catch (e) { t.diagnostic(`leg3 wire: decode failed: ${e.message}`); }
     // Explicit BigInt, and the RIGHT FIELD: ethers v6 renamed receipt
     // effectiveGasPrice → gasPrice (the old name is undefined here — the
     // `?? 0` below used to turn every gasCost into a silent 0, making this a

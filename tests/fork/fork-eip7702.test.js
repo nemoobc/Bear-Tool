@@ -54,7 +54,15 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   // 1) deploy the batch helper
   const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
   const factory = new ethers.ContractFactory(abi, bytecode, signer);
-  const helper = await factory.deploy();
+  // Explicit gasLimit: eth_estimateGas for this CREATE answers
+  // "missing revert data data=null" on the optimism legs (every wave; also
+  // optimism-sepolia in the last one) while the same ContractFactory pattern
+  // deploys the ERC-20 fine on those very legs — anvil's estimator choking on
+  // this bytecode against an OP fork, not the helper (its constructor is one
+  // assignment). The real cost is ~600k; 3M leaves room, and if the deploy
+  // itself were broken the SEND below would catch it — which is the point of
+  // this test, delegation executing, not estimation.
+  const helper = await factory.deploy({ gasLimit: 3_000_000 });
   await helper.waitForDeployment();
   const helperAddr = await helper.getAddress();
 
