@@ -26,7 +26,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { startFork, forkSkipReason, knownStable, ANVIL_ACCOUNT, stopFork, waitForTx } from './fork-helper.mjs';
+import { startFork, forkSkipReason, knownStable, ANVIL_ACCOUNT, stopFork, waitForTx, FORK_NETWORKS } from './fork-helper.mjs';
 
 // js/swap.js reads `const { ethers } = globalThis` at module scope, the way it
 // does in the browser where the vendored UMD build has already defined it. Under
@@ -216,15 +216,31 @@ for (const venue of VENUES) {
     assert.equal(q3.path[1].toLowerCase(), weth.toLowerCase(),
       'token→native harus menyelesaikan tujuan ke wrapped native');
     const before3 = await provider.getBalance(ANVIL_ACCOUNT);
+    // The recipient of leg3 is a FRESH address, not ANVIL_ACCOUNT — because
+    // an anvil FORK cannot be trusted to report value credits to its own
+    // prefunded dev accounts. Proven locally (tests/fork/probe-credit2.mjs,
+    // pinned AND unpinned forks): a credit to 0xf39F…/0x7099… never appears in
+    // eth_getBalance — not after a 30s poll, anvil_mine, a follow-up tx, or
+    // anvil_mine×10 — while the gas DEBIT of the same tx applies exactly, and
+    // the identical credit to a fresh address shows up on the first read.
+    // This is the foundry-rs/foundry#4700 family (the suite already dodges it
+    // in fork-send.test.js with a fresh recipient), and it is what CI run
+    // 36889949127 measured as the "impossible" polygon leg3: status=1 with the
+    // balance moving down by exactly the gas cost. The chain is not broken —
+    // the read of a prefunded account is — so the assertion lands on an
+    // address anvil tracks honestly, and the wiring proof comes from the
+    // decoded calldata below (toParam must equal this address).
+    const to3 = E.Wallet.createRandom().address;
     const tx3 = await step(t, 'arah 3 token→native', () => uniswapV2Swap(signer, q3.router, stable, NATIVE, usdcIn,
-      (out3 * 99n) / 100n, ANVIL_ACCOUNT));
+      (out3 * 99n) / 100n, to3));
     const r3 = await waitForTx(tx3, `${venue.label} token→native`);
     assert.equal(r3?.status, 1, `token→native gagal: ${r3?.status}`);
-    // Net of gas, not gross. The same transaction that returns the native balance
-    // also pays for itself, so a raw "balance went up" assertion fails whenever the
-    // returned amount is smaller than the fee — which it was here, by a lot. The
-    // first version of this test asserted the gross number and looked like a broken
-    // unwrap.
+    // The recipient pays no gas in this transaction, so its credit is exact:
+    // the router must have paid the full quoted out3 to `to3`.
+    const recv3 = await provider.getBalance(to3);
+    // The sender pays exactly the gas and nothing else (value=0 swap), so its
+    // net is exact too — and it proves the sender-side accounting that the old
+    // net-of-gas assertion could only approximate.
     const after3 = await provider.getBalance(ANVIL_ACCOUNT);
     const wethAfter3 = await wethC.balanceOf(ANVIL_ACCOUNT);
     const usdcAfter3 = await usdc.balanceOf(ANVIL_ACCOUNT);
@@ -233,31 +249,83 @@ for (const venue of VENUES) {
     // promised, what the receipt says the gas cost, and where the router was
     // told to send the ETH — with each receipt log's emitter and topic.
     t.diagnostic(`leg3: tx=${r3.hash} status=${r3.status} gasUsed=${r3.gasUsed} gasPrice=${r3.gasPrice} ` +
-      `out3=${out3} signer=${await signer.getAddress()} to=${ANVIL_ACCOUNT} ` +
+      `out3=${out3} signer=${await signer.getAddress()} to=${to3} ` +
       `routerEth=${await provider.getBalance(q3.router)} ` +
       `logs=${r3.logs.map((l) => `${l.address.slice(0, 8)}:${String(l.topics[0] || '').slice(0, 10)}`).join('|')} ` +
-      `nativeΔ=${after3 - before3} wethΔ=${wethAfter3 - gotWeth} usdcΔ=${usdcAfter3 - gotUsdc}`);
-    // What the ROUTER received, off the wire, plus raw vs ethers balance —
-    // arithmetic says credit=0 exactly while the receipt's gas lines up to the
-    // wei, so either the ETH went to an address this test is not watching or
-    // the balance read is lying. This distinguishes the two.
+      `recv3=${recv3} nativeΔ=${after3 - before3} wethΔ=${wethAfter3 - gotWeth} usdcΔ=${usdcAfter3 - gotUsdc}`);
+    // The wiring proof, mandatory: the tx on the wire must carry THIS test's
+    // recipient in its to-param. (ethers v6 blanking `data:""` in error renders
+    // — provider.js checkReceipt — is why the raw wire is read here instead of
+    // trusting an error object.)
+    const wire = await provider.getTransaction(r3.hash);
+    const decWire = new E.Interface(['function swapExactTokensForETH(uint256,uint256,address[],address,uint256)'])
+      .parseTransaction({ data: wire.data });
+    assert.equal(String(decWire.args[3]).toLowerCase(), to3.toLowerCase(),
+      'calldata to-param bukan alamat tujuan test — wiring uniswapV2Swap rusak');
+    const rawSigner = await provider.send('eth_getBalance', [ANVIL_ACCOUNT]);
+    const rawRecv = await provider.send('eth_getBalance', [to3]);
+    t.diagnostic(`leg3 wire: value=${wire.value} toParam=${decWire.args[3]} signerRaw=${rawSigner} ` +
+      `signerEthers=${await provider.getBalance(ANVIL_ACCOUNT)} recvRaw=${rawRecv} routerEthRaw=${await provider.send('eth_getBalance', [q3.router])}`);
+    // Full evidence per log: emitter + EVERY topic + data. topics[0] alone
+    // cannot say who the Withdrawal paid or who approved inside a receipt —
+    // that ambiguity is what left CI run 36889949127's polygon leg3
+    // "impossible" instead of explained.
     try {
-      const wire = await provider.getTransaction(r3.hash);
-      const dec = new E.Interface(['function swapExactTokensForETH(uint256,uint256,address[],address,uint256)'])
-        .parseTransaction({ data: wire.data });
-      const rawSigner = await provider.send('eth_getBalance', [ANVIL_ACCOUNT]);
-      const rawRouter = await provider.send('eth_getBalance', [q3.router]);
-      t.diagnostic(`leg3 wire: value=${wire.value} toParam=${dec.args[3]} signerRaw=${rawSigner} ` +
-        `signerEthers=${await provider.getBalance(ANVIL_ACCOUNT)} routerEthRaw=${rawRouter}`);
-    } catch (e) { t.diagnostic(`leg3 wire: decode failed: ${e.message}`); }
+      const iface = new E.Interface([
+        'event Transfer(address indexed from, address indexed to, uint256 value)',
+        'event Approval(address indexed owner, address indexed spender, uint256 value)',
+        'event Withdrawal(address indexed dst, uint256 wad)',
+        'event Deposit(address indexed dst, uint256 wad)',
+        'event Sync(uint112 reserve0, uint112 reserve1)',
+        'event Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)',
+      ]);
+      for (const [i, l] of r3.logs.entries()) {
+        let decoded = '';
+        try { const p = iface.parseLog(l); decoded = p ? `${p.name}(${p.args.join(',')})` : 'unknown-topic'; }
+        catch { decoded = 'undecodable'; }
+        t.diagnostic(`leg3 log#${i}: ${l.address} topics=[${l.topics.join(',')}] data=${l.data} → ${decoded}`);
+      }
+    } catch (e) { t.diagnostic(`leg3 log decode failed: ${e.message}`); }
+    // Receipt in isolation cannot exclude "another tx in the same block spent
+    // the credit". Anvil automines one tx per block — length must be 1.
+    try {
+      const blk = await provider.getBlock(r3.blockNumber, true);
+      t.diagnostic(`leg3 block: n=${r3.blockNumber} txCount=${blk.transactions.length} txs=[${blk.transactions.join(',')}]`);
+    } catch (e) { t.diagnostic(`leg3 block probe failed: ${e.message}`); }
+    // Router code: fork vs live RPC. If they differ, the router on the fork is
+    // not the contract the registry names, and everything downstream —
+    // including a "successful" swap that pays nobody — is suspect.
+    try {
+      const forkCode = await provider.getCode(q3.router);
+      const liveRpc = FORK_NETWORKS[network.name]?.rpc;
+      const rq = await fetch(liveRpc, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getCode', params: [q3.router, 'latest'] }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const rj = await rq.json();
+      const liveCode = rj.result || '0x';
+      const kf = E.keccak256(forkCode), kl = E.keccak256(liveCode);
+      t.diagnostic(`leg3 router code: forkHash=${kf} liveHash=${kl} match=${kf === kl} ` +
+        `forkLen=${forkCode.length} liveLen=${liveCode.length}`);
+    } catch (e) { t.diagnostic(`leg3 router code probe failed: ${e.message}`); }
     // Explicit BigInt, and the RIGHT FIELD: ethers v6 renamed receipt
     // effectiveGasPrice → gasPrice (the old name is undefined here — the
     // `?? 0` below used to turn every gasCost into a silent 0, making this a
     // gross-balance assert while claiming to be net-of-gas).
     const gasCost = BigInt(r3.gasUsed) * BigInt(r3.gasPrice);
-    assert.ok(after3 + gasCost > before3,
-      `token→native tidak mengembalikan native: saldo ${before3} → ${after3}, gas ${gasCost}`);
-    t.diagnostic(`${venue.label} arah 3: native kembali ${(Number(after3 + gasCost - before3) / 1e18).toFixed(8)} setelah gas ${(Number(gasCost) / 1e18).toFixed(8)}`);
+    // Exact, both directions. The old `after3 + gasCost > before3` could not
+    // tell a correct payout from an over-payment, and the recipient side was
+    // not asserted at all — which is precisely how CI run 36889949127's
+    // polygon leg3 slipped through as "impossible". `to3` pays no gas, so its
+    // credit is the quoted out3 to the wei; the signer pays gas and nothing
+    // else (value=0), so its net is -gasCost to the wei.
+    assert.equal(recv3, out3,
+      `router tidak membayar output penuh ke penerima: recv3=${recv3} out3=${out3} (=${out3 - recv3} hilang)`);
+    assert.equal(after3, before3 - gasCost,
+      `saldo pengirim tidak bergerak tepat -gas: sebelum=${before3} sesudah=${after3} gas=${gasCost} Δ=${after3 - (before3 - gasCost)}`);
+    t.diagnostic(`${venue.label} arah 3: penerima +${(Number(recv3) / 1e18).toFixed(8)} (exact out3), ` +
+      `pengirim -gas ${(Number(gasCost) / 1e18).toFixed(8)} (exact)`);
 
     // Reported so a failure above names the venue, the chain and the amounts
     // rather than just "assertion failed".
@@ -299,7 +367,7 @@ test('fork: native↔wrapped is refused with an explanation, not a router revert
     catch (e) { err = e; }
     assert.ok(err, `${label}: seharusnya ditolak, bukan dikuotasi`);
     assert.match(err.message, /same asset|pilih token lain/i,
-      `${label}: pesan tidak menjelaskan者数 alasan — dapat: ${err.message}`);
+      `${label}: pesan tidak menjelaskan alasan — dapat: ${err.message}`);
     assert.doesNotMatch(err.message, /IDENTICAL_ADDRESSES|0x[0-9a-f]{40}/i,
       `${label}: masih meneruskan revert mentah dari router ke user`);
   }

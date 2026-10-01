@@ -5,7 +5,7 @@
 // reason — the app still falls back to the non-7702 path.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFork, compileSource, forkSkipReason, ANVIL_ACCOUNT, ANVIL_KEY, stopFork, waitForTx } from './fork-helper.mjs';
+import { startFork, compileSource, forkSkipReason, ANVIL_ACCOUNT, ANVIL_KEY, stopFork, waitForTx, withRpcRetry } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -63,7 +63,7 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
   // itself were broken the SEND below would catch it — which is the point of
   // this test, delegation executing, not estimation.
   const helper = await factory.deploy({ gasLimit: 3_000_000 });
-  await helper.waitForDeployment();
+  await withRpcRetry(() => helper.waitForDeployment(), { label: '7702 helper deployment receipt' });
   const helperAddr = await helper.getAddress();
 
   // 2) authorize the target EOA to delegate to the helper (EIP-7702)
@@ -89,9 +89,23 @@ test('fork: EIP-7702 delegation → batch call executes through the EOA', { skip
       authorizationList: [authorization],
       data: '0x'
     });
-    receipt = await withDeadline(tx.wait(), 45_000, '7702 tx receipt');
+    // Retried, not just bounded. On the optimism legs CI run 36889949127 saw
+    // this receipt poll come back as `Fork Error: Transport(… 429 … requests
+    // per second capacity …)` from anvil's upstream, which is transport, not a
+    // contract answer: retry it inside the test (per-attempt 45s deadline),
+    // so a throttled read cannot become a late rejection outside the test.
+    receipt = await withRpcRetry(() => tx.wait(), {
+      label: '7702 tx receipt', attempts: 3, delayMs: 3000, timeoutMs: 45_000,
+    });
   } catch (err) {
-    // anvil without EIP-7702 support — honest skip (app falls back)
+    // Honest skip — and ONLY the honest skip. This catch exists because anvil
+    // (or ethers) without type-4 support refuses the send, and the app then
+    // falls back to the non-7702 path. At HEAD it also swallowed a
+    // ReferenceError: `withDeadline` was used here but never imported, so the
+    // test returned BEFORE its first assertion — green while verifying
+    // nothing, which is how CI ran this file for every wave. A programming
+    // error is not an environment: it must fail.
+    if (err instanceof ReferenceError || err instanceof TypeError) throw err;
     return;
   }
   assert.equal(receipt.status, 1, 'type-4 tx must succeed');

@@ -56,10 +56,21 @@ describe('2. HTML STRUCTURE', () => {
     html = readFileSync(join(ROOT, 'index.html'), 'utf8');
   });
 
+  // M2 moved the view markup into src/views/*.jsx — a shell-only check now
+  // compares 0 sections to 0 sections (a gate that cannot fail) and reports
+  // every view as missing. Both views and shell count from here on.
+  const viewSources = () =>
+    readdirSync(join(ROOT, 'src', 'views'))
+      .filter((f) => f.endsWith('.jsx'))
+      .map((f) => readFileSync(join(ROOT, 'src', 'views', f), 'utf8'))
+      .join('\n');
+
   it('section tags balanced', () => {
-    const open = (html.match(/<section/g) || []).length;
-    const close = (html.match(/<\/section>/g) || []).length;
+    const src = html + viewSources();
+    const open = (src.match(/<section/g) || []).length;
+    const close = (src.match(/<\/section>/g) || []).length;
     assert.equal(open, close, `Sections: ${open} open vs ${close} close`);
+    assert.ok(open > 0, 'Sections: 0 open — nothing is being counted');
     log(`✓ ${open} sections balanced`);
   });
 
@@ -67,8 +78,9 @@ describe('2. HTML STRUCTURE', () => {
     // eip7702 view was intentionally removed — its suite lives inside
     // view-deploy (index.html:505). dapps is the tenth view.
     const views = ['dashboard', 'send', 'swap', 'bridge', 'nft', 'dapps', 'approval', 'deploy', 'activity', 'settings'];
+    const src = html + viewSources();
     for (const v of views) {
-      assert.ok(html.includes(`id="view-${v}"`), `Missing view: ${v}`);
+      assert.ok(src.includes(`id="view-${v}"`), `Missing view: ${v}`);
     }
     log(`✓ All 10 views found`);
   });
@@ -424,10 +436,17 @@ describe('7. CROSS-CHECK: NUMBERS vs REALITY', () => {
   });
 
   it('index.html lines reasonable', () => {
-    const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
-    const lines = html.split('\n').length;
-    log(`✓ ${lines} lines in index.html`);
-    assert.ok(lines > 400 && lines < 1100, `HTML lines ${lines} out of expected range`);
+    const shell = readFileSync(join(ROOT, 'index.html'), 'utf8').split('\n').length;
+    const viewFiles = readdirSync(join(ROOT, 'src', 'views')).filter((f) => f.endsWith('.jsx'));
+    const views = viewFiles.reduce(
+      (n, f) => n + readFileSync(join(ROOT, 'src', 'views', f), 'utf8').split('\n').length, 0);
+    log(`✓ ${shell} lines in index.html + ${views} in ${viewFiles.length} React views`);
+    // M2 moved the views out: the SHELL is small (~168), the TOTAL keeps the
+    // ~900 lines the shipped UI grew to. Two drift alarms — a fat shell means
+    // views crept back into index.html, a shrinking total means UI vanished.
+    assert.ok(shell > 80 && shell < 400, `index.html shell ${shell} lines out of expected range`);
+    const total = shell + views;
+    assert.ok(total > 400 && total < 1600, `shell+views ${total} lines out of expected range`);
   });
 
   it('app.js lines reasonable', () => {

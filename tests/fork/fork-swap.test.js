@@ -16,7 +16,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { startFork, forkSkipReason, knownStable, ANVIL_ACCOUNT, stopFork, waitForTx } from './fork-helper.mjs';
+import { startFork, forkSkipReason, knownStable, ANVIL_ACCOUNT, stopFork, waitForTx, withRpcRetry } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 const { SWAP_ROUTERS, getRouterAddress } =
@@ -146,13 +146,18 @@ test('every V2-family venue in the registry has a routable ABI', { skip }, async
       // If the fork is on that chain, prove the contract answers WETH().
       const { provider, network } = await startFork();
       if (Number(network.chainId) !== chain) continue;
-      const c = await provider.getCode(addr);
+      // Both reads go through withRpcRetry: upstream rate limiting (CI run
+      // 36889949127's optimism leg) surfaces as `missing revert data` on a
+      // plain eth_call — the transport-error class this helper retries — and
+      // without the wrapper a throttled RPC fails the whole leg on the first
+      // read instead of the third attempt.
+      const c = await withRpcRetry(() => provider.getCode(addr), { label: `getCode ${r.id}@${chain}` });
       if (!c || c === '0x') {
         t.diagnostic(`${r.name} chain ${chain}: tidak ada kode di chain ini`);
         continue;
       }
       const c2 = new ethers.Contract(addr, V2_ABI, provider);
-      const w = await c2.WETH();
+      const w = await withRpcRetry(() => c2.WETH(), { label: `WETH() ${r.id}@${chain}` });
       assert.match(w, /^0x[0-9a-fA-F]{40}$/, `${r.name} chain ${chain} tidak menjawab WETH()`);
     }
   }

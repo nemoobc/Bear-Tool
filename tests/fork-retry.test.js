@@ -100,8 +100,9 @@ test('withDeadline sinks the loser — a late rejection is never unhandled', asy
   }
 });
 
-test('withRpcRetry classifies the exact transport failures CI hit as retryable', async () => {
-  // Each message below is copied from run 36889949127's logs. If the
+test('withRpcRetry classifies the transport failures CI and the solc download hit as retryable', async () => {
+  // Each message below is copied from run 36889949127's logs, plus the local
+  // `TypeError: terminated` the solc CDN download produced. If the
   // classifier drifts, the retry never engages and the leg fails on the first
   // throttled read again — so the strings themselves are pinned here.
   const ciShapes = [
@@ -110,6 +111,8 @@ test('withRpcRetry classifies the exact transport failures CI hit as retryable',
     // run 90, fork-eip7702.test.js:50 — anvil's upstream was rate-limited
     'could not coalesce error (error={ "code": -32603, "message": "Fork Error: Transport(Custom(\\"Max retries exceeded HTTP error 429 with body: …\\"))" })',
     'HTTP error 429 with body: {"jsonrpc":"2.0","error":{"code":-32016,"message":"Your IP has exceeded its requests per second capacity"}}',
+    // local Termux: the solc CDN connection dropped mid-body (NGHTTP2_STREAM_ERROR)
+    'TypeError: terminated',
   ];
   for (const msg of ciShapes) {
     let n = 0;

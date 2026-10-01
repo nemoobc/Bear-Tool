@@ -33,7 +33,13 @@ globalThis.ethers = ethers;
 export const FORK_NETWORKS = {
   ethereum:          { chainId: 1,      rpc: 'https://ethereum-rpc.publicnode.com',          type: 'mainnet' },
   bsc:               { chainId: 56,     rpc: 'https://bsc-dataseed.binance.org',             type: 'mainnet' },
-  polygon:           { chainId: 137,    rpc: 'https://polygon-bor-rpc.publicnode.com',       type: 'mainnet' },
+  // drpc.org, bukan publicnode: anvil mem-pinning block lalu suite menggiling
+  // beberapa menit, dan publicnode polygon BUKAN arsip — retention singkat +
+  // backend broker 5xx/529 → `historical state ... is not available` muncul
+  // SETELAH pin menua (fork-poly4 lolos 20s → fork-poly5 mati pada run yang
+  // sama-sama benar). Probe 8 kandidat (tests/fork/probe-polygon-rpc.mjs):
+  // hanya drpc.org serve state N-50000 dan 3/3 eth_call stabil.
+  polygon:           { chainId: 137,    rpc: 'https://polygon.drpc.org',                     type: 'mainnet' },
   arbitrum:          { chainId: 42161,  rpc: 'https://arb1.arbitrum.io/rpc',                 type: 'mainnet' },
   optimism:          { chainId: 10,     rpc: 'https://mainnet.optimism.io',                  type: 'mainnet' },
   base:              { chainId: 8453,   rpc: 'https://mainnet.base.org',                     type: 'mainnet' },
@@ -223,18 +229,42 @@ async function startForkLocked(port) {
     // never re-syncs: upstream is touched once, at boot. If the block query
     // fails (rate limit), the flag is skipped and the old behaviour stands.
     let forkBlock = process.env.FORK_BLOCK || '';
-    if (!forkBlock) {
-      try {
-        const rq = await fetch(network.rpc, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
-          signal: AbortSignal.timeout(15000),
-        });
-        const rj = await rq.json();
-        if (rj?.result) forkBlock = String(parseInt(rj.result, 16));
-      } catch { /* leave empty: unfinned, exactly as before */ }
+    // Diagnostic escape hatch: FORK_UNPINNED=1 forces the live-following mode
+    // (the state CI actually failed in) so the two modes can be compared on
+    // the same machine. Deliberate, loud, and never the default.
+    if (process.env.FORK_UNPINNED === '1') {
+      forkBlock = '';
+      process.stderr.write('[fork] FORK_UNPINNED=1 — live-following fork (diagnostic mode)\n');
+    } else if (!forkBlock) {
+      // The pin query is the load-bearing line above, and a single rate-limited
+      // HTTP 429/529 (publicnode, drpc) used to silently drop it — leaving a
+      // live-following fork, the exact mode CI failed in. Retry like every
+      // other RPC call in this helper; only after 3 attempts give up, loudly.
+      for (let a = 1; a <= 3 && !forkBlock; a++) {
+        try {
+          const rq = await fetch(network.rpc, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+            signal: AbortSignal.timeout(15000),
+          });
+          const rj = await rq.json();
+          if (rj?.result) forkBlock = String(parseInt(rj.result, 16));
+          else if (a === 3) process.stderr.write(`[fork] eth_blockNumber empty after ${a} tries: ${JSON.stringify(rj).slice(0, 160)}\n`);
+        } catch (e) {
+          process.stderr.write(`[fork] eth_blockNumber attempt ${a}/3 failed: ${String(e.message).slice(0, 120)}\n`);
+          if (a < 3) await new Promise((r) => setTimeout(r, 1000 * a));
+        }
+      }
     }
+    // The pin is the difference between a frozen fork and one that re-syncs
+    // upstream mid-run — and skipping it is SILENT, which is how CI run
+    // 36889949127 shipped failures while carrying this very code. Make the
+    // decision observable in every run's log: either this fork is pinned to a
+    // block, or the query failed and it is not.
+    process.stderr.write(`[fork] ${network.name}: ` +
+      (forkBlock ? `pinning to block ${forkBlock}` :
+        'NO --fork-block-number pin (eth_blockNumber query failed/empty) — live-following fork') + '\n');
     let started = false;
     for (let attempt = 1; attempt <= 3 && !started; attempt++) {
       const args = [
@@ -243,6 +273,17 @@ async function startForkLocked(port) {
         '--silent',
         '--chain-id', String(network.chainId),
         '--hardfork', 'prague',
+        // Upstream resilience. CI run 36889949127's optimism leg died inside
+        // anvil's own transport ("Max retries exceeded HTTP error 429 … IP has
+        // exceeded its requests per second capacity") and reappeared one run
+        // later as `missing revert data` on an eth_call. Make anvil itself
+        // back off and re-fetch instead of surfacing a dead fork: 8 tries
+        // (default 5) with a 2s initial backoff (default 1s); the per-request
+        // timeout stays anvil's own 45s default — it was measured generous
+        // enough for the slow legs and cutting it would trade one flake for
+        // another.
+        '--retries', '8',
+        '--fork-retry-backoff', '2000',
         // Harmless for the node tests, and it lets the same anvil serve a
         // browser: without it anvil does not answer the CORS preflight, so a
         // page cannot POST JSON-RPC to it even though curl and node can.
@@ -280,7 +321,7 @@ async function startForkLocked(port) {
   // cache returns the pre-funding balance right after anvil_setBalance
   // (journey "funded and can send value" failed on all 12 legs exactly that
   // way, 2026-10-01): test reads must see their own writes.
-  provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`, undefined, { cacheTimeout: -1 });
+  provider = retryingProvider(new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`, undefined, { cacheTimeout: -1 }));
   // NonceManager keeps nonces strictly sequential. Without it, ethers v6
   // queries getTransactionCount per tx and anvil's fork state can lag one
   // block behind → two txs share a nonce → "nonce too low" (flaky).
@@ -328,9 +369,20 @@ async function loadSolc() {
   if (file) {
     code = fs.readFileSync(file, 'utf8');
   } else {
-    const res = await fetch(solcJs.SOLC_URL);
-    if (res.status !== 200) throw new Error('compiler download failed: ' + res.status);
+    // No local compiler: this is a real network download (jsdelivr, ~8MB),
+    // and it is what a fork test does first in every process. A dropped
+    // connection mid-body shows up as undici's `TypeError: terminated`
+    // (NGHTTP2_STREAM_ERROR) — measured on this box, failing an otherwise
+    // green deploy leg. Transport noise, so retry it like every other RPC
+    // call in this helper; a non-200 is also transport (CDN hiccup), and the
+    // message is worded so withRpcRetry's classifier recognises it.
+    const res = await withRpcRetry(async () => {
+      const r = await fetch(solcJs.SOLC_URL, { signal: AbortSignal.timeout(60_000) });
+      if (r.status !== 200) throw new Error(`compiler download failed: HTTP error ${r.status} from ${solcJs.SOLC_URL}`);
+      return r;
+    }, { label: 'solc download', attempts: 3, delayMs: 2000, timeoutMs: 70_000 });
     code = await res.text();
+    if (!code || code.length < 1000) throw new Error(`compiler download incomplete: ${code ? code.length : 0} bytes`);
   }
   const sandbox = { console, setTimeout, clearTimeout, process, Buffer, __dirname: '.', module: {}, exports: {} };
   sandbox.global = sandbox;
@@ -386,7 +438,16 @@ export function withDeadline(promise, ms = 30_000, label = 'operation') {
   const guard = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} did not settle within ${ms}ms`)), ms);
   });
-  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+  const raced = Promise.race([promise, guard]);
+  // Promise.race does not cancel the loser. If the guard wins, `promise` keeps
+  // running and a later rejection of it is UNHANDLED — and node's runner then
+  // attributes it to whatever test is running at that moment. CI run
+  // 36889949127's optimism leg failed exactly that way: a receipt poll from a
+  // bounded wait rejecting minutes of work later with an upstream 429
+  // ("A resource generated asynchronous activity after the test ended",
+  // fork-eip7702.test.js). Sink the loser: only the race decides.
+  promise.catch(() => {});
+  return raced.finally(() => clearTimeout(timer));
 }
 
 export async function withRpcRetry(fn, { attempts = 3, delayMs = 2500, label = 'call', timeoutMs = 45000 } = {}) {
@@ -422,8 +483,18 @@ export async function withRpcRetry(fn, { attempts = 3, delayMs = 2500, label = '
     } catch (e) {
       last = e;
       const msg = String(e?.message || e);
-      const hasReason = /\brevert(ed)?\b/i.test(msg) && /reason=/.test(msg);
-      const transport = /missing revert data|could not coalesce|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket hang up|network error|fetch failed|timed out after/i.test(msg);
+      // A `reason` only counts when it carries a VALUE. ethers renders the
+      // failure CI run 36889949127's optimism leg hit as `missing revert data
+      // … reason=null` — an answer that never arrived (anvil's upstream was
+      // throttled), not a contract that refused. The old `reason=` substring
+      // test read that as a real revert and skipped the retry on exactly the
+      // message the retry exists for.
+      const reasonValue = (msg.match(/reason=([^,)\s]+)/i) || [])[1];
+      const hasReason = /\brevert(ed)?\b/i.test(msg)
+        && !!reasonValue
+        && !/^null$/i.test(reasonValue)
+        && !/missing revert data/i.test(msg);
+      const transport = /missing revert data|could not coalesce|Fork Error|HTTP error 4[0-9]{2}|exceeded its requests per second|\bterminated\b|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket hang up|network error|fetch failed|timed out after/i.test(msg);
       if (hasReason || !transport || i === attempts) throw e;
       await new Promise((r) => setTimeout(r, delayMs * i));
       process.stderr.write(`[fork] ${label}: retrying after a transport error (${i}/${attempts - 1}) — ${msg.slice(0, 90)}\n`);
@@ -432,6 +503,40 @@ export async function withRpcRetry(fn, { attempts = 3, delayMs = 2500, label = '
     }
   }
   throw last;
+}
+
+// ── provider-level retry ──
+//
+// The app resolves its provider from state (state.get('provider')) and calls it
+// DIRECTLY — decimals(), balanceOf(), v2Quote — so a test-level withRpcRetry
+// wrapped around OUR reads never sees those calls. When anvil's upstream
+// throttles (HTTP 529 "upstream overloaded" on polygon — observed in
+// fork-poly4: decimals() on 0x2791…174 died with `missing revert data …
+// reason=null`), the app's own call failed and the swap test went red even
+// though every helper call had been retried.
+//
+// Wrapping the READ surface of the provider itself covers every consumer at
+// once: app code, ethers.Contract, helpers. Writes stay unwrapped — retrying a
+// broadcast is how two runs spend each other's nonce.
+const RETRYING_READS = new Set([
+  'call', 'getStorage', 'getCode', 'getBalance', 'getBlock', 'getBlockNumber',
+  'getTransaction', 'getTransactionReceipt', 'getFeeData', 'estimateGas',
+  'resolveName', 'lookupAddress',
+]);
+
+export function retryingProvider(p) {
+  return new Proxy(p, {
+    get(target, prop) {
+      const v = target[prop];   // no receiver: getters run against the real target
+      if (typeof v !== 'function') return v;
+      if (RETRYING_READS.has(prop)) {
+        return (...args) => withRpcRetry(() => v.apply(target, args), {
+          label: `provider.${String(prop)}`, delayMs: 1500, timeoutMs: 30000,
+        });
+      }
+      return v.bind(target);
+    },
+  });
 }
 
 /**
