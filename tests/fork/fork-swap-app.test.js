@@ -226,6 +226,13 @@ for (const venue of VENUES) {
     // first version of this test asserted the gross number and looked like a broken
     // unwrap.
     const after3 = await provider.getBalance(ANVIL_ACCOUNT);
+    const wethAfter3 = await wethC.balanceOf(ANVIL_ACCOUNT);
+    const usdcAfter3 = await usdc.balanceOf(ANVIL_ACCOUNT);
+    // Evidence BEFORE the assertion, so a failure still shows where the value
+    // went: native/weth/usdc deltas + which transaction the receipt belongs to.
+    t.diagnostic(`leg3: tx=${r3.hash} status=${r3.status} gasUsed=${r3.gasUsed} ` +
+      `logs=${r3.logs.length} nativeΔ=${after3 - before3} ` +
+      `wethΔ=${wethAfter3 - gotWeth} usdcΔ=${usdcAfter3 - gotUsdc}`);
     // Explicit BigInt on both. A receipt that has crossed a JSON boundary reports
     // gasUsed and effectiveGasPrice as strings, and string * BigInt is the
     // "Cannot mix BigInt and other types" this assertion threw — an error about
@@ -294,7 +301,13 @@ test('fork: a router with no code is refused by the app, not silently used', { s
   const chainId = Number(network.chainId);
   const E = globalThis.ethers;
   const real = getRouterAddress('uniswap_v2', chainId);
-  assert.ok(real, 'butuh registry hidup untuk baseline');
+  // Chains without a V2 router in the registry (Base, Amoy, BSC testnet…)
+  // never had one — there is no baseline to test the guard against, so skip
+  // honestly instead of failing the whole leg for the chain's geography.
+  if (!real) {
+    t.skip('chain ini tidak punya uniswap_v2 di registry — baseline tidak tersedia');
+    return;
+  }
   const code = await provider.getCode(real);
   assert.ok(code && code !== '0x', 'router registry tidak punya kode — test lain tidak valid');
 
