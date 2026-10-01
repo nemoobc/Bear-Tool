@@ -216,13 +216,28 @@ test('a wallet created here can be funded and can send value', { skip }, async (
 
   // And spend it. A signer that can recover its own signature but cannot produce
   // a chain-accepted transaction would still pass the check above.
-  const dest = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
+  // A fresh destination: anvil prefunds its built-in accounts with 10000 ETH
+  // on every fork, so an exact-balance assert against one of them can never
+  // pass (the address already holds more than this test sends).
+  const dest = E.Wallet.createRandom().address;
   const amount = E.parseEther('0.25');
   const tx = await signer.sendTransaction({ to: dest, value: amount });
   const r = await waitForTx(tx, 'journey send');
   assert.equal(r?.status, 1, `transaksi wallet baru gagal: ${r?.status}`);
-  assert.equal(await provider.getBalance(dest), amount, 'tujuan tidak menerima dana');
-  assert.equal(await provider.getBalance(w.address), fund - amount - BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice),
+  // Poll instead of one read: anvil's fork state can lag a receipt by a block
+  // (same pattern as fork-eip7702.test.js and fork-send.test.js).
+  const poll = async (addr, want) => {
+    const until = Date.now() + 30000;
+    let bal = await provider.getBalance(addr);
+    while (bal !== want && Date.now() < until) {
+      await new Promise((res) => setTimeout(res, 500));
+      bal = await provider.getBalance(addr);
+    }
+    return bal;
+  };
+  assert.equal(await poll(dest, amount), amount, 'tujuan tidak menerima dana');
+  const expectLeft = fund - amount - BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice);
+  assert.equal(await poll(w.address, expectLeft), expectLeft,
     'sisa saldo tidak sesuai dengan yang dikirim dikurangi gas');
   t.diagnostic(`wallet baru mengirim ${E.formatEther(amount)} ETH, gas ${E.formatEther(BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice))} ETH`);
 
