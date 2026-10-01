@@ -5,6 +5,9 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "dev": "node node_modules/vite/bin/vite.js",
+    "build": "node node_modules/vite/bin/vite.js build",
+    "preview": "node node_modules/vite/bin/vite.js preview",
     "test": "node --test tests/*.test.js",
     "test:fork": "node --test --test-concurrency=1 --test-timeout=600000 tests/fork/*.test.js",
     "test:fork:net": "node --test --test-concurrency=1 --test-timeout=600000 tests/fork/*.test.js",
@@ -14,13 +17,23 @@
     "test:all": "npm run check && npm test && npm run test:fork && npm run test:e2e",
     "test:live": "node --test --test-concurrency=1 --test-timeout=240000 tests/*.live.js"
   },
+  "dependencies": {
+    "ethers": "6.17.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
   "devDependencies": {
     "@capacitor/android": "^8.5.2",
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.5.2",
     "@capacitor/core": "^8.5.2",
     "@playwright/test": "^1.63.0",
-    "ethers": "6.17.0",
-    "playwright": "^1.63.0"
+    "@vitejs/plugin-react": "^5.1.0",
+    "playwright": "^1.63.0",
+    "vite": "^7.1.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "sharp@0.32.6": true
   }
 }

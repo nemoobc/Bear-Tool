@@ -27,3 +27,4 @@ shots/
 __*.html
 __*.mjs
 __*
+dist/
