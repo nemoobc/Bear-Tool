@@ -21,7 +21,9 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        network: [ethereum, bsc, polygon, arbitrum, optimism, base, sepolia, amoy, arbitrum-sepolia, optimism-sepolia, base-sepolia, bsc-testnet]
+        # Branch probe ci/setbalance-probe: single network, runs the setBalance
+        # probe instead of the suite. Restore the full list after the probe.
+        network: [ethereum]
     steps:
       - uses: actions/checkout@v4
 
@@ -42,13 +44,7 @@ jobs:
           path: /tmp/soljson-0828.js
           key: soljson-0828-v1
 
-      - name: Fork tests — ${{ matrix.network }}
+      - name: Probe anvil_setBalance — ${{ matrix.network }}
         env:
           FORK_NETWORK: ${{ matrix.network }}
-          BEAR_SOLC_FILE: /tmp/soljson-0828.js
-        run: |
-          set -o pipefail
-          npm run test:fork:net 2>&1 | tee /tmp/fork.log
-          # A gate that does not run is decoration: fail loudly on skips too.
-          grep -qE "pass [1-9][0-9]*" /tmp/fork.log || {
-            echo "::error::fork tests did not run (all skipped?)"; exit 1; }
+        run: node tools/debug-setbalance.mjs

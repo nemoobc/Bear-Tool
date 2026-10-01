@@ -56,7 +56,10 @@ jobs:
           VIEWS=$(grep -oP 'id="view-\K[^"]+' index.html | sort)
           echo "Views found: $(echo $VIEWS | tr '\n' ' ')"
           VIEW_COUNT=$(echo "$VIEWS" | wc -l)
-          [ "$VIEW_COUNT" -eq 11 ] || { echo "FAIL: Expected 11 views, got $VIEW_COUNT"; exit 1; }
+          # 10 views: view-eip7702 was intentionally removed — its suite lives in
+          # view-deploy now (comment at index.html:505 "moved here from the old
+          # separate view-eip7702"). The old 11 was stale and blocked every run.
+          [ "$VIEW_COUNT" -eq 10 ] || { echo "FAIL: Expected 10 views, got $VIEW_COUNT"; exit 1; }
 
           # Check nav items match views
           NAV_VIEWS=$(grep -oP 'data-view="\K[^"]+' index.html | sort -u)
