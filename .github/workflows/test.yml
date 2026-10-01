@@ -46,14 +46,18 @@ jobs:
       - name: Validate HTML structure
         run: |
           echo "=== HTML Structure Check ==="
-          # Check all sections have matching open/close tags
-          SECTIONS_OPEN=$(grep -c '<section' index.html)
-          SECTIONS_CLOSE=$(grep -c '</section>' index.html)
+          # Check all sections have matching open/close tags.
+          # Views live in src/views/*.jsx since M2, so BOTH sources are counted —
+          # and every grep feeds awk (which always exits 0): `grep -c` returns 1
+          # on zero matches, which under `bash -e` killed this step in 3ms before
+          # it could even print the counts.
+          SECTIONS_OPEN=$(grep -h -c '<section' index.html src/views/*.jsx | awk '{s+=$1} END {print s+0}')
+          SECTIONS_CLOSE=$(grep -h -c '</section>' index.html src/views/*.jsx | awk '{s+=$1} END {print s+0}')
           echo "Sections: $SECTIONS_OPEN open, $SECTIONS_CLOSE close"
           [ "$SECTIONS_OPEN" -eq "$SECTIONS_CLOSE" ] || { echo "FAIL: Section tag mismatch"; exit 1; }
 
-          # Check all views have IDs
-          VIEWS=$(grep -oP 'id="view-\K[^"]+' index.html | sort)
+          # Check all views have IDs (in index.html or the React views)
+          VIEWS=$(grep -h -oP 'id="view-\K[^"]+' index.html src/views/*.jsx | sort)
           echo "Views found: $(echo $VIEWS | tr '\n' ' ')"
           VIEW_COUNT=$(echo "$VIEWS" | wc -l)
           # 10 views: view-eip7702 was intentionally removed — its suite lives in
@@ -68,7 +72,11 @@ jobs:
           # Check static IDs exist (skip dynamic modal IDs from wallet.js)
           python3 -c "
           import re, glob
+          # M2: the view markup moved to src/views/*.jsx — ids count as static
+          # whether they live in the shell or in a React view.
           html = open('index.html').read()
+          for vf in sorted(glob.glob('src/views/*.jsx')):
+              html += open(vf).read()
           html_ids = set(re.findall(r'id=\"([^\"]+)\"', html))
           # IDs the JS renders itself (template literals → innerHTML): valid
           # without being in index.html. A hardcoded skip-list rots every time
