@@ -45,7 +45,9 @@ async function test(name, fn) {
 // 1. Provider & Connectivity
 // ═══════════════════════════════════════════════════════════════
 await test('Provider connects to Anvil', async () => {
-  provider = new ethers.JsonRpcProvider(RPC, CHAIN_ID);
+  // cacheTimeout: -1 — tests assert right after writes; the default 250ms
+  // response cache serves pre-write state (bit the journey fork test in CI).
+  provider = new ethers.JsonRpcProvider(RPC, CHAIN_ID, { cacheTimeout: -1 });
   const network = await provider.getNetwork();
   ok(network.chainId === BigInt(CHAIN_ID), `chainId = ${network.chainId}`);
 });

@@ -12,7 +12,8 @@ const TIMEOUT_MS = 20000;
 const timer = setTimeout(() => { console.error('health probe timed out'); process.exit(1); }, TIMEOUT_MS);
 
 try {
-  const provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`);
+  // No 250ms response cache: test reads must see their own writes.
+  const provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`, undefined, { cacheTimeout: -1 });
   const wallet = new ethers.Wallet(
     '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     provider

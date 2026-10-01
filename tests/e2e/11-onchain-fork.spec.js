@@ -129,7 +129,8 @@ async function waitSendSuccess(page, timeout = 45000) {
 }
 
 async function getReceipt(port, hash) {
-  const provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`);
+  // cacheTimeout: -1 — no 250ms response cache, reads see their own writes.
+  const provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`, undefined, { cacheTimeout: -1 });
   for (let i = 0; i < 10; i++) {
     const r = await provider.getTransactionReceipt(hash);
     if (r) return r;
@@ -298,7 +299,8 @@ async function deployErc20ViaWeb(page, fork, netId) {
   expect(reg.address.toLowerCase()).toBe(addr.toLowerCase());
 
   // ONCHAIN verification straight through the fork's RPC
-  const provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${fork.port}`);
+  // No 250ms cache: freshly deployed code must be visible to getCode.
+  const provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${fork.port}`, undefined, { cacheTimeout: -1 });
   const code = await provider.getCode(addr);
   expect(code, `code at ${addr} on ${netId} fork`).not.toBe('0x');
   const token = new ethers.Contract(addr, ERC20_MIN_ABI, provider);

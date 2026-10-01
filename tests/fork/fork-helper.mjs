@@ -251,7 +251,11 @@ async function startForkLocked(port) {
   }
 
   const { ethers } = await import('ethers');
-  provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`);
+  // cacheTimeout: -1 turns ethers' 250ms response cache off. The default
+  // cache returns the pre-funding balance right after anvil_setBalance
+  // (journey "funded and can send value" failed on all 12 legs exactly that
+  // way, 2026-10-01): test reads must see their own writes.
+  provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`, undefined, { cacheTimeout: -1 });
   // NonceManager keeps nonces strictly sequential. Without it, ethers v6
   // queries getTransactionCount per tx and anvil's fork state can lag one
   // block behind → two txs share a nonce → "nonce too low" (flaky).
