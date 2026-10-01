@@ -87,7 +87,11 @@ test.describe('Sidebar — static', () => {
   });
 
   test('the document is structurally sound', () => {
-    const open = (html.match(/<section class="view/g) || []).length;
+    // M2: the <section class="view"> markup moved into src/views/*.jsx where
+    // JSX spells the attribute className — matching only `class=` counted 0
+    // openers against the JSX `</section>` closers (CI 36936253780). Both
+    // spellings are the same DOM attribute after build.
+    const open = (html.match(/<section\s+(?:class|className)="view/g) || []).length;
     const close = (html.match(/<\/section>/g) || []).length;
     expect(open, 'every <section> must be closed').toBe(close);
     const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
