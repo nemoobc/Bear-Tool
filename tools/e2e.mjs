@@ -34,6 +34,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '..');
 const PORT = Number(process.env.BEAR_PORT || 8080);
 const BASE_URL = process.env.BEAR_BASE_URL || `http://127.0.0.1:${PORT}`;
+// Where the static server reads from: the vite BUILD output (dist/), assigned
+// after the build runs below. Serving the raw tree would hand the browser
+// index.html pointing at /src/main.jsx — raw JSX, octet-stream MIME — which a
+// module loader refuses outright.
+let serveRoot = root;
 
 // The first endpoint that actually answers, and the block it reports. A real
 // POST with eth_blockNumber, because an OPTIONS preflight says nothing about
@@ -90,8 +95,8 @@ const server = createServer(async (req, res) => {
     const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     // Contain the path: a static server that will happily read outside its root is
     // a file-read hole, and this one is reachable from a test run.
-    const target = path.join(root, rel === '/' ? 'index.html' : rel);
-    if (!target.startsWith(root)) { res.writeHead(403).end('forbidden'); return; }
+    const target = path.join(serveRoot, rel === '/' ? 'index.html' : rel);
+    if (!target.startsWith(serveRoot)) { res.writeHead(403).end('forbidden'); return; }
     const body = await readFile(target);
     res.writeHead(200, {
       'content-type': MIME[path.extname(target)] || 'application/octet-stream',
@@ -106,11 +111,37 @@ const closeServer = () => new Promise((r) => server.close(r));
 let exitCode = 1;
 
 try {
+  // Serve the BUILD, not the raw tree.
+  //
+  // M2 made index.html load /src/main.jsx as a module. This server hands files
+  // over byte-for-byte, so the browser got raw JSX with an octet-stream
+  // content-type — a module with a non-JS MIME is refused outright — the app
+  // never booted, and all 205 specs then burned their 45s timeout serially
+  // (workers: 1): CI crossed an hour still crawling with no result. `vite build`
+  // turns the same tree into plain assets, which is also exactly what the APK
+  // wraps — the gate now measures the artifact that ships.
+  if (!flag('--list') && !flag('--no-build')) {
+    console.log('build   vite build …');
+    const buildCode = await new Promise((res) => {
+      const b = spawn(process.execPath,
+        [path.join(root, 'node_modules', 'vite', 'bin', 'vite.js'), 'build'],
+        { cwd: root, stdio: 'inherit' });
+      b.on('exit', (c) => res(c ?? 1));
+      b.on('error', (e) => { console.error('gagal menjalankan vite build:', e.message); res(1); });
+    });
+    if (buildCode !== 0) throw new Error(`vite build gagal (exit ${buildCode})`);
+  }
+  if (!flag('--list')) {
+    serveRoot = path.join(root, 'dist');
+    if (!existsSync(path.join(serveRoot, 'index.html'))) {
+      throw new Error('dist/index.html tidak ada — jalankan tanpa --no-build');
+    }
+  }
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(PORT, '127.0.0.1', resolve);
   });
-  console.log(`server  ${BASE_URL}  (root ${root})`);
+  console.log(`server  ${BASE_URL}  (root ${serveRoot})`);
 
   const specDir = path.join(root, 'tests', 'e2e');
   if (!existsSync(specDir)) throw new Error(`tests/e2e tidak ada di ${root}`);
