@@ -212,9 +212,32 @@ async function startForkLocked(port) {
     // Retry loop: publicnode RPCs can be slow/rate-limited (polygon flakes
     // "anvil did not start in time"). A fresh anvil process often initializes
     // faster than waiting on a stuck one, so kill and retry up to 3 attempts.
+    //
+    // Pin the fork to a block. A live-following fork has two failure modes this
+    // suite actually hit: (a) upstream trades move the pair reserves between
+    // v2Quote and the swap a second later, and the 1% minOut reverts on the
+    // busiest pair on the chain (status=0, no logs); (b) each new upstream block
+    // makes anvil re-sync state, the same window in which foundry#4700-class
+    // behaviour wipes a local credit while the gas debit survives — leg3 status=1
+    // with the output ETH credited to nowhere. A pinned block cannot drift and
+    // never re-syncs: upstream is touched once, at boot. If the block query
+    // fails (rate limit), the flag is skipped and the old behaviour stands.
+    let forkBlock = process.env.FORK_BLOCK || '';
+    if (!forkBlock) {
+      try {
+        const rq = await fetch(network.rpc, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const rj = await rq.json();
+        if (rj?.result) forkBlock = String(parseInt(rj.result, 16));
+      } catch { /* leave empty: unfinned, exactly as before */ }
+    }
     let started = false;
     for (let attempt = 1; attempt <= 3 && !started; attempt++) {
-      anvilProcess = spawn('anvil', [
+      const args = [
         '--fork-url', network.rpc,
         '--port', String(port),
         '--silent',
@@ -224,7 +247,9 @@ async function startForkLocked(port) {
         // browser: without it anvil does not answer the CORS preflight, so a
         // page cannot POST JSON-RPC to it even though curl and node can.
         '--allow-origin', '*'
-      ], { stdio: 'ignore' });
+      ];
+      if (forkBlock) args.push('--fork-block-number', forkBlock);
+      anvilProcess = spawn('anvil', args, { stdio: 'ignore' });
       // Do not let the anvil child keep the Node process alive after the
       // tests finish (pass OR fail) — otherwise CI hangs until timeout.
       anvilProcess.unref();
