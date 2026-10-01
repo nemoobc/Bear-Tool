@@ -238,7 +238,15 @@ test('a wallet created here can be funded and can send value', { skip }, async (
   assert.equal(await poll(dest, amount), amount, 'tujuan tidak menerima dana');
   // ethers v6 renamed the receipt field: effectiveGasPrice no longer exists on
   // TransactionReceipt (undefined → BigInt() throws); gasPrice is it.
-  const expectLeft = fund - amount - BigInt(r.gasUsed) * BigInt(r.gasPrice);
+  const execFee = BigInt(r.gasUsed) * BigInt(r.gasPrice);
+  // Execution gas is not the whole cost on OP-stack chains (base, optimism and
+  // their testnets): their receipts carry an L1 data fee charged on top — the
+  // four OP-stack legs missed this exact assertion by ~5.6e8 wei while
+  // ethereum/polygon/arbitrum matched. ethers drops the l1Fee field during
+  // receipt formatting, so read the raw receipt for it.
+  const rawRcpt = await provider.send('eth_getTransactionReceipt', [r.hash]).catch(() => null);
+  const l1Fee = BigInt(rawRcpt?.l1Fee ?? 0);
+  const expectLeft = fund - amount - execFee - l1Fee;
   assert.equal(await poll(w.address, expectLeft), expectLeft,
     'sisa saldo tidak sesuai dengan yang dikirim dikurangi gas');
   t.diagnostic(`wallet baru mengirim ${E.formatEther(amount)} ETH, gas ${E.formatEther(BigInt(r.gasUsed) * BigInt(r.gasPrice))} ETH`);

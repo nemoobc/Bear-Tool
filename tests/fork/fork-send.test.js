@@ -35,7 +35,10 @@ test('fork: send native ETH — balances move on-chain', { skip }, async () => {
   // transaction_receipt → fork.transaction_receipt), and publicnode 403s
   // eth_getTransactionReceipt (archive restriction) on some networks.
   // The balance change IS the assertion — it proves the transfer landed.
-  const deadline = Date.now() + 30000;
+  // 75s, not 30s: the optimism legs were observed taking >30s to reflect a
+  // local transfer (92s test runtime vs ~10-20s elsewhere) while every other
+  // leg lands in <5s — the poll deadline, not the chain, was failing first.
+  const deadline = Date.now() + 75000;
   let afterBal = await provider.getBalance(to);
   while (afterBal !== beforeBal + amount && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 500));
