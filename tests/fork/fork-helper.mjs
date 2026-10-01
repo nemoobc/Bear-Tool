@@ -31,7 +31,14 @@ globalThis.ethers = ethers;
 // publicnode blocks eth_getTransactionReceipt (archive) with 403 on most
 // networks, so non-ethereum networks use official chain endpoints.
 export const FORK_NETWORKS = {
-  ethereum:          { chainId: 1,      rpc: 'https://ethereum-rpc.publicnode.com',          type: 'mainnet' },
+  // drpc.org, bukan publicnode — probe tests/fork/probe-ethereum-rpc.mjs:
+  // publicnode eth menolak state historis (HTTP 403, bukan arsip) sementara
+  // anvil mem-pinning block dan menggiling beberapa menit; jawaban historis
+  // yang bervariasi antar-panggilan = kelas foundry#4700 (fetch diam-diam
+  // gagal → slot kosong saat eksekusi → swap revert status=0 logs=[] walau
+  // minOut 1% longgar) — pola hijau/merah antar-wave dengan kode identik.
+  // drpc: serve N-50000 + 3/3 stabil (1rpc: 1/3; lainnya mati).
+  ethereum:          { chainId: 1,      rpc: 'https://eth.drpc.org',                        type: 'mainnet' },
   bsc:               { chainId: 56,     rpc: 'https://bsc-dataseed.binance.org',             type: 'mainnet' },
   // drpc.org, bukan publicnode: anvil mem-pinning block lalu suite menggiling
   // beberapa menit, dan publicnode polygon BUKAN arsip — retention singkat +
