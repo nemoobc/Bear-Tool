@@ -17,7 +17,7 @@ after(async () => {
 });
 
 
-test('fork: send native ETH — balances move on-chain', { skip }, async () => {
+test('fork: send native ETH — balances move on-chain', { skip }, async (t) => {
   const { signer, provider } = await startFork();
   // Fresh address: no base state on the forked chain, so anvil's
   // eth_getBalance reflects the locally-mined transfer. (0xdEaD has a
@@ -43,6 +43,15 @@ test('fork: send native ETH — balances move on-chain', { skip }, async () => {
   while (afterBal !== beforeBal + amount && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 500));
     afterBal = await provider.getBalance(to);
+  }
+  if (afterBal !== beforeBal + amount) {
+    // The recipient never got the ETH even after the deadline: say where the
+    // transaction actually is — mined or still pending, and at which block —
+    // before the assertion turns that into a bare number line. (Optimism-sepolia
+    // read 0n twice in a row while every other leg landed in <5s.)
+    const rcpt = await provider.getTransactionReceipt(tx.hash).catch((e) => 'ERR ' + (e?.message || e));
+    const bn = await provider.getBlockNumber().catch(() => -1);
+    t.diagnostic(`send#13: recipient=${afterBal} bn=${bn} receipt=${rcpt == null ? 'null' : (typeof rcpt === 'string' ? rcpt : 'status=' + rcpt.status + ' block=' + rcpt.blockNumber)}`);
   }
   assert.equal(afterBal, beforeBal + amount, 'recipient balance must increase by the exact amount');
 });

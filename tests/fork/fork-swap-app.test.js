@@ -229,10 +229,14 @@ for (const venue of VENUES) {
     const wethAfter3 = await wethC.balanceOf(ANVIL_ACCOUNT);
     const usdcAfter3 = await usdc.balanceOf(ANVIL_ACCOUNT);
     // Evidence BEFORE the assertion, so a failure still shows where the value
-    // went: native/weth/usdc deltas + which transaction the receipt belongs to.
-    t.diagnostic(`leg3: tx=${r3.hash} status=${r3.status} gasUsed=${r3.gasUsed} ` +
-      `logs=${r3.logs.length} nativeΔ=${after3 - before3} ` +
-      `wethΔ=${wethAfter3 - gotWeth} usdcΔ=${usdcAfter3 - gotUsdc}`);
+    // went: every delta plus the three facts arithmetic needs — what the quote
+    // promised, what the receipt says the gas cost, and where the router was
+    // told to send the ETH — with each receipt log's emitter and topic.
+    t.diagnostic(`leg3: tx=${r3.hash} status=${r3.status} gasUsed=${r3.gasUsed} gasPrice=${r3.gasPrice} ` +
+      `out3=${out3} signer=${await signer.getAddress()} to=${ANVIL_ACCOUNT} ` +
+      `routerEth=${await provider.getBalance(q3.router)} ` +
+      `logs=${r3.logs.map((l) => `${l.address.slice(0, 8)}:${String(l.topics[0] || '').slice(0, 10)}`).join('|')} ` +
+      `nativeΔ=${after3 - before3} wethΔ=${wethAfter3 - gotWeth} usdcΔ=${usdcAfter3 - gotUsdc}`);
     // Explicit BigInt, and the RIGHT FIELD: ethers v6 renamed receipt
     // effectiveGasPrice → gasPrice (the old name is undefined here — the
     // `?? 0` below used to turn every gasCost into a silent 0, making this a
