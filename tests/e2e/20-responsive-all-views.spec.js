@@ -64,7 +64,11 @@ const MEASURE = (viewId) => `(() => {
     if (r.right <= vw + 1) continue;
     if (scrolls(el)) continue;                 // meant to scroll sideways
     const cls = String(el.className || '').split(' ').filter(Boolean).slice(0, 2).join('.');
-    bad.push(el.tagName.toLowerCase() + (cls ? '.' + cls : '') + ' right=' + Math.round(r.right));
+    // id first, like the clipped-controls list below: a classless element (the
+    // planted one) reported as bare "div right=…" and located nothing, so the
+    // proof-by-planting could not see its own subject.
+    const id = el.id ? '#' + el.id : '';
+    bad.push(el.tagName.toLowerCase() + id + (cls ? '.' + cls : '') + ' right=' + Math.round(r.right));
   }
 
   // Controls that are present but narrower than a usable touch target are a

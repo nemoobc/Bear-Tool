@@ -118,6 +118,32 @@ test.describe('MAX amount', () => {
     await page.waitForTimeout(900);
 
     const value = await page.inputValue('#sendAmount');
+    if (value === '') {
+      // resolveMax's refusal reason only reaches #sendMaxNote; an empty field
+      // alone cannot say WHY it refused. Carry the note, the seed state and a
+      // live re-run of resolveMax into the assertion so the CI log names the
+      // cause instead of just the empty input.
+      const note = await page.locator('#sendMaxNote').textContent().catch(() => '(none)');
+      const diag = await page.evaluate(async (wei) => {
+        try {
+          const [{ get }, { resolveMax }] = await Promise.all([import('/js/state.js'), import('/js/max-ui.js')]);
+          const sel = document.getElementById('sendToken');
+          const t = (get('tokens') || []).find((x) => (x.address || 'native') === sel?.value);
+          const provider = get('provider');
+          let live = null;
+          let seeded = null;
+          try { live = String(await provider.getBalance(get('address'))); } catch (e) { live = 'ERR ' + (e?.message || e); }
+          try { await provider.send('anvil_setBalance', [get('address'), wei]); seeded = 'ok'; } catch (e) { seeded = 'failed: ' + (e?.message || e); }
+          const r = await resolveMax({
+            token: t && { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+            provider, from: get('address'),
+            to: (document.getElementById('sendTo')?.value || '').trim(), pct: 100,
+          });
+          return { live, seeded, ok: r.ok, spendable: String(r.spendable), balanceSource: r.balanceSource, source: r.source, message: r.message };
+        } catch (e) { return { probeError: String(e) }; }
+      }, BALANCE_WEI);
+      expect(value, `MAX must write something [note="${note}"] [diag=${JSON.stringify(diag)}]`).not.toBe('');
+    }
     expect(value, 'MAX must write something').not.toBe('');
     const amt = Number(value);
     expect(amt, 'MAX must be under the balance').toBeLessThan(0.1);

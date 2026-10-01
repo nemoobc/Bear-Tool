@@ -653,7 +653,20 @@ function wire() {
 
   el.url.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); navigate(el.url.value); }
-    if (e.key === 'Escape') { el.url.value = active()?.url || ''; el.url.blur(); }
+    if (e.key === 'Escape') {
+      // A mid-edit Escape must cancel the edit and KEEP the tab. This handler
+      // runs before the document-level one below and restores the value first —
+      // so the document guard read the already-restored value, always decided
+      // "not being typed", and closed the overlay anyway: a cancel threw the
+      // tab away (e2e 18-dapp-browser:212). Swallow the event only when
+      // something was actually being edited; an untouched or empty bar still
+      // bubbles so Escape closes the browser as documented there.
+      const current = active()?.url || '';
+      const typed = el.url.value !== '' && el.url.value !== current;
+      el.url.value = current;
+      el.url.blur();
+      if (typed) e.stopPropagation();
+    }
   });
   el.url.addEventListener('focus', () => el.url.select());
 

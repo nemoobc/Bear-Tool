@@ -2676,7 +2676,11 @@ body::before {
 /* ── DApps Browser ── */
 .dapps-browser { padding: 8px 0; }
 .dapps-bar { display: flex; gap: 6px; margin-bottom: 12px; align-items: center; }
-.dapp-url-input { flex: 1; padding: 8px 12px; border-radius: 8px; border: 2px solid var(--border, #ddd); font-size: 13px; background: var(--bg, #fff); color: var(--text, #333); }
+/* min-width:0 — a flex item refuses to shrink below its intrinsic width by
+   default, and this input's floor pushed .dapps-bar's Open button past a 320px
+   screen (button right=327, e2e 20-responsive phone-320). flex:1 may shrink it
+   only if it is allowed to. */
+.dapp-url-input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: 8px; border: 2px solid var(--border, #ddd); font-size: 13px; background: var(--bg, #fff); color: var(--text, #333); }
 .dapp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
 .dapp-card {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
