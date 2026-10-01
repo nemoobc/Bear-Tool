@@ -1,5 +1,33 @@
 // Bear Tool — shared helpers for the Playwright E2E suite.
 import { expect } from '@playwright/test';
+import { readFileSync, readdirSync } from 'node:fs';
+
+// M2 moved the view markup out of index.html into src/views/*.jsx (React
+// renders it into the shell at boot), so the served DOM = shell + views.
+// Static specs must read BOTH or every id that moved reads as absent — CI
+// 36930970112 failed tools-merge ×2, sidebar-order ×1, picker-casing ×1 on
+// indexOf/toMatch against the shell alone. Composition order follows the
+// render order in src/App.jsx (extracted, not hardcoded): assertions slice
+// between sections (e.g. view-deploy → view-activity) and DOM order is
+// real order. Same composition as tests/full-audit.test.mjs, one source.
+export const staticHtml = (() => {
+  const root = new URL('../../', import.meta.url);
+  let src = readFileSync(new URL('index.html', root), 'utf8');
+  const app = readFileSync(new URL('src/App.jsx', root), 'utf8');
+  const renderOrder = [...app.matchAll(/from '\.\/views\/([\w-]+)\.jsx'/g)].map((m) => m[1]);
+  const files = readdirSync(new URL('src/views/', root)).filter((f) => f.endsWith('.jsx'));
+  const known = new Set(renderOrder);
+  const ordered = [
+    ...renderOrder.map((n) => `${n}.jsx`),
+    // A view not yet wired into App.jsx still exists on disk — keep it
+    // visible at the end rather than silently dropping it.
+    ...files.filter((f) => !known.has(f.replace(/\.jsx$/, ''))),
+  ];
+  for (const f of ordered) {
+    src += `\n<!-- view: ${f} -->\n` + readFileSync(new URL(`src/views/${f}`, root), 'utf8');
+  }
+  return src;
+})();
 
 // Known benign console message: a <meta http-equiv="X-Frame-Options"> is
 // ignored by browsers (must be an HTTP header). Reported as a finding, not a
@@ -195,7 +223,12 @@ export function collectErrors(page) {
   const errors = [];
   page.on('console', (m) => {
     if (m.type() === 'error' && !ALLOWED_CONSOLE.some((a) => m.text().includes(a))) {
-      errors.push('console: ' + m.text());
+      // The failing URL is not part of the message text — CI 36930970112
+      // logged five bare 'Failed to load resource … 404' lines with no way to
+      // tell WHICH asset was missing. Keep the text identical, append the
+      // location when the console reports one.
+      const url = m.location()?.url;
+      errors.push('console: ' + m.text() + (url ? ` @ ${url}` : ''));
     }
   });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));

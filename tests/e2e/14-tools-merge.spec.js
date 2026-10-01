@@ -7,9 +7,12 @@
 // now merged into a single Tools view. These tests stop that regressing.
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { gotoApp, skipIntro, createWallet, appClick } from './helpers.js';
+import { gotoApp, skipIntro, createWallet, appClick, staticHtml } from './helpers.js';
 
-const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+// M2: view markup lives in src/views/*.jsx — staticHtml = shell + views in
+// App.jsx render order (the slice between view-deploy and view-activity below
+// depends on that order). Reading index.html alone returned indexOf -1.
+const html = staticHtml;
 const app = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
 
 test.describe('Tools merge — static', () => {

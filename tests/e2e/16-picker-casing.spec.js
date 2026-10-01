@@ -16,7 +16,7 @@
 //    seven, and the suites read inputValue().
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { gotoApp, skipIntro, createWallet, appClick, openView } from './helpers.js';
+import { gotoApp, skipIntro, createWallet, appClick, openView, staticHtml } from './helpers.js';
 
 const app   = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
 const ui    = readFileSync(new URL('../../js/ui.js', import.meta.url), 'utf8');
@@ -24,7 +24,9 @@ const tp    = readFileSync(new URL('../../js/token-picker.js', import.meta.url),
 const dapps = readFileSync(new URL('../../js/dapps.js', import.meta.url), 'utf8');
 const swap  = readFileSync(new URL('../../js/swap.js', import.meta.url), 'utf8');
 const bridge= readFileSync(new URL('../../js/bridge.js', import.meta.url), 'utf8');
-const html  = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+// M2: picker forms (swapFrom/Btn/Panel, bridge*) live in src/views/*.jsx —
+// staticHtml = shell + views (CI 36930970112: indexOf -1 on shell alone).
+const html  = staticHtml;
 const css   = readFileSync(new URL('../../css/cartoon.css', import.meta.url), 'utf8');
 
 // Walk to a view at any width: sidebar when it is shown, otherwise the mobile

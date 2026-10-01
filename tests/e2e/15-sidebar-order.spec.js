@@ -11,9 +11,11 @@
 import { test, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gotoApp, skipIntro, createWallet, appClick , openView} from './helpers.js';
+import { gotoApp, skipIntro, createWallet, appClick , openView, staticHtml} from './helpers.js';
 
-const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+// M2: view markup (id="view-dapps", id="dappsContainer", …) lives in
+// src/views/*.jsx — index.html is only the shell now (CI 36930970112).
+const html = staticHtml;
 const i18n = readFileSync(new URL('../../js/i18n.js', import.meta.url), 'utf8');
 
 const sidebar = html.slice(html.indexOf('<nav class="sidebar"'), html.indexOf('</nav>', html.indexOf('<nav class="sidebar"')));
