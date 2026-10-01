@@ -50,3 +50,19 @@ const bal = after1?.result ? BigInt(after1.result) : -1n;
 log('VERDICT:', bal === BigInt(parseInt(FUND, 16)) ? 'setBalance STICKS' : 'setBalance NO-OP');
 
 await stopFork();
+
+// ── v2: exact wire traffic — why does ethers disagree with raw? ──
+const { provider: p2 } = await (async () => {
+  await stopFork();
+  return startFork();
+})();
+p2.on('debug', (d) => {
+  if (d.action === 'request') log('ethers REQ:', JSON.stringify(d.request));
+  if (d.action === 'response') log('ethers RES:', JSON.stringify(d.response));
+});
+try { log('ethers url:', p2._getConnection().url); } catch (e) { log('url ?', String(e)); }
+log('v2 balBefore:', String(await p2.getBalance(ADDR)));
+log('v2 setBalance:', JSON.stringify(await raw('anvil_setBalance', [ADDR, FUND])));
+log('v2 raw latest:', JSON.stringify(await raw('eth_getBalance', [ADDR, 'latest'])));
+log('v2 balAfter ethers:', String(await p2.getBalance(ADDR)));
+await stopFork();
