@@ -185,6 +185,19 @@ jobs:
       - name: Run E2E suite (tests/e2e/*.spec.js)
         run: npm run test:e2e -- --reporter=list
 
+      # Traces and error-context die with the runner otherwise: CI
+      # 36992334807 failed seven sends and left nothing but the TAP wall
+      # behind — the page snapshot (which dialog was open, what activity
+      # held) and the console trail only exist under test-results/.
+      - name: Upload failure traces (test-results/**)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-test-results
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   full-audit:
     name: Full Audit (All Features + Onchain)
     runs-on: ubuntu-latest

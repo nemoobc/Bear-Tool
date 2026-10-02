@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 import { ethers } from 'ethers';
 import {
   gotoApp, skipIntro, importWallet, expectUnlocked, openSendView, appClick,
-  freshFork, proxyRpc, FORKS, HAS_ANVIL,
+  freshFork, proxyRpc, collectErrors, FORKS, HAS_ANVIL,
 } from './helpers.js';
 
 // Every test here needs a real Anvil fork of its network. Anvil forks pin to
@@ -35,13 +35,52 @@ const ANVIL_1 = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 // "Your IP has exceeded..."), and anvil's fork-retry layer backs off between
 // attempts before the receipt ever lands — four sends timed out at 45s with
 // the fork itself healthy. The window covers a retry cycle, not a hang.
-async function waitSendSuccess(page, timeout = 90_000) {
-  await page.waitForFunction(() => {
+//
+// On timeout the error carries the whole scene, because "Timeout 90000ms
+// exceeded" is what CI 36992334807 gave for seven sends — seven rounds of
+// root-causing against a blank wall: the last send entry raw from
+// localStorage (status/error/hash), which dialog is open, whether the FORK
+// itself holds the tx (getReceipt against the port — receipt on chain while
+// activity is silent = app recording bug; no receipt = broadcast never
+// landed; status 0 = reverted), and the tail of console/pageerror.
+async function waitSendSuccess(page, timeout = 90_000, port = null, errors = []) {
+  try {
+    await page.waitForFunction(() => {
+      try {
+        const acts = JSON.parse(localStorage.getItem('bear.activity') || '[]');
+        return acts.some((a) => a.type === 'send' && a.status === 'success');
+      } catch { return false; }
+    }, null, { timeout });
+  } catch (e) {
+    const snap = await page.evaluate(() => {
+      try {
+        const acts = JSON.parse(localStorage.getItem('bear.activity') || '[]');
+        const sends = acts.filter((a) => a.type === 'send');
+        const last = sends[sends.length - 1] || null;
+        const dlg = [
+          document.querySelector('#confirmYes') ? 'sign-open' : null,
+          document.querySelector('#confirmTypeInput') ? 'type-gate' : null,
+          document.querySelector('#sendTo') ? 'send-view' : null,
+        ].filter(Boolean).join('+') || 'none';
+        return { n: acts.length, last: last ? JSON.stringify(last).slice(0, 500) : null, dlg };
+      } catch (x) { return { evalError: String(x), dlg: 'unreadable' }; }
+    }).catch((x) => ({ evalError: String(x), dlg: 'page-gone' }));
+    let chain = 'not-probed';
     try {
-      const acts = JSON.parse(localStorage.getItem('bear.activity') || '[]');
-      return acts.some((a) => a.type === 'send' && a.status === 'success');
-    } catch { return false; }
-  }, null, { timeout });
+      const m = String(snap.last || '').match(/0x[0-9a-fA-F]{64}/);
+      if (!port) chain = 'no port';
+      else if (!m) chain = 'no hash in last entry';
+      else {
+        const r = await getReceipt(port, m[0]);
+        chain = r ? `receipt status=${r.status} block=${r.blockNumber}` : 'no receipt on chain';
+      }
+    } catch (x) { chain = `probe error: ${String(x).slice(0, 120)}`; }
+    throw new Error(
+      `waitSendSuccess TIMEOUT ${timeout}ms (original: ${String(e).slice(0, 80)}) ` +
+      `[dialog=${snap.dlg}] [activity=${JSON.stringify(snap)}] [chain=${chain}] ` +
+      `[console/pageerror=${JSON.stringify(errors.slice(-10))}]`
+    );
+  }
   return page.evaluate(() => {
     const acts = JSON.parse(localStorage.getItem('bear.activity') || '[]');
     return acts.find((a) => a.type === 'send' && a.status === 'success');
@@ -78,6 +117,7 @@ async function switchNetwork(page, netId) {
 for (const [netId, fork] of Object.entries(FORKS)) {
   test(`onchain send via web UI → ${netId} fork (:${fork.port})`, async ({ page }) => {
     freshFork(netId); // stale fork state = root cause of intermittent onchain flake
+    const errors = collectErrors(page); // dumped by waitSendSuccess on timeout
     await proxyRpc(page, fork);
     await gotoApp(page);
     await skipIntro(page);
@@ -119,7 +159,7 @@ for (const [netId, fork] of Object.entries(FORKS)) {
     });
 
     // success persisted in activity → then verify the receipt onchain
-    const entry = await waitSendSuccess(page);
+    const entry = await waitSendSuccess(page, 90_000, fork.port, errors);
     expect(entry, `send activity entry for ${netId}`).toBeTruthy();
     expect(entry.hash).toMatch(/^0x[0-9a-fA-F]{64}$/);
 

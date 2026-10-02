@@ -87,7 +87,17 @@ start_one() {
 # blockNumber answering is NOT enough — stale/pruned forks still answer it
 # while every state read fails. Gate on a real estimateGas (fork-health.mjs).
 fork_healthy() {
-  (cd "$ROOT" && timeout 25 node tests/fork/fork-health.mjs "$1") >/dev/null 2>&1
+  # Surface the reason: CI 36992334807 lost "answers but state unhealthy" ×3
+  # on amoy with the health probe's own line swallowed here — a gate that
+  # cannot say WHY it failed turns one red test into a guessing game.
+  local out rc
+  out=$( (cd "$ROOT" && timeout 25 node tests/fork/fork-health.mjs "$1") 2>&1 )
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    out=$(printf '%s\n' "$out" | grep -E 'unhealthy:|timed out' | tail -1)
+    echo "health :$1 → ${out:-exit $rc (no output)}"
+  fi
+  return "$rc"
 }
 
 kill_port() {
