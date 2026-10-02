@@ -24,6 +24,21 @@ test.describe('Asset list', () => {
     await expect(page.locator('#assetList .asset-spark')).toHaveCount(0);
   });
 
+  test('tapping a coin opens a full-screen sheet with contract and transactions', async ({ page }) => {
+    await expect(page.locator('#assetList .asset-clickable').first())
+      .toBeVisible({ timeout: 10_000 });
+    await page.locator('#assetList .asset-clickable').first().click();
+    // The sheet owns the screen — a small centred card was the old behaviour.
+    await expect(page.locator('#modalBox.welcome-screen')).toBeVisible();
+    // Contract row exists on every token; the native coin states honestly
+    // that it has none (an ERC-20 row shows the address with a copy button).
+    await expect(page.locator('.token-modal-addr')).toContainText('Contract');
+    await expect(page.locator('.token-modal-addr')).toContainText('Native asset');
+    // Per-token transaction list: fresh wallet = empty state, not a blank hole.
+    await expect(page.locator('.token-modal-txs h3')).toHaveText('Transactions');
+    await expect(page.locator('.token-modal-txs')).toContainText('No transactions for this token yet.');
+  });
+
   test('#4 Add Token sits below the asset list and not in the header', async ({ page }) => {
     const btn = page.locator('#btnAddCustomToken');
     await expect(btn).toHaveCount(1);

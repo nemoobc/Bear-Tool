@@ -18,6 +18,8 @@
     "test:live": "node --test --test-concurrency=1 --test-timeout=240000 tests/*.live.js"
   },
   "dependencies": {
+    "@reown/walletkit": "^1.6.0",
+    "@walletconnect/core": "^2.25.0",
     "ethers": "6.17.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

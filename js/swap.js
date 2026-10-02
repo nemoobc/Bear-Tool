@@ -585,7 +585,7 @@ export async function doSwap() {
       tx = await uniswapV2Swap(signer, u.router, u.tokenIn, u.tokenOut, u.amountIn, u.amountOutMin, userAddr);
     }
     toast('Swap tx sent! ⏳', 'info');
-    addActivity({ hash: tx.hash, type: 'swap', status: 'pending', ts: Date.now(), detail: `${amt} ${from} → ${to}` });
+    addActivity({ hash: tx.hash, type: 'swap', status: 'pending', ts: Date.now(), detail: `${amt} ${from} → ${to}`, symbols: [from, to] });
     const { receipt, timedOut } = await waitForReceipt(tx);
     if (timedOut) {
       // Sent but not confirmed in time. The pending activity entry is left as
@@ -593,7 +593,7 @@ export async function doSwap() {
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'swap', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${amt} ${from} → ${to}` });
+    addActivity({ hash: tx.hash, type: 'swap', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${amt} ${from} → ${to}`, symbols: [from, to] });
     toast(receipt.status === 1 ? 'Swap confirmed! 🎉' : 'Swap failed!', receipt.status === 1 ? 'success' : 'error');
     emit('refresh');
   });

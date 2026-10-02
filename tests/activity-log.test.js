@@ -101,3 +101,27 @@ test('rows without a hash are all kept — they are not the same transaction', (
   assert.equal(st.get('activity').length, 2,
     'a helper deploy has no tx hash; collapsing those would erase real history');
 });
+
+test('activity rows file themselves under the right token symbol', () => {
+  // New rows: explicit fields. A swap records BOTH legs, so ETH -> USDC shows
+  // up under either token's modal.
+  assert.equal(st.activityMatchesSymbol({ symbol: 'USDC' }, 'usdc'), true);
+  assert.equal(st.activityMatchesSymbol({ symbols: ['ETH', 'USDC'] }, 'USDC'), true);
+  assert.equal(st.activityMatchesSymbol({ symbols: ['ETH', 'USDC'] }, 'DAI'), false);
+  assert.equal(st.activityMatchesSymbol({ symbol: 'ETH' }, 'WETH'), false);
+
+  // Legacy rows (written before the fields existed): the human detail string
+  // is the only place the token is named — "0.5 MATIC -> 0x123...".
+  assert.equal(st.activityMatchesSymbol({ detail: '1.5 MATIC → 0x1234' }, 'MATIC'), true);
+  assert.equal(st.activityMatchesSymbol({ detail: '0.5 ETH → USDC' }, 'ETH'), true);
+  assert.equal(st.activityMatchesSymbol({ detail: '0.5 ETH → USDC' }, 'USDC'), true);
+
+  // Word boundary both ways: USDT must not claim USDTX rows, and USDTX must
+  // not claim USDT rows. A substring match would file both incorrectly.
+  assert.equal(st.activityMatchesSymbol({ detail: '1 USDTX → 0x1' }, 'USDT'), false);
+  assert.equal(st.activityMatchesSymbol({ detail: '1 USDT → 0x1' }, 'USDTX'), false);
+
+  // Degenerate input: the token modal must not crash on a missing row.
+  assert.equal(st.activityMatchesSymbol(null, 'ETH'), false);
+  assert.equal(st.activityMatchesSymbol({ detail: 'x' }, ''), false);
+});

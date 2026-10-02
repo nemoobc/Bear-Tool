@@ -127,6 +127,25 @@ export function hasActivity(hash) {
   return state.activity.some((a) => a.hash === hash);
 }
 
+/**
+ * Does this activity row belong to the given token symbol? Used by the token
+ * modal's Transactions list.
+ *
+ * New rows carry `symbol` (send, bridge) or `symbols` (swap — both legs, so a
+ * ETH -> USDC trade shows under both). Rows written before those fields
+ * existed only carry the human detail string ("0.5 ETH -> 0x123..."), so the
+ * fallback is a word-boundary match against detail: a plain substring test
+ * would file USDT rows under a token named USDTX, and vice versa.
+ */
+export function activityMatchesSymbol(a, sym) {
+  if (!a || !sym) return false;
+  const s = String(sym).toLowerCase();
+  if (typeof a.symbol === 'string' && a.symbol.toLowerCase() === s) return true;
+  if (Array.isArray(a.symbols) && a.symbols.some((x) => String(x).toLowerCase() === s)) return true;
+  const esc = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('\\b' + esc + '\\b', 'i').test(String(a.detail || ''));
+}
+
 export const ACTIVITY_TERMINAL = TERMINAL;
 
 export function loadActivity() {

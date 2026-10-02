@@ -85,3 +85,47 @@ test('the catalogue injection is what the discovery view relies on', async () =>
   // Calling it must not throw and must be safe to call before anything is built.
   assert.doesNotThrow(() => mod.initDappBrowser({ catalog: [] }));
 });
+
+// WalletConnect rides the same entry points (menu + "did not load" fallback),
+// so it is imported HERE, through the real graph: dapp-browser.js imports
+// walletconnect.js, and a broken module would fail this file before any browser
+// ever ran. The assertions are the pure gates — nothing opens a socket in CI.
+test('walletconnect imports for real and its gates are pure', async () => {
+  const wc = await import('../js/walletconnect.js');
+  assert.equal(typeof wc.openPairWalletConnect, 'function',
+    'the pairing sheet is what both entry points call');
+  assert.equal(typeof wc.isValidWcUri, 'function');
+
+  // A paste must look like wc:<ver>-<topic>@<relay>?symKey=... BEFORE it is
+  // allowed near core.pair(), where a malformed URI throws deep in jsonrpc.
+  assert.equal(wc.isValidWcUri('wc:2.0-abc123@relay?symKey=deadbeef'), true);
+  assert.equal(wc.isValidWcUri('https://evil.example'), false, 'a URL is not a pairing URI');
+  assert.equal(wc.isValidWcUri('wc:2.0-abc123'), false, 'no relay, no pair');
+  assert.equal(wc.isValidWcUri(null), false);
+
+  // The grant equals exactly what the confirm dialog can deliver. eth_sign is
+  // absent on purpose: it signs raw digests nothing human can read.
+  assert.deepEqual(wc.WC_SIGN_METHODS,
+    ['personal_sign', 'eth_signTypedData_v4', 'eth_sendTransaction']);
+  assert.ok(!wc.WC_SIGN_METHODS.includes('eth_sign'), 'eth_sign must never be granted');
+
+  // Chains: union of required + optional, deduplicated; unspecified collapses
+  // to mainnet instead of granting "every chain" the user never saw.
+  assert.deepEqual(
+    wc.collectEip155Chains({ eip155: { chains: ['eip155:1'] } },
+                           { eip155: { chains: ['eip155:8453', 'eip155:1'] } }),
+    ['eip155:1', 'eip155:8453']);
+  assert.deepEqual(wc.collectEip155Chains({}, {}), ['eip155:1'],
+    'no chains asked = mainnet, never an unbounded namespace');
+  assert.deepEqual(wc.collectEip155Chains(undefined, undefined, ['eip155:137']), ['eip155:137']);
+
+  // Preview: hex decodes to text, and control/invisible characters cannot
+  // survive into the dialog (a bidi override would flip the displayed order
+  // of the message being signed).
+  assert.equal(wc.hexToPreview('0x48656c6c6f'), 'Hello');
+  assert.equal(wc.hexToPreview('0x48656c6c6f00'), 'Hello', 'NUL is stripped, not shown');
+  assert.equal(wc.stripInvisible('a\u202Eb'), 'ab', 'U+202E RLO removed');
+  assert.equal(wc.stripInvisible('a\u200bb'), 'ab', 'zero-width space removed');
+  assert.equal(wc.hexToPreview('0xzz'), '0xzz', 'non-hex degrades to the raw string');
+  assert.equal(wc.shortAddr('0x1234567890abcdef1234'), '0x1234...1234');
+});

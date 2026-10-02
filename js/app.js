@@ -15,7 +15,7 @@ import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPasswo
          fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue, titleCase } from './ui.js';
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity,
-         reconcileActivity } from './state.js';
+         reconcileActivity, activityMatchesSymbol } from './state.js';
 import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate } from './price.js';
 import { waitForReceipt, withTimeout } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
@@ -1925,6 +1925,19 @@ function showTokenActions(el) {
   try { holding = Number(ethers.formatUnits(balance || '0', decimals)) * usd; } catch { holding = 0; }
   if (!Number.isFinite(holding)) holding = 0;
 
+  // The transactions of THIS token, newest first. Rows written before the
+  // symbol field existed match through their detail string (see
+  // activityMatchesSymbol), so old history is not lost from this list.
+  loadActivity();
+  const tokenActs = get('activity').filter((a) => activityMatchesSymbol(a, symbol));
+  // Native ETH rows record symbol "ETH"; a native-coin send on another chain
+  // still carries the chain symbol in detail, so no special case is needed.
+  const contractBlock = address
+    ? `<span class="tm-addr-k">Contract</span>
+       <span class="tm-addr-v mono">${escapeHtml(address)}</span>
+       <button class="copy-btn" type="button" data-copy="${escapeHtml(address)}" title="Copy contract address" aria-label="Copy contract address"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`
+    : `<span class="tm-addr-k">Contract</span><span class="tm-addr-v">Native asset — no contract</span>`;
+
   openModal(`
     <button class="modal-close" type="button" data-close-modal>✕</button>
     <div class="token-modal-header">
@@ -1936,6 +1949,7 @@ function showTokenActions(el) {
         ${usd ? `<div class="small" style="opacity:0.7">@ ${escapeHtml(fmtUsd(usd))} / ${escapeHtml(symbol)}</div>` : ''}
       </div>
     </div>
+    <div class="token-modal-addr">${contractBlock}</div>
     <div class="token-modal-chart" id="tokenChart">
       <div class="chart-timeframes" id="chartTimeframes">
         <button class="chart-tf-btn active" data-tf="5m">5m</button>
@@ -1964,14 +1978,31 @@ function showTokenActions(el) {
         History
       </button>
     </div>
+    <div class="token-modal-txs">
+      <h3>Transactions</h3>
+      ${tokenActs.length ? tokenActs.map((a, i) => `
+        <button class="token-modal-tx" type="button" data-tx-idx="${i}">
+          <span class="tm-tx-line"><strong>${escapeHtml(a.type || 'tx')}</strong> · ${escapeHtml(a.status || '')}</span>
+          ${a.detail ? `<span class="tm-tx-detail">${escapeHtml(a.detail)}</span>` : ''}
+          <span class="tm-tx-time">${escapeHtml(fmtTime(a.ts))}</span>
+        </button>`).join('') : '<p class="small dim">No transactions for this token yet.</p>'}
+    </div>
     <div class="token-modal-footer">
       <button class="btn btn-ghost btn-block" type="button" data-close-modal>Close</button>
     </div>
-  `);
+  `, { fullscreen: true });
 
   // Store for action handlers
   window._tokenModalSymbol = symbol;
   window._tokenModalAddress = address;
+
+  // A transaction row opens the same full record the Activity view uses:
+  // the local row first, then the on-chain truth (block, status, gas, fee).
+  // openModal rewrites the same #modalBox, so this IS a navigation, not a
+  // modal stacked on a modal.
+  document.querySelectorAll('.token-modal-tx').forEach(b => {
+    b.addEventListener('click', () => showActivityDetail(tokenActs[Number(b.dataset.txIdx)]));
+  });
 
   // Draw mini chart from real 24h history
   drawMiniChart({ symbol, address, timeframe: '24h' });

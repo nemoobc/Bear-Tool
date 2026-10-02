@@ -33,6 +33,7 @@ import { escapeHtml, toast } from './ui.js';
 import { inspectUrl, classifyInput, VERDICT, renderSignalList, baseHost, matchHostList, matchCatalog } from './dapp-safety.js';
 import { sanitizeForStore, isSecretishUrl } from './security.js';
 import { getSecurityConfig, addBlockedHost, addTrustedHost, clearBrowsingData, listBlocked, listTrusted } from './dapp-sessions.js';
+import { openPairWalletConnect } from './walletconnect.js';
 
 const LS = {
   tabs: 'bear.dapp.tabs',
@@ -624,6 +625,7 @@ function toggleMenu(force) {
     ['sep'],
     ['open', '↗ Open in a new browser tab', () => { const u = t?.url; if (u) window.open(u, '_blank', 'noopener'); }],
     ['share', '🔗 Copy address', async () => { try { await navigator.clipboard.writeText(t?.url || ''); toast('Address copied', 'info'); } catch { toast('Clipboard refused by the browser', 'error'); } }],
+    ['wc', '🔗 Pair via WalletConnect', () => openPairWalletConnect()],
     ['sep'],
     ['bm', isBookmarked(t?.url) ? '★ Remove bookmark' : '☆ Bookmark this page', () => toggleBookmark()],
     ['hist', '🕘 Clear history', () => { write(LS.history, []); toast('History cleared', 'info'); paint(); }],
@@ -660,11 +662,14 @@ function showDidNotLoad() {
     out is a real browser tab:</p>
     <div class="dbr-rep-btns"><button class="btn btn-sm btn-primary" data-act="popup">↗ Open in a new tab</button>
     <button class="btn btn-sm btn-secondary" data-act="copy">📋 Copy URL</button>
+    <button class="btn btn-sm btn-secondary" data-act="wc">🔗 Pair via WalletConnect</button>
     <button class="btn btn-sm btn-secondary" data-act="back">Back</button></div></div>`;
   el.blocked.hidden = false;
   el.blocked.querySelector('[data-act="popup"]')?.addEventListener('click', () => {
     window.open(el.frame.src, '_blank', 'noopener');
   });
+  // The dApp refused to be embedded: hand the connection to the relay instead.
+  el.blocked.querySelector('[data-act="wc"]')?.addEventListener('click', () => { el.blocked.hidden = true; openPairWalletConnect(); });
   // Programmatic copy can be refused without a gesture or permission — the
   // address bar still shows the URL, so a refusal says that instead of failing
   // silently.

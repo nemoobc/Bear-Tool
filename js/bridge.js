@@ -442,7 +442,7 @@ export async function doBridgeExec() {
       connected.sendTransaction({ to, data, value, chainId }),
       BROADCAST_TIMEOUT_MS, 'bridge broadcast');
     toast('Bridge tx sent! ⏳', 'info');
-    addActivity({ hash: tx.hash, type: 'bridge', status: 'pending', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}` });
+    addActivity({ hash: tx.hash, type: 'bridge', status: 'pending', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}`, symbol: context.tokenSymbol });
     const { receipt, timedOut } = await waitForReceipt(tx);
     if (timedOut) {
       // Sent but not confirmed in time. The pending activity entry is left as
@@ -450,7 +450,7 @@ export async function doBridgeExec() {
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'bridge', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}` });
+    addActivity({ hash: tx.hash, type: 'bridge', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}`, symbol: context.tokenSymbol });
     toast(receipt.status === 1 ? 'Bridge confirmed! 🎉' : 'Bridge failed!', receipt.status === 1 ? 'success' : 'error');
     emit('refresh');
   });
