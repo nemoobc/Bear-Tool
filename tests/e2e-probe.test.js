@@ -464,6 +464,41 @@ test('E2E-probe: unawaited async render calls are caught (no global "Unexpected 
 // it would consume the keyless rate limit and make the native-price probe
 // above flaky with HTTP 429. Covered by mocked tests in price.test.js.
 
+// ── M4: rescue pk → sponsor → safe, single binding, auto-detect badge ──
+test('M4 eip7702: one binding per dangerous button, rescue signs with the target key', async () => {
+  const fs = await import('node:fs');
+  const src = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
+  const eip = src('../js/eip7702.js');
+  const tools = src('../js/eip7702-tools.js');
+  const app = src('../js/app.js');
+  const deploy = src('../src/views/deploy.jsx');
+  const page = src('../index.html');
+
+  // stubs gone: the dangerous buttons bind only in eip7702-tools.js
+  assert.ok(!/btnRescue'\)\.addEventListener/.test(eip), 'eip7702.js must not bind #btnRescue (tools owns it)');
+  assert.ok(!/doRescue|doClaim/.test(eip), 'stub doRescue/doClaim must be gone from eip7702.js');
+  assert.match(tools, /\$\('#btnRescue'\)\?\.addEventListener\('click', executeRescue\)/, 'tools binds the real rescue');
+
+  // EIP-7702 nonce rule: +1 only when sender == authority; wrong nonce = tuple silently skipped
+  assert.match(tools, /selfSponsor \? nonce \+ 1 : nonce/, 'auth nonce: +1 only for self-sponsor');
+  // RESCUER bound to the sponsor that executes (msg.sender inside the helper)
+  assert.match(tools, /deployContract\(sponsorSigner, abi, bytecode, \[safe, sponsorSigner\.address\]\)/, 'RESCUER = sponsor executor');
+  // success verdict requires the delegation to actually be on-chain
+  assert.match(tools, /const delegated = !!landed && landed\.toLowerCase\(\) === rescueAddr\.toLowerCase\(\)/, 'post-receipt delegation verify');
+  // target key: validated against the address, used as signer, wiped from the DOM
+  assert.match(tools, /wipeKeyField\('#rescueTargetKey'\)/, 'target key wiped');
+  assert.match(tools, /targetKey \? new ethers\.Wallet\(targetKey, provider\)/, 'target signs with its own key');
+  assert.match(deploy, /id="rescueTargetKey"/, 'form has the target key field');
+
+  // auto-detect badge: topline, driven by the topbar
+  assert.match(app, /function updateDelegationBadge\(\)/, 'badge updater exists');
+  const tb = app.slice(app.indexOf('function updateTopbar'));
+  assert.match(tb.slice(0, 1600), /updateDelegationBadge\(\)/, 'badge updates with the topbar');
+  assert.match(page, /id="delegationBadge"/, 'badge element sits in the topbar');
+  // activity: pending rows settle while the app stays open, not only at boot
+  assert.match(app, /setInterval\(\(\) => \{[\s\S]{0,400}reconcileActivity\(get\('provider'\)\)/, 'periodic reconcile of pending rows');
+});
+
 // let undici fetch resources settle before the runner tears down
 await new Promise(r => setTimeout(r, 1500));
 // silence undici resource-timing noise (Node 24 + node:test)

@@ -120,8 +120,14 @@ async function delegateAndExecute(targetAddress, implAddress, calldata, opts = {
     if (!targetSigner) throw new Error('Target wallet signer required for delegation');
 
     const nonce = await provider.getTransactionCount(targetAddress);
-    // Self-sponsored: auth nonce = nonce + 1
-    const authNonce = nonce + 1;
+    // EIP-7702 (final): the authorization list is processed AFTER the
+    // sender's nonce is incremented, and a tuple whose nonce does not equal
+    // the authority's current nonce is silently SKIPPED — the tx still mines
+    // status 1 while the delegation never applies. So: sender == authority
+    // (self-sponsor) → nonce + 1; foreign sponsor → the authority's raw nonce.
+    const senderAddr = String((opts.sponsorSigner || opts.targetSigner).address || '');
+    const selfSponsor = senderAddr.toLowerCase() === String(targetAddress).toLowerCase();
+    const authNonce = selfSponsor ? nonce + 1 : nonce;
 
     const authorization = targetSigner.authorizeSync({
       chainId: net.chainId,
@@ -332,19 +338,24 @@ async function executeRescue() {
   // Validated: take it out of the document. From here on the signer holds it.
   wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
 
-  // The 7702 authorization MUST be signed by the target itself — the nonce and
-  // the delegation check are both read from `target`. This build has no field
-  // for the target's key, so the only signer it holds is the unlocked wallet.
-  // Without this guard the code used get('signer') unconditionally: the
-  // signature belonged to the OPEN wallet while the nonce came from `target`,
-  // and had those two happened to agree the delegation would have been applied
-  // to the open wallet — a permanent, unapproved account change pointing it at a
-  // rescue contract, with the sponsor already having paid the gas. Refuse
-  // rather than guess which wallet was meant.
+  // The 7702 authorization MUST be signed by the target itself — it is the
+  // authority of the tuple; the sponsor key can only pay gas. Two ways to
+  // hold that signature: paste the target's private key (validated against
+  // the address right here), or have the target be the unlocked wallet.
+  // Never sign with some other account: refuse rather than guess.
+  const targetKey = $('#rescueTargetKey')?.value.trim() || '';
   const unlockedAddr = get('address');
-  if (!unlockedAddr || target.toLowerCase() !== String(unlockedAddr).toLowerCase()) {
-    return toast('Rescue requires the target wallet itself to be unlocked — this build cannot sign for a second address.', 'error');
+  if (targetKey) {
+    if (!/^0x[a-fA-F0-9]{64}$/.test(targetKey)) return toast('Invalid target private key', 'error');
+    if (new ethers.Wallet(targetKey).address.toLowerCase() !== target.toLowerCase()) {
+      return toast('Target private key does not match the locked wallet address', 'error');
+    }
+  } else if (!unlockedAddr || target.toLowerCase() !== String(unlockedAddr).toLowerCase()) {
+    return toast('Unlock the target wallet or paste its private key', 'error');
   }
+  const sponsorAddress = new ethers.Wallet(sponsorKey).address;
+  // Validated: out of the document; the local strings hold them from here.
+  wipeKeyField('#rescueTargetKey');
 
   const net = getNetworkById(get('networkId'));
   {
@@ -354,6 +365,8 @@ async function executeRescue() {
         { k: 'Locked wallet', v: wallet.shortAddress(target) },
         { k: 'SAFE destination', v: wallet.shortAddress(safe) },
         { k: 'Token type', v: type.toUpperCase() },
+        { k: 'Authorization', v: targetKey ? 'Target private key (validated)' : 'Unlocked target wallet' },
+        { k: 'Gas sponsor (executor)', v: wallet.shortAddress(sponsorAddress) },
         { k: 'Network', v: net.name }
       ],
       confirmText: 'Rescue', danger: net.type === 'mainnet'
@@ -372,7 +385,8 @@ async function executeRescue() {
     // Rescue helper must be deployed first (step 1 in the helper status card).
     // No silent auto-deploy here: the user explicitly deploys it up front.
     const existing = await findUsableDeployed('rescue', chainId, item =>
-      item.safe?.toLowerCase() === safe.toLowerCase() && item.target?.toLowerCase() === target.toLowerCase(), provider);
+      item.safe?.toLowerCase() === safe.toLowerCase() && item.target?.toLowerCase() === target.toLowerCase()
+        && item.sponsor?.toLowerCase() === sponsorAddress.toLowerCase(), provider);
     if (!existing) {
       toast('Deploy the rescue helper first (step 1 above)', 'error');
       return;
@@ -394,12 +408,10 @@ async function executeRescue() {
       calldata = rescueContract.interface.encodeFunctionData('rescueERC721', [tokenAddr, ids]);
     }
 
-    // Delegate target wallet to rescue contract, then execute
-    // The target wallet signs authorization, sponsor pays gas
-    // For this to work, we need the target wallet's private key
-    // In a real scenario, the target wallet would sign locally
-    // Here we use the sponsor to send (target must be unlocked or provide key)
-    const targetSigner = get('signer').connect(provider);
+    // Delegate target to the rescue contract, then sweep in the same tx:
+    // target signs the authorization, sponsor broadcasts (msg.sender inside
+    // the helper = the sponsor — which is why RESCUER is bound to it).
+    const targetSigner = targetKey ? new ethers.Wallet(targetKey, provider) : get('signer').connect(provider);
 
     const tx = await delegateAndExecute(
       target,
@@ -417,8 +429,19 @@ async function executeRescue() {
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'eip7702-rescue', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `Rescue ${type}` });
-    toast(receipt.status === 1 ? 'Assets rescued! 🎉' : 'Rescue failed!', receipt.status === 1 ? 'success' : 'error');
+    // A mined receipt is NOT proof the assets moved: a skipped authorization
+    // still mines status 1, and a call into an undelegated target is an
+    // empty-code no-op. Verify the delegation landed before claiming success.
+    let landed = null;
+    try { landed = await getDelegation(provider, target); } catch { /* RPC hiccup → honest unknown */ }
+    const delegated = !!landed && landed.toLowerCase() === rescueAddr.toLowerCase();
+    const rescued = receipt.status === 1 && delegated;
+    addActivity({ hash: tx.hash, type: 'eip7702-rescue', status: rescued ? 'success' : 'failed', ts: Date.now(), detail: `Rescue ${type}` });
+    if (receipt.status === 1 && !delegated) {
+      toast('Tx mined but the delegation did NOT apply — assets were NOT moved.', 'error');
+    } else {
+      toast(rescued ? 'Assets rescued! 🎉' : 'Rescue failed!', rescued ? 'success' : 'error');
+    }
     renderDeployedRegistry();
     emit('refresh');
   });
@@ -610,7 +633,10 @@ export async function deployBatchHelper() {
   }
 }
 
-// Explicit "deploy the helper first" action for Rescue (constructor: safe, target).
+// Explicit "deploy the helper first" action for Rescue (constructor: safe,
+// sponsor). RESCUER must be the account that BROADCASTS the sweep: the helper
+// executes in the target's context, so msg.sender is the sponsor — binding it
+// to the target made onlyRescuer revert on every rescue.
 export async function deployRescueHelper() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const target = $('#rescueTarget').value.trim();
@@ -635,17 +661,17 @@ export async function deployRescueHelper() {
         { k: 'Contract', v: 'rescue' },
         { k: 'Network', v: net.name },
         { k: 'SAFE', v: safe },
-        { k: 'Rescuer', v: target },
-        { k: 'Sponsor', v: wallet.shortAddress(sponsorSigner.address) },
+        { k: 'Rescue target', v: target },
+        { k: 'Sponsor (executor / RESCUER)', v: wallet.shortAddress(sponsorSigner.address) },
       ],
       confirmText: 'Sign',
       danger: net.type === 'mainnet',
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
     const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
-    const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, target]);
+    const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, sponsorSigner.address]);
     const addr = await contract.getAddress();
-    saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, abi });
+    saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, sponsor: sponsorSigner.address, abi });
     addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
     toast('Rescue helper deployed: ' + wallet.shortAddress(addr), 'success');
     showDeployedResult('rescue', 'Rescue helper', addr, net);
@@ -886,6 +912,7 @@ export function bindEip7702ToolsEvents() {
 
   // Password toggles
   bindPasswordToggle('#btnRescueKeyToggle', '#rescueSponsorKey');
+  bindPasswordToggle('#btnRescueTargetKeyToggle', '#rescueTargetKey');
   bindPasswordToggle('#btnClaimKeyToggle', '#claimSponsorKey');
 
   // Helper status (step 1) + registry list

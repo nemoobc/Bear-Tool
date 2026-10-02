@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { POPULAR_TOKENS, ERC20_ABI,
-         NETWORKS, getAllNetworks, getNetworkById, getProvider,
+         NETWORKS, getAllNetworks, getNetworkById, getProvider, getDelegation,
          addCustomNetwork, removeCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
          applyRpcOverrides, providerEndpoint } from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
@@ -78,6 +78,17 @@ window.addEventListener('DOMContentLoaded', () => {
   try { bindNav(); } catch (e) { console.error('[BearTool] nav binding failed:', e); }
   try { bindTopbar(); } catch (e) { console.error('[BearTool] topbar binding failed:', e); }
   try { bindViews(); } catch (e) { console.error('[BearTool] view binding failed:', e); }
+
+  // M4 activity: boot-only reconcile left a stuck row pending until the next
+  // reload/network switch — settle pending rows while the app stays open.
+  setInterval(() => {
+    if (!get('unlocked') || !get('provider')) return;
+    const pending = (get('activity') || []).some((a) => a && a.status === 'pending' && a.hash);
+    if (!pending) return;
+    reconcileActivity(get('provider')).then((r) => {
+      if (r.settled || r.failed) { emit('activity'); renderActivity(); }
+    }).catch(() => { /* honest state stays pending */ });
+  }, 45000);
   initTheme();
   // The provider must exist before any page can ask, and it answers "locked"
   // on its own until the user signs in — so installing it early is safe.
@@ -905,6 +916,34 @@ function bindTopbar() {
   pillKey($('#accountPill'), showAccountModal);
 }
 
+// ── auto-detect EIP-7702 delegation (M4): top-line badge driven by the
+// topbar (boot / unlock / network switch / account switch). Unknown (RPC
+// error) stays hidden — reporting "EOA" when the check failed would be a lie.
+let delegationBadgeKey = '';
+async function updateDelegationBadge() {
+  const el = $('#delegationBadge');
+  if (!el) return;
+  const addr = get('address');
+  const netId = get('networkId');
+  if (!addr || !netId) { el.hidden = true; el.dataset.state = ''; return; }
+  const key = netId + ':' + addr;
+  if (key === delegationBadgeKey && el.dataset.state) return;
+  try {
+    const net = getNetworkById(netId);
+    const provider = await getProvider(net.chainId);
+    const delegate = await getDelegation(provider, addr);
+    if (netId + ':' + get('address') !== key) return; // stale race → next tick
+    delegationBadgeKey = key;
+    el.dataset.state = delegate ? 'delegated' : 'eoa';
+    el.hidden = false;
+    el.className = 'delegation-badge ' + (delegate ? 'delegated' : 'eoa');
+    el.textContent = delegate ? `7702 ${delegate.slice(0, 10)}…` : 'EOA';
+    el.title = delegate ? `Delegated to ${delegate}` : 'Plain EOA (no delegation)';
+  } catch {
+    el.hidden = true; el.dataset.state = ''; delegationBadgeKey = '';
+  }
+}
+
 function updateTopbar() {
   const net = getNetworkById(get('networkId'));
   const pill = $('#networkPill');
@@ -935,6 +974,7 @@ function updateTopbar() {
     if (!get('unlocked')) label = '🔒 ' + label;
   }
   $('#accountShort').textContent = label || 'Not connected';
+  updateDelegationBadge();
 }
 
 // ── welcome / unlock modals ──
@@ -2443,6 +2483,8 @@ function renderActivity() {
     if (t.includes('swap')) return 'swap';
     if (t.includes('bridge')) return 'bridge';
     if (t.includes('approve')) return 'approve';
+    if (t.includes('7702') || t.includes('delegate') || t.includes('revoke')) return 'delegate';
+    if (t.includes('rescue') || t.includes('claim') || t.includes('deploy') || t.includes('helper')) return 'deploy';
     return 'send';
   };
   const actSvg = (type) => {
@@ -2452,7 +2494,9 @@ function renderActivity() {
       receive: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
       swap: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
       bridge: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 17h20"/><path d="M4 12V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5"/><circle cx="12" cy="17" r="3"/></svg>',
-      approve: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'
+      approve: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+      deploy: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>',
+      delegate: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
     };
     return `<div class="activity-icon ${cls}">${svgs[cls] || svgs.send}</div>`;
   };

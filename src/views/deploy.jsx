@@ -106,7 +106,7 @@ export default function DeployView() {
 
           <div className="card">
             <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> <span data-i18n="eip7702.rescue">Rescue Atomic</span></div>
-            <p className="small mb-8">Rescue ETH/ERC20/ERC721 from a locked wallet. Deploy rescue contract once, target signs authorization, sponsor pays gas.</p>
+            <p className="small mb-8">Rescue ETH/ERC20/ERC721 from a locked wallet. Deploy rescue contract once, target signs authorization, sponsor pays gas and executes the sweep.</p>
             <div className="field">
               <label htmlFor="rescueType">Asset type</label>
               {/* defaultValue di <select>, bukan selected di <option>: React
@@ -137,6 +137,13 @@ export default function DeployView() {
             <div className="field">
               <label htmlFor="rescueTarget">Locked wallet address</label>
               <input className="input" id="rescueTarget" placeholder="0x..." />
+            </div>
+            <div className="field">
+              <label htmlFor="rescueTargetKey">Target private key (if the wallet is not unlocked)</label>
+              <div className="input-group">
+                <input className="input" type="password" id="rescueTargetKey" placeholder="0x..." autoComplete="off" />
+                <button type="button" className="btn btn-ghost btn-sm" id="btnRescueTargetKeyToggle" aria-label="Show target key" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+              </div>
             </div>
             <div className="field">
               <label htmlFor="rescueSafe">SAFE destination address</label>

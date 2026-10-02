@@ -3327,3 +3327,10 @@ body::before {
 }
 .net-filter:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
 
+
+/* ── M4: delegation badge + activity icon families ── */
+.delegation-badge{margin:0 6px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.02em;white-space:nowrap}
+.delegation-badge.eoa{background:rgba(56,189,248,.15);color:#38bdf8}
+.delegation-badge.delegated{background:rgba(167,139,250,.18);color:#a78bfa}
+.activity-icon.delegate{color:#a78bfa}
+.activity-icon.deploy{color:#38bdf8}

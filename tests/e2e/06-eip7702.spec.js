@@ -49,3 +49,26 @@ test.describe('EIP-7702 (inside Tools)', () => {
     await expect(page.locator('#batchList .batch-item')).toHaveCount(1);
   });
 });
+
+
+test.describe('EIP-7702 M4 (rescue pk + single-fire batch)', () => {
+  test('rescue form offers a target private key field', async ({ page }) => {
+    await gotoApp(page);
+    await skipIntro(page);
+    await createWallet(page);
+    await appClick(page, '.nav-item[data-view="deploy"]');
+    await expect(page.locator('#rescueTargetKey')).toBeVisible();
+    await expect(page.locator('#btnRescueTargetKeyToggle')).toBeVisible();
+  });
+
+  test('one click on "+ Add action" adds exactly one row (single binding)', async ({ page }) => {
+    await gotoApp(page);
+    await skipIntro(page);
+    await createWallet(page);
+    await appClick(page, '.nav-item[data-view="deploy"]');
+    await appClick(page, '#btnBatchAdd');
+    await expect(page.locator('#batchList .batch-item')).toHaveCount(1);
+    await appClick(page, '#btnBatchAdd');
+    await expect(page.locator('#batchList .batch-item')).toHaveCount(2);
+  });
+});

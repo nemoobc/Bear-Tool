@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — eip7702.js
-// EIP-7702 suite: delegate/revoke (real), batch/rescue/claim
-// (honest stubs — need a deployed implementation contract).
+// EIP-7702 suite: delegate/revoke. Batch/rescue/claim live in
+// eip7702-tools.js — exactly one binding per button (M4 removed the stubs).
 // ChainId guard: default = active chain, 0 blocked on mainnet.
 // ═══════════════════════════════════════════════════════════════
 
@@ -23,10 +23,10 @@ export function bindEip7702Events() {
   // revoke branch always acted on get('address') and ignored those fields, so
   // it revoked the wrong account while reporting success.
   $('#btnRevoke').addEventListener('click', () => revokeDelegation());
-  $('#btnBatchAdd').addEventListener('click', addBatchItem);
-  $('#btnBatchExecute').addEventListener('click', executeBatch);
-  $('#btnRescue').addEventListener('click', doRescue);
-  $('#btnClaim').addEventListener('click', doClaim);
+  // M4: #btnBatchAdd/#btnBatchExecute/#btnRescue/#btnClaim bind ONLY in
+  // eip7702-tools.js. Binding them here too fired the stub listener first:
+  // a fake "Rescue requires…" toast plus a bogus activity row in front of
+  // the real flow (last-writer-wins hid it on batch, not on rescue).
 }
 
 export async function loadEip7702() {
@@ -132,92 +132,4 @@ export async function doEip7702(action) {
     loadEip7702();
     emit('refresh');
   });
-}
-
-// ── batch call ──
-export function addBatchItem() {
-  const batch = get('batch');
-  batch.push({ target: '', data: '', value: '0' });
-  renderBatch();
-}
-
-export function renderBatch() {
-  const list = $('#batchList');
-  if (!list) return;
-  const batch = get('batch');
-  if (!batch.length) {
-    list.innerHTML = '<p class="small text-center">No actions. Add one to batch.</p>';
-    return;
-  }
-  list.innerHTML = batch.map((b, i) => `
-    <div class="batch-item">
-      <span class="idx">${i + 1}</span>
-      <input class="input" data-batch="target" data-i="${i}" placeholder="Target contract 0x..." value="${escapeHtml(b.target)}">
-      <input class="input" data-batch="data" data-i="${i}" placeholder="Calldata 0x..." value="${escapeHtml(b.data)}">
-      <button class="btn btn-danger" data-del="${i}">✕</button>
-    </div>`).join('');
-  const $all = (sel) => document.querySelectorAll(sel);
-  $all('[data-batch]').forEach(el => el.addEventListener('input', (e) => {
-    const batch2 = get('batch');
-    batch2[Number(e.target.dataset.i)][e.target.dataset.batch] = e.target.value;
-  }));
-  $all('[data-del]').forEach(el => el.addEventListener('click', () => {
-    const batch2 = get('batch');
-    batch2.splice(Number(el.dataset.del), 1);
-    renderBatch();
-  }));
-}
-
-export async function executeBatch() {
-  if (!get('unlocked')) { requireUnlock(); return; }
-  const valid = get('batch').filter(b => b.target && b.data);
-  if (!valid.length) return toast('Add at least one valid action', 'error');
-  const net = getNetworkById(get('networkId'));
-  if (net.type === 'mainnet') {
-    const ok = await confirmTx({
-      title: 'BATCH ON MAINNET!',
-      rows: [{ k: 'Actions', v: String(valid.length) }, { k: 'Network', v: net.name }],
-      confirmText: 'Execute', danger: true
-    });
-    if (!ok) return;
-  }
-  toast('Batch execution requires a 7702-compatible implementation contract. Connect one to execute atomically.', 'info');
-}
-
-// ── rescue (honest stub — needs deployed rescue contract) ──
-export async function doRescue() {
-  if (!get('unlocked')) { requireUnlock(); return; }
-  const target = $('#rescueTarget').value.trim();
-  const safe = $('#rescueSafe').value.trim();
-  if (!wallet.isValidAddress(target) || !wallet.isValidAddress(safe)) return toast('Invalid addresses', 'error');
-  const net = getNetworkById(get('networkId'));
-  if (net.type === 'mainnet') {
-    const ok = await confirmTx({
-      title: 'RESCUE ON MAINNET!',
-      rows: [{ k: 'Locked wallet', v: target }, { k: 'SAFE destination', v: safe }, { k: 'Network', v: net.name }],
-      confirmText: 'Rescue', danger: true
-    });
-    if (!ok) return;
-  }
-  addActivity({ hash: 'rescue-' + Date.now(), type: 'eip7702-rescue', status: 'info', ts: Date.now(), detail: `Rescue attempt: ${target} → ${safe}` });
-  toast('Rescue requires a deployed rescue contract + sponsored gas. See docs/PROMPT.md for the full flow.', 'info');
-}
-
-// ── claim (honest stub — needs 7702 implementation) ──
-export async function doClaim() {
-  if (!get('unlocked')) { requireUnlock(); return; }
-  const token = $('#claimToken').value.trim();
-  const safe = $('#claimSafe').value.trim();
-  if (!wallet.isValidAddress(token) || !wallet.isValidAddress(safe)) return toast('Invalid addresses', 'error');
-  const net = getNetworkById(get('networkId'));
-  if (net.type === 'mainnet') {
-    const ok = await confirmTx({
-      title: 'CLAIM ON MAINNET!',
-      rows: [{ k: 'Token', v: token }, { k: 'Forward to', v: safe }, { k: 'Network', v: net.name }],
-      confirmText: 'Claim', danger: true
-    });
-    if (!ok) return;
-  }
-  addActivity({ hash: 'claim-' + Date.now(), type: 'claim', status: 'info', ts: Date.now(), detail: `Claim attempt: ${token} → ${safe}` });
-  toast('Claim + forward requires a 7702 implementation. See docs/PROMPT.md.', 'info');
 }
