@@ -7,6 +7,7 @@ Self-custody crypto wallet — 100% client-side, all EVM networks (mainnet + tes
 > ⚠️ **Educational / self-custody tool.** Keys never leave your browser. Always verify addresses. Mainnet transactions require extra confirmation (type `YA` to proceed).
 
 🔗 **Live:** [nemoobc.github.io/Bear-Tool](https://nemoobc.github.io/Bear-Tool)
+📦 Web build auto-deploys to Pages · 🤖 Android APK builds in CI (artifact `bear-tool-apk`) — both from this one repo.
 
 ---
 
@@ -76,16 +77,46 @@ Measured in a browser after the change, across all ten views:
 
 ## 🚀 Run
 
-No build step. Serve the folder:
-
 ```bash
-# any static server
-python3 -m http.server 8080
-# or
-npx serve .
+npm ci
+npm run dev       # Vite dev server (React views compiled on the fly)
+npm run preview   # serve the built bundle from dist/
 ```
 
-Open `http://localhost:8080`. Works offline for wallet ops (quotes need internet).
+Works offline for wallet ops (quotes need internet).
+
+## 📦 Build (web → HTML/CSS/JS)
+
+The web app is plain **HTML/CSS/JS** at its core — `index.html` + `css/` + `js/`
+(runtime), with React views in `src/` compiled by Vite into one static bundle:
+
+```bash
+npm run build     # → dist/: index.html + assets/ (hashed js/css) + js/ + assets/
+```
+
+`dist/` is the publishable artifact (gitignored). GitHub Pages serves it through
+the **Deploy Web (Pages)** workflow (`.github/workflows/pages.yml`):
+build → `upload-pages-artifact` → `deploy-pages`, on every push to `master`
+or via `gh workflow run pages.yml`.
+
+## 🤖 Android APK
+
+The Android app is a **Capacitor** wrapper over the same web code — one repo,
+one source of truth (`capacitor.config.json`, `android/`, `www/` staged from
+the Vite build):
+
+```bash
+# CI (recommended): Android APK workflow (.github/workflows/apk.yml)
+gh workflow run apk.yml
+gh run download <run-id> -n bear-tool-apk -D .
+```
+
+Local build needs JDK 21 + Android SDK 36:
+
+```bash
+npm run build && mkdir -p www && cp index.html www/ && cp -r css js assets www/ \
+  && npx cap sync android && cd android && ./gradlew assembleDebug
+```
 
 ## 🧪 Test
 
@@ -158,6 +189,8 @@ this file are measured, not intended.
 
 ```
 Bear-Tool/
+├── android/         # Capacitor Android project (Gradle assembleDebug)
+├── src/             # React views (App.jsx + views/*.jsx), Vite entry
 ├── index.html          # SPA shell (all views; ethers vendored + SHA-384 SRI)
 ├── css/cartoon.css     # cartoon theme + intro animation + spinner + reduced-motion
 ├── js/
@@ -174,7 +207,7 @@ Bear-Tool/
 │   ├── send.js         # send view: preview, gas estimate, poisoning warnings
 │   ├── swap.js         # swap view: auto-route over the registry (real quotes only)
 │   ├── bridge.js       # bridge view: LI.FI quote (real API, no simulation)
-│   ├── eip7702.js      # delegate/revoke (chainId guard), batch, rescue, claim
+│   ├── eip7702.js      # delegate/revoke (chainId guard); batch/rescue/claim in tools
 │   ├── eip7702-tools.js# helper-contract batch/rescue/airdrop flows
 │   ├── deploy.js       # deploy wizard: real in-browser solc compile → gas → deploy
 │   ├── contracts.js    # standard contract sources for the deploy wizard
