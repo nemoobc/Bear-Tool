@@ -184,6 +184,16 @@ restart_one() {
       fi
       echo "fork :$port answers but state unhealthy — restarting..."
       kill_port "$port"
+    else
+      # The port never answered — and until now this path printed NOTHING:
+      # CI 36997713895 amoy burned 4 attempts with no health line, no anvil
+      # output, no way to tell "not listening" from "listening but blocked on
+      # a dead upstream". Tail the log so DOWN is diagnosable from the job
+      # log alone, and kill whatever holds the port — a wedged anvil still
+      # bound to :port makes every later attempt die on Address-in-use.
+      echo "no answer from :$port — anvil log tail:"
+      tail -n 5 "$LOG/$n.log" 2>/dev/null | sed 's/^/  | /'
+      kill_port "$port"
     fi
     if [ "$attempt" -lt 4 ]; then
       echo "retrying $n fork start (attempt $attempt of 4)..."

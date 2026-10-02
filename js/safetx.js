@@ -44,28 +44,45 @@ export function withTimeout(promise, ms, label = 'operation') {
 // away — a revert left the user with nothing to look up and a "pending" row in
 // their history that nothing ever corrected. A revert is an ON-CHAIN OUTCOME,
 // not a failure to broadcast, so it is reported as one.
-export async function waitForReceipt(tx, { timeoutMs = CONFIRM_TIMEOUT_MS, label = 'confirmation' } = {}) {
+export async function waitForReceipt(tx, { timeoutMs = CONFIRM_TIMEOUT_MS, label = 'confirmation', retryMs = 2000 } = {}) {
   const hash = tx?.hash;
-  try {
-    const receipt = await withTimeout(tx.wait(), timeoutMs, label);
-    return { receipt, hash, timedOut: false, reverted: receipt?.status === 0 };
-  } catch (e) {
-    if (e?.code === 'BEAR_TIMEOUT') return { receipt: null, hash, timedOut: true };
-    // Reverted on chain: broadcast happened, the receipt exists, and the user
-    // needs its hash. `timedOut:false` because it did not time out.
-    if (e?.code === 'CALL_EXCEPTION' && e.receipt) {
-      return { receipt: e.receipt, hash: hash || e.transactionHash, timedOut: false, reverted: true };
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { receipt: null, hash, timedOut: true };
+    try {
+      const receipt = await withTimeout(tx.wait(), remaining, label);
+      return { receipt, hash, timedOut: false, reverted: receipt?.status === 0 };
+    } catch (e) {
+      if (e?.code === 'BEAR_TIMEOUT') return { receipt: null, hash, timedOut: true };
+      // Reverted on chain: broadcast happened, the receipt exists, and the user
+      // needs its hash. `timedOut:false` because it did not time out.
+      if (e?.code === 'CALL_EXCEPTION' && e.receipt) {
+        return { receipt: e.receipt, hash: hash || e.transactionHash, timedOut: false, reverted: true };
+      }
+      // Replaced (speed-up, drop-and-replace, underpriced retry) also arrives as
+      // an error. Surface both hashes — the dropped one and the one that took its
+      // place — so the history can point at the truth.
+      if (e?.code === 'TRANSACTION_REPLACED') {
+        return {
+          receipt: null, hash, timedOut: false, reverted: false, replaced: true,
+          replacement: e.replacement?.hash || null,
+        };
+      }
+      // Transient receipt-poll failure: the broadcast is DONE and the hash is
+      // real, so keep polling until the deadline instead of dying. ethers
+      // rejects the WHOLE wait() when one getTransactionReceipt call errors,
+      // and CI 36997713895 showed what rethrowing costs: four mainnets sent
+      // fine (receipt status=1 on the local fork) while anvil forwarded the
+      // app's receipt query to an upstream that answered 403 "Archive requests
+      // require a personal token" — one hiccup, and every row was stranded as
+      // "pending" forever with the confirmation sitting right there on chain.
+      // A node error is not an answer (same policy as the fork tests' backoff
+      // 2000). Only the deadline ends the wait — as an honest timedOut, with
+      // the hash preserved for the explorer.
+      if (deadline - Date.now() <= retryMs) return { receipt: null, hash, timedOut: true };
+      await new Promise((r) => setTimeout(r, retryMs));
     }
-    // Replaced (speed-up, drop-and-replace, underpriced retry) also arrives as
-    // an error. Surface both hashes — the dropped one and the one that took its
-    // place — so the history can point at the truth.
-    if (e?.code === 'TRANSACTION_REPLACED') {
-      return {
-        receipt: null, hash, timedOut: false, reverted: false, replaced: true,
-        replacement: e.replacement?.hash || null,
-      };
-    }
-    throw e;
   }
 }
 

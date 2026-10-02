@@ -64,13 +64,41 @@ test('a timeout is still a timeout, and still not a revert', async () => {
   assert.equal(r.hash, HASH, 'an unconfirmed tx must still be trackable by hash');
 });
 
-test('an unrelated failure (RPC down, user rejected) is still allowed to throw', async () => {
-  // Swallowing everything would hide real errors; only the two known
-  // transaction-outcome codes are converted into results.
+test('a transient receipt-poll failure is retried, not fatal', async () => {
+  // CI 36997713895: four mainnets broadcast successfully (receipt status=1 on
+  // the local fork) but anvil forwarded eth_getTransactionReceipt to an
+  // upstream answering 403 — ethers rejected the whole wait(), the old code
+  // rethrew, and every row was stranded "pending" forever. A node hiccup must
+  // not end the wait while the deadline still has room.
+  const boom = new Error('Fork Error: Transport(HttpError { status: 403 })');
+  boom.code = 'SERVER_ERROR';
+  let calls = 0;
+  const tx = {
+    hash: HASH,
+    wait: async () => {
+      calls += 1;
+      if (calls === 1) throw boom;
+      return { status: 1, gasUsed: 21000n };
+    },
+  };
+
+  const r = await waitForReceipt(tx, { timeoutMs: 2000, retryMs: 10 });
+
+  assert.equal(r.timedOut, false, 'the retry must reach the receipt');
+  assert.equal(r.receipt.status, 1);
+  assert.equal(r.hash, HASH);
+  assert.ok(calls >= 2, 'the poll must have been retried after the error');
+});
+
+test('a persistent transient failure ends as an honest timeout, never a throw', async () => {
+  // Swallowing must still be bounded: the caller learns "unconfirmed in
+  // time" with the hash intact — not an exception that skips its cleanup.
   const boom = new Error('network unreachable');
   boom.code = 'SERVER_ERROR';
-  await assert.rejects(
-    () => waitForReceipt(txThrowing(boom), { timeoutMs: 500 }),
-    /network unreachable/,
-  );
+
+  const r = await waitForReceipt(txThrowing(boom), { timeoutMs: 120, retryMs: 15 });
+
+  assert.equal(r.timedOut, true, 'a node that never answers is a timeout, not a crash');
+  assert.equal(r.receipt, null);
+  assert.equal(r.hash, HASH, 'an unconfirmed tx must still be trackable by hash');
 });

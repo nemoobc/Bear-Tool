@@ -45,9 +45,17 @@ test('waitForReceipt returns the receipt on success', async () => {
   assert.equal(res.receipt.status, 1);
 });
 
-test('waitForReceipt still rethrows real revert errors', async () => {
+test('waitForReceipt turns an unexpected poll error into an honest timeout', async () => {
+  // Contract change, evidence CI 36997713895: a generic error from the
+  // receipt poll used to be rethrown — one forwarded-403 and runTx's boundary
+  // killed the wait, stranding the row "pending" forever while the receipt
+  // sat at status=1 on chain. Infrastructure errors now retry until the
+  // deadline and end as timedOut: bounded, hash kept, no false success.
   const tx = { hash: '0xabc', wait: async () => { throw new Error('execution reverted'); } };
-  await assert.rejects(() => waitForReceipt(tx), /execution reverted/);
+  const res = await waitForReceipt(tx, { timeoutMs: 120, retryMs: 15 });
+  assert.equal(res.timedOut, true, 'the error must not hang and must not throw');
+  assert.equal(res.receipt, null);
+  assert.equal(res.hash, '0xabc', 'the hash must survive so the user can track it');
 });
 
 test('timeout budgets are finite and sane', () => {
