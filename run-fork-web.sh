@@ -79,7 +79,7 @@ start_one() {
   # node test keep working, because neither performs a preflight. That asymmetry
   # is what made this look like a flaky app rather than a missing flag.
   anvil --port "$port" --chain-id "$chain" "${fork_args[@]}" \
-        --fork-retry-backoff 2 \
+        --fork-retry-backoff 2000 \
         --allow-origin '*' --silent > "$LOG/$n.log" 2>&1 &
   echo $! >> "$PIDFILE"
 }

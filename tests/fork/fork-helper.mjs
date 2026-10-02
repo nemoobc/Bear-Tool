@@ -571,6 +571,46 @@ export async function waitForTx(tx, label = 'transaction', timeoutMs = 60000) {
     // an unhandled rejection from it would be attributed to the wrong test.
     real.catch(() => {});
     return await Promise.race([real, deadline]);
+  } catch (e) {
+    // status=0 is the one failure where WHY is invisible by default: ethers
+    // reports it from the receipt path with no reason string and no gas
+    // figures, and CI 36983252053's swap leg3 then spent three rounds
+    // guessing INSUFFICIENT_OUTPUT vs TRANSFER_FROM_FAILED vs out-of-gas from
+    // nothing but "gasUsed 171349". Two readings fix that, both from data
+    // that already exists: gasLimit on the response (equal to gasUsed = out
+    // of gas), and an eth_call replay of the same tx at the same block, which
+    // makes anvil re-execute it and return the revert string ethers could not
+    // recover post-hoc. If the replay succeeds instead, the revert was
+    // state-dependent — equally worth knowing. Enrichment never masks the
+    // original error.
+    try {
+      const rc = e?.receipt;
+      if (rc && rc.status === 0) {
+        const prov = tx.provider;
+        const full = prov ? await prov.getTransaction(tx.hash).catch(() => null) : null;
+        const limit = full?.gasLimit ?? tx.gasLimit ?? '?';
+        let why = 'replay skipped (no provider)';
+        if (prov && limit !== '?') {
+          why = 'replay skipped (no from/to/data)';
+          if (tx.to && (tx.data || full?.data)) {
+            try {
+              await prov.call({
+                to: tx.to, data: tx.data ?? full?.data, value: tx.value ?? full?.value ?? 0n,
+                from: tx.from ?? full?.from, gasLimit: limit,
+              }, rc.blockNumber);
+              why = 'replay SUCCEEDED at that block — revert depended on state that moved';
+            } catch (re) {
+              const r = re?.reason ?? re?.revert?.args?.[0] ?? null;
+              why = r ? `revert reason: ${String(r)}`
+                : `replay reverted, undecoded: ${String(re?.shortMessage || re?.message || re).slice(0, 160)}`;
+            }
+          }
+        }
+        const tag = String(label).slice(0, 60);
+        e.message = `${tag}: status=0 [gasLimit=${limit} gasUsed=${rc.gasUsed} — ${why}] — ${e.message}`;
+      }
+    } catch { /* enrichment is best-effort; the original throw stands */ }
+    throw e;
   } finally {
     clearTimeout(timer);
   }
