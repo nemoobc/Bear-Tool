@@ -28,7 +28,18 @@ test.setTimeout(300_000);
 
 const ANVIL_KEY0 = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const ANVIL_0 = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
-const ANVIL_1 = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
+// Recipient: 0xdEaD, NOT anvil account 1 (0x7099…). Every one of the 12
+// forked chains carries an EIP-7702 delegation on 0x7099… in REAL chain
+// state (probe 2026-10-02: mainnets → 0x8a67b5…, sepolia → 0xca11… = multicall3
+// with no payable fallback, testnets → their own targets; dEaD is empty code
+// 12/12). The app's verifySpendable and signer.sendTransaction both estimateGas
+// a transfer TO the recipient, so the delegated code runs there: CI 36997713895
+// logged `send failed: execution reverted require(false) … to=0x7099…` on
+// sepolia/bsc-testnet and starved amoy's pre-dialog estimate of a response.
+// dEaD is the same recipient fork-send.test.js already proves onchain — a
+// plain codeless value transfer cannot revert on delegation and needs no
+// upstream state fetch, which also keeps the sign window fast.
+const SEND_TO = '0x000000000000000000000000000000000000dEaD';
 
 // Wait until a send tx shows as success in the persisted activity.
 // 90s, not 45: CI 36983252072's runner IP was rate-limited upstream (429
@@ -52,16 +63,28 @@ async function waitSendSuccess(page, timeout = 90_000, port = null, errors = [])
       } catch { return false; }
     }, null, { timeout });
   } catch (e) {
+    // Dialog identity: closeModal() does NOT clear #modalBox.innerHTML — a
+    // settled confirmTx leaves its (hidden) #confirmYes in the DOM forever,
+    // so testing bare #confirmYes presence reported "sign-open" for every
+    // case in CI 36997713895, including ones whose flow had long moved past
+    // it. The overlay's 'open' class is the truth, plus WHICH question is
+    // showing and whether #btnSend is stuck in its runTx loading state.
     const snap = await page.evaluate(() => {
       try {
         const acts = JSON.parse(localStorage.getItem('bear.activity') || '[]');
         const sends = acts.filter((a) => a.type === 'send');
         const last = sends[sends.length - 1] || null;
-        const dlg = [
-          document.querySelector('#confirmYes') ? 'sign-open' : null,
-          document.querySelector('#confirmTypeInput') ? 'type-gate' : null,
-          document.querySelector('#sendTo') ? 'send-view' : null,
-        ].filter(Boolean).join('+') || 'none';
+        const overlay = document.querySelector('#modalOverlay');
+        const open = !!overlay && overlay.classList.contains('open');
+        const q = open
+          ? ((document.querySelector('#modalBox .question')?.textContent || '?').slice(0, 60))
+          : 'closed';
+        const btn = document.querySelector('#btnSend');
+        const btnState = btn
+          ? `${btn.disabled ? 'disabled' : 'enabled'}:${(btn.textContent || '').trim().slice(0, 24)}`
+          : 'missing';
+        const dlg = `modal="${q}" btn=${btnState}`
+          + (document.querySelector('#sendTo') ? ' send-view' : '');
         return { n: acts.length, last: last ? JSON.stringify(last).slice(0, 500) : null, dlg };
       } catch (x) { return { evalError: String(x), dlg: 'unreadable' }; }
     }).catch((x) => ({ evalError: String(x), dlg: 'page-gone' }));
@@ -128,30 +151,41 @@ for (const [netId, fork] of Object.entries(FORKS)) {
 
     // Send view with the native token loaded (proves fork RPC answered).
     await openSendView(page);
-    await page.fill('#sendTo', ANVIL_1);
+    await page.fill('#sendTo', SEND_TO);
     await page.fill('#sendAmount', '0.0001');
     await page.locator('#btnSend').click({ timeout: 5000 }).catch(async () => {
       const box = await page.locator('#btnSend').boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
 
-    // Mainnet networks show an extra "MAINNET TRANSACTION!" dialog. It is
-    // Cancel plus a named button - no typed field - so there is nothing to fill
-    // before clearing it. Afterwards the sign dialog is always confirmed.
+    // Mainnet networks show an extra "MAINNET TRANSACTION!" gate BEFORE the
+    // sign dialog — and it only renders after verifySpendable's estimateGas
+    // round-trip returns. The gate and the sign dialog share #confirmYes, so
+    // the old non-blocking `gate.count() > 0` raced that render: when the gate
+    // was still cooking, the wait below caught the GATE instead of the sign
+    // dialog, clicked it, and the real sign dialog opened afterwards with
+    // nobody left to click it. CI 36997713895: five mainnet sends sat 90s with
+    // dialog=sign-open, activity n=0, silent console. Identify each dialog by
+    // its title and click through gates until SIGN is the one up.
     if (fork.type === 'mainnet') {
       await expect(page.locator('#confirmTypeInput')).toHaveCount(0);
-      const gate = page.locator('#confirmYes');
-      if (await gate.count() > 0) {
-        await gate.click({ timeout: 5000 }).catch(async () => {
-          const box = await gate.boundingBox();
-          if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        });
+      for (let i = 0; i < 4; i++) {
+        await page.waitForSelector('#confirmYes', { timeout: 15_000 });
+        const q = (await page.locator('.question').first().textContent().catch(() => '')) || '';
+        if (/SIGN TRANSACTION/i.test(q)) break;
+        // settle() → closeModal() flips the overlay's 'open' class synchronously,
+        // so the next visible-wait below only succeeds once the NEXT dialog
+        // (the sign one) is actually up — no detached wait needed, and none
+        // would work anyway: closeModal keeps #modalBox.innerHTML in the DOM.
+        await page.locator('#confirmYes').click({ timeout: 5000 });
       }
     }
     // SIGN TRANSACTION dialog → re-pin the fork right before broadcast
     // (fast chains prune the fork base state within minutes and the UI flow
     // up to here is slow) → sign & send
     await page.waitForSelector('#confirmYes', { timeout: 15_000 });
+    const signTitle = (await page.locator('.question').first().textContent().catch(() => '')) || '';
+    expect(signTitle, 'dialog yang terbuka harus SIGN TRANSACTION, bukan gate/hasil balapan').toMatch(/SIGN TRANSACTION/i);
     freshFork(netId);
     await page.locator('#confirmYes').click({ timeout: 5000 }).catch(async () => {
       const box = await page.locator('#confirmYes').boundingBox();
@@ -167,7 +201,7 @@ for (const [netId, fork] of Object.entries(FORKS)) {
     expect(receipt, `receipt for ${entry.hash} on ${netId} fork`).toBeTruthy();
     expect(receipt.status).toBe(1);
     expect(receipt.from.toLowerCase()).toBe(ANVIL_0.toLowerCase());
-    expect(receipt.to.toLowerCase()).toBe(ANVIL_1.toLowerCase());
+    expect(receipt.to.toLowerCase()).toBe(SEND_TO.toLowerCase());
     expect(receipt.blockNumber).toBeGreaterThan(0);
   });
 }
