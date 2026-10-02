@@ -11,7 +11,7 @@
 import { test, expect } from '@playwright/test';
 import {
   gotoApp, skipIntro, createWallet, fundedWallet, openSendView, appClick,
-  freshFork, proxyRpc, FORKS, HAS_ANVIL,
+  freshFork, proxyRpc, FORKS, HAS_ANVIL, ANVIL_ACCOUNT_0,
 } from './helpers.js';
 
 const BALANCE_WEI = '0x2386f26fc10000'; // 0.1 ETH
@@ -47,45 +47,43 @@ test.setTimeout(300_000);
 // visible to the next one. That is a test that reports a JavaScript scoping error
 // as if it were a wallet problem.
 
-// Seed the cached token balances, then RE-ENTER the Send view so the dropdown is
-// rebuilt from what was just written.
+// Seed the fork's CHAIN directly from the test process — one plain POST to its
+// fixed port — then RE-ENTER the Send view so the dropdown is rebuilt from
+// what the chain now says.
 //
-// Both halves matter. MAX prefers a LIVE balanceOf() read and only accepts it when
-// it is non-zero, falling back to the cached balance — and on a mainnet fork a
-// well-known test address holds none of these tokens, so the live read is always 0
-// and the cached value is what decides. A <select> rendered before the seed
-// therefore reports the balance the wallet had BEFORE, not the one just set, and MAX
-// dutifully reports that: 0 for a seeded 25 USDC, and 0.009919 for a seeded 1 wei
-// because it was still working from the fork's 0.1 ETH.
-//
-// openSendView cannot fix this by itself, and that is deliberate: it is idempotent
-// so a second call does not try to click a dashboard button that is display:none
-// from inside the Send view. Re-entering is therefore the caller's job.
-async function seedAndReenter(page, { native, usdc } = {}) {
-  await page.evaluate(async (seed) => {
-    const { set, get } = await import('/js/state.js');
-    // The NATIVE balance is set on the node first, because that is the read MAX
-    // prefers. Patching the cached copy alone is not enough: opening the Send view
-    // re-reads from the chain and overwrites it, which is why a seeded 1 wei kept
-    // coming back as the fork's 0.1 ETH.
-    if (seed.native !== undefined) {
-      const provider = get('provider');
-      if (provider) {
-        try { await provider.send('anvil_setBalance', [get('address'), seed.native]); }
-        catch { /* not a fork: the cached patch below is all there is */ }
-      }
-    }
-    const tokens = get('tokens');
-    if (seed.native !== undefined) {
-      const net = tokens.find((t) => !t.address);
-      if (net) net.balance = seed.native;
-    }
-    if (seed.usdc !== undefined) {
-      const t = tokens.find((x) => x.symbol === 'USDC');
-      if (t) t.balance = seed.usdc;
-    }
-    set('tokens', tokens);
-  }, { native, usdc });
+// Seed on the node, not through the page: vite inlines js/state.js into the
+// app bundle (dist/assets/app-*.js) while this test imports /js/state.js as a
+// separate file — two modules, two stores. Everything written through
+// page.evaluate's set() landed in the test's copy where get('provider') is
+// null, so the old in-page anvil_setBalance skipped itself silently and the
+// app never saw a seed: CI 36983252072 had MAX measuring anvil's default
+// 10000 ETH (9999.999973, 9999.99964) instead of the seeded 0.1, and the
+// balance-below-fee test filling a field it had asked to stay empty. Chain
+// state is shared by every module — the app's own provider reads this fork and
+// picks the new balance up on re-entry, which is why the click-through below
+// is part of the seed and not decoration. Failure must be loud: a silent
+// catch is exactly what hid this.
+async function forkSetBalance(wei) {
+  const res = await fetch(`http://127.0.0.1:${FORKS.ethereum.port}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      method: 'anvil_setBalance',
+      params: [ANVIL_ACCOUNT_0.address, wei],
+    }),
+  });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`fork anvil_setBalance HTTP ${res.status}: ${body}`);
+  const json = JSON.parse(body);
+  if (json.error) throw new Error(`fork anvil_setBalance rejected: ${body}`);
+  // anvil answers {"result":null}; any other shape is the silent-failure
+  // costume, and this gate exists precisely because one of those ran for weeks.
+  if (json.result !== null) throw new Error(`fork anvil_setBalance unexpected: ${body}`);
+}
+
+async function seedAndReenter(page, { native } = {}) {
+  if (native !== undefined) await forkSetBalance(native);
   await page.waitForTimeout(400);
   await appClick(page, '.nav-item[data-view="dashboard"]');
   await openSendView(page);
@@ -104,17 +102,13 @@ async function waitForTokens(page) {
 }
 
 async function seedBalances(page) {
-  // Give the wallet a real native balance and a token balance, so both the
-  // gas-paying and the non-gas-paying branch can be exercised.
+  // Give the wallet a real native balance on the fork. The token branch runs
+  // through the refusal path instead: anvil's account holds no USDC, the app
+  // reads that as 0, and the non-gas-token test already follows "the number
+  // the app itself is showing" — a token the fork says is empty is a token
+  // MAX correctly reports as empty.
   await waitForTokens(page);
-  await page.evaluate(async (wei) => {
-    const { get } = await import('/js/state.js');
-    const provider = get('provider');
-    if (provider) {
-      try { await provider.send('anvil_setBalance', [get('address'), wei]); } catch { /* not a fork */ }
-    }
-  }, BALANCE_WEI);
-  await seedAndReenter(page, { native: BALANCE_WEI, usdc: '25000000' }); // 25 USDC, 6 dp
+  await seedAndReenter(page, { native: BALANCE_WEI });
 }
 
 test.describe('MAX amount', () => {
@@ -150,28 +144,36 @@ test.describe('MAX amount', () => {
     const value = await page.inputValue('#sendAmount');
     if (value === '') {
       // resolveMax's refusal reason only reaches #sendMaxNote; an empty field
-      // alone cannot say WHY it refused. Carry the note, the seed state and a
-      // live re-run of resolveMax into the assertion so the CI log names the
-      // cause instead of just the empty input.
+      // alone cannot say WHY it refused. Carry the note plus hard facts into
+      // the assertion: what the DOM shows, and what the FORK says the wallet
+      // holds. The old probe imported /js/state.js in-page and reported the
+      // TEST's copy of the store — a null provider nobody had — which sent CI
+      // 36955492385 chasing a null that wasn't the app's. The app's module
+      // state is inlined into its bundle and out of reach by design; the
+      // balance question lives on the chain, so ask the chain.
       const note = await page.locator('#sendMaxNote').textContent().catch(() => '(none)');
-      const diag = await page.evaluate(async (wei) => {
-        try {
-          const [{ get }, { resolveMax }] = await Promise.all([import('/js/state.js'), import('/js/max-ui.js')]);
-          const sel = document.getElementById('sendToken');
-          const t = (get('tokens') || []).find((x) => (x.address || 'native') === sel?.value);
-          const provider = get('provider');
-          let live = null;
-          let seeded = null;
-          try { live = String(await provider.getBalance(get('address'))); } catch (e) { live = 'ERR ' + (e?.message || e); }
-          try { await provider.send('anvil_setBalance', [get('address'), wei]); seeded = 'ok'; } catch (e) { seeded = 'failed: ' + (e?.message || e); }
-          const r = await resolveMax({
-            token: t && { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
-            provider, from: get('address'),
-            to: (document.getElementById('sendTo')?.value || '').trim(), pct: 100,
-          });
-          return { live, seeded, ok: r.ok, spendable: String(r.spendable), balanceSource: r.balanceSource, source: r.source, message: r.message };
-        } catch (e) { return { probeError: String(e) }; }
-      }, BALANCE_WEI);
+      const dom = await page.evaluate(() => {
+        const s = document.getElementById('sendToken');
+        return {
+          token: s ? (s.options[s.selectedIndex]?.textContent || s.value) : '(no select)',
+          shown: document.getElementById('sendTokenBalance')?.textContent ?? '(none)',
+        };
+      });
+      let forkBalanceWei = '(unreachable)';
+      try {
+        const res = await fetch(`http://127.0.0.1:${FORKS.ethereum.port}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 1,
+            method: 'eth_getBalance',
+            params: [ANVIL_ACCOUNT_0.address, 'latest'],
+          }),
+        });
+        const j = await res.json();
+        forkBalanceWei = j.error ? `ERR ${j.error.message}` : BigInt(j.result).toString();
+      } catch (e) { forkBalanceWei = 'ERR ' + (e?.message || e); }
+      const diag = { ...dom, forkBalanceWei };
       expect(value, `MAX must write something [note="${note}"] [diag=${JSON.stringify(diag)}]`).not.toBe('');
     }
     expect(value, 'MAX must write something').not.toBe('');

@@ -146,10 +146,17 @@ test('E2E-probe: i18n toggle EN → ID changes labels', () => {
 });
 
 // ── 6. Real API probes (KyberSwap / LI.FI / CoinGecko) ──
-test('E2E-probe: KyberSwap quote API returns real route (ETH→USDC, mainnet)', async () => {
+test('E2E-probe: KyberSwap quote API returns real route (ETH→USDC, mainnet)', async (t) => {
   const url = 'https://aggregator-api.kyberswap.com/ethereum/api/v1/routes?tokenIn=0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE&tokenOut=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48&amountIn=1000000000000000000';
-  const res = await httpGetRetry(url);
-  assert.equal(res.status, 200);
+    const res = await httpGetRetry(url);
+    // Same treatment as the CoinGecko probe below: after retries a 429 is the
+    // shared runner IP being throttled upstream (CI 36983252072's log: "Your
+    // IP has exceeded..."), not a defect in this app's route request — skip
+    // honestly instead of failing the gate for someone else's rate limiter.
+    if (res.status === 429) {
+      return t.skip('KyberSwap rate limit (429) — live probe, not a code failure');
+    }
+    assert.equal(res.status, 200);
   const json = JSON.parse(res.text);
   assert.equal(json.code, 0);
   assert.ok(json.data?.routeSummary?.amountOut, 'routeSummary.amountOut present');

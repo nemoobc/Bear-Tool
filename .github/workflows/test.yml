@@ -152,7 +152,13 @@ jobs:
   playwright-test:
     name: Playwright E2E Test (tracked suite)
     runs-on: ubuntu-latest
-    needs: static-analysis
+    # unit-tests too, not just static-analysis: the unit job runs the live-API
+    # probes (KyberSwap/LI.FI/CoinGecko), and running both jobs at once made
+    # ONE runner IP hit those upstreams twice — CI 36983252072's log shows the
+    # 429 storm in the unit job landing in the same seconds the E2E suite
+    # started forking. Serial costs ~3 minutes; the shared-IP throttle cost
+    # nine fork failures.
+    needs: [static-analysis, unit-tests]
     steps:
       - uses: actions/checkout@v4
 

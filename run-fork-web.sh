@@ -61,14 +61,25 @@ start_one() {
   line="${NET[$n]:-}"
   [ -n "$line" ] || { echo "unknown network: $n"; return 1; }
   IFS='|' read -r port chain rpc <<< "$line"
-  [ -n "${2:-}" ] && rpc="$2"
+  # Round-robin pair: anvil accepts MULTIPLE --fork-url flags and load-balances
+  # across them, rotating to the next endpoint on failure — the built-in answer
+  # to CI 36983252072's upstream 429s ("Your IP has exceeded..."), which took
+  # down the health gate, the broadcast path AND the live API probes. Two
+  # providers = two rate buckets = one of them is usually still open.
+  local rpc2="${ALT[$n]:-}"
+  # A retry passes its own choice as $2: it becomes the first endpoint, with
+  # the original primary kept as the pair so no attempt runs single-handed.
+  if [ -n "${2:-}" ]; then rpc2="$rpc"; rpc="$2"; fi
+  local fork_args=(--fork-url "$rpc")
+  [ -n "$rpc2" ] && fork_args+=(--fork-url "$rpc2")
   # --allow-origin is not optional here. This script exists so the WEB UI can
   # reach these forks, and a browser will not send a JSON-RPC POST until the
   # CORS preflight succeeds. Without the flag anvil does not answer OPTIONS and
   # every request from the page fails as "Failed to fetch" — while curl and any
   # node test keep working, because neither performs a preflight. That asymmetry
   # is what made this look like a flaky app rather than a missing flag.
-  anvil --port "$port" --chain-id "$chain" --fork-url "$rpc" \
+  anvil --port "$port" --chain-id "$chain" "${fork_args[@]}" \
+        --fork-retry-backoff 2 \
         --allow-origin '*' --silent > "$LOG/$n.log" 2>&1 &
   echo $! >> "$PIDFILE"
 }
@@ -83,13 +94,18 @@ kill_port() {
   if [ -f "$PIDFILE" ]; then
     local pid newpids=""
     while read -r pid; do
+      [ -n "$pid" ] || continue   # blank line → /proc//cmdline noise (see restart_one)
       if [ -d "/proc/$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "--port $1"; then
         kill "$pid" 2>/dev/null || true
       else
         newpids="$newpids $pid"
       fi
     done < "$PIDFILE"
-    printf '%s\n' $newpids | sed 's/^ //' > "$PIDFILE"
+    if [ -n "${newpids# }" ]; then
+      printf '%s\n' $newpids | sed 's/^ //' > "$PIDFILE"
+    else
+      : > "$PIDFILE"
+    fi
   fi
 }
 
@@ -102,13 +118,23 @@ restart_one() {
   if [ -f "$PIDFILE" ]; then
     local pid
     while read -r pid; do
+      # A blank line makes $pid empty: [ -d "/proc/" ] is TRUE (it is /proc)
+      # and the redirect below then reads "/proc//cmdline" and prints
+      # "Permission denied" into the log. Skip empties outright.
+      [ -n "$pid" ] || continue
       if [ -d "/proc/$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "--port $port"; then
         kill "$pid" 2>/dev/null || true
       else
         newpids="$newpids $pid"
       fi
     done < "$PIDFILE"
-    printf '%s\n' $newpids | sed 's/^ //' > "$PIDFILE"
+    # Empty input makes printf emit ONE blank line, planting exactly the
+    # malformed entry the skip above just learned to ignore — truncate instead.
+    if [ -n "${newpids# }" ]; then
+      printf '%s\n' $newpids | sed 's/^ //' > "$PIDFILE"
+    else
+      : > "$PIDFILE"
+    fi
   fi
   # wait until the port is actually free (old anvil may take a moment to die)
   for i in 1 2 3 4 5 6 7 8; do

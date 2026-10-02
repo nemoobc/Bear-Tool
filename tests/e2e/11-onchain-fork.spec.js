@@ -31,7 +31,11 @@ const ANVIL_0 = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 const ANVIL_1 = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
 // Wait until a send tx shows as success in the persisted activity.
-async function waitSendSuccess(page, timeout = 45000) {
+// 90s, not 45: CI 36983252072's runner IP was rate-limited upstream (429
+// "Your IP has exceeded..."), and anvil's fork-retry layer backs off between
+// attempts before the receipt ever lands — four sends timed out at 45s with
+// the fork itself healthy. The window covers a retry cycle, not a hang.
+async function waitSendSuccess(page, timeout = 90_000) {
   await page.waitForFunction(() => {
     try {
       const acts = JSON.parse(localStorage.getItem('bear.activity') || '[]');
