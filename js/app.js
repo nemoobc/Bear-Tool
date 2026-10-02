@@ -1762,6 +1762,15 @@ async function loadDashboard() {
   renderHeroSpark(net).catch(() => { /* cosmetic — never blocks */ });
   try {
     const provider = await getProvider(net.chainId);
+    // A dashboard that STARTED before a network switch must not install its
+    // provider AFTER the switch landed: CI 36997713895 amoy lost this race by
+    // milliseconds — the import-time ethereum dashboard's set('provider')
+    // overwrote the amoy one, so verifySpendable quoted a balance from real
+    // ETHEREUM (0.00), refused the send, and the sign dialog never opened
+    // (trace: eth_getBalance + fee batch hit ethereum-rpc.publicnode.com while
+    // networkId was 'amoy'). Same class of staleness as the token-list guard
+    // below; re-check which network this snapshot actually belongs to.
+    if (get('networkId') !== net.id) return;
     set('provider', provider);
     const balance = await provider.getBalance(get('address'));
     const native = {
@@ -1785,6 +1794,10 @@ async function loadDashboard() {
         decimals: popular[i].decimals, balance: '0', usd: null
       });
     });
+    // Same staleness guard as the provider above: the balanceOf batch can take
+    // seconds, and a switch landing mid-flight must not be overwritten with a
+    // token list (and provider render) built for the OLD network.
+    if (get('networkId') !== net.id) return;
     set('tokens', tokens);
     // USD prices (CoinGecko → DexScreener → cache)
     try {
@@ -2583,6 +2596,11 @@ async function reconnectRpc() {
   if (!net) return;
   try {
     const provider = await getProvider(net.chainId);
+    // Switch may have been superseded while getProvider probed its RPCs —
+    // installing a provider for a network that is no longer active strands
+    // every later call on the wrong chain (CI amoy: verify ran against
+    // ethereum, balance 0.00, send refused, no dialog).
+    if (get('networkId') !== net.id) return;
     set('provider', provider);
     if (get('unlocked')) {
       const secret = wallet.getSession();
