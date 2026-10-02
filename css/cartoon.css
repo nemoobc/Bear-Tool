@@ -1289,9 +1289,16 @@ body::before {
   font-weight: 600;
   white-space: nowrap;
 }
-.swap-flip-wrap { display: flex; justify-content: center; margin: calc(var(--sp-4) * -1) 0; }
+/* Hug the pair fields: -4px left the button floating too far from both
+   sides (report: "agak jauh sama kedua pairnya"). */
+.swap-flip-wrap { display: flex; justify-content: center; margin: -10px 0; }
 .swap-flip-btn {
   font-size: 1.3rem;
+  /* Exact circle: .btn's base padding (12px 22px) made this button 60x44 —
+     an ellipse under border-radius:50%. Square it off, zero the padding. */
+  padding: 0;
+  width: var(--touch-min);
+  height: var(--touch-min);
   min-width: var(--touch-min);
   min-height: var(--touch-min);
   border-radius: 50%;
