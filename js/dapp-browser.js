@@ -34,6 +34,8 @@ import { inspectUrl, classifyInput, VERDICT, renderSignalList, baseHost, matchHo
 import { sanitizeForStore, isSecretishUrl } from './security.js';
 import { getSecurityConfig, addBlockedHost, addTrustedHost, clearBrowsingData, listBlocked, listTrusted } from './dapp-sessions.js';
 import { openPairWalletConnect } from './walletconnect.js';
+import { get, on } from './state.js';
+import { getNetworkById } from './network.js';
 
 const LS = {
   tabs: 'bear.dapp.tabs',
@@ -136,20 +138,29 @@ function restoreSession() {
 // CHROME
 // ═══════════════════════════════════════════════════════════════
 
+// Chrome, in the order OKX Wallet lays it out:
+//
+//   TOP    [ ✕ ] [ 🔒 pill: url ................ ] [ ★ ] [ 🔗 ] [ ⛓ logo ]
+//   TABS   the existing strip (kept verbatim — its ids are asserted by e2e)
+//   STAGE  home page | frame | blocked
+//   BOTTOM [ ‹ ] [ › ] [ ⟳ ] [ ⌂ ] [ ⋯ ]        ← five slots, one per thumb
+//
+// Every id below is pre-existing except #dbrClose / #dbrNet / #dbrNetIc / #dbrBar.
+// The five navigation buttons MOVED rather than changed identity, so the back /
+// forward / home / reload / menu tests keep passing against the same selectors.
 const SHELL = `
   <div class="dbr-top">
-    <button class="dbr-btn" id="dbrBack" title="Back" aria-label="Back">‹</button>
-    <button class="dbr-btn" id="dbrFwd" title="Forward" aria-label="Forward">›</button>
-    <button class="dbr-btn" id="dbrReload" title="Reload" aria-label="Reload">⟳</button>
-    <button class="dbr-btn" id="dbrHome" title="Home" aria-label="Home">⌂</button>
-    <div class="dbr-secure" id="dbrSecure" role="status" aria-live="polite"></div>
+    <button class="dbr-btn dbr-ic" id="dbrClose" title="Close browser" aria-label="Close browser">✕</button>
     <div class="dbr-urlwrap">
+      <span class="dbr-secure" id="dbrSecure" role="status" aria-live="polite"></span>
       <input type="text" id="dbrUrl" class="dbr-url" spellcheck="false" autocomplete="off"
              placeholder="Search DApps or type an address" aria-label="Address and search">
     </div>
-    <button class="dbr-btn" id="dbrBm" title="Bookmark this page" aria-label="Bookmark this page" aria-pressed="false">★</button>
-    <button class="dbr-btn" id="dbrConnect" title="Connect this site to the wallet" aria-label="Connect this site to the wallet">🔗</button>
-    <button class="dbr-btn" id="dbrMenu" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">⋯</button>
+    <button class="dbr-btn dbr-ic" id="dbrBm" title="Bookmark this page" aria-label="Bookmark this page" aria-pressed="false">★</button>
+    <button class="dbr-btn dbr-ic dbr-conn" id="dbrConnect" title="Connect this site to the wallet" aria-label="Connect this site to the wallet" hidden>🔗</button>
+    <button class="dbr-btn dbr-ic dbr-net" id="dbrNet" title="Switch network" aria-label="Current network — switch network">
+      <span class="dbr-net-ic" id="dbrNetIc" aria-hidden="true"></span>
+    </button>
   </div>
   <div class="dbr-tabs" id="dbrTabs" role="tablist" aria-label="Open tabs"></div>
   <div class="dbr-menu" id="dbrMenuPop" hidden role="menu"></div>
@@ -163,6 +174,13 @@ const SHELL = `
       sandbox="allow-scripts allow-forms allow-popups allow-modals"
       referrerpolicy="no-referrer" credentialless allow="" hidden></iframe>
     <div class="dbr-blocked" id="dbrBlocked" hidden></div>
+  </div>
+  <div class="dbr-bar" id="dbrBar" role="toolbar" aria-label="Browser controls">
+    <button class="dbr-bbtn" id="dbrBack" title="Back" aria-label="Back">‹</button>
+    <button class="dbr-bbtn" id="dbrFwd" title="Forward" aria-label="Forward">›</button>
+    <button class="dbr-bbtn" id="dbrReload" title="Reload" aria-label="Reload">⟳</button>
+    <button class="dbr-bbtn" id="dbrHome" title="Home" aria-label="Home">⌂</button>
+    <button class="dbr-bbtn" id="dbrMenu" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">⋯</button>
   </div>`;
 
 function build() {
@@ -177,6 +195,7 @@ function build() {
   document.body.appendChild(overlay);
 
   el = {
+    close: overlay.querySelector('#dbrClose'),
     back: overlay.querySelector('#dbrBack'),
     fwd: overlay.querySelector('#dbrFwd'),
     reload: overlay.querySelector('#dbrReload'),
@@ -185,6 +204,9 @@ function build() {
     url: overlay.querySelector('#dbrUrl'),
     bm: overlay.querySelector('#dbrBm'),
     connect: overlay.querySelector('#dbrConnect'),
+    net: overlay.querySelector('#dbrNet'),
+    netIc: overlay.querySelector('#dbrNetIc'),
+    bar: overlay.querySelector('#dbrBar'),
     menu: overlay.querySelector('#dbrMenu'),
     menuPop: overlay.querySelector('#dbrMenuPop'),
     tabs: overlay.querySelector('#dbrTabs'),
@@ -609,6 +631,34 @@ function go(raw) {
   navigate(raw);
 }
 
+/**
+ * Hand a URL to a real browser.
+ *
+ * `window.open(...)` is a no-op inside the Capacitor WebView: nothing in
+ * @capacitor/android overrides WebChromeClient.onCreateWindow (grep of
+ * node_modules/@capacitor/android), so the call returns null and the click does
+ * nothing at all. That is the whole of "cannot browse": every frameable:false
+ * dApp lands on a sheet whose only forward button was this dead call.
+ *
+ * A target=_blank anchor works in both worlds. A desktop browser opens a tab.
+ * The Android WebView ships with multiple-window support disabled, so
+ * target=_blank falls through to shouldOverrideUrlLoading, where Capacitor
+ * already fires ACTION_VIEW (Bridge.java:420) and the system browser takes it.
+ * One path, no feature detection, no plugin.
+ */
+function openExternal(url) {
+  if (!url) return false;
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  return true;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // WIRING
 // ═══════════════════════════════════════════════════════════════
@@ -623,7 +673,7 @@ function toggleMenu(force) {
     ['tab', '＋ New tab', () => addTab()],
     ['incog', '🕶 Incognito tab', () => addTab({ incognito: true })],
     ['sep'],
-    ['open', '↗ Open in a new browser tab', () => { const u = t?.url; if (u) window.open(u, '_blank', 'noopener'); }],
+    ['open', '↗ Open in a new browser tab', () => { openExternal(t?.url); }],
     ['share', '🔗 Copy address', async () => { try { await navigator.clipboard.writeText(t?.url || ''); toast('Address copied', 'info'); } catch { toast('Clipboard refused by the browser', 'error'); } }],
     ['wc', '🔗 Pair via WalletConnect', () => openPairWalletConnect()],
     ['sep'],
@@ -666,7 +716,7 @@ function showDidNotLoad() {
     <button class="btn btn-sm btn-secondary" data-act="back">Back</button></div></div>`;
   el.blocked.hidden = false;
   el.blocked.querySelector('[data-act="popup"]')?.addEventListener('click', () => {
-    window.open(el.frame.src, '_blank', 'noopener');
+    openExternal(el.frame.src);
   });
   // The dApp refused to be embedded: hand the connection to the relay instead.
   el.blocked.querySelector('[data-act="wc"]')?.addEventListener('click', () => { el.blocked.hidden = true; openPairWalletConnect(); });
@@ -703,7 +753,47 @@ function clearLoadTimers() {
   phaseTimers = [];
 }
 
+/**
+ * The chain badge in the top-right corner — the OKX position.
+ *
+ * It reuses the app's own picker rather than growing a second one. That picker
+ * lives at z-index 1000 and this overlay at 9000, so a click straight through
+ * would put the sheet BEHIND the browser and look like a dead button: the
+ * browser is dropped under the modal for the duration and restored after.
+ */
+function switchNetworkFromBrowser() {
+  const pill = document.getElementById('networkPill');
+  if (!pill || !overlay) return;
+  overlay.style.zIndex = '999';
+  let seen = false;
+  let ticks = 0;
+  const iv = setInterval(() => {
+    const open = !!document.querySelector('.modal-overlay.open');
+    if (open) { seen = true; ticks = 0; return; }
+    if (!seen && ++ticks < 8) return;   // picker not up yet — give it 2s
+    clearInterval(iv);
+    overlay.style.zIndex = '';
+  }, 250);
+  pill.click();
+}
+
+function paintNetwork() {
+  if (!el.net || !el.netIc) return;
+  const net = getNetworkById(get('networkId'));
+  if (!net) { el.netIc.textContent = '⛓'; el.net.style.removeProperty('--net-color'); return; }
+  el.netIc.textContent = net.icon || '⛓';
+  el.net.style.setProperty('--net-color', net.color || 'var(--border)');
+  el.net.title = `Network: ${net.name} (chain ${net.chainId}) — tap to switch`;
+  el.net.setAttribute('aria-label', `Current network ${net.name} — switch network`);
+}
+
 function wire() {
+  el.close.addEventListener('click', () => close());
+  el.net.addEventListener('click', switchNetworkFromBrowser);
+  paintNetwork();
+  // The active chain can change while the browser is open — from another pill,
+  // from a dApp request — so the badge tracks it instead of going stale.
+  on('networkId', paintNetwork);
   el.back.addEventListener('click', back);
   el.fwd.addEventListener('click', fwd);
   el.reload.addEventListener('click', () => {
@@ -877,6 +967,7 @@ export function openExternalNotice(url, name, reason) {
       <ul class="dsig-list">${renderSignalList(v.signals)}</ul>
       <div class="dbr-rep-btns">
         <button class="btn btn-sm btn-primary" data-act="popup">↗ Open in a browser tab</button>
+        <button class="btn btn-sm btn-secondary" data-act="wc">🔗 Pair via WalletConnect</button>
         <button class="btn btn-sm btn-secondary" data-act="block">Block this site</button>
         <button class="btn btn-sm btn-secondary" data-act="home">Back to DApps</button>
       </div>
@@ -886,7 +977,12 @@ export function openExternalNotice(url, name, reason) {
   el.blocked.hidden = true;
   el.url.value = '';
   el.homePage.querySelector('[data-act="popup"]')?.addEventListener('click', () => {
-    window.open(url, '_blank', 'noopener');
+    openExternal(url);
+  });
+  // The pairing route for the same dead end: the page lives outside the frame,
+  // but the wallet still reaches it through the relay (WC_PROJECT_ID is wired).
+  el.homePage.querySelector('[data-act="wc"]')?.addEventListener('click', () => {
+    openPairWalletConnect();
   });
   el.homePage.querySelector('[data-act="block"]')?.addEventListener('click', () => {
     addBlockedHost(v.host);

@@ -3046,15 +3046,31 @@ body::before {
   display: none; flex-direction: column;
 }
 .dapp-browser-overlay.open { display: flex; }
-.dbr-top { display: flex; align-items: center; gap: 5px; padding: 7px 8px; border-bottom: 1px solid var(--border); background: var(--card, #fff); flex-wrap: wrap; }
-.dbr-btn { border: 1px solid var(--border); background: transparent; border-radius: 9px; min-width: 34px; height: 34px; cursor: pointer; font-size: 1rem; }
+/* ─── top bar: [ ✕ ] [ 🔒 pill: url … ] [ ★ ] [ 🔗 ] [ ⛓ ] — never wraps ─── */
+.dbr-top { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--border); background: var(--card, #fff); flex: 0 0 auto; }
+.dbr-btn { border: 1px solid var(--border); background: transparent; border-radius: 9px; min-width: 34px; height: 34px; cursor: pointer; font-size: 1rem; flex: 0 0 auto; }
 .dbr-btn:disabled { opacity: .35; cursor: default; }
-.dbr-secure { font-size: .7rem; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
-.dbr-secure.ok { background: rgba(16,185,129,.16); color: #0f7a52; }
-.dbr-secure.warn { background: rgba(255,201,60,.22); color: #8a6a00; }
-.dbr-secure.bad { background: rgba(255,107,107,.18); color: #b23b3b; }
-.dbr-urlwrap { flex: 1 1 220px; min-width: 140px; }
-.dbr-url { width: 100%; border: 1px solid var(--border); border-radius: 999px; padding: 7px 13px; background: transparent; font-size: .82rem; }
+.dbr-ic { width: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+/* Verdict and address share one pill, status first — where you are, and whether
+   it is safe: the OKX shape, kept honest by the safety gate underneath it. */
+.dbr-urlwrap { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 3px 12px; border: 1px solid var(--border); border-radius: 999px; background: rgba(127,127,127,.08); }
+.dbr-urlwrap:focus-within { border-color: var(--ink); }
+.dbr-secure { font-size: .66rem; padding: 0; border-radius: 999px; white-space: nowrap; flex: 0 0 auto; max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
+.dbr-secure.ok { color: #0f7a52; }
+.dbr-secure.warn { color: #8a6a00; }
+.dbr-secure.bad { color: #b23b3b; }
+.dbr-url { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; padding: 4px 0; font-size: .82rem; outline: none; }
+.dbr-conn { font-size: .85rem; }
+/* Chain badge in the top-right corner: the active network as its own icon on
+   its own chain colour, exactly where OKX puts it. */
+.dbr-net { border-color: transparent; }
+.dbr-net:hover { border-color: var(--border); }
+.dbr-net-ic { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--net-color, var(--border)); font-size: .78rem; line-height: 1; }
+/* ─── bottom bar: five thumb-reachable slots ─── */
+.dbr-bar { display: flex; align-items: stretch; gap: 5px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border); background: var(--card, #fff); flex: 0 0 auto; }
+.dbr-bbtn { flex: 1 1 0; min-width: 44px; min-height: var(--touch-min, 44px); border: 1px solid var(--border); background: transparent; border-radius: 10px; cursor: pointer; font-size: 1.15rem; display: inline-flex; align-items: center; justify-content: center; }
+.dbr-bbtn:disabled { opacity: .35; cursor: default; }
+.dbr-bbtn:hover:not(:disabled) { background: rgba(127,127,127,.12); }
 .dbr-tabs { display: flex; gap: 4px; padding: 5px 8px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--card, #fff); }
 .dbr-tab { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; font-size: .76rem; max-width: 190px; flex: 0 0 auto; }
 .dbr-tab.on { background: rgba(88,160,255,.16); border-color: var(--ink); }

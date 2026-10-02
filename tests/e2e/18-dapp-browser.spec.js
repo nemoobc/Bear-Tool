@@ -299,4 +299,80 @@ test.describe('dApp browser', () => {
     // The toolbar still works after the timeout — a way out stays a way out.
     await expect(page.locator('#dbrUrl')).toBeVisible();
   });
+
+  // The chrome is laid out the way OKX Wallet lays it out, from three
+  // screenshots of the real app: ✕ top-left, the chain badge top-right, and
+  // five thumb-sized controls along the bottom. The ids are the pre-existing
+  // ones — they moved, they were not renamed — and this test is what keeps the
+  // claim honest.
+  test('the chrome is the OKX layout: ✕ top-left, chain badge top-right, five below', async ({ page }) => {
+    await openBrowser(page);
+
+    // ✕ leads the top bar.
+    await expect(page.locator('#dbrClose')).toBeVisible();
+    expect(await page.evaluate(() => document.querySelector('.dbr-top > *')?.id),
+      '✕ is the first control in the top bar').toBe('dbrClose');
+
+    // The chain badge ends it — the corner OKX puts the network logo in.
+    expect(await page.evaluate(() =>
+      [...document.querySelectorAll('.dbr-top > *')].pop()?.id),
+    'the chain badge closes the top bar').toBe('dbrNet');
+    await expect(page.locator('#dbrNet')).toBeVisible();
+
+    // …and it says which network it is showing.
+    await expect(page.locator('#dbrNet')).toHaveAttribute('aria-label', /network/i);
+    const icon = (await page.locator('#dbrNetIc').textContent())?.trim();
+    expect(icon, 'the badge renders an icon, not an empty circle').toBeTruthy();
+
+    // Navigation left the top bar and is now five slots underneath.
+    expect(await page.evaluate(() =>
+      document.querySelectorAll('.dbr-top #dbrBack').length),
+    'back is no longer crowded into the top').toBe(0);
+    await expect(page.locator('#dbrBar .dbr-bbtn')).toHaveCount(5);
+    for (const id of ['dbrBack', 'dbrFwd', 'dbrReload', 'dbrHome', 'dbrMenu']) {
+      await expect(page.locator(`#dbrBar #${id}`), `${id} lives in the bottom bar`).toBeVisible();
+    }
+
+    // The verdict and the address share one pill.
+    await expect(page.locator('.dbr-urlwrap #dbrSecure')).toBeVisible();
+    await expect(page.locator('.dbr-urlwrap #dbrUrl')).toBeVisible();
+
+    // And ✕ actually closes the browser — the whole point of a close button.
+    await appClick(page, '#dbrClose');
+    await expect(page.locator('#dappBrowserOverlay')).toBeHidden();
+  });
+
+  // Reaching a site that refuses framing used to end on three buttons, one of
+  // which called window.open — a no-op inside the Capacitor WebView, because
+  // nothing in @capacitor/android overrides WebChromeClient.onCreateWindow. The
+  // call returned null and the click did nothing, which is how "cannot browse"
+  // looked: 14 of the 18 catalog entries land on that sheet, and the only
+  // forward button on it never fired. The sheet now offers a route the WebView
+  // really honours plus the pairing route the Project ID was given for.
+  test('a site that refuses framing offers working routes, not a dead button', async ({ page }) => {
+    await gotoApp(page);
+    await skipIntro(page);
+    await createWallet(page);
+    await appClick(page, '.nav-item[data-view="dapps"]');
+    await page.waitForSelector('#dappsContainer .dapps-browser', { timeout: 10_000 });
+
+    // 14 of 18 entries are marked frameable:false — pick one.
+    const card = page.locator('.dapp-card[data-frameable="0"]').first();
+    await expect(card, 'the catalog still carries non-frameable entries').toBeVisible();
+    await card.click();
+
+    const sheet = page.locator('#dbrHomePage');
+    await expect(sheet).toBeVisible();
+    // Route one: straight out to the system browser, through openExternal —
+    // an anchor with target=_blank, which the WebView forwards to ACTION_VIEW.
+    await expect(sheet.locator('[data-act="popup"]')).toContainText(/open in a browser tab/i);
+    // Route two: stay in the wallet and pair over the relay.
+    await expect(sheet.locator('[data-act="wc"]')).toContainText(/walletconnect/i);
+    // Neither route is an escape from the gate: blocked stays blocked.
+    await expect(sheet.locator('[data-act="block"]')).toContainText(/block this site/i);
+    // Route three: back to the grid, always available.
+    await expect(sheet.locator('[data-act="home"]')).toContainText(/back to dapps/i);
+    // Which escape hatch is wired is proved at source level in
+    // tests/dapp-chrome.test.js — no live window.open, one openExternal.
+  });
 });
