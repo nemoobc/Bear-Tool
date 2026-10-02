@@ -1992,7 +1992,6 @@ function showTokenActions(el) {
     : `<span class="tm-addr-k">Contract</span><span class="tm-addr-v">Native asset — no contract</span>`;
 
   openModal(`
-    <button class="modal-close" type="button" data-close-modal>✕</button>
     <div class="token-modal-header">
       <div class="token-modal-icon">${getLogoSVG(symbol)}</div>
       <div class="token-modal-info">

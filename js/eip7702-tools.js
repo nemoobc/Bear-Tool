@@ -324,36 +324,31 @@ function toggleRescueFields() {
 
 async function executeRescue() {
   if (!get('unlocked')) { requireUnlock(); return; }
-  const target = $('#rescueTarget').value.trim();
   const safe = $('#rescueSafe').value.trim();
   const type = $('#rescueType').value;
   const tokenAddr = $('#rescueTokenAddr').value.trim();
   const tokenIds = $('#rescueTokenId').value.trim();
   const sponsorKey = $('#rescueSponsorKey').value.trim();
 
-  if (!wallet.isValidAddress(target)) return toast('Invalid locked wallet address', 'error');
   if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
   if (type !== 'eth' && !wallet.isValidAddress(tokenAddr)) return toast('Invalid token contract address', 'error');
-  if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+  if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   // Validated: take it out of the document. From here on the signer holds it.
   wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
 
+  const derived = deriveTargetAddress();
+  if (derived.error) return toast(derived.error, 'error');
+  const target = derived.address;
+
   // The 7702 authorization MUST be signed by the target itself — it is the
-  // authority of the tuple; the sponsor key can only pay gas. Two ways to
-  // hold that signature: paste the target's private key (validated against
-  // the address right here), or have the target be the unlocked wallet.
-  // Never sign with some other account: refuse rather than guess.
+  // authority of the tuple; the sponsor can only pay gas. Two ways to hold
+  // that signature: paste the target's private key, or have the target be the
+  // unlocked wallet. Never sign with some other account: refuse rather than
+  // guess. The address itself comes from deriveTargetAddress above, so the
+  // key and the address it claims can no longer disagree.
   const targetKey = $('#rescueTargetKey')?.value.trim() || '';
-  const unlockedAddr = get('address');
-  if (targetKey) {
-    if (!/^0x[a-fA-F0-9]{64}$/.test(targetKey)) return toast('Invalid target private key', 'error');
-    if (new ethers.Wallet(targetKey).address.toLowerCase() !== target.toLowerCase()) {
-      return toast('Target private key does not match the locked wallet address', 'error');
-    }
-  } else if (!unlockedAddr || target.toLowerCase() !== String(unlockedAddr).toLowerCase()) {
-    return toast('Unlock the target wallet or paste its private key', 'error');
-  }
-  const sponsorAddress = new ethers.Wallet(sponsorKey).address;
+  const sponsorAddress = sponsorAddressOf(sponsorKey);
+  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
   // Validated: out of the document; the local strings hold them from here.
   wipeKeyField('#rescueTargetKey');
 
@@ -380,12 +375,16 @@ async function executeRescue() {
     // Gas sponsor must exist in BOTH branches (reuse and fresh deploy) and is
     // used again at delegateAndExecute. Declared in the `else` branch it was
     // out of scope at that call → ReferenceError on every rescue.
-    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+    const sponsorSigner = sponsorSignerOf(sponsorKey, provider);
 
     // Rescue helper must be deployed first (step 1 in the helper status card).
     // No silent auto-deploy here: the user explicitly deploys it up front.
+    // Match on what the constructor actually received — SAFE and the sponsor
+    // (RESCUER). The locked wallet is NOT a constructor argument, so it is
+    // deliberately absent: it is derived now, and matching on a derived value
+    // would reject a helper that is perfectly reusable.
     const existing = await findUsableDeployed('rescue', chainId, item =>
-      item.safe?.toLowerCase() === safe.toLowerCase() && item.target?.toLowerCase() === target.toLowerCase()
+      item.safe?.toLowerCase() === safe.toLowerCase()
         && item.sponsor?.toLowerCase() === sponsorAddress.toLowerCase(), provider);
     if (!existing) {
       toast('Deploy the rescue helper first (step 1 above)', 'error');
@@ -459,9 +458,11 @@ async function executeClaim() {
   if (!wallet.isValidAddress(contractAddr)) return toast('Invalid airdrop contract address', 'error');
   if (!claimData || !claimData.startsWith('0x')) return toast('Invalid claim calldata (must start with 0x)', 'error');
   if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
-  if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+  if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   // Validated: take it out of the document. From here on the signer holds it.
   wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
+  const sponsorAddress = sponsorAddressOf(sponsorKey);
+  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
 
   const net = getNetworkById(get('networkId'));
   {
@@ -483,7 +484,7 @@ async function executeClaim() {
     const targetAddress = get('address');
     // Same fix as executeRescue: the sponsor payer is needed in both the
     // reuse and the deploy branch AND at delegateAndExecute.
-    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+    const sponsorSigner = sponsorSignerOf(sponsorKey, provider);
 
     // Airdrop claimer must be deployed first (step 1 in the helper status card).
     // No silent auto-deploy here: the user explicitly deploys it up front.
@@ -547,6 +548,55 @@ async function executeClaim() {
 export function wipeKeyField(sel) {
   const el = $(sel);
   if (el) { el.value = ''; el.blur?.(); }
+}
+
+// ── the two values this card used to make you retype ──────────────────────
+/** The locked wallet. It is no longer a field: it is whatever the target key
+ *  says, or — when no key is pasted — the unlocked wallet.
+ *  Deriving it in ONE place is what keeps "the address the helper was
+ *  deployed for" and "the address being rescued from" the same value, so the
+ *  helper you just deployed cannot fail to match the rescue you then run.
+ *  Returns { address } or { error }; a malformed key is reported rather than
+ *  silently falling back to the unlocked wallet. */
+/** Turn a private key into its address, or null when it is not usable.
+ *
+ *  The hex-shape test ALONE is not enough: 0x00…00 and 0xfff…f are perfect
+ *  32-byte hex, and ethers rejects both ("0 < bigint < curve.n"). That throw
+ *  escaped the validation path and left the button dead with no toast.
+ *  Deriving is the only honest check. */
+export function addressFromKey(key) {
+  if (!/^0x[a-fA-F0-9]{64}$/.test(key)) return null;
+  try { return new ethers.Wallet(key).address; } catch { return null; }
+}
+
+export function deriveTargetAddress() {
+  const key = $('#rescueTargetKey')?.value.trim() || '';
+  if (key) {
+    const addr = addressFromKey(key);
+    return addr ? { address: addr } : { error: 'Invalid target private key' };
+  }
+  const unlocked = get('address');
+  if (!unlocked) return { error: 'Unlock the target wallet or paste its private key' };
+  return { address: String(unlocked) };
+}
+
+/** Who pays for gas. A pasted key wins; with no key the unlocked wallet
+ *  sponsors. Both already live in memory, so demanding a copy-paste of a key
+ *  the app is holding only pushed users to paste it into a second field. */
+export function sponsorAddressOf(sponsorKey) {
+  if (sponsorKey) return addressFromKey(sponsorKey);
+  const unlocked = get('address');
+  return unlocked ? String(unlocked) : null;
+}
+
+/** Same rule as sponsorAddressOf, as a signing object. Must stay in lockstep:
+ *  deploy records this address, execute matches on it — resolving them
+ *  differently on the two sides would strand a perfectly good helper. */
+function sponsorSignerOf(sponsorKey, provider) {
+  if (sponsorKey) return new ethers.Wallet(sponsorKey, provider);
+  const signer = get('signer');
+  if (!signer) throw new Error('Unlock a wallet or paste a sponsor private key');
+  return signer.connect(provider);
 }
 
 export function renderHelperStatus() {
@@ -639,14 +689,17 @@ export async function deployBatchHelper() {
 // to the target made onlyRescuer revert on every rescue.
 export async function deployRescueHelper() {
   if (!get('unlocked')) { requireUnlock(); return; }
-  const target = $('#rescueTarget').value.trim();
   const safe = $('#rescueSafe').value.trim();
   const sponsorKey = $('#rescueSponsorKey').value.trim();
-  if (!wallet.isValidAddress(target)) return toast('Fill a valid locked wallet address first', 'error');
+  const derived = deriveTargetAddress();
+  if (derived.error) return toast(derived.error, 'error');
+  const target = derived.address;
   if (!wallet.isValidAddress(safe)) return toast('Fill a valid SAFE address first', 'error');
-  if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+  if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   // Validated: take it out of the document. From here on the signer holds it.
   wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
+  const sponsorAddress = sponsorAddressOf(sponsorKey);
+  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
 
   const net = getNetworkById(get('networkId'));
   const btn = $('#btnDeployRescueHelper');
@@ -654,7 +707,7 @@ export async function deployRescueHelper() {
   try {
     const provider = get('provider') || await getProvider(net.chainId);
     set('provider', provider);
-    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+    const sponsorSigner = sponsorSignerOf(sponsorKey, provider);
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'DEPLOY HELPER ON MAINNET!' : 'Deploy rescue helper?',
       rows: [
@@ -688,9 +741,11 @@ export async function deployRescueHelper() {
 export async function deployAirdropClaimer() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const sponsorKey = $('#claimSponsorKey').value.trim();
-  if (!sponsorKey || !/^0x[a-fA-F0-9]{64}$/.test(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+  if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   // Validated: take it out of the document. From here on the signer holds it.
   wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
+  const sponsorAddress = sponsorAddressOf(sponsorKey);
+  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
 
   const net = getNetworkById(get('networkId'));
   const btn = $('#btnDeployAirdropClaimer');
@@ -698,7 +753,7 @@ export async function deployAirdropClaimer() {
   try {
     const provider = get('provider') || await getProvider(net.chainId);
     set('provider', provider);
-    const sponsorSigner = new ethers.Wallet(sponsorKey, provider);
+    const sponsorSigner = sponsorSignerOf(sponsorKey, provider);
     const targetAddress = get('address');
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'DEPLOY HELPER ON MAINNET!' : 'Deploy airdrop claimer?',
@@ -823,7 +878,7 @@ export async function revokeDelegation() {
   let signer;
   if (target.toLowerCase() === (get('address') || '').toLowerCase()) {
     signer = get('signer').connect(provider);
-  } else if (!key || !/^0x[a-fA-F0-9]{64}$/.test(key)) {
+  } else if (!addressFromKey(key)) {
     return toast('Target is not the active wallet — provide its private key', 'error');
   } else {
     signer = new ethers.Wallet(key, provider);

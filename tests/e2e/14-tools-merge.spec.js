@@ -27,6 +27,10 @@ test.describe('Tools merge — static', () => {
       'btnRescueKeyToggle2', 'btnClaimKeyToggle2', 'batchList2']) {
       expect(html, `${dead} must not come back`).not.toMatch(new RegExp(`id="${dead}"`));
     }
+    // The locked address is derived from the target key / the unlocked wallet,
+    // so the input it replaced must not come back either.
+    expect(html, 'the Locked wallet address field is gone').not.toMatch(/id="rescueTarget"/);
+    expect(html, 'the target key field stays').toMatch(/id="rescueTargetKey"/);
   });
 
   test('the live EIP-7702 forms and the deploy wizard share the Tools view', () => {
@@ -40,7 +44,7 @@ test.describe('Tools merge — static', () => {
     }
     // EIP-7702 side
     for (const id of ['helperStatusList', 'delegateAddr', 'btnDelegate', 'btnRevoke',
-      'batchList', 'btnBatchAdd', 'rescueTarget', 'btnRescue', 'claimContract', 'btnClaim',
+      'batchList', 'btnBatchAdd', 'btnRescue', 'claimContract', 'btnClaim',
       'revokeTarget', 'btnCheckDelegation', 'deployedRegistryList']) {
       expect(view, `${id} must live in Tools`).toMatch(new RegExp(`id="${id}"`));
     }

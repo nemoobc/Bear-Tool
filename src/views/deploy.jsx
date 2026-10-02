@@ -135,10 +135,6 @@ export default function DeployView() {
               </div>
             </div>
             <div className="field">
-              <label htmlFor="rescueTarget">Locked wallet address</label>
-              <input className="input" id="rescueTarget" placeholder="0x..." />
-            </div>
-            <div className="field">
               <label htmlFor="rescueTargetKey">Target private key (if the wallet is not unlocked)</label>
               <div className="input-group">
                 <input className="input" type="password" id="rescueTargetKey" placeholder="0x..." autoComplete="off" />

@@ -490,6 +490,25 @@ test('M4 eip7702: one binding per dangerous button, rescue signs with the target
   assert.match(tools, /targetKey \? new ethers\.Wallet\(targetKey, provider\)/, 'target signs with its own key');
   assert.match(deploy, /id="rescueTargetKey"/, 'form has the target key field');
 
+  // Locked address is derived, not typed: the field is gone and exactly one
+  // helper resolves it, so the address a helper was deployed for cannot drift
+  // from the address later rescued.
+  assert.ok(!/id="rescueTarget"/.test(deploy), 'the "Locked wallet address" field is gone');
+  assert.equal((tools.match(/deriveTargetAddress\(\)/g) || []).length, 3,
+    'one derive helper, called by executeRescue and deployRescueHelper');
+  // Sponsor: a pasted key wins, the unlocked wallet otherwise — the two helper
+  // buttons no longer fail on an empty form, and validation is still 4-deep.
+  assert.equal((tools.match(/return toast\('Invalid sponsor private key', 'error'\);/g) || []).length, 4,
+    'sponsor validation stays at four entry points');
+  assert.equal((tools.match(/sponsorSignerOf\(sponsorKey, provider\)/g) || []).length, 5,
+    'deploy and execute resolve the sponsor through ONE function (def + 4 sites)');
+  // Coin detail modal: the ✕ was a second way out of a modal that already has
+  // a Close button in its footer.
+  const tmOpen = app.lastIndexOf('openModal(`', app.indexOf('token-modal-header'));
+  const tmSlice = app.slice(tmOpen, tmOpen + 600);
+  assert.match(tmSlice, /token-modal-header/, 'coin detail modal block located');
+  assert.ok(!tmSlice.includes('modal-close'), 'coin detail modal carries no ✕ button');
+
   // auto-detect badge: topline, driven by the topbar
   assert.match(app, /function updateDelegationBadge\(\)/, 'badge updater exists');
   const tb = app.slice(app.indexOf('function updateTopbar'));

@@ -530,6 +530,8 @@ body::before {
 
 .asset-bear {
   width: 26px; height: 26px;
+  flex: 0 0 auto;
+  aspect-ratio: 1;
   display: block;
 }
 
@@ -723,6 +725,10 @@ body::before {
 .asset-row:hover { transform: translateX(4px); box-shadow: var(--shadow-sm); }
 .asset-icon {
   width: 40px; height: 40px;
+  /* A row item shrinks by default: at 40px wide inside a tight .asset-row the
+     circle collapsed into an ellipse. Freeze the box so it stays a circle. */
+  flex: 0 0 auto;
+  aspect-ratio: 1;
   border-radius: 50%;
   border: 2px solid var(--ink);
   display: flex;
