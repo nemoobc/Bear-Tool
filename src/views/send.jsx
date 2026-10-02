@@ -14,7 +14,7 @@ export default function SendView() {
                 <div className="address-book-add mt-8">
                   <input className="input" id="abLabel" placeholder="Label (e.g. My Safe)" />
                   <input className="input mt-4" id="abAddress" placeholder="0x..." />
-                  <button className="btn btn-primary btn-block mt-8" id="btnAddAddress">Add Address</button>
+                  <button type="button" className="btn btn-primary btn-block mt-8" id="btnAddAddress">Add Address</button>
                 </div>
               </div>
             </details>
@@ -23,7 +23,7 @@ export default function SendView() {
                 <label htmlFor="sendTo">To address</label>
                 <div className="send-address-wrap">
                   <input className="input" id="sendTo" placeholder="0x... or ENS name" autoComplete="off" spellCheck="false" />
-                  <button className="btn btn-ghost btn-sm" id="btnSendPaste" title="Paste">📋</button>
+                  <button type="button" className="btn btn-ghost btn-sm" id="btnSendPaste" title="Paste">📋</button>
                 </div>
                 <div className="send-ens-status hidden" id="sendEnsStatus"></div>
               </div>
@@ -38,15 +38,15 @@ export default function SendView() {
                 <label htmlFor="sendAmount">Amount</label>
                 <input className="input" id="sendAmount" type="number" placeholder="0.0" min="0" step="any" />
                 <div className="send-pct-btns" id="sendPctBtns" role="group" aria-label="Amount shortcuts">
-                  <button className="pct-btn" data-pct="25">25%</button>
-                  <button className="pct-btn" data-pct="50">50%</button>
-                  <button className="pct-btn" data-pct="75">75%</button>
+                  <button type="button" className="pct-btn" data-pct="25">25%</button>
+                  <button type="button" className="pct-btn" data-pct="50">50%</button>
+                  <button type="button" className="pct-btn" data-pct="75">75%</button>
                   {/* Labelled MAX, not 100%. Beside 25/50/75, "100%" reads as
                        "send my whole balance" - and it is not: it sends the whole
                        balance MINUS the fee, because a transfer that spends the
                        last wei cannot pay for itself. MAX says what the button
                        does; the amount field shows the number either way. */}
-                  <button className="pct-btn pct-max" data-pct="100"
+                  <button type="button" className="pct-btn pct-max" data-pct="100"
                           title="Send everything spendable — the balance minus the fee"
                           aria-label="MAX: send everything spendable, the balance minus the fee">MAX</button>
                 </div>
@@ -60,10 +60,10 @@ export default function SendView() {
               <div className="field">
                 <label>Gas speed</label>
                 <div className="gas-btns" id="sendGas">
-                  <button className="gas-btn" data-speed="slow">🐢 Slow</button>
-                  <button className="gas-btn active" data-speed="normal">🚶 Normal</button>
-                  <button className="gas-btn" data-speed="fast">🏃 Fast</button>
-                  <button className="gas-btn" data-speed="auto">🤖 Auto</button>
+                  <button type="button" className="gas-btn" data-speed="slow">🐢 Slow</button>
+                  <button type="button" className="gas-btn active" data-speed="normal">🚶 Normal</button>
+                  <button type="button" className="gas-btn" data-speed="fast">🏃 Fast</button>
+                  <button type="button" className="gas-btn" data-speed="auto">🤖 Auto</button>
                 </div>
               </div>
               <div id="sendPreview" className="quote-box hidden"></div>
@@ -72,7 +72,7 @@ export default function SendView() {
                 <span className="gas-est-value" id="gasEstValue">—</span>
                 <span className="gas-est-usd" id="gasEstUsd"></span>
               </div>
-              <button className="btn btn-primary btn-block btn-lg" id="btnSend">Send</button>
+              <button type="button" className="btn btn-primary btn-block btn-lg" id="btnSend">Send</button>
             </div>
           </div>
         </section>

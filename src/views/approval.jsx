@@ -18,7 +18,7 @@ export default function ApprovalView() {
                 <input className="input" id="approvalCustom" placeholder="0x..." />
               </div>
             </div>
-            <button className="btn btn-primary btn-block" id="btnApprovalScan">Scan Approvals</button>
+            <button type="button" className="btn btn-primary btn-block" id="btnApprovalScan">Scan Approvals</button>
             <div id="approvalList" className="mt-16"></div>
           </div>
 

@@ -36,9 +36,9 @@ export default function SettingsView() {
               <div className="field">
                 <label data-i18n="set.theme">Theme</label>
                 <div className="theme-toggle">
-                  <button className="theme-btn active" data-theme="light">☀️ <span data-i18n="set.theme.light">Light</span></button>
-                  <button className="theme-btn" data-theme="dark">🌙 <span data-i18n="set.theme.dark">Dark</span></button>
-                  <button className="theme-btn" data-theme="auto">💻 <span data-i18n="set.theme.auto">Auto</span></button>
+                  <button type="button" className="theme-btn active" data-theme="light">☀️ <span data-i18n="set.theme.light">Light</span></button>
+                  <button type="button" className="theme-btn" data-theme="dark">🌙 <span data-i18n="set.theme.dark">Dark</span></button>
+                  <button type="button" className="theme-btn" data-theme="auto">💻 <span data-i18n="set.theme.auto">Auto</span></button>
                 </div>
               </div>
             </div>
@@ -96,7 +96,7 @@ export default function SettingsView() {
               <h4 className="set-group-h" data-i18n="set.group.data">Your data</h4>
               <div className="field">
                 <p className="small dim" data-i18n="set.data.hint">Everything lives in this browser only. Deleting removes every wallet, every setting and your whole history from here. It cannot be undone, and there is no copy anywhere else.</p>
-                <button className="btn btn-danger btn-block" id="btnClearAllData">🗑️ <span data-i18n="set.data.clear">Clear all data</span></button>
+                <button type="button" className="btn btn-danger btn-block" id="btnClearAllData">🗑️ <span data-i18n="set.data.clear">Clear all data</span></button>
               </div>
             </div>
           </div>

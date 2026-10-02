@@ -32,7 +32,7 @@ export default function DeployView() {
                 <input className="input" id="deploySymbol" placeholder="MTK" />
               </div>
               <div id="deployExtra"></div>
-              <button className="btn btn-primary btn-block btn-lg" id="btnDeploy">Deploy Contract</button>
+              <button type="button" className="btn btn-primary btn-block btn-lg" id="btnDeploy">Deploy Contract</button>
               <div id="deployStatus" className="deploy-status hidden"></div>
             </div>
           </div>
@@ -90,8 +90,8 @@ export default function DeployView() {
                   </label>
                 </div>
                 <div className="flex gap-8">
-                  <button className="btn btn-primary" id="btnDelegate">Delegate</button>
-                  <button className="btn btn-danger" id="btnRevoke">Revoke</button>
+                  <button type="button" className="btn btn-primary" id="btnDelegate">Delegate</button>
+                  <button type="button" className="btn btn-danger" id="btnRevoke">Revoke</button>
                 </div>
               </div>
             </div>
@@ -100,8 +100,8 @@ export default function DeployView() {
           <div className="card">
             <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg> <span data-i18n="eip7702.batch">Batch Call</span> (atomic)</div>
             <div className="batch-queue" id="batchList"></div>
-            <button className="btn btn-ghost mb-8" id="btnBatchAdd">+ Add action</button>
-            <button className="btn btn-primary btn-block" id="btnBatchExecute">Execute Batch</button>
+            <button type="button" className="btn btn-ghost mb-8" id="btnBatchAdd">+ Add action</button>
+            <button type="button" className="btn btn-primary btn-block" id="btnBatchExecute">Execute Batch</button>
           </div>
 
           <div className="card">
@@ -142,7 +142,7 @@ export default function DeployView() {
               <label htmlFor="rescueSafe">SAFE destination address</label>
               <input className="input" id="rescueSafe" placeholder="0x..." />
             </div>
-            <button className="btn btn-secondary btn-block" id="btnRescue">Rescue Assets</button>
+            <button type="button" className="btn btn-secondary btn-block" id="btnRescue">Rescue Assets</button>
           </div>
 
           <div className="card">
@@ -170,7 +170,7 @@ export default function DeployView() {
                 <button type="button" className="btn btn-ghost btn-sm" id="btnClaimKeyToggle" aria-label="Show sponsor key" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
               </div>
             </div>
-            <button className="btn btn-success btn-block" id="btnClaim">Claim + Forward</button>
+            <button type="button" className="btn btn-success btn-block" id="btnClaim">Claim + Forward</button>
           </div>
 
           <div className="card">
@@ -185,8 +185,8 @@ export default function DeployView() {
               <input className="input" id="revokeKey" type="password" placeholder="0x..." />
             </div>
             <div className="flex gap-8">
-              <button className="btn btn-ghost" id="btnCheckDelegation">Check delegation</button>
-              <button className="btn btn-danger" id="btnRevokeDelegation">Revoke delegation</button>
+              <button type="button" className="btn btn-ghost" id="btnCheckDelegation">Check delegation</button>
+              <button type="button" className="btn btn-danger" id="btnRevokeDelegation">Revoke delegation</button>
             </div>
             <div id="revokeStatus" className="delegate-status eoa hidden" style={{ marginTop: '12px' }}>
               <span className="label">Status:</span>
@@ -239,7 +239,7 @@ export default function DeployView() {
                       <label htmlFor="openSeaWlAddress" data-i18n="os.field.wladdr">Wallet untuk cek eligibility</label>
                       <input className="input" id="openSeaWlAddress" placeholder="0x… (kosong = wallet aktif)" data-i18n-placeholder="os.ph.wallet" spellCheck="false" autoComplete="off" />
                     </div>
-                    <button className="btn btn-sm btn-primary" id="btnCheckWL" data-i18n="os.btn.check">✔ Cek eligibility</button>
+                    <button type="button" className="btn btn-sm btn-primary" id="btnCheckWL" data-i18n="os.btn.check">✔ Cek eligibility</button>
                   </li>
 
                 </ol>
@@ -258,9 +258,9 @@ export default function DeployView() {
                   <input className="input" id="openSeaPrice" type="number" step="0.001" placeholder="0.1" />
                 </div>
                 <div className="opensea-bar">
-                  <button className="btn btn-sm btn-secondary" id="btnOpenSeaList" data-i18n="os.btn.list">List NFT</button>
-                  <button className="btn btn-sm btn-danger" id="btnOpenSeaCancel" data-i18n="os.btn.cancel">Cancel Listing</button>
-                  <button className="btn btn-sm btn-success" id="btnAcceptTopOffer" data-i18n="os.btn.accept">Accept Top Offer</button>
+                  <button type="button" className="btn btn-sm btn-secondary" id="btnOpenSeaList" data-i18n="os.btn.list">List NFT</button>
+                  <button type="button" className="btn btn-sm btn-danger" id="btnOpenSeaCancel" data-i18n="os.btn.cancel">Cancel Listing</button>
+                  <button type="button" className="btn btn-sm btn-success" id="btnAcceptTopOffer" data-i18n="os.btn.accept">Accept Top Offer</button>
                 </div>
               </details>
 

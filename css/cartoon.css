@@ -1267,6 +1267,15 @@ body::before {
 .swap-card { display: flex; flex-direction: column; gap: var(--sp-12); }
 .swap-field { position: relative; }
 .swap-field label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: var(--sp-4); }
+/* Label row: label left, balance right — one line beside the token it
+   describes. Baseline alignment pairs the two texts; the label's own
+   margin-bottom still provides the gap to the input row below. */
+.swap-field-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-8);
+}
 .swap-input-row { display: flex; gap: var(--sp-8); align-items: stretch; }
 /* 0 0 pinned the control at 140px so it could not shrink, which is what
    pushed the picker panel off the right edge on a 320px phone. 0 1 lets it
@@ -1277,11 +1286,21 @@ body::before {
 .swap-balance {
   font-size: 0.75rem;
   color: var(--ink-soft);
-  margin-top: var(--sp-4);
   font-weight: 600;
+  white-space: nowrap;
 }
 .swap-flip-wrap { display: flex; justify-content: center; margin: calc(var(--sp-4) * -1) 0; }
-.swap-flip-btn { font-size: 1.3rem; min-width: var(--touch-min); min-height: var(--touch-min); border-radius: 50%; }
+.swap-flip-btn {
+  font-size: 1.3rem;
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  border-radius: 50%;
+  /* The icon is an inline SVG now — flex-centering keeps it optically in the
+     round button the way the ⇅ glyph used to be by accident. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .swap-extras { display: flex; gap: var(--sp-12); }
 .swap-extras .field { flex: 1; }
 .slippage-btns { display: flex; gap: var(--sp-4); }

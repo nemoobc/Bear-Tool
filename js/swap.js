@@ -8,7 +8,7 @@
 
 const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 
-import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
+import { $, toast, confirmTx, escapeHtml, spinnerDots, fmtAmount } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, withTimeout } from './safetx.js';
 import { getNetworkById, ERC20_ABI } from './network.js';
@@ -237,8 +237,12 @@ export function loadSwapTokens() {
     const ft = tokens.find(x => (x.address || 'native') === from.value);
     const tt = tokens.find(x => (x.address || 'native') === to.value);
     const fb = $('#swapFromBalance'), tb = $('#swapToBalance');
-    if (fb && ft) fb.textContent = `Balance: ${parseFloat(ethers.formatUnits(ft.balance, ft.decimals)).toFixed(4)}`;
-    if (tb && tt) tb.textContent = `Balance: ${parseFloat(ethers.formatUnits(tt.balance, tt.decimals)).toFixed(4)}`;
+    // fmtAmount is the formatter send/dashboard already use (js/ui.js): grouped
+    // thousands, precision that shrinks as the number grows, a genuine zero as
+    // 0.00, and dust reported as — instead of the old hand-rolled
+    // toFixed(4) which printed a lying "0.0000" for 1 wei.
+    if (fb) fb.textContent = `Balance: ${ft ? fmtAmount(ft.balance, ft.decimals) : '—'}`;
+    if (tb) tb.textContent = `Balance: ${tt ? fmtAmount(tt.balance, tt.decimals) : '—'}`;
     // auto-route: refresh quote when tokens change (if amount > 0)
     const amt = $('#swapFromAmount')?.value;
     if (amt && parseFloat(amt) > 0) getSwapQuote();
