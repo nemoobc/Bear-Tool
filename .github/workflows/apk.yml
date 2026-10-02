@@ -4,6 +4,11 @@ name: Android APK
 # Icon/splash rasterization runs here because sharp has no Termux prebuilt.
 # Lessons applied from the previous project: setup-android@v4 (v3 dies on the
 # removed sdkmanager "tools" package), JDK 21 (Capacitor 8).
+#
+# www/ MUST be the built bundle (dist/): index.html boots
+# <script type="module"> from the Vite build — copying the raw source tree
+# without src/ (the old way) shipped an APK whose only script 404'd and
+# rendered a blank app.
 
 on:
   push:
@@ -12,8 +17,10 @@ on:
       - 'android/**'
       - 'js/**'
       - 'css/**'
+      - 'src/**'
       - 'assets/**'
       - 'index.html'
+      - 'vite.config.js'
       - 'capacitor.config.json'
       - 'package.json'
       - 'package-lock.json'
@@ -55,11 +62,14 @@ jobs:
       - name: Generate Android res from assets
         run: npx @capacitor/assets generate --android --assetPath resources --iconBackgroundColor '#1a1a2e' --splashBackgroundColor '#1a1a2e'
 
-      - name: Build www/ and sync to the Android project
+      - name: Build web bundle (dist/)
+        run: npm run build
+
+      - name: Build www/ from dist and sync to the Android project
         run: |
+          rm -rf www
           mkdir -p www
-          cp index.html www/
-          cp -r css js assets www/
+          cp -r dist/. www/
           npx cap sync android
 
       - name: Gradle assembleDebug
