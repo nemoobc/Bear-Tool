@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 import { ethers } from 'ethers';
 import {
   gotoApp, skipIntro, importWallet, expectUnlocked, openSendView, appClick,
-  freshFork, proxyRpc, collectErrors, FORKS, HAS_ANVIL,
+  freshForkResilient, proxyRpc, collectErrors, FORKS, HAS_ANVIL,
 } from './helpers.js';
 
 // Every test here needs a real Anvil fork of its network. Anvil forks pin to
@@ -24,7 +24,10 @@ test.beforeEach(() => {
   test.skip(!HAS_ANVIL, 'needs anvil (foundry) — https://foundry.paradigm.xyz');
 });
 
-test.setTimeout(300_000);
+// 660s: freshForkResilient can burn 240s + a 30s pause + 240s before the flow
+// even starts (amoy CI 37020081620 needed every second of that window), and a
+// test killed at the cap loses the very diagnostics the retry collected.
+test.setTimeout(660_000);
 
 const ANVIL_KEY0 = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const ANVIL_0 = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
@@ -139,7 +142,7 @@ async function switchNetwork(page, netId) {
 
 for (const [netId, fork] of Object.entries(FORKS)) {
   test(`onchain send via web UI → ${netId} fork (:${fork.port})`, async ({ page }) => {
-    freshFork(netId); // stale fork state = root cause of intermittent onchain flake
+    freshForkResilient(netId); // stale fork state = root cause of intermittent onchain flake
     const errors = collectErrors(page); // dumped by waitSendSuccess on timeout
     await proxyRpc(page, fork);
     await gotoApp(page);
@@ -186,7 +189,7 @@ for (const [netId, fork] of Object.entries(FORKS)) {
     await page.waitForSelector('#confirmYes', { timeout: 15_000 });
     const signTitle = (await page.locator('.question').first().textContent().catch(() => '')) || '';
     expect(signTitle, 'dialog yang terbuka harus SIGN TRANSACTION, bukan gate/hasil balapan').toMatch(/SIGN TRANSACTION/i);
-    freshFork(netId);
+    freshForkResilient(netId);
     await page.locator('#confirmYes').click({ timeout: 5000 }).catch(async () => {
       const box = await page.locator('#confirmYes').boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -225,7 +228,7 @@ const ERC20_MIN_ABI = [
 
 // Run the deploy wizard for one network and verify the result ONCHAIN.
 async function deployErc20ViaWeb(page, fork, netId) {
-  freshFork(netId);
+  freshForkResilient(netId);
   await proxyRpc(page, fork);
   await gotoApp(page);
   await skipIntro(page);
@@ -258,7 +261,7 @@ async function deployErc20ViaWeb(page, fork, netId) {
   await page.waitForSelector('#confirmYes', { timeout: 90_000 });
   // dialog is up = compile done → re-pin before broadcast (fast chains
   // prune within minutes, compile already consumed time)
-  freshFork(netId);
+  freshForkResilient(netId);
   await page.locator('#confirmYes').click({ timeout: 5000 }).catch(async () => {
     const box = await page.locator('#confirmYes').boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);

@@ -684,19 +684,39 @@ export async function v3Quote(routerId, chainId, tokenIn, tokenOut, amountIn, fe
   throw lastErr || new Error(`${routerId}: no pool for any fee tier`);
 }
 
+// A shipped gas estimate can be LOW. CI 37020081620 polygon: QuickSwap leg3
+// shipped gasLimit=174636 and ran out of gas at exactly it — waitForTx's
+// replay at 5M succeeded, and a fresh estimate at that very state returned
+// 185052 (+5.96%). The divergence comes from upstream state quirks at send
+// time, which nothing in the app can fix; the gas LIMIT is ours. +25% is
+// refunded when unused, so a wrong estimate stops costing a failed swap and
+// starts costing nothing — the buffer is only skipped when the pre-estimate
+// itself fails, leaving the send path exactly as it was.
+const SWAP_GAS_BUFFER_DEN = 4n;
+export async function withSwapGasBuffer(signer, req) {
+  try {
+    const est = await signer.estimateGas(req);
+    return { ...req, gasLimit: (est * (SWAP_GAS_BUFFER_DEN + 1n)) / SWAP_GAS_BUFFER_DEN };
+  } catch {
+    return req;
+  }
+}
+
 export async function uniswapV2Swap(signer, routerAddr, tokenIn, tokenOut, amountIn, amountOutMin, to, deadline) {
   const router = new ethers.Contract(routerAddr, UNISWAP_V2_ABI, signer);
   const weth = await router.WETH();
   const path = [tokenIn === NATIVE_SENTINEL ? weth : tokenIn,
                  tokenOut === NATIVE_SENTINEL ? weth : tokenOut];
   const txDeadline = deadline || Math.floor(Date.now() / 1000) + 60 * 20;
+  let req;
   if (tokenIn === NATIVE_SENTINEL) {
-    return router.swapExactETHForTokens(amountOutMin, path, to, txDeadline, { value: amountIn });
+    req = await router.swapExactETHForTokens.populateTransaction(amountOutMin, path, to, txDeadline, { value: amountIn });
   } else if (tokenOut === NATIVE_SENTINEL) {
-    return router.swapExactTokensForETH(amountIn, amountOutMin, path, to, txDeadline);
+    req = await router.swapExactTokensForETH.populateTransaction(amountIn, amountOutMin, path, to, txDeadline);
   } else {
-    return router.swapExactTokensForTokens(amountIn, amountOutMin, path, to, txDeadline);
+    req = await router.swapExactTokensForTokens.populateTransaction(amountIn, amountOutMin, path, to, txDeadline);
   }
+  return signer.sendTransaction(await withSwapGasBuffer(signer, req));
 }
 
 // ── Uniswap V3: execute swap ──
@@ -716,9 +736,11 @@ export async function uniswapV3Swap(signer, routerAddr, tokenIn, tokenOut, amoun
     sqrtPriceLimitX96: 0,
   };
   if (tokenIn === NATIVE_SENTINEL) {
-    return router.exactInputSingle(params, { value: amountIn });
+    const req = await router.exactInputSingle.populateTransaction(params, { value: amountIn });
+    return signer.sendTransaction(await withSwapGasBuffer(signer, req));
   }
-  return router.exactInputSingle(params);
+  const req = await router.exactInputSingle.populateTransaction(params);
+  return signer.sendTransaction(await withSwapGasBuffer(signer, req));
 }
 
 // ── Multi-router quote: KyberSwap → Uniswap V3 → Uniswap V2 ──

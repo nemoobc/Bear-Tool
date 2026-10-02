@@ -68,8 +68,13 @@ test('the app sends a value, and the test mirrors the app rather than guessing',
   // The point of fixing the test is that it can now catch the app being wrong.
   // So the detector asserts the app's own call shape, and the test asserts the
   // same shape — if either drifts, one of them says so.
+  //
+  // Shape note: the app now goes through .populateTransaction(...) + a buffered
+  // sendTransaction (the CI 37020081620 OOG fix), so the detector accepts both
+  // the direct call and the populate form — what it will not accept is a
+  // payable call that dropped its { value }.
   const appSrc = readFileSync(path.join(here, '..', 'js', 'swap.js'), 'utf8');
-  const appCalls = [...appSrc.matchAll(/swapExactETHForTokens\(([^;]*?)\)\s*;/gs)].map((m) => m[1]);
+  const appCalls = [...appSrc.matchAll(/swapExactETHForTokens(?:\.populateTransaction)?\(([^;]*?)\)\s*;/gs)].map((m) => m[1]);
   assert.ok(appCalls.length >= 1, 'tidak ada panggilan swapExactETHForTokens di js/swap.js');
   for (const args of appCalls) {
     assert.match(args, /\{\s*value\s*:/, 'app memanggil swapExactETHForTokens tanpa value — bug produk');

@@ -77,6 +77,29 @@ export function freshFork(netId, timeout = 240_000) {
   }
 }
 
+// One paused re-attempt for a boot-time upstream outage. CI 37020081620 amoy:
+// every endpoint answered HTTP 500 "Temporary internal error" for the whole
+// ~70s six-attempt window — reproduced from a second IP, so it is a provider
+// outage, not CI's rate bucket — and back-to-back attempts cannot out-wait an
+// outage measured in minutes. One 30s pause + one full freshFork round gives
+// the provider a second chance; if that still fails the provider is genuinely
+// down and the error reports with full diagnostics. Nothing is masked: a
+// permanently broken upstream stays red, just no longer inside one storm cell.
+export function freshForkResilient(netId, pauseMs = 30_000) {
+  try {
+    freshFork(netId);
+  } catch (e1) {
+    console.error(`[freshFork] ${netId} boot failed — one paused retry in ${pauseMs}ms: `
+      + String(e1.message || e1).slice(0, 220));
+    const t0 = Date.now();
+    // freshFork is synchronous, so the pause must be too: Atomics.wait blocks
+    // this thread honestly instead of letting the test body race ahead.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pauseMs);
+    console.error(`[freshFork] ${netId} retry after ${Date.now() - t0}ms pause`);
+    freshFork(netId);
+  }
+}
+
 // Anvil forks pin to the block they started at. Some upstream nodes (BSC,
 // Polygon, Arbitrum…) prune state after ~128 blocks, so a fork that has been
 // up for more than a few minutes on a fast chain serves BROKEN state
