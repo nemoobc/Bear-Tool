@@ -5,45 +5,21 @@
 // so every send lands in a real chain state. Each test then verifies the
 // receipt ONCHAIN through the fork's own RPC: status=1, correct from/to.
 import { test, expect } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ethers } from 'ethers';
 import {
   gotoApp, skipIntro, importWallet, expectUnlocked, openSendView, appClick,
+  freshFork, proxyRpc, FORKS, HAS_ANVIL,
 } from './helpers.js';
 
-// Anvil forks pin to the block they started at. Some upstream nodes (BSC,
-// Polygon, Arbitrum…) prune state after ~128 blocks, so a fork that has been
-// up for more than a few minutes on a fast chain serves BROKEN state
-// ("missing trie node", estimateGas reverts) even though eth_getBalance still
-// answers. Fix: restart the fork for THIS network right before each test —
-// every test gets a fresh, non-stale fork. Ports never overlap between
-// sequential single-worker tests.
-// fileURLToPath, not URL.pathname: the pathname of a file: URL is a
-// percent-encoded POSIX string, and on Windows it comes back as "/C:/Users/…",
-// which cwd then resolves to "C:\C:\Users\…". run-fork-web.sh is a bash
-// script and never ran on Windows, so the bug was invisible — but the path is
-// still wrong on any host where the checkout has a space or a non-ASCII
-// character in it, because the percent-encoding is not decoded.
-const REPO = fileURLToPath(new URL('../../', import.meta.url));
-function freshFork(netId) {
-  execFileSync('bash', ['run-fork-web.sh', 'restart-one', netId], {
-    cwd: REPO, stdio: 'pipe', timeout: 90_000,
-  });
-}
-
-// Every test here needs a real Anvil fork of its network. Without foundry on
-// PATH each one used to burn its full 300s timeout and then fail — 12 networks
-// is about an hour of red on any machine that simply has no anvil installed.
-// Probe once and skip the whole file, so a plain `npm run test:e2e` reports
-// "skipped: needs anvil" instead. CI installs foundry first
-// (.github/workflows/fork-tests.yml), so there these run for real.
-const HAS_ANVIL = (process.env.PATH || '').split(':')
-  .some((d) => d && existsSync(join(d, 'anvil')))
-  || existsSync(join(process.env.HOME || '', '.foundry/bin/anvil'));
-
+// Every test here needs a real Anvil fork of its network. Anvil forks pin to
+// the block they started at, and some upstream nodes (BSC, Polygon, Arbitrum…)
+// prune state after ~128 blocks — a fork that has been up for more than a few
+// minutes on a fast chain serves BROKEN state ("missing trie node", estimateGas
+// reverts) even though eth_getBalance still answers. Hence freshFork() before
+// each flow (helpers.js, with the script's own diagnosis attached on failure):
+// every test gets a fresh, non-stale fork, ports never overlap between
+// sequential single-worker tests, and a machine without foundry reports
+// "skipped: needs anvil" instead of an hour of red.
 test.beforeEach(() => {
   test.skip(!HAS_ANVIL, 'needs anvil (foundry) — https://foundry.paradigm.xyz');
 });
@@ -53,66 +29,6 @@ test.setTimeout(300_000);
 const ANVIL_KEY0 = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const ANVIL_0 = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 const ANVIL_1 = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
-
-// networkId → { port, type, hosts } — hosts mirror the first RPCs in
-// js/network.js for that network (the app tries them in order).
-const FORKS = {
-  ethereum:          { port: 18545, type: 'mainnet', hosts: ['ethereum-rpc.publicnode.com', 'eth.drpc.org'] },
-  bsc:               { port: 18546, type: 'mainnet', hosts: ['bsc-dataseed.binance.org', 'bsc-rpc.publicnode.com'] },
-  polygon:           { port: 18547, type: 'mainnet', hosts: ['polygon-bor-rpc.publicnode.com', 'polygon.drpc.org'] },
-  arbitrum:          { port: 18548, type: 'mainnet', hosts: ['arb1.arbitrum.io', 'arbitrum-one-rpc.publicnode.com'] },
-  optimism:          { port: 18549, type: 'mainnet', hosts: ['mainnet.optimism.io', 'optimism-rpc.publicnode.com'] },
-  base:              { port: 18550, type: 'mainnet', hosts: ['mainnet.base.org', 'base-rpc.publicnode.com'] },
-  sepolia:           { port: 18551, type: 'testnet', hosts: ['sepolia.gateway.tenderly.co', 'ethereum-sepolia-rpc.publicnode.com'] },
-  amoy:              { port: 18552, type: 'testnet', hosts: ['polygon-amoy.drpc.org', 'polygon-amoy-bor-rpc.publicnode.com'] },
-  'arbitrum-sepolia': { port: 18553, type: 'testnet', hosts: ['sepolia-rollup.arbitrum.io', 'arbitrum-sepolia-rpc.publicnode.com'] },
-  'op-sepolia':       { port: 18554, type: 'testnet', hosts: ['sepolia.optimism.io', 'optimism-sepolia-rpc.publicnode.com'] },
-  'base-sepolia':     { port: 18555, type: 'testnet', hosts: ['sepolia.base.org', 'base-sepolia-rpc.publicnode.com'] },
-  'bsc-testnet':      { port: 18556, type: 'testnet', hosts: ['data-seed-prebsc-1-s1.bnbchain.org:8545', 'bsc-testnet-rpc.publicnode.com'] },
-};
-
-function escapeRe(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// Intercept only the app's RPC hosts and proxy each request to the fork.
-// Everything else (ethers CDN, price API) continues normally.
-async function proxyRpc(page, fork) {
-  const re = new RegExp('^https://(' + fork.hosts.map(escapeRe).join('|') + ')(:|/|$)');
-  await page.route(re, async (route) => {
-    const req = route.request();
-    // The browser sends a CORS preflight before a JSON POST — answer it so
-    // the app's cross-origin fetch is allowed through our local proxy.
-    if (req.method() === 'OPTIONS') {
-      await route.fulfill({
-        status: 204,
-        headers: {
-          'access-control-allow-origin': '*',
-          'access-control-allow-methods': 'POST, OPTIONS',
-          'access-control-allow-headers': 'content-type',
-        },
-        body: '',
-      });
-      return;
-    }
-    if (req.method() !== 'POST') { await route.continue(); return; }
-    const body = req.postData();
-    const resp = await fetch(`http://127.0.0.1:${fork.port}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-    }).catch(() => null);
-    if (!resp) { await route.fulfill({ status: 502, body: 'fork proxy unavailable' }); return; }
-    await route.fulfill({
-      status: resp.status,
-      headers: {
-        'content-type': 'application/json',
-        'access-control-allow-origin': '*',
-      },
-      body: await resp.text(),
-    });
-  });
-}
 
 // Wait until a send tx shows as success in the persisted activity.
 async function waitSendSuccess(page, timeout = 45000) {

@@ -1,6 +1,9 @@
 // Bear Tool — shared helpers for the Playwright E2E suite.
 import { expect } from '@playwright/test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // M2 moved the view markup out of index.html into src/views/*.jsx (React
 // renders it into the shell at boot), so the served DOM = shell + views.
@@ -35,6 +38,120 @@ export const staticHtml = (() => {
 export const ALLOWED_CONSOLE = [
   'X-Frame-Options may only be set via an HTTP header',
 ];
+
+// ---------------------------------------------------------------------------
+// Fork plumbing — shared by every spec that needs a REAL chain behind the app
+// (11-onchain-fork sends on it; 17-max-amount measures MAX against it).
+// ---------------------------------------------------------------------------
+
+// fileURLToPath, not URL.pathname: the pathname of a file: URL is a
+// percent-encoded POSIX string, and on Windows it comes back as "/C:/Users/…",
+// which cwd then resolves to "C:\C:\Users\…". run-fork-web.sh is a bash
+// script and never ran on Windows, so the bug was invisible — but the path is
+// still wrong on any host where the checkout has a space or a non-ASCII
+// character in it, because the percent-encoding is not decoded.
+const REPO = fileURLToPath(new URL('../../', import.meta.url));
+
+// Restart THIS network's fork and fail loudly if the script cannot.
+//
+// stdio:'pipe' hides the script's own diagnosis: execFileSync's error message
+// is just "Command failed: bash run-fork-web.sh restart-one X", and CI
+// 36955492385 produced nine such failures with no cause anywhere in the log —
+// no DOWN line, no retry count, no anvil stderr. Re-throw with the captured
+// output so the NEXT red names itself. Budget 180s: the script's own worst
+// case (4 attempts × health-gate retry) is ≈150s, so it always gets to print
+// its diagnosis before the caller kills it blind.
+export function freshFork(netId, timeout = 180_000) {
+  try {
+    execFileSync('bash', ['run-fork-web.sh', 'restart-one', netId], {
+      cwd: REPO, stdio: 'pipe', timeout,
+    });
+  } catch (e) {
+    const parts = [['stdout', e.stdout], ['stderr', e.stderr]]
+      .filter(([, s]) => s && String(s).trim())
+      .map(([k, s]) => `${k}:\n${String(s).trim()}`);
+    throw new Error(
+      `run-fork-web.sh restart-one ${netId} failed (status=${e.status}, signal=${e.signal || 'none'}):\n`
+      + (parts.join('\n---\n') || '(no output captured)'),
+    );
+  }
+}
+
+// Anvil forks pin to the block they started at. Some upstream nodes (BSC,
+// Polygon, Arbitrum…) prune state after ~128 blocks, so a fork that has been
+// up for more than a few minutes on a fast chain serves BROKEN state
+// ("missing trie node", estimateGas reverts) even though eth_getBalance still
+// answers. Spec files that need a fresh fork call freshFork() before their
+// flows; ports never overlap between sequential single-worker tests.
+
+// Without foundry on PATH each fork test used to burn its full timeout and
+// then fail — 12 networks is about an hour of red on any machine that simply
+// has no anvil installed. Probe once and skip, so a plain `npm run test:e2e`
+// reports "skipped: needs anvil" instead. CI installs foundry first, so there
+// these run for real.
+export const HAS_ANVIL = (process.env.PATH || '').split(':')
+  .some((d) => d && existsSync(join(d, 'anvil')))
+  || existsSync(join(process.env.HOME || '', '.foundry/bin/anvil'));
+
+// networkId → { port, type, hosts } — hosts mirror the first RPCs in
+// js/network.js for that network (the app tries them in order).
+export const FORKS = {
+  ethereum:          { port: 18545, type: 'mainnet', hosts: ['ethereum-rpc.publicnode.com', 'eth.drpc.org'] },
+  bsc:               { port: 18546, type: 'mainnet', hosts: ['bsc-dataseed.binance.org', 'bsc-rpc.publicnode.com'] },
+  polygon:           { port: 18547, type: 'mainnet', hosts: ['polygon-bor-rpc.publicnode.com', 'polygon.drpc.org'] },
+  arbitrum:          { port: 18548, type: 'mainnet', hosts: ['arb1.arbitrum.io', 'arbitrum-one-rpc.publicnode.com'] },
+  optimism:          { port: 18549, type: 'mainnet', hosts: ['mainnet.optimism.io', 'optimism-rpc.publicnode.com'] },
+  base:              { port: 18550, type: 'mainnet', hosts: ['mainnet.base.org', 'base-rpc.publicnode.com'] },
+  sepolia:           { port: 18551, type: 'testnet', hosts: ['sepolia.gateway.tenderly.co', 'ethereum-sepolia-rpc.publicnode.com'] },
+  amoy:              { port: 18552, type: 'testnet', hosts: ['polygon-amoy.drpc.org', 'polygon-amoy-bor-rpc.publicnode.com'] },
+  'arbitrum-sepolia': { port: 18553, type: 'testnet', hosts: ['sepolia-rollup.arbitrum.io', 'arbitrum-sepolia-rpc.publicnode.com'] },
+  'op-sepolia':       { port: 18554, type: 'testnet', hosts: ['sepolia.optimism.io', 'optimism-sepolia-rpc.publicnode.com'] },
+  'base-sepolia':     { port: 18555, type: 'testnet', hosts: ['sepolia.base.org', 'base-sepolia-rpc.publicnode.com'] },
+  'bsc-testnet':      { port: 18556, type: 'testnet', hosts: ['data-seed-prebsc-1-s1.bnbchain.org:8545', 'bsc-testnet-rpc.publicnode.com'] },
+};
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Intercept only the app's RPC hosts and proxy each request to the fork.
+// Everything else (ethers CDN, price API) continues normally.
+export async function proxyRpc(page, fork) {
+  const re = new RegExp('^https://(' + fork.hosts.map(escapeRe).join('|') + ')(:|/|$)');
+  await page.route(re, async (route) => {
+    const req = route.request();
+    // The browser sends a CORS preflight before a JSON POST — answer it so
+    // the app's cross-origin fetch is allowed through our local proxy.
+    if (req.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-methods': 'POST, OPTIONS',
+          'access-control-allow-headers': 'content-type',
+        },
+        body: '',
+      });
+      return;
+    }
+    if (req.method() !== 'POST') { await route.continue(); return; }
+    const body = req.postData();
+    const resp = await fetch(`http://127.0.0.1:${fork.port}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    }).catch(() => null);
+    if (!resp) { await route.fulfill({ status: 502, body: 'fork proxy unavailable' }); return; }
+    await route.fulfill({
+      status: resp.status,
+      headers: {
+        'content-type': 'application/json',
+        'access-control-allow-origin': '*',
+      },
+      body: await resp.text(),
+    });
+  });
+}
 
 export async function gotoApp(page) {
   // CoinGecko is frequently rate-limited / CORS-blocked from CI — the app is

@@ -9,9 +9,37 @@
 // A wallet on a forked chain with a real balance is what makes this testable
 // end to end; with no balance there is nothing for MAX to get wrong.
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, createWallet, fundedWallet, openSendView, appClick } from './helpers.js';
+import {
+  gotoApp, skipIntro, createWallet, fundedWallet, openSendView, appClick,
+  freshFork, proxyRpc, FORKS, HAS_ANVIL,
+} from './helpers.js';
 
 const BALANCE_WEI = '0x2386f26fc10000'; // 0.1 ETH
+
+// The chain these tests measure against, wired the same way 11-onchain-fork
+// wires its sends: a LOCAL ethereum fork behind proxyRpc.
+//
+// Every comment in this file already assumes one — "a wallet on a forked
+// chain", "the fork's 0.1 ETH", "a mainnet-fork address" — because
+// anvil_setBalance only EXISTS on a fork, and opening the Send view re-reads
+// balances from the chain and overwrites the cache. CI never provided that
+// fork (playwright.config.js says the same out loud: without the seeded
+// storageState "every spec that needs a balance times out"), so all three
+// balance-dependent tests ran against real mainnet, where anvil's account
+// holds nothing: CI 36955492385 failed 111/170/235 with provider=null,
+// spendable="0" and "Balance 0 ETH". One fresh fork per FILE (workers:1 →
+// one process): the first test pays the restart, the rest reuse it — ethereum
+// prunes state slowly, unlike the fast chains 11 restarts per test.
+let forkStarted = false;
+async function wireFork(page) {
+  if (!forkStarted) { freshFork('ethereum'); forkStarted = true; }
+  await proxyRpc(page, FORKS.ethereum);
+}
+
+// A fork restart (≈15s healthy, longer when the upstream is slow) plus the
+// UI flow needs more than the 45s default — the same budget 11-onchain-fork
+// already claims for the identical reason.
+test.setTimeout(300_000);
 
 // Module scope, not inside the first describe. The second describe — the one about
 // a balance too small to pay the fee — called waitForTokens and got a bare
@@ -91,6 +119,8 @@ async function seedBalances(page) {
 
 test.describe('MAX amount', () => {
   test.beforeEach(async ({ page }) => {
+    test.skip(!HAS_ANVIL, 'needs anvil (foundry) — https://foundry.paradigm.xyz');
+    await wireFork(page);
     await gotoApp(page);
     await skipIntro(page);
     // A funded wallet, not a fresh one. createWallet() generates a random key,
@@ -261,6 +291,8 @@ test.describe('MAX amount', () => {
 
 test.describe('MAX is honest about a balance that cannot pay the fee', () => {
   test.beforeEach(async ({ page }) => {
+    test.skip(!HAS_ANVIL, 'needs anvil (foundry) — https://foundry.paradigm.xyz');
+    await wireFork(page);
     await gotoApp(page);
     await skipIntro(page);
     // A funded wallet, not a fresh one. createWallet() generates a random key,

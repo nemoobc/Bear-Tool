@@ -33,12 +33,27 @@ declare -A NET=(
   [bsc-testnet]="18556|97|https://bsc-testnet-rpc.publicnode.com"
 )
 
-# Fallback upstream RPCs for networks whose free endpoints prune fork state
-# intermittently — restart-one rotates primary → alt → primary across attempts.
+# Fallback upstream RPCs for EVERY network, drawn from the second/third entry
+# in js/network.js so the candidates are endpoints the app itself already
+# trusts. restart-one rotates primary → alt → primary → alt across 4 attempts:
+# CI 36955492385 failed 8 sends because the health gate (a real estimateGas)
+# could not get state from ONE upstream — either a fast JSON-RPC error or a
+# 20s hang — and with no alt to rotate to, all three attempts asked the same
+# rate-limited host the same question. A different provider is a different
+# rate bucket, which is the only thing that helps against 429s.
 declare -A ALT=(
+  [ethereum]="https://eth.drpc.org"
+  [bsc]="https://bsc-dataseed.binance.org"
   [polygon]="https://polygon-bor-rpc.publicnode.com"
+  [arbitrum]="https://arbitrum-one-rpc.publicnode.com"
+  [optimism]="https://optimism-rpc.publicnode.com"
+  [base]="https://base-rpc.publicnode.com"
+  [sepolia]="https://ethereum-sepolia-rpc.publicnode.com"
   [amoy]="https://polygon-amoy.drpc.org"
   [arbitrum-sepolia]="https://sepolia-rollup.arbitrum.io/rpc"
+  [op-sepolia]="https://optimism-sepolia-rpc.publicnode.com"
+  [base-sepolia]="https://base-sepolia-rpc.publicnode.com"
+  [bsc-testnet]="https://data-seed-prebsc-1-s1.bnbchain.org:8545"
 )
 
 start_one() {
@@ -113,7 +128,10 @@ restart_one() {
   # (upstream RPCs intermittently 500 "temporary internal error"; a fresh
   # anvil usually gets a healthy one on the next attempt)
   local attempt
-  for attempt in 1 2 3; do
+  # 4 attempts, worst case ≈ 8s port-wait + 4×(11s curl + 25s health) ≈ 150s —
+  # callers budget execFileSync at 180s, so the loop always finishes (and prints
+  # its own diagnosis) before the caller kills it blind.
+  for attempt in 1 2 3 4; do
     local ok=0
     for i in $(seq 1 7); do
       sleep 1.5
@@ -131,11 +149,11 @@ restart_one() {
       echo "fork :$port answers but state unhealthy — restarting..."
       kill_port "$port"
     fi
-    if [ "$attempt" -lt 3 ]; then
-      echo "retrying $n fork start (attempt $attempt of 3)..."
-      # rotate to the fallback RPC on first retry (then back to primary)
+    if [ "$attempt" -lt 4 ]; then
+      echo "retrying $n fork start (attempt $attempt of 4)..."
+      # odd retries go to the alt upstream, even ones back to primary
       local rpc_try=""
-      [ "$attempt" = "1" ] && [ -n "${ALT[$n]:-}" ] && rpc_try="${ALT[$n]}"
+      [ $((attempt % 2)) = 1 ] && [ -n "${ALT[$n]:-}" ] && rpc_try="${ALT[$n]}"
       start_one "$n" "$rpc_try"
     fi
   done
