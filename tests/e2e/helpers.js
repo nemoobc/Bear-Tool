@@ -58,10 +58,10 @@ const REPO = fileURLToPath(new URL('../../', import.meta.url));
 // is just "Command failed: bash run-fork-web.sh restart-one X", and CI
 // 36955492385 produced nine such failures with no cause anywhere in the log —
 // no DOWN line, no retry count, no anvil stderr. Re-throw with the captured
-// output so the NEXT red names itself. Budget 180s: the script's own worst
-// case (4 attempts × health-gate retry) is ≈150s, so it always gets to print
+// output so the NEXT red names itself. Budget 240s: the script's own worst
+// case (6 attempts × health-gate retry) is ≈221s, so it always gets to print
 // its diagnosis before the caller kills it blind.
-export function freshFork(netId, timeout = 180_000) {
+export function freshFork(netId, timeout = 240_000) {
   try {
     execFileSync('bash', ['run-fork-web.sh', 'restart-one', netId], {
       cwd: REPO, stdio: 'pipe', timeout,

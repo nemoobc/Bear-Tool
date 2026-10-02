@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { withRpcRetry, withDeadline } from '../tests/fork/fork-helper.mjs';
+import { withRpcRetry, withDeadline, waitForTx } from '../tests/fork/fork-helper.mjs';
 
 test('a transport error is retried and can succeed', async () => {
   let n = 0;
@@ -128,4 +128,66 @@ test('withRpcRetry classifies the transport failures CI and the solc download hi
     throw new Error('execution reverted (action="call", reason="UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT")');
   }, { attempts: 3, delayMs: 1 }));
   assert.equal(n, 1, 'revert ber-alasan bukan gangguan transport — jangan diulang');
+});
+
+// ── waitForTx enrichment: a status=0 must explain itself ──
+//
+// CI's swap leg3 arrived as "gasLimit=171325 gasUsed=171325 — replay reverted,
+// undecoded": a replay at the tx's own gas limit cannot tell out-of-gas from an
+// empty require (both come back without data), so the failure named nothing.
+// The enrichment now replays at 5M, adds a fresh estimate, and this test pins
+// that message — if the diagnostics silently stop forming, the next red is a
+// blind one, and that costs a full wave to rediscover.
+
+const statusZeroTx = (provider) => ({
+  hash: '0x' + '11'.repeat(32),
+  provider,
+  to: '0xb'.padEnd(42, '0'),
+  data: '0xbeef',
+  from: '0xa'.padEnd(42, '0'),
+  gasLimit: 171325n,
+  wait: async () => {
+    const e = new Error('transaction execution reverted');
+    e.code = 'CALL_EXCEPTION';
+    e.receipt = { status: 0, gasUsed: 171325n, blockNumber: 123456 };
+    throw e;
+  },
+});
+
+test('waitForTx enriches a status=0 with a 5M-gas replay verdict and a fresh estimate', async () => {
+  const provider = {
+    getTransaction: async () => ({ gasLimit: 171325n, data: '0xbeef' }),
+    call: async () => '0x',             // replay at 5M passes → it was out of gas
+    estimateGas: async () => 147571n,   // the number the estimate should have shipped
+  };
+  await assert.rejects(
+    () => waitForTx(statusZeroTx(provider), 'leg3 token→native', 5000),
+    (e) => {
+      assert.match(e.message, /status=0 \[gasLimit=171325 gasUsed=171325/,
+        `baris status wajib ada: ${e.message.slice(0, 120)}`);
+      assert.match(e.message, /OUT OF GAS at its own limit/,
+        'replay 5M sukses + limit==gasUsed = verdict OOG harus terucap');
+      assert.match(e.message, /estimateNow=147571/,
+        'angka estimate segar wajib ikut — itu bukti divergensi');
+      return true;
+    },
+  );
+});
+
+test('a real revert reason still wins over the OOG verdict', async () => {
+  const provider = {
+    getTransaction: async () => ({ gasLimit: 171325n, data: '0xbeef' }),
+    call: async () => { throw Object.assign(new Error('execution reverted'), { reason: 'UniswapV2: K' }); },
+    estimateGas: async () => { throw new Error('execution reverted: this state can never run it'); },
+  };
+  await assert.rejects(
+    () => waitForTx(statusZeroTx(provider), 'leg3 with reason', 5000),
+    (e) => {
+      assert.match(e.message, /revert reason: UniswapV2: K/,
+        `alasan revert nyata harus tampil: ${e.message.slice(0, 160)}`);
+      assert.match(e.message, /estimateNow=error:/, 'estimate yang melempar harus tercatat apa adanya');
+      assert.doesNotMatch(e.message, /OUT OF GAS/, 'alasan revert nyata menang, bukan ditebak OOG');
+      return true;
+    },
+  );
 });

@@ -35,7 +35,7 @@ declare -A NET=(
 
 # Fallback upstream RPCs for EVERY network, drawn from the second/third entry
 # in js/network.js so the candidates are endpoints the app itself already
-# trusts. restart-one rotates primary → alt → primary → alt across 4 attempts:
+# trusts. restart-one rotates primary → alt → primary → alt across its attempts:
 # CI 36955492385 failed 8 sends because the health gate (a real estimateGas)
 # could not get state from ONE upstream — either a fast JSON-RPC error or a
 # 20s hang — and with no alt to rotate to, all three attempts asked the same
@@ -56,6 +56,19 @@ declare -A ALT=(
   [bsc-testnet]="https://data-seed-prebsc-1-s1.bnbchain.org:8545"
 )
 
+# Extra upstreams beyond the pair — same job as ALT, more heads for the same
+# fire. CI 37013009446 amoy boot: BOTH the primary (publicnode) and the alt
+# (drpc) answered HTTP 500 on account-state fetches for the whole ~45s retry
+# window (anvil log: "failed to get account … HTTP error 500", cf-ray IAD) —
+# two providers were not enough, and every one of the 4 attempts starved the
+# same way. Candidates verified by eth_chainId == 0x13882 (80002) + a state
+# call answering 200 from this box before being allowed in; they join every
+# start as additional --fork-url, so anvil's round-robin spreads bootstrap
+# across up to four rate buckets per attempt.
+declare -A EXTRA=(
+  [amoy]="https://polygon-amoy.api.onfinality.io/public https://gateway.tenderly.co/public/polygon-amoy"
+)
+
 start_one() {
   local n="$1" port chain rpc line
   line="${NET[$n]:-}"
@@ -72,6 +85,11 @@ start_one() {
   if [ -n "${2:-}" ]; then rpc2="$rpc"; rpc="$2"; fi
   local fork_args=(--fork-url "$rpc")
   [ -n "$rpc2" ] && fork_args+=(--fork-url "$rpc2")
+  # Extra heads (if any) join the round-robin — see EXTRA above.
+  local extra
+  for extra in ${EXTRA[$n]:-}; do
+    fork_args+=(--fork-url "$extra")
+  done
   # --allow-origin is not optional here. This script exists so the WEB UI can
   # reach these forks, and a browser will not send a JSON-RPC POST until the
   # CORS preflight succeeds. Without the flag anvil does not answer OPTIONS and
@@ -164,10 +182,13 @@ restart_one() {
   # (upstream RPCs intermittently 500 "temporary internal error"; a fresh
   # anvil usually gets a healthy one on the next attempt)
   local attempt
-  # 4 attempts, worst case ≈ 8s port-wait + 4×(11s curl + 25s health) ≈ 150s —
-  # callers budget execFileSync at 180s, so the loop always finishes (and prints
-  # its own diagnosis) before the caller kills it blind.
-  for attempt in 1 2 3 4; do
+  # 6 attempts, worst case ≈ 8s port-wait + 6×(11s curl + 25s health) ≈ 221s —
+  # callers budget execFileSync at 240s, so the loop always finishes (and prints
+  # its own diagnosis) before the caller kills it blind. 6 because CI
+  # 37013009446 amoy burned all of 4 inside a single ~45s upstream-500 storm:
+  # more attempts + the EXTRA round-robin heads stretch the window without
+  # touching the per-attempt budget.
+  for attempt in 1 2 3 4 5 6; do
     local ok=0
     for i in $(seq 1 7); do
       sleep 1.5
@@ -195,11 +216,11 @@ restart_one() {
       tail -n 5 "$LOG/$n.log" 2>/dev/null | sed 's/^/  | /'
       kill_port "$port"
     fi
-    if [ "$attempt" -lt 4 ]; then
-      echo "retrying $n fork start (attempt $attempt of 4)..."
+    if [ "$attempt" -lt 6 ]; then
       # odd retries go to the alt upstream, even ones back to primary
       local rpc_try=""
       [ $((attempt % 2)) = 1 ] && [ -n "${ALT[$n]:-}" ] && rpc_try="${ALT[$n]}"
+      echo "retrying $n fork start (attempt $attempt of 6, first=${rpc_try:-${NET[$n]##*|}})..."
       start_one "$n" "$rpc_try"
     fi
   done

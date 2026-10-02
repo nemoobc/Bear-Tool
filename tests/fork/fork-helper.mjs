@@ -566,7 +566,14 @@ export async function waitForTx(tx, label = 'transaction', timeoutMs = 60000) {
       `${label}: no receipt after ${timeoutMs}ms (tx ${String(tx.hash ?? '?').slice(0, 14)})`)), timeoutMs);
   });
   try {
-    const real = tx.wait();
+    // tx.wait() runs its receipt poll on the RAW provider (waitForTransaction is
+    // not in RETRYING_READS, and the proxy applies methods with `this` = target),
+    // so a single throttled eth_getTransactionReceipt rejected the whole wait and
+    // escaped — CI 37005258456: optimism-sepolia's journey send died on anvil's
+    // forwarded 429 "IP exceeded requests per second" while the tx sat mined on
+    // the fork. Same treatment as every other read in this suite (and as
+    // fork-eip7702.test.js already does): retry the wait, never the broadcast.
+    const real = withRpcRetry(() => tx.wait(), { label: `${label} wait` });
     // Same reason as in withRpcRetry: the loser of a race is not cancelled, and
     // an unhandled rejection from it would be attributed to the wrong test.
     real.catch(() => {});
@@ -576,13 +583,15 @@ export async function waitForTx(tx, label = 'transaction', timeoutMs = 60000) {
     // reports it from the receipt path with no reason string and no gas
     // figures, and CI 36983252053's swap leg3 then spent three rounds
     // guessing INSUFFICIENT_OUTPUT vs TRANSFER_FROM_FAILED vs out-of-gas from
-    // nothing but "gasUsed 171349". Two readings fix that, both from data
-    // that already exists: gasLimit on the response (equal to gasUsed = out
-    // of gas), and an eth_call replay of the same tx at the same block, which
-    // makes anvil re-execute it and return the revert string ethers could not
-    // recover post-hoc. If the replay succeeds instead, the revert was
-    // state-dependent — equally worth knowing. Enrichment never masks the
-    // original error.
+    // nothing but "gasUsed 171349". Three readings fix that: the gasLimit the
+    // tx shipped with, an eth_call replay of the same tx at 5M gas (generous
+    // on purpose — a replay at the tx's own limit cannot tell out-of-gas from
+    // an empty require, both come back "missing revert data", which is how CI
+    // arrived at "replay reverted, undecoded" with gasLimit == gasUsed and no
+    // verdict), and a fresh estimateGas whose number either converges with the
+    // shipped limit or exposes the divergence. If the replay succeeds, the tx
+    // simply needed more gas than its estimate granted; a string names the
+    // real revert. Enrichment never masks the original error.
     try {
       const rc = e?.receipt;
       if (rc && rc.status === 0) {
@@ -593,17 +602,40 @@ export async function waitForTx(tx, label = 'transaction', timeoutMs = 60000) {
         if (prov && limit !== '?') {
           why = 'replay skipped (no from/to/data)';
           if (tx.to && (tx.data || full?.data)) {
+            // Replay at a GENEROUS gas limit, not at the tx's own: a replay
+            // at `limit` returns "missing revert data" for BOTH an out-of-gas
+            // and an empty require, so it can never tell them apart — that is
+            // exactly how CI's swap leg3 arrived ("replay reverted, undecoded")
+            // with gasLimit == gasUsed, leaving OOG-vs-state unproven. One
+            // extra reading settles it: success at 5M = the tx simply needed
+            // more gas than its estimate granted (estimate ran against state
+            // the execution did not see); a string = the real revert; bare
+            // again = a state-side empty require (WETH9-class).
+            const req = {
+              to: tx.to, data: tx.data ?? full?.data, value: tx.value ?? full?.value ?? 0n,
+              from: tx.from ?? full?.from, gasLimit: 5000000n,
+            };
             try {
-              await prov.call({
-                to: tx.to, data: tx.data ?? full?.data, value: tx.value ?? full?.value ?? 0n,
-                from: tx.from ?? full?.from, gasLimit: limit,
-              }, rc.blockNumber);
-              why = 'replay SUCCEEDED at that block — revert depended on state that moved';
+              await prov.call({ ...req, blockTag: rc.blockNumber });
+              why = limit === rc.gasUsed
+                ? 'replay SUCCEEDED at 5M gas — OUT OF GAS at its own limit (estimate under-granted)'
+                : 'replay SUCCEEDED at 5M gas — revert depended on state that moved';
             } catch (re) {
               const r = re?.reason ?? re?.revert?.args?.[0] ?? null;
               why = r ? `revert reason: ${String(r)}`
-                : `replay reverted, undecoded: ${String(re?.shortMessage || re?.message || re).slice(0, 160)}`;
+                : `replay reverted at 5M gas, undecoded: ${String(re?.shortMessage || re?.message || re).slice(0, 160)} (state-side empty require)`;
             }
+            // What does an estimate say NOW? ethers v6 estimateGas has no
+            // block tag — it reads the node head — but while this catch runs
+            // the head IS the receipt's block (one tx per auto-mined block,
+            // nothing else sends on this anvil), so the number is comparable
+            // to the limit the tx shipped with. Returns a value = the
+            // divergence is visible; throws = this state can never execute
+            // it, which is its own answer.
+            const est = await prov.estimateGas(req)
+              .then((v) => String(v))
+              .catch((er) => `error: ${String(er?.shortMessage || er?.message || er).slice(0, 90)}`);
+            why += ` | estimateNow=${est}`;
           }
         }
         const tag = String(label).slice(0, 60);
