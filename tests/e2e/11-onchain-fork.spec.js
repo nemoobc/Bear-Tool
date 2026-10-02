@@ -50,6 +50,13 @@ const SEND_TO = '0x000000000000000000000000000000000000dEaD';
 // attempts before the receipt ever lands — four sends timed out at 45s with
 // the fork itself healthy. The window covers a retry cycle, not a hang.
 //
+// 150s default, deliberately ABOVE the app's own receipt-retry budget
+// (CONFIRM_TIMEOUT_MS = 120s): CI 37027145392 failed bsc and base with
+// receipt status=1 on chain and console clean — the app was correctly
+// retrying a receipt poll through a publicnode 403 storm (retry to 120s)
+// while this wait gave up at 90s. A test may not declare "stuck" while the
+// app is still inside its own contract; 150s outwaits 120s with margin.
+//
 // On timeout the error carries the whole scene, because "Timeout 90000ms
 // exceeded" is what CI 36992334807 gave for seven sends — seven rounds of
 // root-causing against a blank wall: the last send entry raw from
@@ -57,7 +64,7 @@ const SEND_TO = '0x000000000000000000000000000000000000dEaD';
 // itself holds the tx (getReceipt against the port — receipt on chain while
 // activity is silent = app recording bug; no receipt = broadcast never
 // landed; status 0 = reverted), and the tail of console/pageerror.
-async function waitSendSuccess(page, timeout = 90_000, port = null, errors = []) {
+async function waitSendSuccess(page, timeout = 150_000, port = null, errors = []) {
   try {
     await page.waitForFunction(() => {
       try {
@@ -196,7 +203,7 @@ for (const [netId, fork] of Object.entries(FORKS)) {
     });
 
     // success persisted in activity → then verify the receipt onchain
-    const entry = await waitSendSuccess(page, 90_000, fork.port, errors);
+    const entry = await waitSendSuccess(page, 150_000, fork.port, errors);
     expect(entry, `send activity entry for ${netId}`).toBeTruthy();
     expect(entry.hash).toMatch(/^0x[0-9a-fA-F]{64}$/);
 

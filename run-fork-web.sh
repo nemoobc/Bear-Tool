@@ -83,13 +83,23 @@ start_one() {
   # A retry passes its own choice as $2: it becomes the first endpoint, with
   # the original primary kept as the pair so no attempt runs single-handed.
   if [ -n "${2:-}" ]; then rpc2="$rpc"; rpc="$2"; fi
+  # $3 = "single" → exactly one endpoint, no pair, no extras. Evidence: the
+  # 4-way amoy pool could not bootstrap while publicnode alone, tenderly alone
+  # and the healthy pair all booted fine minutes apart on this box — ONE dead
+  # member (drpc 500, onfinality 429 "Too Many") poisons the whole round-robin,
+  # and light curl probes do not catch it (drpc answered every probe while its
+  # boot still failed). A single cannot be poisoned by anyone, so retries that
+  # must get through use singles.
+  if [ "${3:-}" = "single" ]; then rpc2=""; fi
   local fork_args=(--fork-url "$rpc")
   [ -n "$rpc2" ] && fork_args+=(--fork-url "$rpc2")
   # Extra heads (if any) join the round-robin — see EXTRA above.
   local extra
-  for extra in ${EXTRA[$n]:-}; do
-    fork_args+=(--fork-url "$extra")
-  done
+  if [ "${3:-}" != "single" ]; then
+    for extra in ${EXTRA[$n]:-}; do
+      fork_args+=(--fork-url "$extra")
+    done
+  fi
   # --allow-origin is not optional here. This script exists so the WEB UI can
   # reach these forks, and a browser will not send a JSON-RPC POST until the
   # CORS preflight succeeds. Without the flag anvil does not answer OPTIONS and
@@ -217,11 +227,20 @@ restart_one() {
       kill_port "$port"
     fi
     if [ "$attempt" -lt 6 ]; then
-      # odd retries go to the alt upstream, even ones back to primary
-      local rpc_try=""
-      [ $((attempt % 2)) = 1 ] && [ -n "${ALT[$n]:-}" ] && rpc_try="${ALT[$n]}"
-      echo "retrying $n fork start (attempt $attempt of 6, first=${rpc_try:-${NET[$n]##*|}})..."
-      start_one "$n" "$rpc_try"
+      # Rotation by evidence: the start that just failed was the full
+      # round-robin pool, and a pool with one dead member cannot bootstrap at
+      # all — locally the 4-way amoy pool stayed DOWN while singles and the
+      # healthy pair booted fine minutes apart. From here on: ONE endpoint per
+      # attempt, cycling primary → alt → extras → wrap. The pool stays the
+      # first try (best rate-bucket spread when everything is healthy);
+      # singles are the poison-proof fallback.
+      local cands=("${NET[$n]##*|}")
+      [ -n "${ALT[$n]:-}" ] && cands+=("${ALT[$n]}")
+      local ex
+      for ex in ${EXTRA[$n]:-}; do cands+=("$ex"); done
+      local pick="${cands[$(( (attempt - 1) % ${#cands[@]} ))]}"
+      echo "retrying $n fork start (attempt $attempt of 6, single=$pick)..."
+      start_one "$n" "$pick" single
     fi
   done
   echo "DOWN $n (fresh fork :$port)"

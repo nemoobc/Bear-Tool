@@ -22,8 +22,17 @@ export const CONFIRM_TIMEOUT_MS = 120000;
 
 export function withTimeout(promise, ms, label = 'operation') {
   let timer;
+  const p = Promise.resolve(promise).finally(() => clearTimeout(timer));
+  // The race LOSER must not surface later as an unhandled rejection. When the
+  // timer wins, this promise keeps running and can still reject — CI
+  // 37027145392 bsc's dump carried the same receipt-403 twice: once inside
+  // waitForReceipt's retry (handled, correct) and once from this orphan
+  // (window.onunhandledrejection). Harmless to the flow, poison to any
+  // zero-noise reading of a dump. The race itself is unchanged: p rejecting
+  // first still rejects it.
+  p.catch(() => {});
   return Promise.race([
-    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    p,
     new Promise((_, reject) => {
       timer = setTimeout(() => {
         const err = new Error(`${label} timed out after ${Math.round(ms / 1000)}s`);
