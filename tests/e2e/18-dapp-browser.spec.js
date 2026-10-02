@@ -243,4 +243,37 @@ test.describe('dApp browser', () => {
     await page.waitForTimeout(400);
     await expect(page.locator('#dappBrowserOverlay')).toBeHidden();
   });
+
+  // The eternal-spinner bug: a hardened frame whose navigation neither fires
+  // load nor error (a dApp that hangs in the sandbox) left an opaque Loading
+  // sheet over the stage forever with nothing to press. Every child-frame
+  // document below never arrives, so neither event fires — exactly that shape,
+  // with no external network involved.
+  test('a frame that never finishes loading offers a way out, not an eternal spinner', async ({ page }) => {
+    await page.route('**/*', async (route) => {
+      const req = route.request();
+      if (req.resourceType() === 'document' && req.frame() !== page.mainFrame()) {
+        return new Promise(() => {}); // the request hangs forever: no load, no error
+      }
+      await route.continue();
+    });
+    // The first card is Uniswap (frameable:false), which opens the notice
+    // instead of the frame; a frameable card is the one that actually navigates.
+    await page.locator('.dapp-card[data-frameable="1"]:visible').first().click();
+    await page.waitForSelector('#dappBrowserOverlay.open', { timeout: 10_000 });
+    // The curated gate may ask before the first load; either way the frame is
+    // about to try, and that attempt is the one that will hang.
+    const proceed = page.locator('[data-act="proceed"]');
+    if (await proceed.isVisible().catch(() => false)) await proceed.click();
+
+    await expect(page.locator('#dbrLoading')).toBeVisible();
+    // LOAD_TIMEOUT_MS is 12s; 20s leaves margin over a slow CI worker.
+    await expect(page.locator('#dbrBlocked')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#dbrBlocked')).toContainText('did not load');
+    await expect(page.locator('#dbrBlocked [data-act="popup"]')).toBeVisible();
+    await page.locator('#dbrBlocked [data-act="back"]').click();
+    await expect(page.locator('#dbrBlocked')).toBeHidden();
+    // The toolbar still works after the timeout — a way out stays a way out.
+    await expect(page.locator('#dbrUrl')).toBeVisible();
+  });
 });
