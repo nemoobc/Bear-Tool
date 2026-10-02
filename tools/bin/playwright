@@ -1,0 +1,26 @@
+#!/bin/sh
+# Bear Tool — Playwright CLI shim.
+#
+# Why a shim exists at all: npm writes `#!/usr/bin/env node` into
+# node_modules/.bin/playwright, and /usr/bin/env is a FHS path that does not
+# exist on Termux (env lives in $PREFIX/bin there). The kernel refuses the
+# exec with ENOENT, and the shell that called it reports the refusal as
+# "playwright: not found" — even though `command -v playwright` points straight
+# at the file. The same Android-vs-FHS mismatch is what stopped every other
+# binary in this integration: BrowserStack's Local binary asked the kernel for
+# /lib/ld-linux-aarch64.so.1, its CLI bootstrap asked for /usr/bin/env, and
+# both died before doing any work.
+#
+# So this shim skips the shebang entirely and invokes node on the real entry
+# point. /bin/sh exists on Termux (it is Android's own shell, reached through
+# the /bin symlink) and on every Linux the suite runs on, which is why that is
+# the interpreter written here instead of anything under /usr/bin.
+#
+# tools/e2e.mjs only puts this directory ahead of node_modules/.bin after it
+# has proven this file actually executes on the current machine, so on a normal
+# Linux box the untouched npm-generated launcher still runs and this file is
+# never reached.
+set -e
+here=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+node_bin=$(command -v node) || node_bin=/data/data/com.termux/files/usr/bin/node
+exec "$node_bin" "$here/node_modules/@playwright/test/cli.js" "$@"

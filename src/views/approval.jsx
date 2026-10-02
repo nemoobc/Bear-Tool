@@ -4,7 +4,7 @@ export default function ApprovalView() {
         <section className="view" id="view-approval">
           <div className="card">
             <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> <span data-i18n="approval.title">Approval Manager</span></div>
-            <p className="small mb-8">Scan token approvals and revoke dangerous allowances. Unlimited approvals = risk.</p>
+            <p className="small mb-8">Scan token approvals and revoke dangerous allowances. Unlimited approvals = risk. The scan runs by itself when you open this tab — the button is there to re-run it, not to start it.</p>
             <div className="approval-controls">
               <div className="field">
                 <label htmlFor="approvalMode">Scan mode</label>
@@ -18,7 +18,14 @@ export default function ApprovalView() {
                 <input className="input" id="approvalCustom" placeholder="0x..." />
               </div>
             </div>
-            <button type="button" className="btn btn-primary btn-block" id="btnApprovalScan">Scan Approvals</button>
+            <div className="approval-actions">
+              <button type="button" className="btn btn-primary" id="btnApprovalScan">Rescan</button>
+              {/* Revoke All is created by renderApprovals() only when there is
+                   something to revoke, and every revoke inside it is still its
+                   own transaction you confirm in the wallet — this button
+                   sequences them, it does not remove your say over any of them. */}
+              <button type="button" className="btn btn-danger hidden" id="btnApprovalRevokeAll">Revoke All</button>
+            </div>
             <div id="approvalList" className="mt-16"></div>
           </div>
 

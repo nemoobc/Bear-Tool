@@ -1,8 +1,16 @@
-// Settings is five things — how it looks, how long it holds a key, and the
-// delete — and it ends at the delete. That is a shape, not a preference, and a
-// shape is only worth anything if something measures it, because the page used
-// to be 2500px with the delete buried in the middle of six sections of Security
-// Center and a second copy of the same delete button at the very bottom.
+// Settings is a shape, not a preference: how it looks, how long it holds a
+// key, and the delete — and the delete ends the page. That shape is only worth
+// anything if something measures it, because the page used to be 2500px with
+// the delete buried in the middle of six sections of Security Center and a
+// second copy of the same delete button at the very bottom.
+//
+// It is now six sections, not five, and the sixth was added on request: an
+// EIP-7702 capability check. Two things about it keep the original rule alive
+// anyway. The count is no longer the rule — the rule is that everything here
+// is something a person opens Settings to FIND OUT or change, and the check
+// is exactly that (a question about the chains, answerable in place). And the
+// group sits BEFORE the delete, so the irreversible button is still the last
+// thing on the page, which is what the count was protecting all along.
 //
 // The second half of this file is the part that matters more. Moving the
 // Security Center out of Settings silently destroyed the ONLY route a phone had
@@ -27,19 +35,24 @@ function view(id) {
   return html.slice(at, end);
 }
 
-test('Settings holds exactly the five things, in three groups', () => {
+test('Settings holds the five things it always had, plus the check, in four groups', () => {
   const v = view('settings');
-  for (const id of ['setLang', 'setCurrency', 'setAutoLock', 'setTestnet', 'btnClearAllData']) {
+  for (const id of ['setLang', 'setCurrency', 'setAutoLock', 'setTestnet', 'btnClearAllData', 'btn7702Check']) {
     assert.ok(v.includes(`id="${id}"`), `#${id} must be in Settings`);
   }
   // Theme is a button group rather than a select, so it has no id of its own.
   assert.match(v, /Theme/, 'Theme must be in Settings');
-  // Three groups: Appearance (language, currency, theme), Safety (auto-lock,
-  // testnet mode), and the delete alone in its own group. The delete is
-  // separated rather than stacked because it is the one irreversible thing on
-  // the page and it should read as a conclusion, not as another preference.
-  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 3);
-  assert.equal((v.match(/set-group-h/g) || []).length, 3);
+  // Four groups: Appearance (language, currency, theme), Safety (auto-lock,
+  // testnet mode), EIP-7702 support (asked for by name), and the delete alone
+  // in its own group. The delete is separated rather than stacked because it
+  // is the one irreversible thing on the page and it should read as a
+  // conclusion, not as another preference.
+  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 4);
+  assert.equal((v.match(/set-group-h/g) || []).length, 4);
+  // And the check sits before the delete, not after it — the ordering rule
+  // below is the one the "five things" count was standing in for.
+  assert.ok(v.indexOf('id="btn7702Check"') < v.indexOf('id="btnClearAllData"'),
+    'the check must not push the delete out of last place');
 });
 
 test('there is no Save button, and no dead control standing in for one', () => {
@@ -47,7 +60,12 @@ test('there is no Save button, and no dead control standing in for one', () => {
   assert.ok(!v.includes('btnSaveSettings'),
     'every setting applies on change; a Save button that no longer saves is worse than none');
   // The pattern that actually bit: a control that still binds to something.
-  const ALLOWED = ['setLang', 'setCurrency', 'setAutoLock', 'setTestnet', 'btnClearAllData'];
+  // btn7702Check and eip7702Results belong here because they are the opposite
+  // of the thing this test hunts: the button is bound to runEip7702Check and
+  // the div is filled by it (both pinned in eip7702-approval-ui.test.js), so
+  // neither is a Save button wearing a working button's clothes.
+  const ALLOWED = ['setLang', 'setCurrency', 'setAutoLock', 'setTestnet', 'btnClearAllData',
+    'btn7702Check', 'eip7702Results'];
   const dead = [...v.matchAll(/id="(\w+)"[^>]*>\s*(?:<[^>]+>\s*)*[A-Za-z]/g)]
     .filter(([, id]) => !ALLOWED.includes(id));
   assert.equal(dead.length, 0, `unexpected controls in Settings: ${dead.map((d) => d[1]).join(', ')}`);
@@ -146,7 +164,11 @@ test('the delete is the last element of the Settings page, with nothing under it
 test('the Security Center renders in the Approvals view, not in Settings', () => {
   assert.ok(view('approval').includes('id="securityCenter"'),
     'the Center belongs beside the approval scanner — both answer "what can a dApp take from me"');
-  assert.match(app, /if \(view === 'approval'\) renderSecurityCenter\(\$\('#securityCenter'\)\)/,
+  // The switch to a block was deliberate: opening the view now runs the
+  // approval scan as well, so the single-line form is gone. What must survive
+  // is the binding itself — a Center whose div never gets painted is the same
+  // silent death as a route nobody can reach.
+  assert.match(app, /if \(view === 'approval'\) \{[\s\S]{0,260}renderSecurityCenter\(\$\('#securityCenter'\)\)/,
     'and it must be rendered when THAT view opens, or the div stays empty');
   // The link it used to hold pointed at the view it now lives inside, so it was
   // removed. A button that navigates to the page you are already on is a dead

@@ -4,14 +4,17 @@ export default function SettingsView() {
         <section className="view" id="view-settings">
           <div className="card">
             <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> <span data-i18n="nav.settings">Settings</span></div>
-            {/* Five settings, and five is what this page is for.
-                 Testnet mode and the custom RPC field came off it deliberately:
-                 both are real capabilities, and both are now reachable from the
-                 places that own them - testnets can be filtered per session
-                 from the network picker itself, and a custom node belongs with
-                 the node it replaces rather than in a general settings list.
-                 What stays here is what a person opens Settings to change:
-                 how it looks, and how long it holds an unlocked key. */}
+            {/* Settings is preferences, and it ends at the delete button. Two
+                 things were added after this comment was written and both were
+                 asked for by name: the EIP-7702 capability check (an answer
+                 about the chains, not a preference) sits with the rest of the
+                 network material, and the Security Center stays in Approvals.
+
+                 The old line here claimed "five settings, and five is what this
+                 page is for." It is now six. A count in a comment rots the moment
+                 anything is added — so the rule is no longer a number, it is this:
+                 what belongs here is what a person opens Settings to find out or
+                 change, and nothing else gets to move in. */}
             <div className="set-group">
               <h4 className="set-group-h" data-i18n="set.group.look">Appearance</h4>
 
@@ -89,6 +92,21 @@ export default function SettingsView() {
                     <span className="slider" aria-hidden="true"></span>
                   </label>
                 </div>
+              </div>
+            </div>
+
+            {/* EIP-7702 is a capability question, not a preference: you cannot
+                 set it, you can only find out. The check talks to every RPC in
+                 the network table with an estimate that can never execute, so it
+                 costs nothing and signs nothing — see js/eip7702-support.js for
+                 the method and for the two detection approaches that were
+                 measured and discarded. */}
+            <div className="set-group">
+              <h4 className="set-group-h">EIP-7702 support</h4>
+              <div className="field">
+                <p className="small dim">Ask every network we ship whether it accepts EIP-7702 set-code transactions, and show which RPC endpoint answered. Read-only: no signature, no broadcast, no cost.</p>
+                <button type="button" className="btn btn-primary btn-block" id="btn7702Check">Check all networks</button>
+                <div id="eip7702Results" className="mt-16"></div>
               </div>
             </div>
 

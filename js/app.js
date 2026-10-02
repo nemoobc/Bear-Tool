@@ -22,6 +22,7 @@ import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
 import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
 import { bindEip7702Events, loadEip7702 } from './eip7702.js';
+import { checkAllNetworks, summarize, STATUS as EIP7702_STATUS } from './eip7702-support.js';
 import { bindEip7702ToolsEvents } from './eip7702-tools.js';
 import { bindDeployEvents } from './deploy.js';
 import { loadNfts } from './nft.js';
@@ -526,9 +527,13 @@ export function refreshView(view) {
   if (view === 'nft') loadNfts();
   if (view === 'activity') renderActivity();
   // The Security Center moved from Settings to Approvals, so it renders with
-  // this view. Settings is five things and ends at the delete; this is where
-  // the reference material about what a dApp or a token can do to you belongs.
-  if (view === 'approval') renderSecurityCenter($('#securityCenter'));
+  // this view, alongside everything else a person opens Approvals to see.
+  // The scan now runs on arrival too: a tab whose whole job is to show you
+  // what you have left open is useless if it waits to be started by hand.
+  if (view === 'approval') {
+    renderSecurityCenter($('#securityCenter'));
+    autoScanApprovals();
+  }
 
 }
 
@@ -2282,6 +2287,8 @@ function bindViews() {
       on('#approvalCustomWrap')?.classList.toggle('hidden', $('#approvalMode').value !== 'custom');
     });
     on('#btnApprovalScan', 'click', scanApprovals);
+    on('#btnApprovalRevokeAll', 'click', revokeAllApprovals);
+    on('#btn7702Check', 'click', runEip7702Check);
 
   // There is no Save button on this page any more, and every control here is
   // applied the moment it is touched. That is not a preference: the Save button
@@ -2417,6 +2424,10 @@ async function scanApprovals() {
 function renderApprovals(approvals, scannedFrom = null) {
   const list = $('#approvalList');
   if (!list) return;
+  // Revoke All earns its place only when there is more than one thing to
+  // revoke: one row already carries its own button, and a second way to do
+  // that same single thing is just a way to press the wrong one.
+  $('#btnApprovalRevokeAll')?.classList.toggle('hidden', approvals.length < 2);
   if (!approvals.length) {
     const note = scannedFrom !== null
       ? `<p class="small text-center">No active approvals found in the scan window (from block ${scannedFrom.toLocaleString()}). Older approvals are not shown — use a block explorer to verify.</p>`
@@ -2445,21 +2456,157 @@ function renderApprovals(approvals, scannedFrom = null) {
       confirmText: 'Revoke', danger: true
     });
     if (!ok) return;
-    if (!get('unlocked')) { requireUnlock(); return; }
-    try {
-      const signer = get('signer').connect(get('provider'));
-      const c = new ethers.Contract(a.token.address, ERC20_ABI, signer);
-      const tx = await withTimeout(c.approve(a.spender, 0), 15000, 'revoke broadcast');
-      toast('Revoke tx sent!', 'info');
-      const { timedOut } = await waitForReceipt(tx);
-      if (timedOut) {
-        toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
-        return;
-      }
-      toast('Approval revoked! 🎉', 'success');
-      scanApprovals();
-    } catch (e) { toast('Revoke failed: ' + e.message, 'error'); }
+    const res = await revokeApproval(a);
+    if (res.ok) scanApprovals();
   }));
+}
+
+/**
+ * Set ONE approval back to zero. The wallet confirms every transaction this
+ * sends — pulling the confirmation out of the loop below would make Revoke All
+ * a button that spends your gas on whatever it finds without asking.
+ *
+ * Always resolves, never throws: a failed revoke is a reported revoke.
+ * @returns {Promise<{ok: boolean, timedOut?: boolean, aborted?: boolean}>}
+ */
+async function revokeApproval(a) {
+  if (!get('unlocked')) { requireUnlock(); return { ok: false, aborted: true }; }
+  try {
+    const signer = get('signer').connect(get('provider'));
+    const c = new ethers.Contract(a.token.address, ERC20_ABI, signer);
+    const tx = await withTimeout(c.approve(a.spender, 0), 15000, 'revoke broadcast');
+    toast('Revoke tx sent!', 'info');
+    const { timedOut } = await waitForReceipt(tx);
+    if (timedOut) {
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return { ok: false, timedOut: true };
+    }
+    toast('Approval revoked! 🎉', 'success');
+    return { ok: true };
+  } catch (e) {
+    toast('Revoke failed: ' + e.message, 'error');
+    return { ok: false };
+  }
+}
+
+/**
+ * Walk the whole list, one transaction at a time, in the order it was scanned.
+ *
+ * Sequenced, not batched: these are separate on-chain revokes on whatever
+ * network is selected, so a failure at #3 leaves #1 and #2 done and visible
+ * on rescan — where a batch that reverts would leave the earlier ones paid for
+ * and none of them actually revoked. The wallet still confirms each one; the
+ * dialog here is only the "yes, all of them" that lets the run start.
+ */
+async function revokeAllApprovals() {
+  const approvals = get('approvals') || [];
+  if (approvals.length < 2) return;
+  const rows = approvals.map(a => ({
+    k: a.token.symbol,
+    v: `${a.unlimited ? 'UNLIMITED · ' : ''}${wallet.shortAddress(a.spender)}`
+  }));
+  const ok = await confirmTx({
+    title: `Revoke ${approvals.length} approvals?`,
+    rows, confirmText: 'Revoke all', danger: true
+  });
+  if (!ok) return;
+  if (!get('unlocked')) { requireUnlock(); return; }
+
+  const btn = $('#btnApprovalRevokeAll');
+  if (btn) { btn.disabled = true; btn.textContent = 'Revoking…'; }
+  let done = 0;
+  let stopped = false;
+  for (const a of approvals) {
+    const res = await revokeApproval(a);
+    if (res.aborted) { stopped = true; break; }   // wallet locked mid-run
+    if (res.ok) done += 1;
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'Revoke All'; }
+
+  if (done === approvals.length) toast(`All ${done} approvals revoked 🎉`, 'success');
+  else if (stopped) toast(`${done}/${approvals.length} revoked before the wallet locked`, 'info');
+  else toast(`${done}/${approvals.length} revoked`, 'info');
+  scanApprovals();
+}
+
+/**
+ * The scan runs when the tab opens — that is the whole point of a tab whose
+ * job is to show you what is left open. Without a wallet there is nothing to
+ * scan, and throwing the unlock modal at someone who only navigated here would
+ * punish them for clicking; Rescan is right there for when they are ready.
+ */
+function autoScanApprovals() {
+  if (!get('address')) return;
+  scanApprovals();
+}
+
+// ── EIP-7702 capability check (Settings) ──
+// Not a preference — Settings is where you go to FIND OUT things about this
+// wallet, and "which of these chains will carry a set-code transaction" is one
+// of them. Every answer on screen carries the endpoint that gave it, because
+// "Ethereum: yes" is only useful if you can see WHICH Ethereum RPC said so and
+// go use it.
+
+const EIP7702_LABEL = {
+  [EIP7702_STATUS.SUPPORT]: '✓ SUPPORT',
+  [EIP7702_STATUS.UNSUPPORTED]: '✕ NO',
+  [EIP7702_STATUS.UNKNOWN]: '? UNCHECKED',
+  [EIP7702_STATUS.OFFLINE]: '? OFFLINE',
+};
+
+function escAttr(s) {
+  // URLs and names reach an href/src attribute; escapeHtml alone leaves a
+  // quote intact in an attribute context.
+  return escapeHtml(s).replace(/"/g, '&quot;');
+}
+
+function renderEip7702Results(results) {
+  const out = $('#eip7702Results');
+  if (!out) return;
+  const s = summarize(results);
+  const head = `<p class="small dim" id="eip7702Summary">${s.support} of ${s.total} networks support EIP-7702`
+    + (s.unknown + s.offline ? ` · ${s.unknown + s.offline} could not be measured` : '')
+    + (s.unsupported ? ` · ${s.unsupported} do not` : '') + '</p>';
+  out.innerHTML = head + results.map((r) => {
+    const n = r.network;
+    const cls = r.status === EIP7702_STATUS.SUPPORT ? 'ok'
+      : r.status === EIP7702_STATUS.UNSUPPORTED ? 'no' : 'q';
+    // Only endpoints that said YES get a link: a URL that would reject the
+    // transaction is not something to hand someone as a remedy.
+    const links = r.rpcs
+      .filter((x) => x.status === EIP7702_STATUS.SUPPORT)
+      .map((x) => `<a class="eip7702-rpc" href="${escAttr(x.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(x.url)}</a>`)
+      .join('');
+    return `<div class="eip7702-row">
+      <div class="eip7702-head">
+        <span class="eip7702-net">${escapeHtml(n.icon || '⬡')} ${escapeHtml(n.name)}</span>
+        <span class="eip7702-pill eip7702-${cls}" data-status="${r.status}">${EIP7702_LABEL[r.status] || r.status}</span>
+        <span class="small dim">${escapeHtml(r.detail || '')}</span>
+      </div>
+      ${links ? `<div class="eip7702-links">${links}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function runEip7702Check() {
+  const out = $('#eip7702Results');
+  const btn = $('#btn7702Check');
+  if (!out) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  out.innerHTML = spinner(64, 'Asking every network…');
+  try {
+    // Custom networks the user added count as networks too — they were told
+    // the app supports them, so they get asked the same question.
+    const all = [...NETWORKS, ...getCustomNetworks()];
+    await checkAllNetworks(all, {
+      onResult: (_r, done) => renderEip7702Results(done),
+      timeoutMs: 6000,
+    });
+  } catch (e) {
+    out.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Checking support'))}</p>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Check all networks'; }
+  }
 }
 
 // ── activity ──

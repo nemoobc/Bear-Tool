@@ -1,0 +1,48 @@
+# Bear Tool — BrowserStack Automate, run through the Playwright grid.
+#
+#   BROWSERSTACK_USERNAME / BROWSERSTACK_ACCESS_KEY  (from .env — gitignored)
+#   npm run test:e2e:browserstack
+#
+# Credentials are deliberately ABSENT from this file. The SDK reads them from
+# the environment, so nothing that reaches git can carry a key: git-guard scans
+# staged changes for exactly that, and a key pasted here would follow every
+# clone forever. .gitignore already excludes .env (line 8).
+
+projectName: Bear Tool
+buildName: bear-tool-e2e
+
+# One platform first, not the sample's three. The suite is 22 specs and the
+# free trial is metered — establish that ONE combination actually runs the
+# suite before paying for parallelism nobody has validated yet.
+platforms:
+  - os: Windows
+    osVersion: 11
+    browserName: chrome
+    browserVersion: latest
+parallelsPerPlatform: 1
+
+# Local testing is OFF, and that is what makes this runnable at all.
+#
+# Two reasons, in order. (1) The BrowserStack Local binary cannot execute on
+# this machine: it ships with INTERP /lib/ld-linux-aarch64.so.1, which only
+# exists on a rooted distro, so it dies with ENOENT before the tunnel starts —
+# installing a loader is a system-package change nobody asked for. (2) It is
+# not needed for the job: the specs run against the DEPLOYED app
+# (BEAR_BASE_URL=https://nemoobc.github.io/Bear-Tool/), which the cloud browser
+# can reach directly. A tunnel exists to expose localhost, and there is no
+# localhost worth exposing here — the bug under test is on the public URL.
+#
+# Keeping this false is also the honest default: set it back to true only
+# together with a localhost BEAR_BASE_URL, otherwise the cloud browser resolves
+# localhost to itself and every spec fails on connection refused — a failure
+# that looks like a broken app.
+browserstackLocal: false
+
+framework: playwright
+
+# Diagnostics off by default: screenshots and HAR logs are stored per run and
+# the trial is metered. Flip debug/networkLogs to true only while chasing a
+# failure that the Playwright trace (trace: 'retain-on-failure') cannot show.
+debug: false
+networkLogs: false
+consoleLogs: errors

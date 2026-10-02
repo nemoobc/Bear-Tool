@@ -194,7 +194,13 @@ export async function gotoApp(page) {
   await page.route('**api.dexscreener.com**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
   );
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  // './', never '/'. A leading slash is resolved against the ORIGIN, and the
+  // suite also runs against the deployed site (BEAR_BASE_URL pointing at
+  // github.io/Bear-Tool/) — there '/' discards the repository path and lands
+  // on a bare 404 that reads exactly like a broken build. Measured: '/' →
+  // nemoobc.github.io/ (404), './' → nemoobc.github.io/Bear-Tool/ (200). On a
+  // localhost base the two are byte-identical, so nothing local changes.
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
 }
 
 // The intro is a 1.5s animation with an ABSOLUTE SAFETY auto-hide at ~2s.

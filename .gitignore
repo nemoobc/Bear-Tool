@@ -16,6 +16,8 @@ test-contracts/foundry.toml
 
 # dev artifacts
 logs/
+# browserstack-node-sdk writes its own run logs here (see browserstack.yml).
+log/
 
 # verification screenshots produced by the browser-driven audit runs
 shots/

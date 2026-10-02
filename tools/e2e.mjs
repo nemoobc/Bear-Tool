@@ -23,7 +23,7 @@
 //   node tools/e2e.mjs --list             # what would run, and where each stands
 
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -181,6 +181,17 @@ try {
     throw new Error(`@playwright/test tidak terpasang — npm install (diper_PLAYWRIGHT_PATH: ${cli})`);
   }
 
+  // BrowserStack: the SAME invocation, wrapped in BrowserStack's runner, which
+  // rewrites the launch into a remote grid session and starts the Local tunnel
+  // that lets a cloud browser reach localhost. Opt-in by environment so the
+  // local path — the CI gate — is byte-for-byte unchanged.
+  const bs = process.env.BEAR_E2E_BROWSERSTACK
+    ? path.join(root, 'node_modules', 'browserstack-node-sdk', 'src', 'bin', 'runner.js')
+    : null;
+  if (bs && !existsSync(bs)) {
+    throw new Error(`browserstack-node-sdk tidak terpasang — npm install (${bs})`);
+  }
+
   // Does this machine have a chain for the specs to talk to?
   //
   // Measured: on a box where all four public Ethereum endpoints answered in
@@ -247,13 +258,22 @@ try {
     try { return readdirSync(d).some((f) => f.startsWith('chromium') || f.startsWith('firefox')); }
     catch { return false; }
   });
-  if (!hasBrowser) {
+  // Under BrowserStack there is no local browser to find: the session runs on
+  // BrowserStack's own grid, and that is precisely why this mode exists on a
+  // machine whose Chromium will not start. The check below measures LOCAL
+  // browsers, so it must not stand in front of a remote run — where it would
+  // block the one configuration that can actually execute the suite here.
+  if (!hasBrowser && !bs) {
     console.error('');
     console.error('  E2E TIDAK BISA JALAN DI MESIN INI — tidak ada browser Playwright terpasang.');
     console.error('  Pasang di mesin yang bisa menjalankan browser: npx playwright install chromium');
     console.error('  Direktori yang diperiksa: ' + browserDirs.filter((d) => d).join(', '));
     console.error('  Ini bukan kegagalan app. Suite browser sengaja hanya jalan di mesin itu.');
+    console.error('  Atau jalankan di grid BrowserStack: npm run test:e2e:browserstack');
     throw { silent: true, code: 5 };
+  }
+  if (!hasBrowser && bs) {
+    console.log('  browser  remote (BrowserStack grid) — no local Chromium needed');
   }
 
   // playwright.config.js declares no `projects`, so --project is not a valid choice
@@ -261,7 +281,9 @@ try {
   // runs. Playwright's own flag is --browser, which works without a projects array.
   // Left off entirely, the config's default browser is used.
   const browser = opt('--browser', null);
-  const args = [cli, 'test'];
+  // BrowserStack's runner takes the framework name as its first argument
+  // (`browserstack-node-sdk playwright test`); Playwright's own CLI does not.
+  const args = bs ? [bs, 'playwright', 'test'] : [cli, 'test'];
   if (browser) args.push(`--browser=${browser}`);
   if (flag('--headed')) args.push('--headed');
   for (const a of argv) {
@@ -271,7 +293,49 @@ try {
   }
   for (const g of terms) args.push(g);
 
+  // .env carries the BrowserStack credentials and is gitignored. Node reads it
+  // natively — no dotenv dependency, no shell sourcing, and it happens only on
+  // the BrowserStack path so a missing file elsewhere still means "missing".
+  if (bs) {
+    try { process.loadEnvFile(path.join(root, '.env')); }
+    catch { console.warn('  .env tidak ada — BrowserStack butuh BROWSERSTACK_USERNAME / BROWSERSTACK_ACCESS_KEY'); }
+  }
   const env = { ...process.env, BEAR_BASE_URL: BASE_URL };
+
+  // Two Termux-only repairs, both proven by running the suite on this machine.
+  //
+  // (1) tools/bin/playwright overrides the npm-generated launcher, whose
+  //     `#!/usr/bin/env node` shebang is a FHS path Termux does not have —
+  //     the kernel fails the exec with ENOENT and the shell reports it as
+  //     "playwright: not found" while `command -v` still finds the file.
+  // (2) playwright-core computes its browser cache directory from the host
+  //     platform and THROWS `Unsupported platform: android` while doing so —
+  //     before it learns that no browser will ever be launched locally,
+  //     because the whole point of the grid is that the browser lives there.
+  //     An explicit path skips that computation entirely.
+  //
+  // Both are applied only after they are PROVEN to work here: the shim is
+  // probed, and an existing browsers path is left alone. On a normal Linux
+  // machine the probe fails, nothing is prepended, and the untouched
+  // node_modules/.bin/playwright runs as npm intended.
+  if (bs) {
+    const shimDir = path.join(root, 'tools', 'bin');
+    // Set FIRST, then probe with it: probe the shim bare and playwright-core
+    // throws `Unsupported platform: android` before --version can print, the
+    // probe reads as failure, and the shim never gets put in front — the
+    // repair hides the very crash it is there to repair.
+    if (!env.PLAYWRIGHT_BROWSERS_PATH) {
+      env.PLAYWRIGHT_BROWSERS_PATH = path.join(os.homedir(), '.cache', 'ms-playwright');
+    }
+    const probe = spawnSync(path.join(shimDir, 'playwright'), ['--version'], {
+      stdio: 'ignore',
+      env,
+    });
+    // The shim is only trusted where it ran — elsewhere npm's own launcher
+    // stays in front, untouched.
+    if (probe.status === 0) env.PATH = `${shimDir}${path.delimiter}${env.PATH || ''}`;
+  }
+
   console.log(`playwright  browser=${browser || 'config default'}  specs=${wanted.length}  headless=${!flag('--headed')}`);
 
   exitCode = await new Promise((resolve) => {

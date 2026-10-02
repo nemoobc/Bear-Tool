@@ -13,6 +13,7 @@
     "test:fork:net": "node --test --test-concurrency=1 --test-timeout=600000 tests/fork/*.test.js",
     "check": "node tools/check.mjs",
     "test:e2e": "node tools/e2e.mjs",
+    "test:e2e:browserstack": "BEAR_E2E_BROWSERSTACK=1 BEAR_BASE_URL=http://localhost:8080 node tools/e2e.mjs",
     "verify": "npm run test:all",
     "test:all": "npm run check && npm test && npm run test:fork && npm run test:e2e",
     "test:live": "node --test --test-concurrency=1 --test-timeout=240000 tests/*.live.js"
@@ -31,6 +32,7 @@
     "@capacitor/core": "^8.5.2",
     "@playwright/test": "^1.63.0",
     "@vitejs/plugin-react": "^5.1.0",
+    "browserstack-node-sdk": "^1.71.4",
     "playwright": "^1.63.0",
     "vite": "^7.1.0"
   },
