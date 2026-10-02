@@ -3007,9 +3007,15 @@ body::before {
 .dbr-card-ic { font-size: 1.35rem; }
 .dbr-card-nm { font-size: .78rem; font-weight: 700; text-align: center; }
 .dbr-card-ct { font-size: .66rem; color: var(--ink-soft); }
-.dbr-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--bg); font-size: .85rem; }
-.dbr-spin { width: 15px; height: 15px; border: 2px solid var(--border); border-top-color: var(--ink); border-radius: 50%; animation: dbrspin .7s linear infinite; }
-@keyframes dbrspin { to { transform: rotate(360deg); } }
+/* Loading never covers the stage: a thin indeterminate bar under the toolbar
+   plus a phase pill (Loading… → Still loading… → Taking longer than usual…).
+   An opaque cover hid every partial render for the full wait — the frame stays
+   visible the whole way. */
+.dbr-loading { position: absolute; inset: 0 0 auto 0; z-index: 2; pointer-events: none; text-align: center; }
+.dbr-progress { height: 3px; overflow: hidden; background: var(--border, #e5e5e5); }
+.dbr-progress::after { content: ''; display: block; height: 100%; width: 40%; background: var(--primary, #FF6B35); animation: dbrprog 1.1s ease-in-out infinite; }
+@keyframes dbrprog { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+.dbr-loading-txt { display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 999px; background: var(--card, #fff); border: 1px solid var(--border, #ddd); font-size: .78rem; }
 .dbr-blocked { overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 22px 12px; }
 .dbr-report { max-width: 560px; border: 1px solid var(--border); border-radius: 14px; padding: 15px; background: var(--card, #fff); }
 .dbr-rep-h { font-weight: 800; margin-bottom: 4px; }

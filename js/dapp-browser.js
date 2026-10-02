@@ -52,13 +52,15 @@ let overlay = null;
 let lastFocused = null;
 let el = {};
 let loadedUrl = '';        // what the frame is actually showing right now
-let loadTimer = 0;
-// A hardened frame that never fires load — a dApp that hangs inside the sandbox,
-// or a blocked response that fires neither load nor error — used to leave an
-// opaque "Loading…" sheet over the stage forever with nothing to press. 12s is
-// long enough for a heavy page and short enough that "stuck" never means
-// "permanent".
-const LOAD_TIMEOUT_MS = 12000;
+let phaseTimers = [];
+// Research (WHATWG HTML #12311 + PR #12312 merged 2026-03-31; Firefox 1552504):
+// a frame blocked by X-Frame-Options / CSP frame-ancestors fires NEITHER load
+// NOR error — no event ever arrives — and `error` on an iframe never fires at
+// all. The only portable failure signal is therefore TIME. Three stages: the
+// progress stays honest while the page still has a chance (3s / 10s attention
+// thresholds), and only a full 15s earns the fallback panel — with nothing on
+// the stage covered, so any partial render is visible the whole way.
+const LOAD_PHASE_MS = { slow: 3000, verySlow: 10000, timeout: 15000 };
 
 /** Per-session memory of a gate decision, so the same host is not nagged twice. */
 const sessionVerdicts = new Map();
@@ -152,7 +154,10 @@ const SHELL = `
   <div class="dbr-menu" id="dbrMenuPop" hidden role="menu"></div>
   <div class="dbr-stage" id="dbrStage">
     <div class="dbr-home" id="dbrHomePage"></div>
-    <div class="dbr-loading" id="dbrLoading" hidden><span class="dbr-spin" aria-hidden="true"></span> Loading…</div>
+    <div class="dbr-loading" id="dbrLoading" role="status" hidden>
+      <div class="dbr-progress" aria-hidden="true"></div>
+      <span class="dbr-loading-txt" id="dbrLoadingTxt">Loading…</span>
+    </div>
     <iframe id="dbrFrame" class="dbr-frame" title="dApp page"
       sandbox="allow-scripts allow-forms allow-popups allow-modals"
       referrerpolicy="no-referrer" credentialless allow="" hidden></iframe>
@@ -185,6 +190,7 @@ function build() {
     stage: overlay.querySelector('#dbrStage'),
     homePage: overlay.querySelector('#dbrHomePage'),
     loading: overlay.querySelector('#dbrLoading'),
+    loadingTxt: overlay.querySelector('#dbrLoadingTxt'),
     frame: overlay.querySelector('#dbrFrame'),
     blocked: overlay.querySelector('#dbrBlocked'),
   };
@@ -245,7 +251,7 @@ function paint() {
 
   if (onHome) {
     loadedUrl = '';
-    clearTimeout(loadTimer);
+    clearLoadTimers();
     paintHome();
     el.url.value = '';
     el.secure.className = 'dbr-secure';
@@ -638,7 +644,7 @@ function toggleMenu(force) {
  * The shared "no page arrived" screen.
  *
  * Shown when the frame fires an error, AND when neither load nor error arrives
- * before LOAD_TIMEOUT_MS. The second case was the eternal spinner: a hardened
+ * before LOAD_PHASE_MS.timeout. The second case was the eternal spinner: a hardened
  * frame that hangs — a dApp that never finishes loading inside the sandbox, or a
  * blocked response that fires nothing at all — left an opaque Loading sheet over
  * the stage forever, with no control the user could press. The wording covers
@@ -650,25 +656,46 @@ function showDidNotLoad() {
     <div class="dbr-rep-h">⚠ This page did not load</div>
     <p class="small dim">${escapeHtml(el.frame.src || '')} never rendered here. Either the site refuses
     to be embedded (X-Frame-Options / frame-ancestors — no web page can bypass that, only a native
-    app can) or it never finished loading. Either way there is a way out:</p>
+    app can) or it never finished loading. Roughly half of all dApps block embedding; the honest way
+    out is a real browser tab:</p>
     <div class="dbr-rep-btns"><button class="btn btn-sm btn-primary" data-act="popup">↗ Open in a new tab</button>
+    <button class="btn btn-sm btn-secondary" data-act="copy">📋 Copy URL</button>
     <button class="btn btn-sm btn-secondary" data-act="back">Back</button></div></div>`;
   el.blocked.hidden = false;
   el.blocked.querySelector('[data-act="popup"]')?.addEventListener('click', () => {
     window.open(el.frame.src, '_blank', 'noopener');
   });
+  // Programmatic copy can be refused without a gesture or permission — the
+  // address bar still shows the URL, so a refusal says that instead of failing
+  // silently.
+  el.blocked.querySelector('[data-act="copy"]')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(el.frame.src || '');
+      toast('Address copied', 'info');
+    } catch {
+      toast('Copy was refused — the address is in the address bar.', 'error');
+    }
+  });
   el.blocked.querySelector('[data-act="back"]')?.addEventListener('click', () => { el.blocked.hidden = true; paint(); });
 }
 
-/** Arm the no-load watchdog for the src that was just assigned. */
+/** Arm the phase watchdog for the src that was just assigned. */
 function armLoadTimeout() {
-  clearTimeout(loadTimer);
-  loadTimer = setTimeout(() => {
-    // load already hid the spinner, or a newer navigation re-armed the timer —
-    // this firing would be stale.
-    if (el.loading.hidden) return;
-    showDidNotLoad();
-  }, LOAD_TIMEOUT_MS);
+  clearLoadTimers();
+  const phase = (ms, text) => phaseTimers.push(setTimeout(() => {
+    if (el.loading.hidden) return; // stale: the load already landed
+    if (text) { if (el.loadingTxt) el.loadingTxt.textContent = text; }
+    else showDidNotLoad();
+  }, ms));
+  if (el.loadingTxt) el.loadingTxt.textContent = 'Loading…';
+  phase(LOAD_PHASE_MS.slow, 'Still loading…');
+  phase(LOAD_PHASE_MS.verySlow, 'Taking longer than usual…');
+  phase(LOAD_PHASE_MS.timeout, '');
+}
+
+function clearLoadTimers() {
+  phaseTimers.forEach(clearTimeout);
+  phaseTimers = [];
 }
 
 function wire() {
@@ -719,13 +746,13 @@ function wire() {
   // No page, no spinner: both real failures (error) and the silent one (neither
   // event ever arrives) end on the same screen with a way out.
   el.frame.addEventListener('load', () => {
-    clearTimeout(loadTimer);
+    clearLoadTimers();
     el.loading.hidden = true;
     // A page that finally finishes AFTER the timeout sheet appeared replaces the
     // sheet with the real content — it is only about the load that just ended.
     if (el.blocked.querySelector('.dbr-report[data-kind="didnotload"]')) el.blocked.hidden = true;
   });
-  el.frame.addEventListener('error', () => { clearTimeout(loadTimer); showDidNotLoad(); });
+  el.frame.addEventListener('error', () => { clearLoadTimers(); showDidNotLoad(); });
 
   // On document, not on the overlay.
   //

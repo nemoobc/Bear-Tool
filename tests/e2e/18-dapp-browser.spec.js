@@ -267,10 +267,33 @@ test.describe('dApp browser', () => {
     if (await proceed.isVisible().catch(() => false)) await proceed.click();
 
     await expect(page.locator('#dbrLoading')).toBeVisible();
-    // LOAD_TIMEOUT_MS is 12s; 20s leaves margin over a slow CI worker.
-    await expect(page.locator('#dbrBlocked')).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator('#dbrBlocked')).toContainText('did not load');
+    await expect(page.locator('#dbrLoading .dbr-progress')).toBeVisible();
+    // LOAD_PHASE_MS.timeout is 15s; 25s leaves margin over a slow CI worker.
+    // ONE assertion for both facts — the sheet must APPEAR WITH its text. The
+    // earlier two-step (visible, then text) raced: #dbrBlocked is also the host
+    // of the pre-load gate, so a transient gate state satisfied the visibility
+    // step while the text step then polled a different moment. On failure the
+    // page state is printed, so the next red wave is legible without a trace.
+    try {
+      await expect(page.locator('#dbrBlocked')).toContainText('did not load', { timeout: 25_000 });
+    } catch (e) {
+      const diag = await page.evaluate(() => ({
+        overlays: document.querySelectorAll('#dappBrowserOverlay').length,
+        blockedCount: document.querySelectorAll('#dbrBlocked').length,
+        blockedHidden: document.querySelector('#dbrBlocked')?.hidden,
+        blockedHtml: (document.querySelector('#dbrBlocked')?.innerHTML || '').slice(0, 300),
+        loadingHidden: document.querySelector('#dbrLoading')?.hidden,
+        loadingTxt: document.querySelector('#dbrLoadingTxt')?.textContent,
+        frameSrc: document.querySelector('#dbrFrame')?.src,
+        frameHidden: document.querySelector('#dbrFrame')?.hidden,
+        proceed: !!document.querySelector('[data-act="proceed"]'),
+        homeShown: !document.querySelector('#dbrHomePage')?.hidden,
+      }));
+      console.log('DAPP-DIAG ' + JSON.stringify(diag));
+      throw e;
+    }
     await expect(page.locator('#dbrBlocked [data-act="popup"]')).toBeVisible();
+    await expect(page.locator('#dbrBlocked [data-act="copy"]')).toBeVisible();
     await page.locator('#dbrBlocked [data-act="back"]').click();
     await expect(page.locator('#dbrBlocked')).toBeHidden();
     // The toolbar still works after the timeout — a way out stays a way out.
