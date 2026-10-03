@@ -134,9 +134,37 @@ is reachable (`CI=1`, or `FORK_RPC_URL` / `FORK_PORT`), so on a machine with no
 foundry the gate reports skips rather than pretending to have passed.
 
 **The browser suite needs Playwright browsers installed** (`npx playwright install
-chromium`). The 21 specs are driven by `tools/e2e.mjs`, which serves the app itself
+chromium`). The 22 specs are driven by `tools/e2e.mjs`, which serves the app itself
 and works on any platform. It is in `verify`, and it exits **5** — neither pass nor
 failure — on a machine with no browser, rather than passing without running.
+
+The same suite also runs **on the BrowserStack grid** — no local browser needed,
+against the deployed site:
+
+```bash
+BEAR_E2E_BROWSERSTACK=1 BEAR_BASE_URL=https://nemoobc.github.io/Bear-Tool/ \
+  node tools/e2e.mjs            # or: npm run test:e2e:browserstack
+```
+
+That path carries three Termux repairs, applied only after they prove
+themselves on the machine: `tools/bin/playwright` (a `#!/bin/sh` shim, because
+`/usr/bin/env` does not exist here and npm's launcher dies on its own shebang),
+an explicit `PLAYWRIGHT_BROWSERS_PATH` (`playwright-core` throws
+`Unsupported platform: android` while computing a cache directory it will never
+use), and `browserstackLocal: false` — the specs target a public URL, so there
+is no localhost worth tunneling to.
+
+The APK itself gets smoke-tested on a **real Android device in the same cloud**:
+
+```bash
+node tools/apk-test.mjs [bs://…]   # upload → session → WEBVIEW DOM assert → screenshot
+```
+
+It opens a WebDriver session against the uploaded build, waits out the splash,
+asserts the welcome screen's `#wCreate` exists inside the live WebView, saves a
+screenshot to `artifacts/`, and closes the session so no device keeps billing.
+Measured 2026-10-03: contexts `["NATIVE_APP","WEBVIEW_com.nemoobc.beartool"]`,
+verdict OK, Galaxy S23 / Android 13.
 
 `npm test` on its own is still the fast loop. The fork suite needs anvil and
 takes minutes: it compiles real Solidity with solc 0.8.28 and runs against a

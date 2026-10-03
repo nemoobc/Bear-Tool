@@ -18,6 +18,13 @@ test-contracts/foundry.toml
 logs/
 # browserstack-node-sdk writes its own run logs here (see browserstack.yml).
 log/
+# Transient configs the BrowserStack SDK regenerates on every run.
+browserstackSetupConfig.json
+playwright-browserstack-sdk.config.cjs
+playwright-browserstack-sdk.config.temp.json
+# CI-downloaded APK and the screenshots tools/apk-test.mjs produces.
+apk/
+artifacts/
 
 # verification screenshots produced by the browser-driven audit runs
 shots/
