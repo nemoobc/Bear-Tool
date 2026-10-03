@@ -10,6 +10,7 @@ import { runTx, waitForReceipt, withTimeout, RPC_TIMEOUT_MS } from './safetx.js'
 import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import * as wallet from './wallet.js';
 import { resolveMax, verifySpendable } from './max-ui.js';
+import { buildFeeParams } from './fee-params.js';
 
 const { ethers } = globalThis;
 const BROADCAST_TIMEOUT_MS = 15000; // 15s for broadcast
@@ -336,11 +337,18 @@ export async function doSend() {
       return toast(`Gas estimation failed: ${e.message}`, 'error');
     }
 
-    // gasPrice can be null on some L2s — fallback to maxFeePerGas
-    const baseFee = feeData.gasPrice || feeData.maxFeePerGas || 0n;
-    const gasPrice = gasSpeed === 'slow' ? baseFee * 90n / 100n
-      : gasSpeed === 'fast' ? baseFee * 120n / 100n
-      : baseFee;
+    // Speed reaches the WIRE, not just the modal row: buildFeeParams applies
+    // the 90%/120% to cap and tip together, with "normal" byte-identical to
+    // the values this replaced. The old shape — a multiplier computed here
+    // and then discarded by `feeData.maxFeePerGas || …` below — made the
+    // slow/fast buttons labels only, and the token path sent no fee fields
+    // at all.
+    const fee = buildFeeParams(feeData, gasSpeed);
+    // Worst case the node may charge: the post-speed cap, falling back to the
+    // base. The old check used gasPrice-first here while the tx paid
+    // maxFeePerGas (about 2x base), so a near-max send passed this line and
+    // died at the node with INSUFFICIENT_FUNDS.
+    const worstFee = fee.maxFeePerGas ?? fee.baseFee;
 
     let tx;
     if (tokenSel === 'native') {
@@ -355,7 +363,7 @@ export async function doSend() {
       try {
         const bal = await provider.getBalance(signer.address);
         const gasLimit = 21000n;
-        const gasCost = gasLimit * baseFee;
+        const gasCost = gasLimit * worstFee;
         if (value + gasCost > bal) {
           return toast('Insufficient balance for amount + gas', 'error');
         }
@@ -364,8 +372,8 @@ export async function doSend() {
       }
       tx = await withTimeout(signer.sendTransaction({
         to, value,
-        maxFeePerGas: feeData.maxFeePerGas || gasPrice || undefined,
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || gasPrice || undefined
+        maxFeePerGas: fee.maxFeePerGas,
+        maxPriorityFeePerGas: fee.maxPriorityFeePerGas
       }), BROADCAST_TIMEOUT_MS, 'broadcast');
     } else {
       // Parse ERC-20 amount safely
@@ -376,7 +384,13 @@ export async function doSend() {
         return toast(`Invalid amount: ${e.message}`, 'error');
       }
       const c = new ethers.Contract(t.address, ERC20_ABI, signer);
-      tx = await withTimeout(c.transfer(to, value), BROADCAST_TIMEOUT_MS, 'broadcast');
+      // Same fee rule as the native path: this branch used to pass no fee
+      // fields, so speed never applied to ERC-20 sends either. undefined
+      // fields = ethers estimates, exactly as before on unknown-fee chains.
+      tx = await withTimeout(c.transfer(to, value, {
+        maxFeePerGas: fee.maxFeePerGas,
+        maxPriorityFeePerGas: fee.maxPriorityFeePerGas
+      }), BROADCAST_TIMEOUT_MS, 'broadcast');
     }
     // A broadcast that times out must NOT leave the button spinning forever:
     // the hash may still land — track it on the explorer. Button released,

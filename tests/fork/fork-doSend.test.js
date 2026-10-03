@@ -146,7 +146,7 @@ async function poll(label, get, want, ms = 75000) {
   return { ok: v === want, value: v };
 }
 
-function armSendForm({ to, amount, token }) {
+function armSendForm({ to, amount, token, speed = 'normal' }) {
   state.set('unlocked', true);
   state.set('address', ANVIL_ACCOUNT);
   state.set('activity', []);
@@ -155,6 +155,10 @@ function armSendForm({ to, amount, token }) {
   el('#sendAmount').value = amount;
   el('#sendToken').value = token;
   el('#btnSend').disabled = false;
+  // The speed the form shows — doSend reads .gas-btn.active. The native leg
+  // runs "fast" so the multiplier path (buildFeeParams x120) is the thing
+  // that actually broadcasts, not just a unit-test artifact.
+  gasBtn.dataset.speed = speed;
 }
 
 test('fork: doSend() native — the Send button really broadcasts', { skip }, async () => {
@@ -169,7 +173,12 @@ test('fork: doSend() native — the Send button really broadcasts', { skip }, as
   // (0xdEaD holds a remote balance anvil reads past local txs — foundry#4700).
   const to = ethers.Wallet.createRandom().address;
   const value = ethers.parseEther('0.001');
-  armSendForm({ to, amount: '0.001', token: 'native' });
+  armSendForm({ to, amount: '0.001', token: 'native', speed: 'fast' });
+  // Capture the fee the node quotes now: the fast leg must land ON CHAIN with
+  // a cap strictly above it (x120 applied, ± one block of base-fee drift is
+  // never enough to hide a 20% lift). Before fee-params.js the cap went out
+  // raw and this equality is exactly what a "no-op button" looked like.
+  const feeBefore = await provider.getFeeData();
 
   await driveModals(sendMod.doSend());
 
@@ -180,6 +189,12 @@ test('fork: doSend() native — the Send button really broadcasts', { skip }, as
   assert.match(activity[0].hash, /^0x[0-9a-f]{64}$/, `hash aneh: ${activity[0].hash}`);
   assert.equal(activity[0].type, 'send');
   assert.equal(activity[0].to, to);
+
+  // The speed reached the wire: the mined tx carries a bigger cap than the
+  // pre-send quote (fast = x120; a raw fee would be equal, not greater).
+  const sent = await provider.getTransaction(activity[0].hash);
+  assert.ok(sent.maxFeePerGas > feeBefore.maxFeePerGas,
+    `fast fee tak terkirim: tx ${sent.maxFeePerGas} vs kutipan ${feeBefore.maxFeePerGas}`);
 
   // On-chain truth: the recipient actually holds the ETH.
   const r = await poll('native', async () => await provider.getBalance(to), value);
