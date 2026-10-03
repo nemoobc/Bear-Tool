@@ -165,9 +165,15 @@ export async function updateSendPreview() {
     const provider = get('provider');
     if (provider) {
       const feeData = await provider.getFeeData();
-      const gasPrice = feeData.gasPrice || feeData.maxFeePerGas || 0n;
       const gasLimit = tokenSel === 'native' ? 21000n : 65000n;
-      const gasEth = ethers.formatEther(gasLimit * gasPrice);
+      // Show the number doSend will actually reserve: the worst-case cap at
+      // the SELECTED speed (same buildFeeParams the send check uses). The old
+      // line showed the current price — about half of maxFee on a 1559 chain,
+      // and blind to the speed multiplier — so the preview could read
+      // "affordable" while the node rejected the send for insufficient funds.
+      const speed = document.querySelector('.gas-btn.active')?.dataset.speed || 'normal';
+      const worst = buildFeeParams(feeData, speed);
+      const gasEth = ethers.formatEther(gasLimit * (worst.maxFeePerGas ?? worst.baseFee));
       const nativeUsd = get('tokens').find(x => !x.address)?.usd || 0;
       const usdText = nativeUsd ? ` ($${(parseFloat(gasEth) * nativeUsd).toFixed(2)})` : '';
       const net = getNetworkById(get('networkId'));
