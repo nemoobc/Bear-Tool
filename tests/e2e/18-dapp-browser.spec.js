@@ -333,9 +333,22 @@ test.describe('dApp browser', () => {
       await expect(page.locator(`#dbrBar #${id}`), `${id} lives in the bottom bar`).toBeVisible();
     }
 
-    // The verdict and the address share one pill.
-    await expect(page.locator('.dbr-urlwrap #dbrSecure')).toBeVisible();
+    // The verdict and the address share one pill. On the home page the pill is
+    // structurally present but the verdict span is empty BY DESIGN — paint()
+    // clears it when there is no page (dapp-browser.js, onHome branch) — so an
+    // empty span has no box and toBeVisible() can never pass there. Assert the
+    // shared pill structurally, then load a real site and assert the verdict
+    // becomes visible: that is the claim, in the state where a verdict exists.
+    expect(await page.evaluate(() =>
+      document.querySelector('#dbrSecure')?.closest('.dbr-urlwrap')
+        ?.contains(document.querySelector('#dbrUrl')) ?? false),
+    'verdict and address share one pill').toBe(true);
     await expect(page.locator('.dbr-urlwrap #dbrUrl')).toBeVisible();
+    const urlBar = page.locator('#dbrUrl');
+    await urlBar.fill('https://app.aave.com/');
+    await urlBar.press('Enter');
+    await page.waitForSelector('#dbrSecure:not(:empty)', { timeout: 15_000 });
+    await expect(page.locator('.dbr-urlwrap #dbrSecure')).toBeVisible();
 
     // And ✕ actually closes the browser — the whole point of a close button.
     await appClick(page, '#dbrClose');
@@ -350,10 +363,10 @@ test.describe('dApp browser', () => {
   // forward button on it never fired. The sheet now offers a route the WebView
   // really honours plus the pairing route the Project ID was given for.
   test('a site that refuses framing offers working routes, not a dead button', async ({ page }) => {
-    await gotoApp(page);
-    await skipIntro(page);
-    await createWallet(page);
-    await appClick(page, '.nav-item[data-view="dapps"]');
+    // beforeEach already booted the app, created the wallet and opened the
+    // dapps view. A second createWallet here waits for #wCreate on a dashboard
+    // that never shows it — the welcome screen only appears when no keystore
+    // exists — which is exactly the 45s appClick timeout CI reported.
     await page.waitForSelector('#dappsContainer .dapps-browser', { timeout: 10_000 });
 
     // 14 of 18 entries are marked frameable:false — pick one.
