@@ -86,3 +86,20 @@ test('dapps: a pasted secret is refused and never stored', () => {
   assert.match(browserSrc, /isSecretishUrl/, 'URLs that look like a seed phrase must be checked');
   assert.match(browserSrc, /sanitizeForStore/, 'history and bookmarks must be sanitised');
 });
+
+test('dapps: field icon di-escape di KEDUA tampilan (daftar & browser chrome)', () => {
+  // name/category/url sudah lewat escapeHtml; `d.icon` masih tertanam mentah
+  // ke innerHTML. Katalog hari ini berisi emoji — field itu tetap field
+  // template yang belum lewat filter, di dua file yang berbeda.
+  assert.match(dappsSrc, /\$\{escapeHtml\(d\.icon\)\}/,
+    'renderDapps harus meng-escape d.icon');
+  assert.ok(!/\$\{d\.icon\}/.test(dappsSrc),
+    'd.icon masih dipasang mentah di js/dapps.js');
+  assert.match(browserSrc, /\$\{escapeHtml\(d\.icon \|\| '◈'\)\}/,
+    'cardHTML harus meng-escape d.icon (fallback ◈ ikut di-escape)');
+  assert.ok(!/\$\{d\.icon \|\|/.test(browserSrc),
+    'd.icon masih dipasang mentah di js/dapp-browser.js');
+  // …dengan helper yang benar-benar diimpor di kedua modul.
+  assert.match(dappsSrc, /import \{ escapeHtml \} from '\.\/ui\.js'/);
+  assert.match(browserSrc, /import \{ escapeHtml, toast \} from '\.\/ui\.js'/);
+});

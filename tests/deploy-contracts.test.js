@@ -140,9 +140,26 @@ test('deploy: real solc compiles every template to real bytecode', { skip: proce
     const factory = new ethers.ContractFactory(out.abi, out.bytecode);
     assert.equal(factory.bytecode, out.bytecode, `${id} bytecode must round-trip through ContractFactory`);
   }
+  // Generated feature combinations (wizard-options.test.js T7): the flag
+  // builder must emit REAL Solidity, not just strings — compile an
+  // all-features ERC-20, a mint-less ERC-721 and burnable NFT variants.
+  const combos = [
+    ['erc20-all', contracts.buildTokenSource('erc20', { burnable: true, mintable: true, pausable: true, cap: '1000000' }), 'BearERC20', ['burn', 'mint', 'pause', 'cap', 'transfer']],
+    ['erc20-plain', contracts.buildTokenSource('erc20', {}), 'BearERC20', ['transfer', 'balanceOf']],
+    ['erc721-burn', contracts.buildTokenSource('erc721', { mintable: true, burnable: true }), 'BearERC721', ['burn', 'mint', 'tokenURI']],
+    ['erc721-nomint', contracts.buildTokenSource('erc721', { mintable: false }), 'BearERC721', ['ownerOf']],
+    ['erc1155-burn', contracts.buildTokenSource('erc1155', { mintable: true, burnable: true }), 'BearERC1155', ['burn', 'mint', 'uri']],
+  ];
+  for (const [label, source, contract, fns] of combos) {
+    const out = await solcJs.compileContract(source, contract);
+    const names = out.abi.filter(e => e.type === 'function').map(e => e.name);
+    for (const fn of fns) assert.ok(names.includes(fn), `${label} abi must expose ${fn}()`);
+    assert.ok(out.bytecode.startsWith('0x') && out.bytecode.length > 200, `${label} bytecode looks empty (${out.bytecode.length} chars)`);
+    if (label === 'erc721-nomint') assert.ok(!names.includes('mint'), 'a minted-off ERC-721 must not ship mint()');
+  }
 });
 
-test('tools: "deploy the helper first" is explicit, real, and bounded', () => {
+test('tools: deploy helper tetap eksplisit, dan flow auto-deploy dgn konfirmasi', () => {
   const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
   // Halaman = index.html + section view (M2: src/views/*.jsx).
   const html = appSource();
@@ -162,18 +179,119 @@ test('tools: "deploy the helper first" is explicit, real, and bounded', () => {
   assert.match(tools, /import \{ compileContract \} from '\.\/solc\.js'/, 'helper compile must use the fixed solc loader');
   assert.doesNotMatch(tools, /solc@0\.8\.28\/solc\.js/, 'the Node solc build must never be loaded again');
   assert.doesNotMatch(tools, /ensureSolcLoaded/, 'the broken loader must be gone');
-  // every flow REQUIRES the helper to be deployed first — no silent auto-deploy
-  assert.match(tools, /Deploy the batch helper first/, 'batch exec must demand a pre-deployed helper');
-  assert.match(tools, /Deploy the rescue helper first/, 'rescue exec must demand a pre-deployed helper');
-  assert.match(tools, /Deploy the airdrop claimer first/, 'claim exec must demand a pre-deployed helper');
-  assert.doesNotMatch(tools, /Compiling batch contract\.\.\./, 'batch exec must not auto-deploy');
-  assert.doesNotMatch(tools, /Compiling rescue contract\.\.\./, 'rescue exec must not auto-deploy');
-  assert.doesNotMatch(tools, /Compiling airdrop claimer contract\.\.\./, 'claim exec must not auto-deploy');
-  assert.doesNotMatch(tools, /Deployed automatically on the first run/, 'status card must not promise auto-deploy');
+  //── Kontrak DIUBAH (2026-10-03, banding dgn nemoobc/EIP-7702-TOOL):
+  // "di fitur tools itu ada yang salah bikin user bingung ... fungsinya tu kek gitu"
+  // Flow kini MENGAMBIL ALIH deploy helper saat belum ada — dengan KONFIRMASI
+  // (bukan silent), sehingga teks kartu "or let the flow deploy it for you"
+  // (deploy.jsx:53) jadi BENAR. Hard-stop "step 1 above" = dihapus.
+  assert.ok((tools.match(/ensureDeployedHelper\(/g) || []).length >= 4,
+    'ensure helper: 1 definisi + dipakai ketiga flow (batch, rescue, claim)');
+  assert.doesNotMatch(tools, /helper first \(step 1 above\)/,
+    'toast buntu "step 1 above" hilang — flow deploy sendiri setelah konfirmasi');
+  assert.doesNotMatch(tools, /Deployed automatically on the first run/,
+    'kartu status tetap tidak menjanjikan deploy SENYAP');
   // a helper deploy must never spin forever
   const fn = tools.slice(tools.indexOf('async function deployContract'), tools.indexOf('// ── EIP-7702: delegate'));
   assert.match(fn, /waitForReceipt\(/, 'helper deploy must be bounded by waitForReceipt');
   assert.match(fn, /timedOut/, 'helper deploy must report a timeout instead of hanging');
   // and the card must be kept in sync after a run / registry change
   assert.ok((tools.match(/renderHelperStatus\(\)/g) || []).length >= 4, 'helper status must refresh after deploy/removal');
+});
+
+// ── live request (2026-10-03): "Deployed Contracts tambahin tombol copy" ──
+test('Deployed Contracts: baris registry membawa tombol copy alamat penuh', () => {
+  const reg = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
+  assert.match(reg, /class="copy-btn"[^>]*data-copy="\$\{escapeHtml\(item\.address\)\}"/,
+    'setiap baris harus menyalin alamat kontrak PENUH lewat handler copy global');
+  assert.doesNotMatch(reg, /data-copy="\$\{escapeHtml\(wallet\.shortAddress/,
+    'data-copy wajib alamat penuh — shortAddress tidak bisa dipakai tujuan copy');
+});
+
+// ── live requests (user, 2026-10-03):
+//   "Sponsor private key ganti jadi auto detect yang udah kepasang di appnya
+//    dan bisa pilih wallet"
+//   "Target private key (if the wallet is not unlocked) ganti jadi
+//    Private Key (Drainner)"
+test('sponsor key field → auto-detect wallet picker (rescue + claim + revoke)', () => {
+  const view = fs.readFileSync(new URL('../src/views/deploy.jsx', import.meta.url), 'utf8');
+  assert.equal((view.match(/Sponsor wallet \(auto-detect\)/g) || []).length, 3,
+    'all three forms (rescue + claim + revoke) offer the picker');
+  assert.doesNotMatch(view, /id="rescueSponsorKey"|id="claimSponsorKey"|id="revokeSponsorKey"/,
+    'the paste-a-key input is gone — sponsor keys must never enter the DOM');
+  const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
+  assert.equal((tools.match(/sponsorKeyFromPicker\(/g) || []).length, 6,
+    'helper defined once + used by all five sponsor entry points');
+  assert.match(tools, /renderSponsorPickers\(\)/,
+    'picker options are filled from the wallets saved in the app');
+});
+
+test('target key label → Private Key (Drainner), field stays', () => {
+  const view = fs.readFileSync(new URL('../src/views/deploy.jsx', import.meta.url), 'utf8');
+  assert.match(view, /Private Key \(Drainner\)/, 'new label text');
+  assert.doesNotMatch(view, /Target private key \(if the wallet is not unlocked\)/,
+    'old label text is gone');
+  assert.match(view, /id="rescueTargetKey"/, 'the target key input itself stays');
+});
+
+// ── live request (2026-10-03): "kalau udah bandingin sama bear tool batch,
+// rescue, claim, revoke delegate pasti beda step by stepnya"
+// Banding dgn referensi nemoobc/EIP-7702-TOOL → P0 step-by-step.
+
+test('P0 claim: RESCUER ikut sponsor (constructor) + lookup serasi rescuer', () => {
+  const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
+  const depStart = tools.indexOf('export async function deployAirdropClaimer');
+  assert.ok(depStart >= 0, 'deployAirdropClaimer exists');
+  const dep = tools.slice(depStart, tools.indexOf('export async function', depStart + 10));
+  assert.match(dep, /deployContract\(sponsorSigner, abi, bytecode, \[sponsorAddress\]\)/,
+    'constructor rescuer = sponsor pembayar broadcast (referensi memakai rescuer=sponsor)');
+  assert.doesNotMatch(dep, /\[targetAddress\]/,
+    'rescuer bukan wallet aktif — itu revert saat sponsor berbeda dari wallet aktif');
+  assert.match(dep, /rescuer: sponsorAddress/, 'registry menyimpan rescuer untuk keputusan reuse');
+  const execStart = tools.indexOf('async function executeClaim');
+  assert.ok(execStart >= 0, 'executeClaim exists');
+  // The body grew with the v1.2.0 additions (target key, decimals, before/
+  // after balances), so the predicate sits further down than the old 4500.
+  assert.match(tools.slice(execStart, execStart + 9000), /item\.rescuer[\s\S]{0,120}abiHasName\(item\.abi, 'claimAndForwardMin'\)/,
+    'reuse claim harus cocokkan rescuer (sponsor) + ABI minimal v1.2.0, bukan hanya target deploy');
+});
+
+test('P0 revoke: auth nonce self-sponsored = nonce + 1', () => {
+  const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
+  const start = tools.indexOf('export async function revokeDelegation');
+  assert.ok(start >= 0, 'revokeDelegation exists');
+  // 2026-10-03: sponsor broadcasts even here (self-only path removed), so the
+  // nonce rule is conditional: RAW authority nonce, +1 only when sponsor ==
+  // target. A wrong nonce → tuple di-skip, tx ter-mine, revoke gagal diam-diam.
+  const body = tools.slice(start, start + 5000);
+  assert.match(body, /getTransactionCount\(target\)/, 'reads the authority nonce');
+  assert.match(body, /selfSponsor \? nonce \+ 1 : nonce/,
+    'self-sponsored revoke must use account nonce + 1, foreign sponsor the raw nonce');
+});
+
+test('P1 teks baris helper: binding sebenarnya (SAFE+sponsor), bukan locked wallet', () => {
+  const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
+  assert.match(tools, /Bound to SAFE \+ sponsor/, 'baris rescue menyebut SAFE + sponsor');
+  assert.match(tools, /Bound to the sponsor wallet \(gas payer\)/, 'baris claim menyentuh sponsor sbg pembayar gas');
+  assert.doesNotMatch(tools, /takes your locked wallet/, 'teks keliru "locked wallet" pada rescue dihapus');
+  assert.doesNotMatch(tools, /locked wallet as rescuer/, 'teks keliru "locked wallet as rescuer" pada claim dihapus');
+});
+
+test('P1 kartu Batch & Claim punya paragraf alur step-by-step', () => {
+  const view = fs.readFileSync(new URL('../src/views/deploy.jsx', import.meta.url), 'utf8');
+  // Region per kartu — hitungan global bisa lolos oleh kartu lain (Revoke,
+  // Deployed Contracts juga punya paragraf), jadi potong persis kartunya.
+  const batchCard = view.slice(view.indexOf('data-i18n="eip7702.batch"'),
+    view.indexOf('data-i18n="eip7702.rescue"'));
+  const claimCard = view.slice(view.indexOf('data-i18n="eip7702.claim"'),
+    view.indexOf('data-i18n="eip7702.revokeTitle"'));
+  assert.match(batchCard, /<p className="small/, 'kartu Batch wajib punya paragraf alur');
+  assert.match(claimCard, /<p className="small/, 'kartu Claim wajib punya paragraf alur');
+});
+
+test('P1 peringatan delegasi permanen di ketiga flow sebelum execute', () => {
+  const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
+  // Referensi memperingatkan "delegasi PERMANEN + tutup dgn revoke" di batch,
+  // rescue, dan claim (ref:1699-1701, 1851-1857, 2066-2076) — Bear tidak.
+  assert.ok((tools.match(/Permanent until revoked/g) || []).length >= 3,
+    'batch, rescue, dan claim masing-masing membawa baris peringatan permanen');
 });

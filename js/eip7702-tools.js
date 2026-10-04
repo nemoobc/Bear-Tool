@@ -6,7 +6,7 @@
 
 const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 
-import { $, toast, confirmTx, escapeHtml, setBtnDots } from './ui.js';
+import { $, toast, confirmTx, escapeHtml, setBtnDots, promptPassword } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, withTimeout } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
@@ -81,8 +81,34 @@ contract airdropClaimer {
             require(success, "ERC20 transfer failed");
         }
     }
-    function version() external pure returns (string memory) { return "1.1.0"; }
+    // v1.2.0: minimum guaranteed ON-CHAIN. If the claimed result is below
+    // minAmount the WHOLE transaction reverts — funds never move halfway.
+    // token is MANDATORY ERC-20 (address(0) refused) so the amount can always
+    // be compared. Kept in sync with nemoobc/EIP-7702-TOOL v1.2.0.
+    function claimAndForwardMin(address airdropContract, bytes calldata claimData, address token, address safe, uint256 minAmount) external onlyRescuer {
+        require(safe != address(0), "SAFE=0");
+        require(token != address(0), "TOKEN=0 (ERC-20 only)");
+        (bool success, ) = airdropContract.call(claimData);
+        require(success, "claim failed");
+        (bool okBal, bytes memory ret) = token.call(abi.encodeWithSelector(0x70a08231, address(this)));
+        require(okBal && ret.length >= 32, "balanceOf failed");
+        uint256 bal = abi.decode(ret, (uint256));
+        require(bal >= minAmount, "CLAIM<MIN (claim less than required)");
+        (success, ) = token.call(abi.encodeWithSelector(0xa9059cbb, safe, bal));
+        require(success, "ERC20 transfer failed");
+    }
+    function version() external pure returns (string memory) { return "1.2.0"; }
 }`;
+
+// True when an ABI carries the named function. Entries hold either parsed
+// objects ({name}) or human-readable strings — an old airdrop helper saved
+// before v1.2.0 has only claimAndForward and would revert on the minimum
+// variant, so reuse must ask the ABI, not assume the label.
+export function abiHasName(abi, name) {
+  return Array.isArray(abi) && abi.some(f =>
+    (f && typeof f === 'object' && f.name === name) ||
+    (typeof f === 'string' && f.includes(name)));
+}
 
 // ── compile a Solidity source → { abi, bytecode } ──
 // The compiler lives in solc.js. It used to be loaded straight from the CDN's
@@ -143,6 +169,11 @@ async function delegateAndExecute(targetAddress, implAddress, calldata, opts = {
     // nonce, the calldata or the fee fields — it just stops the button spinning
     // forever on a node that never answers.
     const tx = await withTimeout(sponsorSigner.sendTransaction({
+      // MUST be explicit — same rule as eip7702.js and revokeDelegation:
+      // without it ethers can infer a type-2 tx from the fee fields and drop
+      // the authorizationList, so the delegation never lands while the tx
+      // still reports success.
+      type: 4,
       to: targetAddress,
       authorizationList: [authorization],
       data: calldata,
@@ -241,9 +272,36 @@ function addBatchItem() {
   renderBatchList();
 }
 
+// ── resolve helper untuk flow: pakai entri registry, atau — dengan konfirmasi
+// eksplisit, tidak pernah senyap — deploy di tempat. Ini yang dijanjikan kartu
+// Helper Contracts: "or let the flow deploy it for you" (deploy.jsx:53).
+async function ensureDeployedHelper(type, label, chainId, predicate, provider, deployFn) {
+  const existing = await findUsableDeployed(type, chainId, predicate, provider);
+  if (existing) return { ...existing, reused: true };
+  const ok = await confirmTx({
+    title: `${label} helper not deployed — deploy it now?`,
+    rows: [{ k: 'Action', v: `Deploy ${label} helper (saved, reused on later runs)` }],
+    confirmText: 'Deploy',
+  });
+  if (!ok) {
+    toast(`${label} helper is required — deploy it now or from Helper Contracts.`, 'info');
+    return null;
+  }
+  try {
+    const entry = await deployFn();
+    renderHelperStatus();
+    renderDeployedRegistry();
+    toast(`${label} helper deployed: ` + wallet.shortAddress(entry.address), 'success');
+    return { ...entry, reused: false };
+  } catch (e) {
+    toast(e?.message || String(e), 'error');
+    return null;
+  }
+}
+
 async function executeBatch() {
   if (!get('unlocked')) { requireUnlock(); return; }
-  const valid = batchCalls.filter(b => b.to && b.data);
+  const valid = batchCalls.filter(b => b.to); // T7: value-only rows (empty data) are legal
   if (!valid.length) return toast('Add at least one valid call', 'error');
   // Every address, not just the first. Checking valid[0].to meant a malformed
   // entry at position 2..n sailed straight into the helper's multicall — the
@@ -256,42 +314,113 @@ async function executeBatch() {
       : `Invalid target address in calls ${bad.join(', ')}`, 'error');
   }
 
+  // Calldata rules: empty → 0x; anything else must be real 0x-hex. The old
+  // code silently ZEROED non-0x data — a typo became a no-op call inside a
+  // batch the user had just paid for.
+  for (let i = 0; i < valid.length; i++) {
+    const d = String(valid[i].data ?? '').trim();
+    if (d && d !== '0x' && !/^0x[0-9a-fA-F]*$/.test(d)) {
+      return toast(`Invalid hex calldata in call #${i + 1} (must start with 0x)`, 'error');
+    }
+  }
+
   const net = getNetworkById(get('networkId'));
+  const provider = await getProvider(net.chainId);
+
+  // Value guard BEFORE the prompt: execute() draws value from the delegated
+  // EOA's own balance, so a total above that balance can only revert on-chain.
+  let totalValue = 0n;
+  for (let i = 0; i < valid.length; i++) {
+    try { totalValue += ethers.parseEther(String(valid[i].value || '0')); }
+    catch { return toast(`Invalid ETH value in call #${i + 1}`, 'error'); }
+  }
+  if (totalValue > 0n) {
+    let balance = 0n;
+    try { balance = await provider.getBalance(get('address')); }
+    catch { /* node did not answer — unknown is not zero, so do not block */ }
+    if (balance > 0n && totalValue > balance) {
+      return toast(`Total value ${ethers.formatEther(totalValue)} ETH exceeds the wallet balance (${ethers.formatEther(balance)} ETH) — batch cancelled`, 'error');
+    }
+  }
+
   {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'BATCH CALL ON MAINNET!' : `Batch ${valid.length} calls on ${net.name}?`,
-      rows: [{ k: 'Calls', v: String(valid.length) }, { k: 'Network', v: net.name }],
+      rows: [
+        { k: 'Calls', v: String(valid.length) },
+        { k: 'Total value', v: `${ethers.formatEther(totalValue)} ETH` },
+        { k: 'Transactions', v: '1) helper deploy if missing  2) delegate  3) execute' },
+        { k: 'Network', v: net.name },
+        { k: 'Delegation', v: 'Permanent until revoked (Tools → Revoke)' },
+      ],
       confirmText: 'Execute', danger: net.type === 'mainnet'
     });
     if (!ok) return;
   }
 
   await runTx('eip7702-batch', $('#btnBatchExecute'), async () => {
-    const provider = get('provider');
     const signer = get('signer').connect(provider);
     const chainId = Number(net.chainId);
 
-    // Batch helper must be deployed first (step 1 in the helper status card).
-    // No silent auto-deploy here: the user explicitly deploys it up front.
-    const existing = await findUsableDeployed('batch', chainId, item =>
-      item.deployer?.toLowerCase() === get('address').toLowerCase(), provider);
-    if (!existing) {
-      toast('Deploy the batch helper first (step 1 above)', 'error');
-      return;
-    }
-    const batchContract = new ethers.Contract(existing.address, existing.abi, signer);
-    toast('Reusing batch contract: ' + wallet.shortAddress(existing.address), 'info');
+    // Resolve the batch helper: reuse the saved entry, or — after an explicit
+    // confirmation, never silently — deploy it right here. The Helper
+    // Contracts card promises "or let the flow deploy it for you".
+    const helper = await ensureDeployedHelper('batch', 'Batch', chainId,
+      item => item.deployer?.toLowerCase() === get('address').toLowerCase(),
+      provider,
+      async () => {
+        const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
+        const contract = await deployContract(signer, abi, bytecode);
+        const addr = await contract.getAddress();
+        const dtx = contract.deploymentTransaction();
+        saveDeployed('batch', addr, { chainId, deployer: get('address'), abi });
+        addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `batch → ${addr}` });
+        return { address: addr, abi };
+      });
+    if (!helper) return;
+    const batchContract = new ethers.Contract(helper.address, helper.abi, signer);
+    if (helper.reused) toast('Reusing batch contract: ' + wallet.shortAddress(helper.address), 'info');
     const batchAddr = await batchContract.getAddress();
 
-    // Encode execute() calldata
+    // Encode execute() calldata — empty data defaults to 0x (value-only call).
     const calls = valid.map(b => ({
       to: b.to,
-      data: b.data.startsWith('0x') ? b.data : '0x',
-      value: ethers.parseEther(b.value || '0')
+      data: (() => { const d = String(b.data ?? '').trim(); return (!d || d === '0x') ? '0x' : d; })(),
+      value: ethers.parseEther(String(b.value || '0'))
     }));
     const executeCalldata = batchContract.interface.encodeFunctionData('execute', [calls]);
 
-    // Delegate wallet to batch contract and execute
+    // Three separate transactions, like the reference: each step names itself
+    // in the activity log and a failed step stops the flow instead of burning
+    // the whole batch in one atomic revert (the helper deploy already ran as
+    // its own transaction inside ensureDeployedHelper).
+    // Step 2 — delegate ONLY (calldata 0x). Skipped when the chain says the
+    // wallet already delegates to this helper — freshness is read, not assumed.
+    const currentDelegate = await getDelegation(provider, get('address'));
+    if (!currentDelegate || currentDelegate.toLowerCase() !== batchAddr.toLowerCase()) {
+      const txD = await delegateAndExecute(
+        get('address'),
+        batchAddr,
+        '0x',
+        { targetSigner: signer, sponsorSigner: signer }
+      );
+      addActivity({ hash: txD.hash, type: 'eip7702-batch', status: 'pending', ts: Date.now(), detail: `delegate → ${wallet.shortAddress(batchAddr)}` });
+      toast('Delegation tx sent…', 'info');
+      const dRes = await waitForReceipt(txD);
+      if (dRes.timedOut) {
+        toast(`Delegation ${String(txD.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+        return;
+      }
+      addActivity({ hash: txD.hash, type: 'eip7702-batch', status: dRes.receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `delegate → ${wallet.shortAddress(batchAddr)}` });
+      if (dRes.receipt.status !== 1) {
+        toast('Delegation transaction FAILED — batch not executed.', 'error');
+        return;
+      }
+    }
+
+    // Step 3 — execute through the delegation. If step 2 did not apply
+    // (skipped auth tuple), delegateAndExecute re-delegates and executes in
+    // one transaction — the flow still completes instead of silently no-opping.
     const tx = await delegateAndExecute(
       get('address'),
       batchAddr,
@@ -300,7 +429,7 @@ async function executeBatch() {
     );
 
     addActivity({ hash: tx.hash, type: 'eip7702-batch', status: 'pending', ts: Date.now(), detail: `${valid.length} calls via batch` });
-    toast('Batch tx sent! ⚡', 'info');
+    toast('Batch execute tx sent! ⚡', 'info');
     const { receipt, timedOut } = await waitForReceipt(tx);
     if (timedOut) {
       // Sent but not confirmed in time. The pending activity entry is left as
@@ -319,7 +448,34 @@ async function executeBatch() {
 function toggleRescueFields() {
   const type = $('#rescueType').value;
   $('#rescueTokenWrap').classList.toggle('hidden', type === 'eth');
-  $('#rescueTokenIdWrap').classList.toggle('hidden', type !== 'erc721');
+  $('#rescueTokenIdWrap')?.classList.toggle('hidden', type !== 'erc721');
+  $('#rescueAmountWrap')?.classList.toggle('hidden', type !== 'erc20');
+}
+
+// MAX: read the target's full ERC-20 balance and fill the amount field with
+// it — the typed value then goes through the same validation path as any
+// other amount (the field accepts the literal "MAX" as well).
+async function fillMaxRescueAmount() {
+  try {
+    const net = getNetworkById(get('networkId'));
+    const provider = await getProvider(net.chainId);
+    const tokenAddr = $('#rescueTokenAddr')?.value.trim() || '';
+    if (!wallet.isValidAddress(tokenAddr)) return toast('Enter the token address first', 'error');
+    const derived = deriveTargetAddress();
+    if (derived.error) return toast(derived.error, 'error');
+    const tc = new ethers.Contract(tokenAddr,
+      ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'], provider);
+    const [bal, dec] = await Promise.all([
+      tc.balanceOf(derived.address),
+      tc.decimals().then(Number).catch(() => 18)
+    ]);
+    const d = (Number.isInteger(dec) && dec >= 0 && dec <= 36) ? dec : 18;
+    const el = $('#rescueAmount');
+    if (el) el.value = ethers.formatUnits(bal, d);
+    toast('MAX filled from the wallet balance', 'info');
+  } catch (e) {
+    toast('Could not read the token balance: ' + (e?.shortMessage || e?.message || e), 'error');
+  }
 }
 
 async function executeRescue() {
@@ -328,13 +484,12 @@ async function executeRescue() {
   const type = $('#rescueType').value;
   const tokenAddr = $('#rescueTokenAddr').value.trim();
   const tokenIds = $('#rescueTokenId').value.trim();
-  const sponsorKey = $('#rescueSponsorKey').value.trim();
+  const sponsorKey = await sponsorKeyFromPicker('#rescueSponsorFrom');
+  if (sponsorKey === null) return;            // password prompt cancelled
 
   if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
   if (type !== 'eth' && !wallet.isValidAddress(tokenAddr)) return toast('Invalid token contract address', 'error');
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
-  // Validated: take it out of the document. From here on the signer holds it.
-  wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
 
   const derived = deriveTargetAddress();
   if (derived.error) return toast(derived.error, 'error');
@@ -353,6 +508,42 @@ async function executeRescue() {
   wipeKeyField('#rescueTargetKey');
 
   const net = getNetworkById(get('networkId'));
+  const provider = await getProvider(net.chainId);
+
+  // ERC-20 amount is explicit (manual or MAX): read the token's scale and the
+  // target's on-chain balance BEFORE the prompt, so the number the user
+  // confirms is real and an impossible amount is refused before anyone signs.
+  let rescueWei = null;
+  let rescueDecimals = 18;
+  let rescueSymbol = '';
+  const rescueAmtRaw = ($('#rescueAmount')?.value.trim() || '');
+  if (type === 'erc20') {
+    try {
+      const tc = new ethers.Contract(tokenAddr,
+        ['function decimals() view returns (uint8)', 'function symbol() view returns (string)'], provider);
+      rescueDecimals = Number(await tc.decimals());
+      rescueSymbol = String(await tc.symbol()).trim() || '';
+      if (!Number.isInteger(rescueDecimals) || rescueDecimals < 0 || rescueDecimals > 36) rescueDecimals = 18;
+    } catch { toast('Could not read token decimals/symbol — assuming 18.', 'info'); }
+    try {
+      const bc = new ethers.Contract(tokenAddr, ['function balanceOf(address) view returns (uint256)'], provider);
+      const targetBal = await bc.balanceOf(target);
+      if (rescueAmtRaw.toUpperCase() === 'MAX') {
+        rescueWei = targetBal;
+        const amtEl = $('#rescueAmount');
+        if (amtEl) amtEl.value = ethers.formatUnits(targetBal, rescueDecimals);
+      } else {
+        try { rescueWei = ethers.parseUnits(rescueAmtRaw, rescueDecimals); }
+        catch { return toast('Invalid token amount', 'error'); }
+      }
+      if (rescueWei <= 0n) return toast('Token amount must be greater than zero', 'error');
+      if (rescueWei > targetBal) {
+        return toast(`Token amount exceeds the wallet balance (${ethers.formatUnits(targetBal, rescueDecimals)} ${rescueSymbol}) — rescue cancelled`, 'error');
+      }
+    } catch (e) {
+      return toast('Could not read the token balance — ' + (e?.shortMessage || e?.message || e), 'error');
+    }
+  }
   {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'RESCUE ON MAINNET!' : `Rescue from ${wallet.shortAddress(target)}?`,
@@ -360,9 +551,11 @@ async function executeRescue() {
         { k: 'Locked wallet', v: wallet.shortAddress(target) },
         { k: 'SAFE destination', v: wallet.shortAddress(safe) },
         { k: 'Token type', v: type.toUpperCase() },
+        ...(type === 'erc20' ? [{ k: 'Amount', v: `${rescueAmtRaw} ${rescueSymbol}` }] : []),
         { k: 'Authorization', v: targetKey ? 'Target private key (validated)' : 'Unlocked target wallet' },
         { k: 'Gas sponsor (executor)', v: wallet.shortAddress(sponsorAddress) },
-        { k: 'Network', v: net.name }
+        { k: 'Network', v: net.name },
+        { k: 'Delegation', v: 'Permanent until revoked (Tools → Revoke)' },
       ],
       confirmText: 'Rescue', danger: net.type === 'mainnet'
     });
@@ -370,28 +563,31 @@ async function executeRescue() {
   }
 
   await runTx('eip7702-rescue', $('#btnRescue'), async () => {
-    const provider = await getProvider(net.chainId);
     const chainId = Number(net.chainId);
     // Gas sponsor must exist in BOTH branches (reuse and fresh deploy) and is
     // used again at delegateAndExecute. Declared in the `else` branch it was
     // out of scope at that call → ReferenceError on every rescue.
     const sponsorSigner = sponsorSignerOf(sponsorKey, provider);
 
-    // Rescue helper must be deployed first (step 1 in the helper status card).
-    // No silent auto-deploy here: the user explicitly deploys it up front.
     // Match on what the constructor actually received — SAFE and the sponsor
-    // (RESCUER). The locked wallet is NOT a constructor argument, so it is
-    // deliberately absent: it is derived now, and matching on a derived value
-    // would reject a helper that is perfectly reusable.
-    const existing = await findUsableDeployed('rescue', chainId, item =>
-      item.safe?.toLowerCase() === safe.toLowerCase()
-        && item.sponsor?.toLowerCase() === sponsorAddress.toLowerCase(), provider);
-    if (!existing) {
-      toast('Deploy the rescue helper first (step 1 above)', 'error');
-      return;
-    }
-    const rescueContract = new ethers.Contract(existing.address, existing.abi, provider);
-    toast('Reusing rescue contract: ' + wallet.shortAddress(existing.address), 'info');
+    // (RESCUER). Belum ada → deploy di sini setelah konfirmasi eksplisit
+    // (tidak pernah senyap), sesuai teks kartu Helper Contracts.
+    const helper = await ensureDeployedHelper('rescue', 'Rescue', chainId,
+      item => item.safe?.toLowerCase() === safe.toLowerCase()
+        && item.sponsor?.toLowerCase() === sponsorAddress.toLowerCase(),
+      provider,
+      async () => {
+        const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
+        const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, sponsorAddress]);
+        const addr = await contract.getAddress();
+        const dtx = contract.deploymentTransaction();
+        saveDeployed('rescue', addr, { chainId, safe, target, sponsor: sponsorAddress, abi });
+        addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
+        return { address: addr, abi };
+      });
+    if (!helper) return;
+    const rescueContract = new ethers.Contract(helper.address, helper.abi, provider);
+    if (helper.reused) toast('Reusing rescue contract: ' + wallet.shortAddress(helper.address), 'info');
     const rescueAddr = await rescueContract.getAddress();
 
     // Build calldata based on token type
@@ -399,8 +595,9 @@ async function executeRescue() {
     if (type === 'eth') {
       calldata = rescueContract.interface.encodeFunctionData('rescueETH');
     } else if (type === 'erc20') {
-      // Use rescueERC20All to rescue all tokens
-      calldata = rescueContract.interface.encodeFunctionData('rescueERC20All', [tokenAddr]);
+      // Explicit amount: manual entry or MAX (which reads the full balance
+      // into the field). The old all-sweep took the choice away.
+      calldata = rescueContract.interface.encodeFunctionData('rescueERC20', [tokenAddr, rescueWei]);
     } else if (type === 'erc721') {
       const ids = tokenIds.split(',').map(s => BigInt(s.trim())).filter(n => n >= 0n);
       if (!ids.length) return toast('Enter valid token IDs', 'error');
@@ -452,26 +649,81 @@ async function executeClaim() {
   const contractAddr = $('#claimContract').value.trim();
   const claimData = $('#claimData').value.trim();
   const tokenAddr = $('#claimToken').value.trim();
+  const amountRaw = $('#claimAmount')?.value.trim() || '';
   const safe = $('#claimSafe').value.trim();
-  const sponsorKey = $('#claimSponsorKey').value.trim();
+  const targetKeyField = $('#claimTargetKey')?.value.trim() || '';
+  const sponsorKey = await sponsorKeyFromPicker('#claimSponsorFrom');
+  if (sponsorKey === null) return;            // password prompt cancelled
 
   if (!wallet.isValidAddress(contractAddr)) return toast('Invalid airdrop contract address', 'error');
-  if (!claimData || !claimData.startsWith('0x')) return toast('Invalid claim calldata (must start with 0x)', 'error');
-  if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
+  if (!claimData || !/^0x[0-9a-fA-F]*$/.test(claimData)) return toast('Invalid claim calldata (must be 0x-hex)', 'error');
+  // The token contract is MANDATORY ERC-20: the guaranteed minimum can only be
+  // compared when there is a comparable amount. address(0)/ETH mode is gone —
+  // sweeping plain ETH is the Rescue flow's job.
+  if (!wallet.isValidAddress(tokenAddr) || tokenAddr.toLowerCase() === ethers.ZeroAddress.toLowerCase()) {
+    return toast('Token contract is required (ERC-20) — address(0) is refused', 'error');
+  }
+  if (!amountRaw) return toast('Claim amount is required (it is granted on-chain as the minimum)', 'error');
+  if (!wallet.isValidAddress(safe) || safe.toLowerCase() === ethers.ZeroAddress.toLowerCase()) return toast('Invalid SAFE address', 'error');
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
-  // Validated: take it out of the document. From here on the signer holds it.
-  wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
   const sponsorAddress = sponsorAddressOf(sponsorKey);
   if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
 
+  // The TARGET signs the authorization — same rule as rescue: pasted key
+  // wins, the active wallet is the fallback. Validated before use.
+  let targetAddress;
+  if (targetKeyField) {
+    const derivedKey = addressFromKey(targetKeyField);
+    if (!derivedKey) return toast('Invalid target private key', 'error');
+    targetAddress = derivedKey;
+  } else {
+    targetAddress = get('address');
+    if (!targetAddress) return toast('Unlock the target wallet or paste its private key', 'error');
+  }
+
   const net = getNetworkById(get('networkId'));
+  const provider = await getProvider(net.chainId);
+  const targetSigner = targetKeyField
+    ? new ethers.Wallet(targetKeyField, provider)
+    : get('signer').connect(provider);
+  wipeKeyField('#claimTargetKey');
+
+  // Read the token's scale first so the typed amount is encoded with the right
+  // decimals, and take the before-numbers the result box will compare against.
+  let decimals = 18;
+  let symbol = '?';
+  try {
+    const tc = new ethers.Contract(tokenAddr,
+      ['function decimals() view returns (uint8)', 'function symbol() view returns (string)'], provider);
+    decimals = Number(await tc.decimals());
+    symbol = String(await tc.symbol()).trim() || '?';
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) decimals = 18;
+  } catch { toast('Could not read token decimals/symbol — assuming 18.', 'info'); }
+
+  let minWei;
+  try { minWei = ethers.parseUnits(amountRaw, decimals); } catch { return toast('Invalid claim amount', 'error'); }
+  if (minWei <= 0n) return toast('Claim amount must be greater than zero', 'error');
+
+  let safeBefore = null, safeAfter = null, eoaBefore = null, eoaAfter = null;
+  let balReadOk = true;
+  try {
+    const bc = new ethers.Contract(tokenAddr, ['function balanceOf(address) view returns (uint256)'], provider);
+    safeBefore = await bc.balanceOf(safe);
+    eoaBefore = await bc.balanceOf(targetAddress);
+  } catch { balReadOk = false; }
+
   {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'CLAIM AIRDROP ON MAINNET!' : `Claim on ${net.name}?`,
       rows: [
         { k: 'Airdrop contract', v: wallet.shortAddress(contractAddr) },
+        { k: 'Token', v: `${symbol} (${wallet.shortAddress(tokenAddr)})` },
+        { k: 'Minimum (on-chain)', v: `${amountRaw} ${symbol} = ${minWei.toString()} units` },
         { k: 'Forward to', v: wallet.shortAddress(safe) },
-        { k: 'Network', v: net.name }
+        { k: 'Target', v: wallet.shortAddress(targetAddress) + (targetKeyField ? ' (pasted key)' : ' (active wallet)') },
+        { k: 'Gas sponsor', v: wallet.shortAddress(sponsorAddress) },
+        { k: 'Network', v: net.name },
+        { k: 'Delegation', v: 'Permanent until revoked (Tools → Revoke)' },
       ],
       confirmText: 'Claim', danger: net.type === 'mainnet'
     });
@@ -479,36 +731,43 @@ async function executeClaim() {
   }
 
   await runTx('eip7702-claim', $('#btnClaim'), async () => {
-    const provider = await getProvider(net.chainId);
     const chainId = Number(net.chainId);
-    const targetAddress = get('address');
     // Same fix as executeRescue: the sponsor payer is needed in both the
     // reuse and the deploy branch AND at delegateAndExecute.
     const sponsorSigner = sponsorSignerOf(sponsorKey, provider);
 
-    // Airdrop claimer must be deployed first (step 1 in the helper status card).
-    // No silent auto-deploy here: the user explicitly deploys it up front.
-    const existing = await findUsableDeployed('airdrop', chainId, item =>
-      item.target?.toLowerCase() === targetAddress.toLowerCase(), provider);
-    if (!existing) {
-      toast('Deploy the airdrop claimer first (step 1 above)', 'error');
-      return;
-    }
-    const claimerContract = new ethers.Contract(existing.address, existing.abi, provider);
-    toast('Reusing claimer contract: ' + wallet.shortAddress(existing.address), 'info');
+    // RESCUER kontrak = sponsor pembayaran. Reuse now ALSO asks the ABI for
+    // claimAndForwardMin: a helper saved before v1.2.0 has only the old
+    // variant and would revert on the minimum calldata — redeploy instead of
+    // trusting the label. Belum ada / tidak serasi → deploy setelah konfirmasi
+    // eksplisit (tidak pernah senyap).
+    const helper = await ensureDeployedHelper('airdrop', 'Claim', chainId,
+      item => String(item.rescuer || item.target || '').toLowerCase() === sponsorAddress.toLowerCase()
+        && abiHasName(item.abi, 'claimAndForwardMin'),
+      provider,
+      async () => {
+        const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
+        const contract = await deployContract(sponsorSigner, abi, bytecode, [sponsorAddress]);
+        const addr = await contract.getAddress();
+        const dtx = contract.deploymentTransaction();
+        saveDeployed('airdrop', addr, { chainId, target: targetAddress, rescuer: sponsorAddress, abi });
+        addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `airdrop → ${addr}` });
+        return { address: addr, abi };
+      });
+    if (!helper) return;
+    const claimerContract = new ethers.Contract(helper.address, helper.abi, provider);
+    if (helper.reused) toast('Reusing claimer contract: ' + wallet.shortAddress(helper.address), 'info');
     const claimerAddr = await claimerContract.getAddress();
 
-    // Encode claimAndForward() calldata
-    const tokenAddress = tokenAddr || ethers.ZeroAddress;
-    const calldata = claimerContract.interface.encodeFunctionData('claimAndForward', [
+    // v1.2.0: the claimed amount is GUARANTEED on-chain — below the typed
+    // minimum the whole transaction reverts, so funds never move halfway.
+    const calldata = claimerContract.interface.encodeFunctionData('claimAndForwardMin', [
       contractAddr,
       claimData,
-      tokenAddress,
-      safe
+      tokenAddr,
+      safe,
+      minWei
     ]);
-
-    // Delegate target wallet to claimer contract, then execute
-    const targetSigner = get('signer').connect(provider);
 
     const tx = await delegateAndExecute(
       targetAddress,
@@ -525,6 +784,26 @@ async function executeClaim() {
       // "pending" (honest) and the button is released — never spin forever.
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
+    }
+    // The numbers are the proof: re-read both balances and show them side by
+    // side — success or failure, the box states what actually moved.
+    if (balReadOk) {
+      try {
+        const bc = new ethers.Contract(tokenAddr, ['function balanceOf(address) view returns (uint256)'], provider);
+        safeAfter = await bc.balanceOf(safe);
+        eoaAfter = await bc.balanceOf(targetAddress);
+      } catch { /* leave the nulls — the box prints n/a instead of inventing */ }
+    }
+    const box = $('#claimResult');
+    if (box) {
+      const fmt = (v) => (v == null ? 'n/a' : ethers.formatUnits(v, decimals));
+      const delta = (safeBefore != null && safeAfter != null) ? safeAfter - safeBefore : null;
+      box.classList.remove('hidden');
+      box.innerHTML =
+        `<div class="small"><strong>Claim result</strong> — ${escapeHtml(symbol)}</div>` +
+        `<div class="small">SAFE: ${fmt(safeBefore)} → ${fmt(safeAfter)}` +
+        (delta != null ? ` (${delta >= 0n ? '+' : ''}${fmt(delta)})` : '') + '</div>' +
+        `<div class="small">EOA: ${fmt(eoaBefore)} → ${fmt(eoaAfter)}</div>`;
     }
     addActivity({ hash: tx.hash, type: 'eip7702-claim', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: 'Airdrop claim' });
     toast(receipt.status === 1 ? 'Airdrop claimed + forwarded! 🎉' : 'Claim failed!', receipt.status === 1 ? 'success' : 'error');
@@ -569,8 +848,8 @@ export function addressFromKey(key) {
   try { return new ethers.Wallet(key).address; } catch { return null; }
 }
 
-export function deriveTargetAddress() {
-  const key = $('#rescueTargetKey')?.value.trim() || '';
+export function deriveTargetAddress(keySel = '#rescueTargetKey') {
+  const key = $(keySel)?.value.trim() || '';
   if (key) {
     const addr = addressFromKey(key);
     return addr ? { address: addr } : { error: 'Invalid target private key' };
@@ -580,9 +859,10 @@ export function deriveTargetAddress() {
   return { address: String(unlocked) };
 }
 
-/** Who pays for gas. A pasted key wins; with no key the unlocked wallet
- *  sponsors. Both already live in memory, so demanding a copy-paste of a key
- *  the app is holding only pushed users to paste it into a second field. */
+/** Who pays for gas. A key picked from the wallet list wins; with no pick
+ *  the active wallet sponsors. Both already live in memory, so demanding a
+ *  copy-paste of a key the app is holding only pushed users to paste it into
+ *  a second field. */
 export function sponsorAddressOf(sponsorKey) {
   if (sponsorKey) return addressFromKey(sponsorKey);
   const unlocked = get('address');
@@ -599,7 +879,58 @@ function sponsorSignerOf(sponsorKey, provider) {
   return signer.connect(provider);
 }
 
+// ── sponsor = a wallet picker, not a key box ────────────────────────────────
+// Live request (user, 2026-10-03): "Sponsor private key ganti jadi auto
+// detect yang udah kepasang di appnya dan bisa pilih wallet". The app already
+// holds these keys in the keystore — pasting one into a second field only
+// put a copy of the secret in the DOM. Options fill from the saved wallets;
+// '' means "the active wallet", exactly what the old empty box meant.
+function sponsorOptionsHtml() {
+  const accounts = wallet.getAccounts() || [];
+  return accounts.map((a, i) =>
+    `<option value="${i}">${escapeHtml(a.name || 'Wallet ' + (i + 1))} — ${escapeHtml(wallet.shortAddress(a.address))}</option>`
+  ).join('');
+}
+
+export function renderSponsorPickers() {
+  for (const id of ['rescueSponsorFrom', 'claimSponsorFrom', 'revokeSponsorFrom']) {
+    const sel = $('#' + id);
+    if (!sel) continue;
+    const keep = sel.value;
+    sel.innerHTML = `<option value="">Auto-detect — active wallet</option>` + sponsorOptionsHtml();
+    if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
+  }
+}
+
+/**
+ * Resolve the chosen picker to a sponsor private key.
+ * Returns '' for auto-detect (the active unlocked wallet — sponsorSignerOf
+ * already handles that), the chosen account's key otherwise, or null when the
+ * user cancels the password prompt (callers must stop). The key is derived
+ * straight from the keystore and never written to the DOM.
+ */
+export async function sponsorKeyFromPicker(selId) {
+  const sel = $(selId);
+  if (!sel) return '';
+  const choice = String(sel.value || '');
+  if (!choice) return '';                     // auto-detect: active wallet
+  let secret = wallet.getSession();
+  if (!secret) {
+    const pw = await promptPassword('Enter password to use the chosen sponsor wallet');
+    if (!pw) return null;                     // cancelled
+    try { secret = await wallet.exportSecret(pw); }
+    catch { toast('Wrong password', 'error'); return null; }
+  }
+  try {
+    return wallet.signerFromSecret(secret, Number(choice)).privateKey;
+  } catch (e) {
+    toast(e?.message || 'Cannot derive the chosen sponsor wallet', 'error');
+    return null;
+  }
+}
+
 export function renderHelperStatus() {
+  renderSponsorPickers();
   const list = $('#helperStatusList');
   if (!list) return;
   const net = getNetworkById(get('networkId'));
@@ -628,13 +959,13 @@ export function renderHelperStatus() {
       `<button class="btn btn-sm ${batch ? 'btn-ghost' : 'btn-primary'}" id="btnDeployBatchHelper">${batch ? 'Deploy another' : 'Deploy batch helper'}</button>`),
     row('Rescue Atomic', rescue.length > 0,
       rescue.length
-        ? `Bound to your inputs: ${rescue.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
-        : 'Deploy it first — its constructor takes your locked wallet + SAFE address from the form below.',
+        ? `Bound to SAFE + sponsor: ${rescue.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
+        : 'Bound to SAFE + sponsor (the gas payer) — deploy it first.',
       `<button class="btn btn-sm ${rescue.length ? 'btn-ghost' : 'btn-primary'}" id="btnDeployRescueHelper">${rescue.length ? 'Deploy another' : 'Deploy rescue helper'}</button>`),
     row('Claim Airdrop', airdrop.length > 0,
       airdrop.length
-        ? `Bound to your inputs: ${airdrop.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
-        : 'Deploy it first — its constructor takes the locked wallet as rescuer.',
+        ? `Bound to sponsor: ${airdrop.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
+        : 'Bound to the sponsor wallet (gas payer) — deploy it first.',
       `<button class="btn btn-sm ${airdrop.length ? 'btn-ghost' : 'btn-primary'}" id="btnDeployAirdropClaimer">${airdrop.length ? 'Deploy another' : 'Deploy airdrop claimer'}</button>`)
   ].join('');
 
@@ -670,8 +1001,9 @@ export async function deployBatchHelper() {
     const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
     const contract = await deployContract(signer, abi, bytecode);
     const addr = await contract.getAddress();
+    const dtx = contract.deploymentTransaction();
     saveDeployed('batch', addr, { chainId: Number(net.chainId), deployer: get('address'), abi });
-    addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `batch → ${addr}` });
+    addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `batch → ${addr}` });
     toast('Batch helper deployed: ' + wallet.shortAddress(addr), 'success');
     renderDeployedRegistry();
     showDeployedResult('batch', 'Batch helper', addr, net);
@@ -690,14 +1022,13 @@ export async function deployBatchHelper() {
 export async function deployRescueHelper() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const safe = $('#rescueSafe').value.trim();
-  const sponsorKey = $('#rescueSponsorKey').value.trim();
+  const sponsorKey = await sponsorKeyFromPicker('#rescueSponsorFrom');
+  if (sponsorKey === null) return;            // password prompt cancelled
   const derived = deriveTargetAddress();
   if (derived.error) return toast(derived.error, 'error');
   const target = derived.address;
   if (!wallet.isValidAddress(safe)) return toast('Fill a valid SAFE address first', 'error');
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
-  // Validated: take it out of the document. From here on the signer holds it.
-  wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
   const sponsorAddress = sponsorAddressOf(sponsorKey);
   if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
 
@@ -724,8 +1055,9 @@ export async function deployRescueHelper() {
     const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
     const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, sponsorSigner.address]);
     const addr = await contract.getAddress();
+    const dtx = contract.deploymentTransaction();
     saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, sponsor: sponsorSigner.address, abi });
-    addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
+    addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
     toast('Rescue helper deployed: ' + wallet.shortAddress(addr), 'success');
     showDeployedResult('rescue', 'Rescue helper', addr, net);
     renderHelperStatus();
@@ -740,10 +1072,9 @@ export async function deployRescueHelper() {
 // Explicit "deploy the helper first" action for Claim Airdrop (constructor: rescuer).
 export async function deployAirdropClaimer() {
   if (!get('unlocked')) { requireUnlock(); return; }
-  const sponsorKey = $('#claimSponsorKey').value.trim();
+  const sponsorKey = await sponsorKeyFromPicker('#claimSponsorFrom');
+  if (sponsorKey === null) return;            // password prompt cancelled
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
-  // Validated: take it out of the document. From here on the signer holds it.
-  wipeKeyField('#rescueSponsorKey'); wipeKeyField('#claimSponsorKey');
   const sponsorAddress = sponsorAddressOf(sponsorKey);
   if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
 
@@ -768,10 +1099,14 @@ export async function deployAirdropClaimer() {
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
     const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
-    const contract = await deployContract(sponsorSigner, abi, bytecode, [targetAddress]);
+    // RESCUER = sponsor (yang membayar & broadcast tx eksekusi) — selaras dgn
+    // rescue. Ikat ke target membuat onlyRescuer revert saat sponsor berbeda
+    // dari wallet aktif.
+    const contract = await deployContract(sponsorSigner, abi, bytecode, [sponsorAddress]);
     const addr = await contract.getAddress();
-    saveDeployed('airdrop', addr, { chainId: Number(net.chainId), target: targetAddress, abi });
-    addActivity({ type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `airdrop → ${addr}` });
+    const dtx = contract.deploymentTransaction();
+    saveDeployed('airdrop', addr, { chainId: Number(net.chainId), target: targetAddress, rescuer: sponsorAddress, abi });
+    addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `airdrop → ${addr}` });
     toast('Airdrop claimer deployed: ' + wallet.shortAddress(addr), 'success');
     showDeployedResult('airdrop', 'Airdrop claimer', addr, net);
     renderHelperStatus();
@@ -816,6 +1151,7 @@ export function renderDeployedRegistry() {
     <div class="registry-item">
       <span class="reg-type">${escapeHtml(item.type)}</span>
       <span class="addr">${escapeHtml(wallet.shortAddress(item.address))}</span>
+      <button class="copy-btn" type="button" data-copy="${escapeHtml(item.address)}" title="Copy contract address" aria-label="Copy contract address"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
       <button class="btn btn-danger btn-sm" data-reg-remove="${i}" aria-label="Remove from registry">✕</button>
     </div>`).join('');
   list.querySelectorAll('[data-reg-remove]').forEach(btn => {
@@ -875,14 +1211,24 @@ export async function revokeDelegation() {
   const provider = await getProvider(net.chainId);
   set('provider', provider);
 
-  let signer;
+  // The TARGET signs the authorization; a sponsor ALWAYS pays and broadcasts
+  // (reference flow — the self-only path is gone). Same shape as rescue/claim:
+  // targetSigner.authorizeSync + sponsorSigner.sendTransaction.
+  const sponsorKey = await sponsorKeyFromPicker('#revokeSponsorFrom');
+  if (sponsorKey === null) return;            // password prompt cancelled
+  if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
+  const sponsorAddress = sponsorAddressOf(sponsorKey);
+  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
+
+  let targetSigner;
   if (target.toLowerCase() === (get('address') || '').toLowerCase()) {
-    signer = get('signer').connect(provider);
+    targetSigner = get('signer').connect(provider);
   } else if (!addressFromKey(key)) {
     return toast('Target is not the active wallet — provide its private key', 'error');
   } else {
-    signer = new ethers.Wallet(key, provider);
+    targetSigner = new ethers.Wallet(key, provider);
   }
+  const sponsorSigner = sponsorSignerOf(sponsorKey, provider);
 
   const delegate = await getDelegation(provider, target);
   if (!delegate) return toast('No active delegation on this address — nothing to revoke.', 'info');
@@ -892,6 +1238,7 @@ export async function revokeDelegation() {
     rows: [
       { k: 'Target', v: target },
       { k: 'Current delegation', v: delegate },
+      { k: 'Gas sponsor (executor)', v: wallet.shortAddress(sponsorAddress) },
       { k: 'Action', v: 'Revoke (back to plain EOA)' }
     ],
     confirmText: 'Revoke', danger: true
@@ -901,10 +1248,17 @@ export async function revokeDelegation() {
   const btn = $('#btnRevokeDelegation');
   if (btn) setBtnDots(btn, true, 'Revoking');
   try {
+    // Nonce rule (reference): the tuple carries the AUTHORITY's current nonce
+    // — raw — except when the sponsor IS the target (self-sponsor pays): the
+    // sender's nonce is consumed first, so that one tuple needs +1. A wrong
+    // nonce is silently SKIPPED: the tx mines with status 1, the delegation
+    // survives — a revoke that failed without saying so.
     const nonce = await provider.getTransactionCount(target);
-    const authorization = signer.authorizeSync({ chainId: net.chainId, address: EIP7702.ZERO_ADDRESS, nonce });
+    const selfSponsor = String(sponsorAddress).toLowerCase() === String(target).toLowerCase();
+    const authNonce = selfSponsor ? nonce + 1 : nonce;
+    const authorization = targetSigner.authorizeSync({ chainId: net.chainId, address: EIP7702.ZERO_ADDRESS, nonce: authNonce });
     const feeData = await provider.getFeeData();
-    const tx = await withTimeout(signer.sendTransaction({
+    const tx = await withTimeout(sponsorSigner.sendTransaction({
       // MUST be explicit: ethers v6 otherwise infers an EIP-1559 type-2 tx from
       // the fee fields and SILENTLY DROPS the authorizationList. The tx then
       // mines fine, receipt.status === 1, the UI reports "Delegation revoked!"
@@ -948,6 +1302,92 @@ export async function revokeDelegation() {
   }
 }
 
+// ── paste → auto-detect: token & NFT identity + the DRAINER's balance ──────
+// Live report: "harusnya yang kedetect pk (drainner) tokennya bukan wallet
+// sponsor". The holder below is ALWAYS the target-key wallet (drainner,
+// deriveTargetAddress — the key field's address, else the active wallet),
+// never the sponsor picker. One probe sequence per field so a slow RPC
+// cannot overwrite a newer paste.
+function wireTokenDetect(inputSel, outSel, opts = {}) {
+  const input = $(inputSel);
+  const out = $(outSel);
+  if (!input || !out) return;
+  let seq = 0;
+  const render = (html) => { out.classList.remove('hidden'); out.innerHTML = html; };
+  const clear = () => { out.classList.add('hidden'); out.innerHTML = ''; };
+
+  const run = async () => {
+    const addr = input.value.trim();
+    if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) { clear(); return; }
+    const mine = ++seq;
+    const derived = deriveTargetAddress(opts.keySel);
+    if (derived.error) { render(escapeHtml(derived.error)); return; }
+    const holder = derived.address;          // ← the drainner, not the sponsor
+    const net = getNetworkById(get('networkId'));
+    let provider;
+    try { provider = await getProvider(net.chainId); }
+    catch (e) { render('Network not ready — ' + escapeHtml(e?.message || String(e))); return; }
+    if (mine !== seq) return;
+    render('Detecting — reading the contract…');
+    try {
+      const c = new ethers.Contract(addr, [
+        'function name() view returns (string)',
+        'function symbol() view returns (string)',
+        'function decimals() view returns (uint8)',
+        'function balanceOf(address) view returns (uint256)',
+        'function balanceOf(address,uint256) view returns (uint256)',
+        'function ownerOf(uint256) view returns (address)',
+        'function uri(uint256) view returns (string)',
+      ], provider);
+      const soft = async (fn) => { try { return await fn(); } catch { return null; } };
+      const [sym, nm, dec] = await Promise.all([soft(() => c.symbol()), soft(() => c.name()), soft(() => c.decimals())]);
+      if (mine !== seq) return;
+      const bal = await soft(() => c['balanceOf(address)'](holder));
+      const owned = await soft(() => c.ownerOf(1n));   // ERC-721 marker
+      const uri1 = await soft(() => c.uri(1n));        // ERC-1155 marker
+      if (mine !== seq) return;
+      const holderTxt = `drainner ${wallet.shortAddress(holder)}`;
+
+      if (owned != null) {                             // ERC-721
+        const total = bal ?? 0n;
+        render(`<strong>ERC-721 NFT</strong> · ${escapeHtml(nm || sym || 'Unnamed collection')}<br>` +
+          `Owned by ${holderTxt}: <strong>${escapeHtml(String(total))}</strong> token${total === 1n ? '' : 's'}`);
+        return;
+      }
+      if (uri1 != null) {                              // ERC-1155
+        const rawId = opts.idSel ? String($(opts.idSel)?.value.trim() || '') : '';
+        let balTxt = 'enter a Token ID for the balance';
+        if (/^\d+$/.test(rawId)) {
+          const v = await soft(() => c['balanceOf(address,uint256)'](holder, BigInt(rawId)));
+          if (mine !== seq) return;
+          if (v != null) balTxt = String(v);
+        }
+        render(`<strong>ERC-1155</strong> · ${escapeHtml(nm || sym || 'Multi-token')}<br>` +
+          `Balance of ${holderTxt} (id ${escapeHtml(rawId || '?')}): <strong>${escapeHtml(balTxt)}</strong>`);
+        return;
+      }
+      if (sym != null || nm != null || dec != null) {  // ERC-20
+        const d = Number(dec ?? 18);
+        const safeDec = Number.isInteger(d) && d >= 0 && d <= 36 ? d : 18;
+        render(`<strong>ERC-20</strong> · ${escapeHtml(sym || nm || 'Unknown token')}` +
+          (nm && sym && nm !== sym ? ` · ${escapeHtml(nm)}` : '') + ` · ${safeDec} decimals<br>` +
+          `Balance of ${holderTxt}: <strong>${escapeHtml(ethers.formatUnits(bal ?? 0n, safeDec))}</strong>`);
+        return;
+      }
+      render('No ERC-20/NFT metadata at that address on ' + escapeHtml(net.name) + '.');
+    } catch (e) {
+      if (mine !== seq) return;
+      render('Could not read that contract — ' + escapeHtml(e?.shortMessage || e?.message || String(e)));
+    }
+  };
+
+  input.addEventListener('input', run);
+  input.addEventListener('paste', () => setTimeout(run, 0));
+  if (opts.idSel) $(opts.idSel)?.addEventListener('input', run);
+  if (opts.keySel) $(opts.keySel)?.addEventListener('input', run);
+  clear();
+}
+
 // ── bind all events ──
 export function bindEip7702ToolsEvents() {
   // Batch (view-deploy only if batch elements exist)
@@ -956,19 +1396,22 @@ export function bindEip7702ToolsEvents() {
 
   // Rescue
   $('#rescueType')?.addEventListener('change', toggleRescueFields);
+  $('#btnRescueMax')?.addEventListener('click', fillMaxRescueAmount);
   $('#btnRescue')?.addEventListener('click', executeRescue);
+  // Paste → detect token/NFT identity + the DRAINNER's balance (not sponsor)
+  wireTokenDetect('#rescueTokenAddr', '#rescueTokenDetect', { idSel: '#rescueTokenId' });
 
   // Claim
   $('#btnClaim')?.addEventListener('click', executeClaim);
+  wireTokenDetect('#claimToken', '#claimTokenDetect', { keySel: '#claimTargetKey' });
 
   // Revoke delegation (Tools card)
   $('#btnCheckDelegation')?.addEventListener('click', checkDelegation);
   $('#btnRevokeDelegation')?.addEventListener('click', revokeDelegation);
 
-  // Password toggles
-  bindPasswordToggle('#btnRescueKeyToggle', '#rescueSponsorKey');
+  // Password toggle — the sponsor inputs are gone (wallet picker now);
+  // the target key field keeps its reveal toggle.
   bindPasswordToggle('#btnRescueTargetKeyToggle', '#rescueTargetKey');
-  bindPasswordToggle('#btnClaimKeyToggle', '#claimSponsorKey');
 
   // Helper status (step 1) + registry list
   renderHelperStatus();

@@ -213,3 +213,16 @@ test('the five bottom-bar slots are the ones the design chose', () => {
     assert.ok(html.includes(`data-view="${s}"`), `no sidebar item for ${s}`);
   }
 });
+
+test('EIP-7702 scan: tombol delete logs muncul setelah scan (markup + wiring)', () => {
+  const v = view('settings');
+  assert.ok(v.includes('id="btnClearLogs"'), '#btnClearLogs must live in the EIP-7702 group');
+  assert.match(v, /id="btnClearLogs"[^>]*hidden/,
+    'button starts hidden — it appears only after the scan finishes');
+  assert.ok(v.indexOf('id="btnClearLogs"') < v.indexOf('id="btnClearAllData"'),
+    'the logs button must not push the irreversible delete out of last place');
+  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 4,
+    'no new settings group — the button joins the EIP-7702 group');
+  assert.ok(app.includes('btnClearLogs'), 'app.js must reveal the button after the scan');
+  assert.ok(app.includes('clearLogs'), 'app.js must call clearLogs() on click');
+});

@@ -2,6 +2,7 @@
 // Tests for wallet create/import/encrypt/decrypt/derive + address helpers.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 // mock localStorage (browser-only API)
 const store = new Map();
@@ -117,6 +118,39 @@ test('deriveNextAccount: derives m/44/60/0/0/1', async () => {
   assert.equal(wallet.getAccounts()[1].path, "m/44'/60'/0'/0/1");
 });
 
+// A phrase import records path:'imported' — no path index — while the phrase
+// itself IS m/44'/60'/0'/0/0. The old "highest recorded index + 1" therefore
+// started at 0 and derived a TWIN of the imported account: two rows in the
+// switcher, one key, and the user signing with a wallet that already existed.
+test('deriveNextAccount: import phrase lalu derive → alamat unik, bukan kembar', async () => {
+  store.clear();
+  const w = ethers.Wallet.createRandom();
+  const res = await wallet.importWallet(w.mnemonic.phrase, 'password123');
+  assert.equal(wallet.getAccounts().length, 1, 'pra-kondisi: satu akun imported');
+
+  const addr = await wallet.deriveNextAccount('password123');
+  const accs = wallet.getAccounts();
+  assert.equal(accs.length, 2, 'akun baru bertambah');
+  assert.notEqual(addr.toLowerCase(), res.address.toLowerCase(),
+    'alamat akun baru tidak boleh sama dengan alamat imported (repro: DUPLICATE true)');
+  const addrs = accs.map((a) => String(a.address).toLowerCase());
+  assert.equal(new Set(addrs).size, addrs.length,
+    'tak ada alamat kembar di seluruh daftar');
+  assert.equal(accs[1].path, "m/44'/60'/0'/0/1",
+    'index lompat ke /1 karena /0 sudah dipakai imported');
+});
+
+test('deriveNextAccount: wallet private-key → pesan "bukan seed-phrase", bukan Wrong password', async () => {
+  store.clear();
+  const w = ethers.Wallet.createRandom();
+  await wallet.importWallet(w.privateKey, 'password123');
+  await assert.rejects(() => wallet.deriveNextAccount('password123'),
+    /Tambah akun hanya untuk seed-phrase wallet/,
+    'tipe non-HD harus diberi pesan yang benar, bukan salah sandi');
+  // and a genuinely wrong password still says exactly that
+  await assert.rejects(() => wallet.deriveNextAccount('bukan-sandi-ini'), /Wrong password/);
+});
+
 test('shortAddress: 6+4 format', () => {
   assert.equal(wallet.shortAddress('0x1234567890abcdef1234567890abcdef12345678'), '0x1234…5678');
 });
@@ -217,4 +251,139 @@ test('a failed or cancelled account switch leaves the active account untouched',
   assert.equal(wallet.getActiveAccountIndex(), 1);
   assert.equal((await wallet.unlockWallet('password123')).address, wallet.getAccounts()[1].address,
     'with no index, the active account is the one used');
+});
+
+// ── delete wallet (live request: hapus wallet pilihan user) ──
+// Deleting SPLICES the accounts array, and signerFromSecret used to derive by
+// ARRAY POSITION — every shifted account would silently resolve a different
+// key than the address shown beside it. These tests pin the whole contract.
+
+test('deleteAccount: hapus akun, aktif menyesuaikan, akun terakhir ditolak', async () => {
+  store.clear();
+  await wallet.createWallet('password123');
+  await wallet.deriveNextAccount('password123');
+  await wallet.deriveNextAccount('password123');
+  assert.equal(wallet.getAccounts().length, 3);
+
+  wallet.setActiveAccount(2);
+  // wrong password must reject AND leave the list untouched
+  await assert.rejects(wallet.deleteAccount(1, 'wrong'));
+  assert.equal(wallet.getAccounts().length, 3, 'password salah = daftar tak berubah');
+
+  // delete the ACTIVE account (idx 2) → active falls back to 0
+  await wallet.deleteAccount(2, 'password123');
+  assert.equal(wallet.getAccounts().length, 2);
+  assert.equal(wallet.getActiveAccountIndex(), 0, 'hapus akun aktif → aktif = 0');
+
+  // active shifts down when an entry BEFORE it disappears
+  wallet.setActiveAccount(1);
+  await wallet.deleteAccount(0, 'password123');
+  assert.equal(wallet.getActiveAccountIndex(), 0, 'hapus entry sebelum aktif → aktif -1');
+
+  // the last remaining wallet can never be deleted
+  await assert.rejects(wallet.deleteAccount(0, 'password123'), /last/i);
+  assert.equal(wallet.getAccounts().length, 1);
+});
+
+test('deleteAccount: kunci ikut PATH tersimpan — hapus tengah tak boleh salah kunci', async () => {
+  store.clear();
+  await wallet.createWallet('password123');
+  await wallet.deriveNextAccount('password123');
+  await wallet.deriveNextAccount('password123');
+  const secret = await wallet.exportSecret('password123');
+  const third = wallet.getAccounts()[2];
+  assert.equal(wallet.signerFromSecret(secret, 2).address, third.address, 'pra-kondisi');
+
+  await wallet.deleteAccount(1, 'password123');
+  const shifted = wallet.getAccounts()[1];
+  assert.equal(shifted.address, third.address, 'entry lama idx2 bergeser ke posisi 1');
+  assert.equal(wallet.signerFromSecret(secret, 1).address, shifted.address,
+    'setelah splice, posisi 1 harus tetap membuka kunci entry itu (derive by path)');
+});
+
+test('deriveNextAccount: derive setelah delete tengah tidak tabrakan HD index', async () => {
+  store.clear();
+  await wallet.createWallet('password123');
+  await wallet.deriveNextAccount('password123');
+  await wallet.deriveNextAccount('password123');
+  await wallet.deleteAccount(1, 'password123');
+  await wallet.deriveNextAccount('password123');
+  const addrs = wallet.getAccounts().map((a) => a.address.toLowerCase());
+  assert.equal(addrs.length, 3, 'jumlah kembali 3');
+  assert.equal(new Set(addrs).size, addrs.length, 'tak ada alamat kembar (index tak ditimpa)');
+});
+
+test('UI wiring: tombol hapus per baris + handler di accounts modal + CSS sendiri', () => {
+  const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.ok(app.includes('data-del-acc'), 'baris akun harus membawa tombol data-del-acc');
+  assert.ok(app.includes('deleteAccount('), 'handler harus memanggil wallet.deleteAccount');
+  assert.ok(/\[data-del-acc\].*addEventListener/s.test(app), 'tombol hapus wajib di-wire');
+  const css = readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
+  assert.ok(css.includes('.acc-del-btn'), 'tombol hapus butuh style sendiri (.acc-del-btn)');
+});
+
+// ── app.js: the switcher's delete + add handlers ────────────────────────────
+// wallet.js can only promise that the LIST is right. What the screen does with
+// it — repointing the signer, re-reading the home label, refusing a derive it
+// cannot perform — is app.js's half of the same contract.
+const appSrc = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+
+test('app: delete tetap refresh daftar walau re-unlock pasca-delete gagal', () => {
+  const start = appSrc.indexOf('const wasActive = i === wallet.getActiveAccountIndex();');
+  const end = appSrc.indexOf("$('#addAccBtn').onclick", start);
+  assert.ok(start > -1 && end > start, 'blok handler delete harus ditemukan');
+  const body = appSrc.slice(start, end);
+
+  // deleteAccount menolak SEBELUM splice → daftar di layar masih benar, jadi
+  // keluar tanpa menyentuh modal.
+  assert.match(body, /try \{\s*removed = await wallet\.deleteAccount\(i, pw\);[\s\S]{0,400}return;/,
+    'kegatal delete keluar lebih dulu, daftar tak di-render ulang');
+
+  // Re-unlock punya try/catch SENDIRI supaya kegagalannya tidak memotong
+  // refresh: index basi di modal terbuka = pindah akun mendarat di akun salah.
+  assert.match(body, /if \(wasActive\) \{\s*try \{\s*const signer = await wallet\.unlockWallet\(/,
+    're-unlock wajib dibungkus try/catch sendiri');
+  assert.match(body, /catch \(e\) \{[\s\S]{0,700}set\('signer', null\);/,
+    'signer akun yang sudah terhapus tidak boleh dipertahankan');
+
+  const failPath = body.indexOf("set('unlocked', false);");
+  const refresh = body.indexOf('showAccountModal();');
+  const label = body.indexOf('syncHomeWalletName();');
+  assert.ok(failPath > -1, 'jalur gagal harus ada');
+  assert.ok(refresh > failPath, 'showAccountModal() tetap jalan SETELAH jalur gagal — tak ada index basi');
+  assert.ok(label > failPath && label < refresh,
+    'label home ikut diperbarui di jalur yang sama');
+  assert.match(body, /toast\(`Removed \$\{name\}/, 'pesan sukses tetap diutarakan');
+});
+
+test('app: #homeWalletName ikut sinkron setelah akun dihapus (tanpa reload)', () => {
+  // Satu penulis untuk dua pemicu: load dashboard dan delete dari switcher.
+  assert.match(appSrc, /function syncHomeWalletName\(\)/,
+    'helper satu-sumber untuk label home harus ada');
+  const fnAt = appSrc.indexOf('function syncHomeWalletName()');
+  const fnEnd = appSrc.indexOf('\n}', fnAt);
+  const fn = appSrc.slice(fnAt, fnEnd);
+  assert.match(fn, /wallet\.getActiveAccountIndex\(\)/, 'label = akun aktif, bukan teks statis');
+  assert.match(fn, /acct\.name \|\| 'Account'/, 'nama yang sama dengan yang dipakai loadDashboard');
+  assert.match(fn, /\$\('#homeWalletName'\)/, 'menulis ke #homeWalletName');
+  // dipakai di loadDashboard…
+  assert.match(appSrc, /syncHomeWalletName\(\);[\s\S]{0,400}if \(!soft\) assetList\.innerHTML = spinner/,
+    'loadDashboard memanggil helper, bukan duplikat kodenya');
+});
+
+test('app: handler derive menampilkan penyebab sebenarnya, bukan "Wrong password"', () => {
+  const start = appSrc.indexOf("$('#addAccBtn').onclick");
+  const end = appSrc.indexOf("$('#exportBtn').onclick", start);
+  assert.ok(start > -1 && end > start, 'handler derive harus ditemukan');
+  const body = appSrc.slice(start, end);
+  assert.match(body, /catch \(err\) \{[\s\S]{0,400}toast\(err\?\.message \|\| 'Could not add account', 'error'\)/,
+    'pesan error dari wallet.deriveNextAccount harus diteruskan apa adanya');
+  assert.doesNotMatch(body, /toast\('Wrong password'/,
+    'wallet tanpa HD tree (import private key) bukan salah sandi');
+  // dan wallet.js sendiri yang membedakan dua kasus itu
+  const w = readFileSync(new URL('../js/wallet.js', import.meta.url), 'utf8');
+  assert.match(w, /throw new Error\('Tambah akun hanya untuk seed-phrase wallet'\)/,
+    'tipe non-HD diberi pesan yang benar');
+  assert.match(w, /try \{\s*secret = await decryptData\(keystore, password\);\s*\} catch \{\s*throw new Error\('Wrong password'\)/,
+    'salah sandi tetap dikatakan sebagai salah sandi');
 });

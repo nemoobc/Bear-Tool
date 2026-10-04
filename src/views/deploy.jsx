@@ -98,7 +98,8 @@ export default function DeployView() {
           </div>
 
           <div className="card">
-            <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg> <span data-i18n="eip7702.batch">Batch Call</span> (atomic)</div>
+            <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg> <span data-i18n="eip7702.batch">Batch Call</span></div>
+            <p className="small mb-8">Queue any calls, then Execute in three separate transactions — helper deploy (only if missing), delegation, then execution. Each step reports on its own and the total value is checked against your balance before you confirm. Delegation stays active until you revoke it.</p>
             <div className="batch-queue" id="batchList"></div>
             <button type="button" className="btn btn-ghost mb-8" id="btnBatchAdd">+ Add action</button>
             <button type="button" className="btn btn-primary btn-block" id="btnBatchExecute">Execute Batch</button>
@@ -122,20 +123,30 @@ export default function DeployView() {
             <div className="field hidden" id="rescueTokenWrap">
               <label htmlFor="rescueTokenAddr">Token address</label>
               <input className="input" id="rescueTokenAddr" placeholder="0x..." />
+              {/* Paste → identity (ERC-20 / NFT) + the DRAINER's balance */}
+              <div className="small" id="rescueTokenDetect" role="status" aria-live="polite" style={{ marginTop: '6px' }}></div>
             </div>
             <div className="field hidden" id="rescueTokenIdWrap">
               <label htmlFor="rescueTokenId">Token ID</label>
               <input className="input" id="rescueTokenId" placeholder="0 or id" />
             </div>
-            <div className="field">
-              <label htmlFor="rescueSponsorKey">Sponsor private key</label>
+            <div className="field hidden" id="rescueAmountWrap">
+              <label htmlFor="rescueAmount">Token amount (ERC-20)</label>
               <div className="input-group">
-                <input className="input" type="password" id="rescueSponsorKey" placeholder="0x..." autoComplete="off" />
-                <button type="button" className="btn btn-ghost btn-sm" id="btnRescueKeyToggle" aria-label="Show sponsor key" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                <input className="input" id="rescueAmount" placeholder="Amount or MAX" autoComplete="off" />
+                <button type="button" className="btn btn-ghost btn-sm" id="btnRescueMax">MAX</button>
               </div>
+              <div className="small">Manual amount, or MAX to fill the wallet's full balance.</div>
             </div>
             <div className="field">
-              <label htmlFor="rescueTargetKey">Target private key (if the wallet is not unlocked)</label>
+              <label htmlFor="rescueSponsorFrom">Sponsor wallet (auto-detect)</label>
+              <select className="input" id="rescueSponsorFrom">
+                <option value="">Auto-detect — active wallet</option>
+              </select>
+              <div className="small">Options fill from your saved wallets — pick any to sponsor from it.</div>
+            </div>
+            <div className="field">
+              <label htmlFor="rescueTargetKey">Private Key (Drainner)</label>
               <div className="input-group">
                 <input className="input" type="password" id="rescueTargetKey" placeholder="0x..." autoComplete="off" />
                 <button type="button" className="btn btn-ghost btn-sm" id="btnRescueTargetKeyToggle" aria-label="Show target key" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
@@ -150,6 +161,7 @@ export default function DeployView() {
 
           <div className="card">
             <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg> <span data-i18n="eip7702.claim">Claim Airdrop</span></div>
+            <p className="small mb-8">Paste the claim calldata and a SAFE to forward rewards to — if the claimer helper is missing, the flow asks and deploys it right there (reused next time). The sponsor pays gas; delegation stays active until you revoke it.</p>
             <div className="field">
               <label htmlFor="claimContract">Claim contract address</label>
               <input className="input" id="claimContract" placeholder="0x..." />
@@ -159,21 +171,32 @@ export default function DeployView() {
               <input className="input" id="claimData" placeholder="0x..." />
             </div>
             <div className="field">
-              <label htmlFor="claimToken">Token address</label>
+              <label htmlFor="claimToken">Token address (ERC-20, required)</label>
               <input className="input" id="claimToken" placeholder="0x..." />
+              <div className="small" id="claimTokenDetect" role="status" aria-live="polite" style={{ marginTop: '6px' }}></div>
+            </div>
+            <div className="field">
+              <label htmlFor="claimAmount">Amount to claim (minimum granted on-chain)</label>
+              <input className="input" id="claimAmount" placeholder="e.g. 100" autoComplete="off" />
+              <div className="small">If the claim lands below this, the whole transaction reverts — funds never move halfway.</div>
             </div>
             <div className="field">
               <label htmlFor="claimSafe">Forward to SAFE</label>
               <input className="input" id="claimSafe" placeholder="0x..." />
             </div>
             <div className="field">
-              <label htmlFor="claimSponsorKey">Sponsor private key</label>
-              <div className="input-group">
-                <input className="input" type="password" id="claimSponsorKey" placeholder="0x..." autoComplete="off" />
-                <button type="button" className="btn btn-ghost btn-sm" id="btnClaimKeyToggle" aria-label="Show sponsor key" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-              </div>
+              <label htmlFor="claimTargetKey">Target private key (optional — active wallet if empty)</label>
+              <input className="input" type="password" id="claimTargetKey" placeholder="0x..." autoComplete="off" />
+            </div>
+            <div className="field">
+              <label htmlFor="claimSponsorFrom">Sponsor wallet (auto-detect)</label>
+              <select className="input" id="claimSponsorFrom">
+                <option value="">Auto-detect — active wallet</option>
+              </select>
+              <div className="small">Options fill from your saved wallets — pick any to sponsor from it.</div>
             </div>
             <button type="button" className="btn btn-success btn-block" id="btnClaim">Claim + Forward</button>
+            <div id="claimResult" className="small claim-result hidden" style={{ marginTop: '10px' }} role="status"></div>
           </div>
 
           <div className="card">
@@ -186,6 +209,13 @@ export default function DeployView() {
             <div className="field">
               <label htmlFor="revokeKey">Private key (optional — only if target is not the active wallet)</label>
               <input className="input" id="revokeKey" type="password" placeholder="0x..." />
+            </div>
+            <div className="field">
+              <label htmlFor="revokeSponsorFrom">Sponsor wallet (auto-detect)</label>
+              <select className="input" id="revokeSponsorFrom">
+                <option value="">Auto-detect — active wallet</option>
+              </select>
+              <div className="small">The sponsor pays gas and broadcasts; the target signs the authorization.</div>
             </div>
             <div className="flex gap-8">
               <button type="button" className="btn btn-ghost" id="btnCheckDelegation">Check delegation</button>

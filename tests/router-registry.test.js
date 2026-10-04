@@ -353,3 +353,18 @@ test('the README does not describe a route set the registry does not have', () =
   assert.doesNotMatch(featureLines, /all chains/,
     'the app supports twelve networks; "all chains" was never true');
 });
+
+test('every aggregator in the registry has a tryRouter case (no dead dropdown entries)', () => {
+  // The bug this pins: ParaSwap sat in the registry AND in the router dropdown
+  // while tryRouter had no case for it — selecting it fell through to the dex
+  // default and threw "not an on-chain route here". A listed venue the wallet
+  // cannot quote is the dead end this registry exists to prevent (rule 2 in
+  // the routers.js header).
+  const cases = new Set([...swapSrc.matchAll(/case '([a-z0-9_]+)'/g)].map((m) => m[1]));
+  for (const r of SWAP_ROUTERS) {
+    if (r.type === 'aggregator') {
+      assert.ok(cases.has(r.id),
+        `${r.id} is listed and selectable but tryRouter has no case for it`);
+    }
+  }
+});

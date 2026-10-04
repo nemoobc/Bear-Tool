@@ -5,14 +5,20 @@
 // send.js / swap.js / bridge.js / eip7702.js / deploy.js / nft.js.
 // ═══════════════════════════════════════════════════════════════
 
+// Impor PALING AWAL disengaja: collector memasang hook error +
+// pembungkus fetch sebelum modul lain dieksekusi, sehingga kegagalan
+// boot pun ikut tertangkap (auto-report → tools/debug-relay.mjs,
+// senyap bila relay tak ada).
+import { clearLogs } from './debug-collector.js';
+
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider, getDelegation,
          addCustomNetwork, removeCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
-         applyRpcOverrides, providerEndpoint } from './network.js';
+         applyRpcOverrides, providerEndpoint, detectNetworkType } from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
-         fmtAmount, fmtUsd, fmtTime, escapeHtml, animateValue, titleCase } from './ui.js';
+         fmtAmount, fmtUsd, fmtTime, fmtTimeShort, escapeHtml, animateValue, titleCase } from './ui.js';
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity,
          reconcileActivity, activityMatchesSymbol } from './state.js';
@@ -45,10 +51,15 @@ const { ethers } = globalThis;
 window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   setUnlockHandler(showUnlockModal);
-  on('refresh', () => {
+  on('refresh', async () => {
     if (!get('address')) return;
-    loadDashboard();
+    // Awaited: the swap form's balance line and the token lists read the
+    // snapshot loadDashboard() writes when it finishes. Fire-and-forget let a
+    // successful swap keep showing the PRE-swap balance until a manual refresh
+    // (live report, 2026-10-03).
+    await loadDashboard();
     if ($('#view-activity').classList.contains('active')) renderActivity();
+    if ($('#view-swap')?.classList.contains('active')) loadSwapTokens();
   });
   // Unlocking repaints whatever the user is actually looking at.
   //
@@ -90,6 +101,12 @@ window.addEventListener('DOMContentLoaded', () => {
       if (r.settled || r.failed) { emit('activity'); renderActivity(); }
     }).catch(() => { /* honest state stays pending */ });
   }, 45000);
+  // Balance auto-refresh: back-to-visible + a 60s tick while the dashboard is
+  // on screen (see refreshDashboardBalance for the gates).
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshDashboardBalance();
+  });
+  setInterval(refreshDashboardBalance, 60000);
   initTheme();
   // The provider must exist before any page can ask, and it answers "locked"
   // on its own until the user signs in — so installing it early is safe.
@@ -370,9 +387,15 @@ function bindNav() {
   // to Enter/Space, not just click (WCAG 2.1.1 keyboard).
   const activateNav = (item) => {
     const view = item.dataset.view;
-    // Swap and Bridge share one nav button: first click opens Swap,
-    // clicking the button again while already on Swap offers the choice.
-    if (view === 'swap' && $('#view-swap')?.classList.contains('active')) {
+    // Swap and Bridge share one nav button: the FIRST click opens Swap;
+    // clicking it again from EITHER side of the pair offers the choice. The old
+    // check only looked at #view-swap, so pressing Swap while Bridge was active
+    // skipped the chooser and yanked the user straight back into Swap (live
+    // report, 2026-10-03: "klik bridge, pencet swap, harusnya muncul 2 pilihan
+    // lagi").
+    const onSwapSide = $('#view-swap')?.classList.contains('active')
+      || $('#view-bridge')?.classList.contains('active');
+    if (view === 'swap' && onSwapSide) {
       showSwapBridgeChooser();
       return;
     }
@@ -1555,7 +1578,7 @@ function showAddNetworkModal() {
       picked = known
         ? { name: known.name, chainId, type: known.type, symbol: known.symbol,
             rpc: [url], explorer: known.explorer, icon: known.icon, color: '#9B5DE5', decimals: 18 }
-        : { name: '', chainId, type: 'mainnet', symbol: 'ETH', rpc: [url],
+        : { name: '', chainId, type: detectNetworkType(chainId, url), symbol: 'ETH', rpc: [url],
             explorer: '', icon: '🛰️', color: '#9B5DE5', decimals: 18 };
       $('#cnIcon').textContent = picked.icon;
       $('#cnNameLabel').textContent = known ? picked.name : `Chain ${chainId}`;
@@ -1705,6 +1728,7 @@ function showAccountModal() {
           <div class="asset-name">${escapeHtml(a.name || `Account ${i + 1}`)}</div>
           <div class="mono">${escapeHtml(a.address)}</div>
         </div>
+        <button class="acc-del-btn" type="button" data-del-acc="${i}" title="Remove this wallet from the list" aria-label="Remove ${escapeHtml(a.name || `Account ${i + 1}`)} from the list">🗑</button>
       </div>`).join('')}
     <button class="btn btn-secondary btn-block mt-8" id="addAccBtn">+ Add Account</button>
     <button class="btn btn-ghost btn-block mt-8" id="exportBtn">📤 Export Secret</button>
@@ -1731,6 +1755,64 @@ function showAccountModal() {
       loadDashboard();
     } catch { toast('Wrong password', 'error'); }
   }));
+  $all('[data-del-acc]').forEach(el => el.addEventListener('click', async (e) => {
+    // The 🗑 sits INSIDE the row: stop the click here or removing a wallet
+    // would also fire the row's switch handler underneath it.
+    e.stopPropagation();
+    const i = Number(el.dataset.delAcc);
+    const accs = wallet.getAccounts();
+    const target = accs[i];
+    if (!target) return;
+    if (accs.length <= 1) return toast('Cannot delete the last wallet', 'error');
+    const name = target.name || `Account ${i + 1}`;
+    const ok = await confirmTx({
+      title: `Remove ${name} from the list?`,
+      rows: [
+        { k: 'Wallet', v: name },
+        { k: 'Address', v: target.address },
+        { k: 'Keys stay yours', v: 'Your recovery phrase still controls this address — copy it first if the wallet holds funds.' },
+      ],
+      confirmText: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
+    const pw = await promptPassword('Enter password to remove this wallet');
+    if (!pw) return;
+    const wasActive = i === wallet.getActiveAccountIndex();
+    let removed;
+    try {
+      removed = await wallet.deleteAccount(i, pw);
+    } catch (err) {
+      // deleteAccount rejects BEFORE it splices, so nothing was written and
+      // the list on screen is still true — leave the modal alone.
+      toast(err?.message || 'Could not remove wallet', 'error');
+      return;
+    }
+    // Past this point the list HAS changed, so the UI must be repointed at it
+    // no matter what happens next. A modal left holding the old indexes lets a
+    // switch land on the wrong account, and an unlock failure used to jump
+    // straight to the catch, skipping every refresh below.
+    if (wasActive) {
+      try {
+        const signer = await wallet.unlockWallet(pw, wallet.getActiveAccountIndex());
+        set('signer', signer);
+        set('address', signer.address);
+        loadDashboard();
+      } catch (e) {
+        // The delete cannot be undone, and a signer for an account that is no
+        // longer on the list must never be kept: the next sign would use a key
+        // the UI no longer shows. Drop it — the next signing action asks for
+        // the password again — and fall through so the list is still re-read.
+        console.warn('[BearTool] re-unlock after delete failed:', e?.message || e);
+        set('signer', null);
+        set('unlocked', false);
+      }
+    }
+    toast(`Removed ${name} — ${wallet.shortAddress(removed.address)}`, 'success');
+    updateTopbar();
+    syncHomeWalletName();
+    showAccountModal();
+  }));
   $('#addAccBtn').onclick = async () => {
     const pw = await promptPassword('Enter password to derive new account');
     if (!pw) return;
@@ -1738,19 +1820,46 @@ function showAccountModal() {
       const addr = await wallet.deriveNextAccount(pw);
       toast('Account added: ' + wallet.shortAddress(addr), 'success');
       showAccountModal();
-    } catch { toast('Wrong password', 'error'); }
+    } catch (err) {
+      // deriveNextAccount already names the failure: a wrong password, or a
+      // wallet with no HD tree (a private-key import) that cannot derive at
+      // all. Printing "Wrong password" for the second case sent people back to
+      // retype a password that was right.
+      toast(err?.message || 'Could not add account', 'error');
+    }
   };
   $('#exportBtn').onclick = async () => {
     const pw = await promptPassword('Enter password to export');
     if (!pw) return;
     try {
       const secret = await wallet.exportSecret(pw);
+      // The phrase alone never says which account's key it is for — show the
+      // ACTIVE account's private key beside it (live request 2026-10-03: "di
+      // export wallet tambahin nampilin private key"). Derived with the same
+      // signerFromSecret() the app signs with, and shown only when the result
+      // really belongs to the active account: a silently wrong key would send
+      // a backup to a wallet that is not theirs.
+      let pk = null;
+      try {
+        const idx = wallet.getActiveAccountIndex();
+        const w = wallet.signerFromSecret(secret, idx);
+        const want = (wallet.getAccounts()[idx] || {}).address;
+        if (want && w.address.toLowerCase() === String(want).toLowerCase()) pk = w.privateKey;
+      } catch { /* fall through — the modal says the key was not derived */ }
+      const isPkOnly = /^0x[a-fA-F0-9]{64}$/.test(secret);
       openModal(`
         <button class="modal-close" type="button" data-close-modal>✕</button>
         <h2>📤 Your Secret</h2>
         <div class="danger-box">Never share this. Anyone with it controls your funds.</div>
+        ${isPkOnly ? '' : `
+        <div class="small mt-8">Seed phrase</div>
         <div class="card" style="box-shadow:none"><div class="mono">${escapeHtml(secret)}</div></div>
-        <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(secret)}">📋 Copy</button>
+        <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(secret)}">📋 Copy seed phrase</button>`}
+        ${pk ? `
+        <div class="small mt-8">Private key — active account</div>
+        <div class="card" style="box-shadow:none"><div class="mono">${escapeHtml(pk)}</div></div>
+        <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(pk)}">📋 Copy private key</button>`
+        : `<div class="small mt-8">⚠️ Private key could not be derived for the active account.</div>`}
         <button class="btn btn-primary btn-block" type="button" data-close-modal>Close</button>
       `);
     } catch { toast('Wrong password', 'error'); }
@@ -1783,25 +1892,41 @@ function restoreReadOnlyAccount() {
   } catch { return null; }
 }
 
-async function loadDashboard() {
+// ── home hero label ───────────────────────────────────────────────────────
+// The wallet name above the balance hero — the home screen's "whose box is
+// this?" label. Reads the account list (non-secret), never an address. One
+// source for BOTH moments that can change it: a full dashboard load and a
+// delete from the account switcher, which shifts rows with no reload at all
+// (a label left behind beside a changed list is a name the wallet no longer
+// has).
+function syncHomeWalletName() {
+  try {
+    const accounts = wallet.getAccounts() || [];
+    const idx = wallet.getActiveAccountIndex();
+    const acct = accounts[idx] || {};
+    const el = $('#homeWalletName');
+    if (el) el.textContent = (acct.name || 'Account').trim();
+  } catch { /* name is cosmetic — skip */ }
+}
+
+async function loadDashboard(opts = {}) {
   if (!get('address')) return;
   const net = getNetworkById(get('networkId'));
   // Network name only. The wallet address lives in the Receive modal — it is
   // not shown (or copyable) from the home screen any more.
   $('#balanceSub').textContent = net.name;
 
-  // Wallet name above the balance hero — the home screen's "whose box is
-  // this?" label. Reads the account list (non-secret) — no address shown.
-  try {
-    const accounts = wallet.getAccounts() || [];
-    const idx = wallet.getActiveAccountIndex();
-    const acct = accounts[idx] || {};
-    $('#homeWalletName').textContent = (acct.name || 'Account').trim();
-  } catch { /* name is cosmetic — skip */ }
+  // Wallet name above the balance hero — same writer as a post-delete refresh
+  // (syncHomeWalletName above), so the label cannot drift from the list.
+  syncHomeWalletName();
 
   const assetList = $('#assetList');
   if (!assetList) return;
-  assetList.innerHTML = spinner(64, 'Loading assets...');
+  // Soft mode (auto-refresh ticks): keep the current rows on screen until the
+  // new snapshot lands — a spinner flash every minute is worse than a balance
+  // that is seconds old.
+  const soft = opts.soft === true;
+  if (!soft) assetList.innerHTML = spinner(64, 'Loading assets...');
   // 24h price sparkline for the native asset — CoinGecko auto-pair
   // (native → auto chain id), cached by fetchPriceHistory. Cosmetic only.
   renderHeroSpark(net).catch(() => { /* cosmetic — never blocks */ });
@@ -1860,13 +1985,41 @@ async function loadDashboard() {
       if (window._assetTokens === tokens) renderAssets(tokens);
     });
     // not awaited on purpose (NFT scan is slow) — but its rejection must be
-    // handled here, or a null element becomes a global "Unexpected error" toast
-    loadNfts().catch((e) => console.warn('[BearTool] NFT scan failed:', e?.message || e));
+    // handled here, or a null element becomes a global "Unexpected error" toast.
+    // Skipped on soft ticks: a balance refresh must not re-run the slow scan.
+    if (!soft) loadNfts().catch((e) => console.warn('[BearTool] NFT scan failed:', e?.message || e));
     // M5-HERO: coin price panel removed per user request
   } catch (e) {
     console.warn('[BearTool] asset list failed:', e);
-    assetList.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Reading your assets'))}</p>`;
+    // Contract above: a SOFT tick never clears the screen. One flaky RPC on a
+    // 60s auto-refresh used to replace the whole coin list with an error
+    // paragraph — the list stayed empty until the next tick succeeded. The
+    // rows on display are seconds old and still true; keep them and log.
+    if (!soft) {
+      assetList.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Reading your assets'))}</p>`;
+    }
   }
+}
+
+// ── balance auto-refresh (live: "saldo ngga auto refresh") ──
+// Two triggers, one gate: the tab becoming visible again (the usual "sent
+// from another app, came back, balance is old" case) and a gentle 60s tick.
+// Both refuse to run for a locked wallet, a hidden tab, or a view nobody is
+// looking at — an idle phone must not poll the chain forever. Wired in the
+// DOMContentLoaded handler at the top of this file (the visibilitychange
+// listener and the 60s setInterval sit there, before boot() is even defined) —
+// not in boot() — so importing this module under Node installs no timers or
+// listeners.
+function currentView() {
+  return (document.querySelector('.view.active')?.id || 'view-dashboard').replace(/^view-/, '');
+}
+async function refreshDashboardBalance() {
+  if (!get('unlocked') || !get('address')) return;
+  if (document.hidden) return;
+  if (currentView() !== 'dashboard') return;
+  try {
+    await loadDashboard({ soft: true });
+  } catch { /* best-effort: the next tick tries again */ }
 }
 
 // USD value of what the user actually holds (amount × unit price).
@@ -2289,6 +2442,15 @@ function bindViews() {
     on('#btnApprovalScan', 'click', scanApprovals);
     on('#btnApprovalRevokeAll', 'click', revokeAllApprovals);
     on('#btn7702Check', 'click', runEip7702Check);
+    // "Delete logs" (live request: muncul setiap selesai scan) — drops the
+    // collector ring and truncates the relay file, then hides itself until
+    // the next scan finishes.
+    on('#btnClearLogs', 'click', () => {
+      clearLogs();
+      const el = $('#btnClearLogs');
+      if (el) el.hidden = true;
+      toast('Debug logs deleted', 'success');
+    });
 
   // There is no Save button on this page any more, and every control here is
   // applied the moment it is touched. That is not a preference: the Save button
@@ -2591,21 +2753,34 @@ function renderEip7702Results(results) {
 async function runEip7702Check() {
   const out = $('#eip7702Results');
   const btn = $('#btn7702Check');
+  const clearBtn = $('#btnClearLogs');
   if (!out) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  // Hidden while running; the success path reveals it (live request: "setiap
+  // selesai scan nanti muncul tombol delete logs"). A failed scan leaves it
+  // hidden — there are no fresh logs to delete then.
+  if (clearBtn) clearBtn.hidden = true;
   out.innerHTML = spinner(64, 'Asking every network…');
+  let scanned = false;
   try {
     // Custom networks the user added count as networks too — they were told
     // the app supports them, so they get asked the same question.
     const all = [...NETWORKS, ...getCustomNetworks()];
-    await checkAllNetworks(all, {
+    const results = await checkAllNetworks(all, {
       onResult: (_r, done) => renderEip7702Results(done),
       timeoutMs: 6000,
     });
+    // `scanned` means "≥1 network was really asked", not "the call did not
+    // throw": checkAllNetworks returns one result per network it walked, and
+    // an empty walk is no scan — nothing fresh in the log to delete, so the
+    // button stays hidden (it used to be revealed unconditionally, because
+    // this flag was a literal `true`).
+    scanned = Array.isArray(results) && results.length > 0;
   } catch (e) {
     out.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Checking support'))}</p>`;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Check all networks'; }
+    if (clearBtn) clearBtn.hidden = !scanned;
   }
 }
 
@@ -2651,8 +2826,8 @@ function renderActivity() {
          data-act-index="${i}">
       ${actSvg(a.type)}
       <div class="activity-details">
-        <div class="activity-action">${escapeHtml(a.type)} — ${escapeHtml(a.status)}</div>
-        <div class="activity-meta">${escapeHtml(a.detail)} · ${escapeHtml(fmtTime(a.ts))}</div>
+        <div class="activity-action">${escapeHtml(titleCase(a.type))} — ${escapeHtml(titleCase(a.status))}</div>
+        <div class="activity-meta">${escapeHtml(a.detail)} · ${escapeHtml(fmtTimeShort(a.ts))}</div>
       </div>
     </div>`).join('');
   // Tapping a row opens the full record. There is deliberately no explorer link
@@ -2685,8 +2860,8 @@ async function showActivityDetail(a) {
   const val = (v) => escapeHtml(v == null || v === '' ? '—' : String(v));
 
   const local = [
-    row('Action', escapeHtml(a.type || '—')),
-    row('Status', escapeHtml(a.status || '—')),
+    row('Action', escapeHtml(titleCase(a.type) || '—')),
+    row('Status', escapeHtml(titleCase(a.status) || '—')),
     row('Detail', escapeHtml(a.detail || '—')),
     row('Time', escapeHtml(fmtTime(a.ts))),
     a.hash ? row('Tx hash', `${escapeHtml(a.hash)}

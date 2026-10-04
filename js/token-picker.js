@@ -106,12 +106,26 @@ function initListPickerInner(selectId, { renderRows, paint }) {
   if (!wrap || !trigger || !panel) return null;
   const picker = { sel, wrap, trigger, panel };
 
+  // Re-entry guard: loadSwapTokens()/loadSendTokens() re-init on EVERY view
+  // visit. A second init stacked a second set of trigger listeners, and two
+  // identical open/close listeners fired on ONE click leave the panel CLOSED —
+  // the picker goes permanently dead after the first re-entry (found while
+  // fixing the Send-picker live report, 2026-10-03). Keep one binding; swap in
+  // the fresh row/paint closures so the latest list is what renders.
+  const state = { renderRows, paint };
+  if (sel._bearPicker) {
+    sel._bearPicker.state.renderRows = renderRows;
+    sel._bearPicker.state.paint = paint;
+    sel._bearPicker.paintTrigger();
+    return sel._bearPicker.picker;
+  }
+
   const renderPanel = () => {
-    panel.innerHTML = renderRows(sel) || '<p class="token-picker-empty">Nothing to choose</p>';
+    panel.innerHTML = state.renderRows(sel) || '<p class="token-picker-empty">Nothing to choose</p>';
     guardLogos(panel);
   };
 
-  const paintTrigger = () => { paint(trigger, sel.value, sel); };
+  const paintTrigger = () => { state.paint(trigger, sel.value, sel); };
 
   const choose = (v) => {
     if (sel.value !== v) {
@@ -162,6 +176,7 @@ function initListPickerInner(selectId, { renderRows, paint }) {
 
   sel.addEventListener('change', paintTrigger);
   paintTrigger();
+  sel._bearPicker = { state, paintTrigger, picker };
   return picker;
 }
 

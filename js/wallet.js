@@ -171,7 +171,12 @@ export function signerFromSecret(secret, index = getActiveAccountIndex()) {
       : ethers.Wallet.fromPhrase(secret);
   } else {
     const hd = ethers.HDNodeWallet.fromPhrase(secret, undefined, "m/44'/60'/0'/0");
-    wallet = hd.derivePath(String(idx));
+    // Derive at the index recorded in THIS account's path, never at its array
+    // position: deleteAccount splices the list, and position-based derivation
+    // would hand back a different key than the address shown beside it —
+    // a signer that signs for the wrong wallet without saying so.
+    const m = /\/(\d+)$/.exec(String(accounts[idx].path || ''));
+    wallet = hd.derivePath(m ? m[1] : String(idx));
   }
   return wallet;
 }
@@ -219,16 +224,84 @@ export function clearSession() {
 export async function deriveNextAccount(password, name) {
   const keystore = getKeystore();
   if (!keystore) throw new Error('No wallet found.');
-  const secret = await decryptData(keystore, password);
+  // A wrong password must SAY so: the caller shows err.message, and the bare
+  // OperationError a decrypt failure produces says nothing a person can act on
+  // (same contract deleteAccount already has).
+  let secret;
+  try {
+    secret = await decryptData(keystore, password);
+  } catch {
+    throw new Error('Wrong password');
+  }
+  // Only a recovery phrase HAS an HD tree. A private-key import has none —
+  // HDNodeWallet.fromPhrase would throw an unrelated "invalid phrase" error
+  // that the caller used to report as "Wrong password", which sends the user
+  // back to retype a password that was right all along.
+  if (/^0x[a-fA-F0-9]{64}$/.test(String(secret).trim())) {
+    throw new Error('Tambah akun hanya untuk seed-phrase wallet');
+  }
   const accounts = getAccounts();
-  const nextIdx = accounts.length;
+  // HD index = highest recorded path index + 1, NOT accounts.length:
+  // deleteAccount splices the list, and deriving at `length` would collide
+  // with a surviving entry (delete idx1 of [0,1,2] → [0,2], length 2 = the
+  // index already stored on path .../2 → two entries, one key).
+  const nextIdx = accounts.reduce((mx, a) => {
+    const m = /\/(\d+)$/.exec(String(a?.path || ''));
+    return m ? Math.max(mx, Number(m[1])) : mx;
+  }, -1) + 1;
   const hd = ethers.HDNodeWallet.fromPhrase(secret, undefined, "m/44'/60'/0'/0");
-  const path = `m/44'/60'/0'/0/${nextIdx}`;
-  const derived = hd.derivePath(String(nextIdx));
+  // …and a recorded path index is only a STARTING POINT. An imported phrase
+  // stores path:'imported' — it contributes no index at all — while the phrase
+  // itself IS m/44'/60'/0'/0/0, so nextIdx came out as 0 and the "new" account
+  // was a twin of the imported one (repro: DUPLICATE true). Walk the index
+  // forward until the derived address is not already on the list; bounded, so
+  // a pathological list fails loudly instead of spinning forever.
+  const taken = new Set(accounts.map((a) => String(a?.address || '').toLowerCase()));
+  let idx = nextIdx;
+  let derived = null;
+  for (let guard = 0; guard < 1000; guard++) {
+    const cand = hd.derivePath(String(idx));
+    if (!taken.has(String(cand.address).toLowerCase())) { derived = cand; break; }
+    idx += 1;
+  }
+  if (!derived) throw new Error('No free HD index — too many derived accounts');
+  const path = `m/44'/60'/0'/0/${idx}`;
   const label = (name || '').trim() || nextAccountName(accounts);
   accounts.push({ address: derived.address, path, name: label });
   saveAccounts(accounts);
   return derived.address;
+}
+
+// Remove one account from the switcher (live request: "hapus wallet pilihan
+// user"). Only the LIST entry goes away — the recovery phrase still controls
+// the HD index, so nothing is destroyed, but the address stops being shown
+// until it is derived again elsewhere. Password required: the same gate as
+// switching, so a borrowed phone cannot empty the list. The wrong password
+// rejects BEFORE anything is written (decrypt runs first), and the last
+// remaining wallet can never be removed — an empty list bricks the app.
+export async function deleteAccount(idx, password) {
+  const i = Number(idx);
+  const accounts = getAccounts();
+  if (!accounts[i]) throw new Error('Account not found.');
+  if (accounts.length <= 1) throw new Error('Cannot delete the last wallet.');
+  const keystore = getKeystore();
+  if (!keystore) throw new Error('No wallet found.');
+  try {
+    await decryptData(keystore, password);
+  } catch {
+    // crypto.subtle throws a bare OperationError; the caller deserves the
+    // one word that tells them what to retype.
+    throw new Error('Wrong password');
+  }
+
+  const removed = accounts.splice(i, 1)[0];
+  saveAccounts(accounts);
+  // Keep the stored active index pointing at the same ACCOUNT, not the same
+  // number: entries after the deleted one shifted down by one.
+  const act = getActiveAccountIndex();
+  if (act > i) setActiveAccount(act - 1);
+  else if (act === i) setActiveAccount(0);
+  return removed;
 }
 
 // export secret (requires password)

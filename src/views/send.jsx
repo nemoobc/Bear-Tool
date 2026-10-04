@@ -30,7 +30,15 @@ export default function SendView() {
               <div className="field">
                 <label htmlFor="sendToken">Token</label>
                 <div className="send-token-wrap">
-                  <select className="select" id="sendToken"></select>
+                  {/* Same in-app picker as Swap/Bridge: a native select's option
+                      list is an OS popup that escapes the page on a phone (live
+                      report: Send's picker "keluar dari screen"). The <select>
+                      stays authoritative underneath. */}
+                  <div className="token-picker" data-picker="sendToken">
+                    <select className="select token-picker-native" id="sendToken" aria-label="token"></select>
+                    <button type="button" className="token-picker-trigger" id="sendTokenBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose token"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button>
+                    <div className="token-picker-panel" id="sendTokenPanel" role="listbox" hidden></div>
+                  </div>
                   <span className="send-token-balance" id="sendTokenBalance"></span>
                 </div>
               </div>

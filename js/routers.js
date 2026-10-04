@@ -115,8 +115,17 @@ export const SWAP_ROUTERS = [
 //
 // Gone, and the reason is measured rather than assumed: Socket/Bungee 403,
 // Across 404, Hop 530, Wormhole 522, Synapse 404, Stargate unreachable,
-// OpenOcean unreachable. A bridge entry the wallet cannot execute is a dead end
-// in a dropdown, so an unreachable service is not carried as a route.
+// OpenOcean unreachable. deBridge DLN (api.dln.trade) answered 400 with a bare
+// nginx HTML page on EVERY probe — five of them re-run 2026-10-03, each HTTP
+// 400 / 150 bytes of the same `<html>…<hr><center>nginx</center></html>` body:
+// (1) GET /v1/chainPairs, (2) GET /v1/quote with full params, (3) GET
+// /v1/order-book, (4) POST /v1/quote with a JSON body, (5) GET /v1/quote over
+// HTTP/2 — all sent with a browser UA and an Origin header (evidence:
+// tests/fixtures/dln/ — body_dln1…body_dln5 + status.txt, all five identical
+// 400/150-byte nginx bodies; re-measured by tests/fixtures/dln/measure.sh). It never
+// returned JSON, so no builder can be written against it and it is not
+// carried. A bridge entry the wallet cannot execute is a dead end in a
+// dropdown, so an unreachable service is not carried as a route.
 export const BRIDGE_ROUTERS = [
   {
     id: 'lifi', name: 'LI.FI', type: 'aggregator',

@@ -692,7 +692,62 @@ body::before {
   outline-offset: 2px;
   box-shadow: 0 0 0 5px var(--sky);
 }
+/* Native <option> popups are painted by the OS on a WHITE sheet but inherit
+   the select's color. Dark theme flips --ink to #e0e0e0 → white text on the
+   white sheet: the wallet picker opened blank (live report: "list wallet,
+   ketika dipilih warna masih putih"). Pin both channels on the options
+   themselves and keep the widget in the light color scheme so Android draws
+   its own dark popup text too. */
+select.input, select.select { color-scheme: light; }
+select.input option, select.select option, .input option {
+  background: #ffffff;
+  color: #2D2A32;
+}
 .textarea { min-height: 90px; resize: vertical; }
+
+/* ── Wizard feature toggles — pill BUTTONS (OZ checkbox-group parity) ──
+   Live report: "kasih tombol aja jangan kotak". The native checkbox stays in
+   the DOM (deploy.js reads .checked; tests pin type=checkbox) but is visually
+   replaced by the label pill. */
+.feature-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.toggle-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.12s, box-shadow 0.12s, transform 0.08s;
+  user-select: none;
+}
+.toggle-pill input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.toggle-pill:hover { box-shadow: var(--shadow-sm, 3px 3px 0 rgba(45, 42, 50, 0.25)); }
+.toggle-pill:has(input:checked) {
+  background: var(--honey);
+  color: #2D2A32; /* keep ink readable on yellow in BOTH themes */
+  box-shadow: var(--shadow-sm, 3px 3px 0 rgba(45, 42, 50, 0.25));
+}
+.toggle-pill:has(input:focus-visible) {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+.toggle-pill:active { transform: translate(2px, 2px); box-shadow: none; }
 
 /* ═══════════ BALANCE / DASHBOARD ═══════════ */
 .balance-hero {
@@ -721,7 +776,37 @@ body::before {
   background: var(--white);
   cursor: pointer;
   transition: all 0.12s;
+  /* The modal ✕ is float:right / 44px wide: without clearance the FIRST card
+     is shortened by exactly that (264 → 220 on a 360px screen). */
+  clear: both;
 }
+/* Which wallet is active must be visible at a glance — live report: "putih
+   semua kotaknya, jadi user bingung pas switch wallet yang mana". */
+.asset-row.active {
+  background: var(--honey);
+  box-shadow: var(--shadow-sm);
+  color: #2D2A32; /* ink flips in dark theme; honey stays yellow — pin readable */
+}
+/* Per-row remove in the account switcher (live request: "hapus wallet pilihan
+   user"). Touch-floor circle right of the address; the handler stops the click
+   from reaching the row's switch action. */
+.acc-del-btn {
+  flex: 0 0 auto;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--cream);
+  color: var(--ink);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.08s;
+}
+.acc-del-btn:hover { background: var(--berry, #FF6B6B); color: #2D2A32; }
+.acc-del-btn:active { transform: translate(2px, 2px); }
 .asset-row:hover { transform: translateX(4px); box-shadow: var(--shadow-sm); }
 .asset-icon {
   width: 40px; height: 40px;
@@ -1988,6 +2073,10 @@ body::before {
   border-radius: 12px;
   overflow: hidden;
   background: #FFF8F0;
+  /* The token modal is a fixed-height flex column; overflow:hidden makes this
+     box the only child with automatic min-size 0, so a long tx history used to
+     squeeze it to a sliver and clip the canvas ("chart ilang"). Never shrink. */
+  flex: 0 0 auto;
 }
 .token-modal-chart canvas {
   display: block;
@@ -2120,6 +2209,10 @@ body::before {
   max-width: 680px;
   margin-left: auto;
   margin-right: auto;
+  /* Keep section heights intact: the modal itself scrolls (overflow-y:auto),
+     so content taller than the viewport must push the scrollbar, not squeeze
+     the chart out of existence. */
+  flex-shrink: 0;
 }
 
 /* ═══════════ ASSET ROW ═══════════ */
@@ -2265,12 +2358,17 @@ body::before {
 }
 .activity-action {
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 1rem; /* rows read 0.9rem — too small on a phone (live report) */
 }
 .activity-meta {
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   color: var(--ink-soft);
   margin-top: 2px;
+  /* detail · timestamp runs long (addresses, locale dates) — clip the row to
+     one line; the detail sheet carries the full text. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ═══════════ THEME TOGGLE ═══════════ */
@@ -2399,7 +2497,9 @@ body::before {
   .nav-item.active,
   .nav-sheet-item.active,
   .mobile-nav-item.active,
-  .dapp-chip.active,
+  /* The active DApps chip left this list with the tile face-lift: its label
+     sits on the view background now, not on the honey fill — forcing #2D2A32
+     there would be dark text on the dark theme. */
   .badge-mainnet,
   .badge-testnet,
   .copy-btn.copied,
@@ -2808,7 +2908,15 @@ body::before {
   transition: all 0.2s;
 }
 .dapp-card:hover { border-color: var(--primary, #FF6B35); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-.dapp-icon { font-size: 28px; }
+/* Catalogue card logo: a tinted tile, the way OKX draws protocol icons — not a
+   bare emoji floating on the card. Colour rides as --cat from the card markup. */
+.dapp-icon {
+  font-size: 28px;
+  width: 52px; height: 52px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 2px solid var(--ink); border-radius: 16px;
+  background: var(--cat, var(--honey));
+}
 .dapp-name { font-size: 12px; font-weight: 600; text-align: center; }
 .dapp-category { font-size: 10px; opacity: 0.6; }
 .dapp-frame { width: 100%; border-radius: 12px; overflow: hidden; border: 2px solid var(--border, #ddd); }
@@ -2851,13 +2959,31 @@ body::before {
 
 /* ═══════════ DAPPS: filters + frameable badge ═══════════ */
 .dapps-filters { display: flex; flex-direction: column; gap: var(--sp-8); margin: var(--sp-8) 0; }
-.dapp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dapp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+/* OKX-style category tiles: a coloured icon square with the label underneath.
+   The old face was a text pill; the fill now lives on the tile, so .active
+   paints the tile instead of the whole button (the label no longer sits on a
+   fill, which is why it left the theme-dark forced-dark list). */
 .dapp-chip {
-  padding: 6px 12px; border-radius: 999px; cursor: pointer;
-  border: 2px solid var(--border); background: var(--bg-card, #f5f5f0);
-  font: inherit; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  display: inline-flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 5px 6px 4px; border: 2px solid transparent; background: transparent;
+  border-radius: 14px; font: inherit; font-size: 11px; font-weight: 600;
+  color: inherit; cursor: pointer;
 }
-.dapp-chip.active { background: var(--honey); color: var(--ink); border-color: var(--ink); }
+.dapp-chip-ic {
+  width: 44px; height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1.2rem; line-height: 1;
+  border: 2px solid var(--ink); border-radius: 14px;
+  background: var(--cat, rgba(127, 127, 127, .14));
+  box-shadow: var(--shadow-sm);
+  transition: transform .12s;
+}
+.dapp-chip:hover .dapp-chip-ic { transform: translateY(-2px); }
+.dapp-chip-lb { max-width: 66px; text-align: center; }
+.dapp-chip.active { background: transparent; color: inherit; border-color: transparent; }
+.dapp-chip.active .dapp-chip-ic { background: var(--honey); }
+.dapp-chip.active .dapp-chip-lb { font-weight: 800; }
 .dapp-chip:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .dapp-card:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .dapp-frame-note { font-size: 10px; opacity: .65; margin-top: 2px; }
@@ -3098,6 +3224,10 @@ body::before {
 .dbr-bbtn:disabled { opacity: .35; cursor: default; }
 .dbr-bbtn:hover:not(:disabled) { background: rgba(127,127,127,.12); }
 .dbr-tabs { display: flex; gap: 4px; padding: 5px 8px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--card, #fff); }
+.dbr-wc-hint { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; line-height: 1.35; background: var(--card, #fff); border-bottom: 1px solid var(--border); color: var(--muted, #666); flex: 0 0 auto; }
+.dbr-wc-hint-txt { flex: 1; min-width: 0; }
+.dbr-wc-hint code { font-size: 11px; }
+.dbr-wc-hint .dbr-wc-btn { flex: 0 0 auto; padding: 4px 9px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: inherit; font-size: 13px; cursor: pointer; line-height: 1.2; }
 .dbr-tab { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; font-size: .76rem; max-width: 190px; flex: 0 0 auto; }
 .dbr-tab.on { background: rgba(88,160,255,.16); border-color: var(--ink); }
 .dbr-tab.incog { border-style: dashed; }
@@ -3117,10 +3247,36 @@ body::before {
 .dbr-mini, .dbr-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
 .dbr-chip { border: 1px solid var(--border); background: rgba(127,127,127,.1); border-radius: 999px; padding: 4px 11px; font-size: .76rem; cursor: pointer; }
 .dbr-chip.on { background: var(--ink); color: var(--bg); }
+/* Category row on the browser home: OKX-style icon tiles. ONLY .dbr-chip-cat
+   restyles — bookmark/recent chips share .dbr-chip and stay pills, so these
+   rules sit after the base pair to win the equal-specificity overrides. */
+.dbr-cats { gap: 9px; }
+.dbr-chip-cat {
+  flex-direction: column; gap: 4px;
+  padding: 5px 7px 4px; border: 1px solid transparent; background: transparent;
+  border-radius: 14px; font-size: .7rem; line-height: 1.2;
+}
+.dbr-chip-ic {
+  width: 42px; height: 42px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1.15rem; line-height: 1;
+  border: 2px solid var(--ink); border-radius: 13px;
+  background: var(--cat, rgba(127, 127, 127, .14));
+}
+.dbr-chip-lb { max-width: 62px; text-align: center; }
+.dbr-chip-cat.on { background: transparent; color: inherit; }
+.dbr-chip-cat.on .dbr-chip-ic { background: var(--honey); box-shadow: var(--shadow-sm); }
+.dbr-chip-cat.on .dbr-chip-lb { font-weight: 800; }
 .dbr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
 .dbr-card { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 11px 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--card, #fff); cursor: pointer; }
 .dbr-card:hover { border-color: var(--ink); }
-.dbr-card-ic { font-size: 1.35rem; }
+.dbr-card-ic {
+  font-size: 1.35rem;
+  width: 40px; height: 40px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 2px solid var(--ink); border-radius: 12px;
+  background: var(--cat, rgba(127, 127, 127, .14));
+}
 .dbr-card-nm { font-size: .78rem; font-weight: 700; text-align: center; }
 .dbr-card-ct { font-size: .66rem; color: var(--ink-soft); }
 /* Loading never covers the stage: a thin indeterminate bar under the toolbar

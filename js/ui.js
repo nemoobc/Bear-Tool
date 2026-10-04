@@ -439,3 +439,24 @@ export function fmtTime(ts) {
   if (Number.isNaN(d.getTime())) return UNREADABLE;
   return d.toLocaleString();
 }
+
+// Short form for list rows: full toLocaleString made every Activity row run
+// long on a phone (live report, 2026-10-03). Today is just HH:MM; older
+// entries get a compact date + time; anything unreadable defers to fmtTime.
+export function fmtTimeShort(ts) {
+  if (ts === null || ts === undefined || ts === '') return fmtTime(ts);
+  let ms;
+  try {
+    ms = typeof ts === 'bigint' ? Number(ts) : ts;
+  } catch { return fmtTime(ts); }
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return fmtTime(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  const hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return hm;
+  const day = d.getDate() + ' ' + d.toLocaleDateString(undefined, { month: 'short' });
+  return d.getFullYear() === now.getFullYear()
+    ? `${day} ${hm}`
+    : `${day} ${d.getFullYear()} ${hm}`;
+}

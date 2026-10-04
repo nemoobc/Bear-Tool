@@ -107,6 +107,12 @@ export default function SettingsView() {
                 <p className="small dim">Ask every network we ship whether it accepts EIP-7702 set-code transactions, and show which RPC endpoint answered. Read-only: no signature, no broadcast, no cost.</p>
                 <button type="button" className="btn btn-primary btn-block" id="btn7702Check">Check all networks</button>
                 <div id="eip7702Results" className="mt-16"></div>
+                {/* A full sweep writes one rpc-error line per endpoint straight
+                     into the debug log (~25 per run). The button stays hidden
+                     until the scan finishes — app.js reveals it in the success
+                     path so a failed run never offers to "delete logs" the user
+                     never generated. */}
+                <button type="button" className="btn btn-ghost btn-block mt-8" id="btnClearLogs" hidden>🗑 Delete logs</button>
               </div>
             </div>
 

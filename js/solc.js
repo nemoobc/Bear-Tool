@@ -56,6 +56,73 @@ function loadScript(url, integrity) {
   });
 }
 
+// ── worker path ─────────────────────────────────────────────────────────
+// Chrome refuses SYNCHRONOUS WebAssembly compilation of buffers >8MB on the
+// MAIN thread — loading soljson.js (9MB) in the page threw
+// "WebAssembly.Compile is disallowed on the main thread" and every Deploy on
+// the user's phone died before compiling (live report, Android Chrome/150).
+// Workers are exempt, so load + compile run in js/solc-worker.js and this
+// side only shuttles messages. No Worker (old browsers, Node tests) → the
+// main-thread loader below runs exactly as before.
+function openWorker(urls, { onStatus } = {}) {
+  return new Promise((resolve, reject) => {
+    let worker;
+    try {
+      worker = new Worker(new URL('./solc-worker.js', import.meta.url));
+    } catch (e) {
+      reject(e);                       // CSP/policy → caller falls back
+      return;
+    }
+    let pending = null;                // in-flight compile { resolve, reject }
+    let workerDead = null;             // sticky: construction-time script error
+    const settle = (err, value) => {
+      const p = pending;
+      pending = null;
+      if (!p) return;
+      if (err) p.reject(err); else p.resolve(value);
+    };
+    worker.onmessage = (ev) => {
+      const m = ev.data || {};
+      if (m.stage === 'status') { onStatus?.(m.message); return; }
+      if (m.stage === 'result') { settle(null, m.output); return; }
+      if (m.stage === 'load-error') {
+        // Download/runtime text is the final message — pass it through.
+        settle(Object.assign(new Error(m.message || 'Failed to load the Solidity compiler'), { bearNoWrap: true }));
+        return;
+      }
+      if (m.stage === 'compile-error') {
+        settle(Object.assign(new Error('Solidity compiler crashed: ' + (m.message || 'unknown error')), { bearNoWrap: true }));
+      }
+    };
+    worker.onerror = (e) => {
+      workerDead = Object.assign(
+        new Error('Compiler worker failed: ' + ((e && e.message) || 'script error')),
+        { bearNoWrap: true },
+      );
+      settle(workerDead);
+    };
+    resolve({
+      compile: (json) => new Promise((res, rej) => {
+        if (workerDead) { rej(workerDead); return; }
+        if (pending) { rej(new Error('Solidity compiler is busy — one compile at a time')); return; }
+        const timer = setTimeout(() => {
+          pending = null;
+          rej(Object.assign(
+            new Error(`Solidity compiler did not finish starting up (timeout ${LOAD_TIMEOUT_MS}ms)`),
+            { bearNoWrap: true },
+          ));
+        }, LOAD_TIMEOUT_MS);
+        pending = {
+          resolve: (v) => { clearTimeout(timer); res(v); },
+          reject: (e) => { clearTimeout(timer); rej(e); },
+        };
+        worker.postMessage({ urls, input: json });
+      }),
+      version: () => SOLC_VERSION,
+    });
+  });
+}
+
 // Load + start the wasm compiler. Cached for the session; a rejection clears
 // the cache so the user can simply tap Deploy again. Tries the primary CDN
 // first, then each mirror — a blocked/slow CDN must not look like a compile error.
@@ -64,8 +131,18 @@ export function loadCompiler({ onStatus } = {}) {
   compilerPromise = (async () => {
     // Some bundlers/tests provide a ready solc-js object.
     if (typeof globalThis.solc?.compile === 'function') return globalThis.solc;
-    if (typeof document === 'undefined') throw new Error('Cannot load the Solidity compiler without a DOM');
     const urls = [SOLC_URL, ...SOLC_FALLBACK_URLS];
+    // 1) worker — off-thread compile, immune to the main-thread wasm block.
+    if (typeof Worker !== 'undefined') {
+      try {
+        return await openWorker(urls, { onStatus });
+      } catch {
+        onStatus?.('Compiler worker unavailable — loading in the page instead…');
+        // fall through: legacy loader keeps old browsers and tests working
+      }
+    }
+    // 2) main-thread loader (legacy path).
+    if (typeof document === 'undefined') throw new Error('Cannot load the Solidity compiler without a DOM');
     let lastErr = null;
     for (const url of urls) {
       try {
@@ -104,8 +181,14 @@ export async function compileContract(source, contractName, opts = {}) {
   };
   let output;
   try {
-    output = JSON.parse(solc.compile(JSON.stringify(input)));
+    // await: worker path returns a Promise, legacy seam/injected compilers
+    // return a string — both work.
+    const rawOut = await solc.compile(JSON.stringify(input));
+    output = JSON.parse(typeof rawOut === 'string' ? rawOut : String(rawOut));
   } catch (e) {
+    // bearNoWrap = the message is already final (worker download/runtime text
+    // or a pre-wrapped compile crash) — re-wrapping would stutter it.
+    if (e && e.bearNoWrap) throw e;
     throw new Error('Solidity compiler crashed: ' + (e?.message || String(e)));
   }
   const errors = (output.errors || []).filter(e => e.severity === 'error');

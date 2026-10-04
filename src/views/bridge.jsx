@@ -45,7 +45,11 @@ export default function BridgeView() {
                 <div className="token-picker" data-picker="bridgeRouterSelect"><select className="select token-picker-native" id="bridgeRouterSelect" aria-label="bridge provider"><option value="auto">Auto (Best Route)</option><option value="lifi">LI.FI</option><option value="socket">Socket</option><option value="stargate">Stargate</option><option value="across">Across</option><option value="hop">Hop</option><option value="wormhole">Wormhole</option><option value="bungee">Bungee</option><option value="synapse">Synapse</option></select><button type="button" className="token-picker-trigger" id="bridgeRouterSelectBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose bridge provider"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeRouterSelectPanel" role="listbox" hidden></div></div>
               </div>
               <div id="bridgeRoute" className="bridge-route hidden"></div>
-              <button type="button" className="btn btn-success btn-block btn-lg hidden" id="btnBridgeExec">Execute Bridge</button>
+              {/* Always visible, disabled until a quote validates — hiding it
+                  left the screen with no bridge button at all when the quote
+                  failed (live report, 2026-10-03). doBridgeExec still refuses
+                  a missing/stale quote on its own. */}
+              <button type="button" className="btn btn-success btn-block btn-lg" id="btnBridgeExec" disabled>Execute Bridge</button>
               <div id="bridgeQuote" className="quote-box hidden"></div>
               <div id="bridgeStatus" className="bridge-status hidden">
                 <div className="bridge-progress"><div className="bridge-progress-fill" id="bridgeProgressFill"></div></div>

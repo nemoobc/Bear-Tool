@@ -254,7 +254,15 @@ try {
     path.join(process.env.LOCALAPPDATA || '', 'ms-playwright'),
     path.join(process.env.HOME || '', 'Library', 'Caches', 'ms-playwright'),
   ];
-  const hasBrowser = browserDirs.some((d) => {
+  // A system Chromium supplied via BEAR_CHROMIUM_PATH counts as installed:
+  // Playwright's own download refuses this platform ("Unsupported platform:
+  // android" on Termux), x11-repo's chromium runs fine, and
+  // playwright.config.js launches it through executablePath — gated by the
+  // same env var, so CI and normal Linux are untouched.
+  const sysBrowser = process.env.BEAR_CHROMIUM_PATH
+    ? existsSync(process.env.BEAR_CHROMIUM_PATH)
+    : false;
+  const hasBrowser = sysBrowser || browserDirs.some((d) => {
     try { return readdirSync(d).some((f) => f.startsWith('chromium') || f.startsWith('firefox')); }
     catch { return false; }
   });
@@ -270,6 +278,7 @@ try {
     console.error('  Direktori yang diperiksa: ' + browserDirs.filter((d) => d).join(', '));
     console.error('  Ini bukan kegagalan app. Suite browser sengaja hanya jalan di mesin itu.');
     console.error('  Atau jalankan di grid BrowserStack: npm run test:e2e:browserstack');
+    console.error('  Atau set BEAR_CHROMIUM_PATH=<binary chromium sistem> bila ada chromium lokal.');
     throw { silent: true, code: 5 };
   }
   if (!hasBrowser && bs) {

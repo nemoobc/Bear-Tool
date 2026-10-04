@@ -103,3 +103,17 @@ test('fmtTime still formats a real millisecond timestamp', () => {
   const out = fmtTime(1750000000000);
   assert.match(String(out), /2025/, 'a valid timestamp must still render');
 });
+
+test('fmtTimeShort: hari ini = HH:MM; lama = tanggal pendek + HH:MM (bukan toLocaleString)', async () => {
+  const { fmtTimeShort, fmtTime } = await import(new URL('../js/ui.js', import.meta.url).href);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 5, 0);
+  assert.equal(fmtTimeShort(today.getTime()), '09:05', 'hari ini hanya jam');
+  const older = new Date(2026, 0, 3, 23, 59, 0);
+  assert.match(fmtTimeShort(older.getTime()), /^\d{1,2} [A-Za-z]{3}\.? 23:59$/,
+    'tahun sama: tanggal pendek + jam — dapat: ' + fmtTimeShort(older.getTime()));
+  assert.notEqual(fmtTimeShort(today.getTime()), fmtTime(today.getTime()),
+    'pendek, bukan toLocaleString panjang');
+  assert.equal(typeof fmtTimeShort(null), 'string', 'null → string, tidak melempar');
+  assert.equal(typeof fmtTimeShort(1790000000000n), 'string', 'bigint tidak melempar');
+});

@@ -11,6 +11,7 @@ import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import * as wallet from './wallet.js';
 import { resolveMax, verifySpendable } from './max-ui.js';
 import { buildFeeParams } from './fee-params.js';
+import { initTokenPicker } from './token-picker.js';
 
 const { ethers } = globalThis;
 const BROADCAST_TIMEOUT_MS = 15000; // 15s for broadcast
@@ -102,6 +103,10 @@ export function loadSendTokens() {
   sel.innerHTML = get('tokens').map(t =>
     `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)} (${escapeHtml(fmtAmount(t.balance, t.decimals))})</option>`
   ).join('');
+  // In-app chooser like Swap/Bridge: a native select's option list is an OS
+  // popup that escapes the page on a phone (live report: Send's picker did
+  // "keluar dari screen" and looked nothing like Swap's).
+  initTokenPicker('sendToken', get('tokens') || []);
   updateSendTokenBalance();
   // The list above is a snapshot from the last dashboard render. Funds can
   // arrive after it — a bridge landing, a tab opened in the morning, a receive
@@ -138,6 +143,7 @@ export async function refreshSendBalances() {
       `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)} (${escapeHtml(fmtAmount(t.balance, t.decimals))})</option>`
     ).join('');
     if (before) el.value = before;   // do not move the user's selection
+    initTokenPicker('sendToken', kept);
     updateSendTokenBalance();
   } catch { /* keep the snapshot — a stale number beats an empty form */ }
 }
@@ -164,7 +170,9 @@ export async function updateSendPreview() {
   try {
     const provider = get('provider');
     if (provider) {
-      const feeData = await provider.getFeeData();
+      // Bounded like the rest: a dead node must leave "Est. gas" on "—"
+      // within 8s, not freeze the Send screen for 300s (ethers' default).
+      const feeData = await withTimeout(provider.getFeeData(), RPC_TIMEOUT_MS, 'preview fee');
       const gasLimit = tokenSel === 'native' ? 21000n : 65000n;
       // Show the number doSend will actually reserve: the worst-case cap at
       // the SELECTED speed (same buildFeeParams the send check uses). The old
@@ -284,13 +292,21 @@ export async function doSend() {
   // Then catch an unspendable amount. MAX already reserves the fee, but the
   // balance can move between pressing MAX and pressing Send, and the
   // alternative to checking here is a node error the user cannot act on.
-  const spend = await verifySpendable({
-    amount: amt,
-    token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
-    provider: get('provider'),
-    from: get('address'),
-    to,
-  });
+  // Bounded to the app's 8s RPC budget: without it a silent endpoint held
+  // this await for ethers' 300s default fetch timeout — no toast, no modal,
+  // a Send button that "does nothing at all". Timeout = visible failure, fast.
+  let spend;
+  try {
+    spend = await withTimeout(verifySpendable({
+      amount: amt,
+      token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+      provider: get('provider'),
+      from: get('address'),
+      to,
+    }), RPC_TIMEOUT_MS, 'balance check');
+  } catch (e) {
+    return toast(`Balance check failed: ${e?.shortMessage || e?.message || e}`, 'error');
+  }
   if (!spend.ok) return toast(spend.message, 'error');
 
   // mainnet safety
@@ -338,9 +354,12 @@ export async function doSend() {
 
     let feeData;
     try {
-      feeData = await provider.getFeeData();
+      // Bounded: getFeeData fans out three parallel RPCs underneath; against
+      // a silent node this await used to sit until ethers' 300s default
+      // fetch timeout before the catch below ever ran.
+      feeData = await withTimeout(provider.getFeeData(), RPC_TIMEOUT_MS, 'fee data');
     } catch (e) {
-      return toast(`Gas estimation failed: ${e.message}`, 'error');
+      return toast(`Gas estimation failed: ${e?.shortMessage || e?.message || e}`, 'error');
     }
 
     // Speed reaches the WIRE, not just the modal row: buildFeeParams applies
@@ -367,7 +386,7 @@ export async function doSend() {
       }
       // Check balance vs amount + gas
       try {
-        const bal = await provider.getBalance(signer.address);
+        const bal = await withTimeout(provider.getBalance(signer.address), RPC_TIMEOUT_MS, 'balance');
         const gasLimit = 21000n;
         const gasCost = gasLimit * worstFee;
         if (value + gasCost > bal) {

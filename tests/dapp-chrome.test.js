@@ -144,3 +144,29 @@ test('the bottom bar is drawn and thumb-sized', () => {
   assert.match(css, /--net-color/, 'badge takes the chain colour as a custom property');
   assert.ok(!/\.dbr-top[^}]*flex-wrap: wrap/.test(css), 'the top bar must not wrap');
 });
+
+test('home categories wear OKX-style icon tiles; bookmark chips keep the pill face', () => {
+  // Same face-lift on the overlay home ("rombak UI/UX dApps, ikon OKX"). The
+  // base .dbr-chip class is shared by the category row AND the bookmark/recent
+  // chips, so only the .dbr-chip-cat modifier may restyle — a blanket change
+  // would repaint rows that are fine as pills.
+  assert.match(src, /class="dbr-chip dbr-chip-cat[^"]*"/,
+    'the category row carries the tile modifier (bookmark chips must not)');
+  assert.ok(src.includes('dbr-chip-ic'), 'each category chip carries an icon tile span');
+  assert.ok(/dbr-chip-cat[^>]*--cat:/.test(src), 'tile colour rides as --cat inline');
+
+  // CSS: tile faces exist for both surfaces, and cards wear a logo tile too.
+  assert.match(css, /\.dbr-chip-ic\s*\{/, 'browser tile face style must exist');
+  assert.match(css, /\.dbr-chip-cat\.on\s*\{/, 'active category paints the tile');
+  assert.match(css, /\.dapp-chip-ic\s*\{/, 'view chips get the same tile face');
+  assert.match(css, /\.dapp-icon\s*\{[^}]*border-radius/,
+    'catalogue cards wear a logo tile, not a bare emoji');
+
+  // The dark-theme forced-dark text list exists because the active chip's LABEL
+  // used to sit on a honey fill. The fill moved into the icon tile; keeping the
+  // label in that list would paint it #2D2A32 on the dark background.
+  const at = css.indexOf('.theme-dark :is(');
+  const darkList = css.slice(at, css.indexOf(') {', at));
+  assert.ok(at > -1 && !darkList.includes('.dapp-chip.active'),
+    'the active chip label no longer sits on a fill — drop it from the forced-dark list');
+});

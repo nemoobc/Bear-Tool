@@ -175,3 +175,24 @@ test('repainting with no active view is a no-op, not a throw', () => {
   assert.equal(app.repaintActiveView(), false, 'nothing active means nothing to repaint');
   set('address', null);
 });
+
+test('category chips are icon tiles and the filter contract survives the face-lift', () => {
+  // live: "rombak UI/UX dApps (…, ikon OKX)" — the text pill row becomes an
+  // OKX-style row of icon tiles. The filter binds on .dapp-chip + data-cat and
+  // announces aria-pressed, so all three must ride along with the new face.
+  set('address', null);
+  nodes.clear();
+  const box = container();
+  app.refreshView('dapps');
+  const html = box.innerHTML;
+
+  const cats = [...new Set(POPULAR_DAPPS.map((d) => d.category))];
+  assert.equal((html.match(/dapp-chip-ic/g) || []).length, cats.length + 1,
+    'every chip (All + each category) must carry an icon tile');
+  assert.ok(html.includes('class="dapp-chip'), '.dapp-chip is what the click handler binds');
+  assert.ok(html.includes('data-cat='), 'filter keys on data-cat');
+  assert.ok((html.match(/aria-pressed=/g) || []).length >= cats.length + 1,
+    'each chip announces its pressed state');
+  assert.ok(/class="dapp-chip[^>]*--cat:/.test(html),
+    'each chip declares its tile colour as a --cat custom property');
+});

@@ -136,6 +136,20 @@ const KYBER_CHAIN_SLUG = {
 // ── simple quote cache
 let quoteCache = { key: null, data: null, ts: 0 };
 
+// Native ↔ its wrapped twin has NO pool between them: every DEX quote for
+// this pair dies with a pair/pool error (live report 2026-10-03: "pair eth ->
+// weth error" on the sepolia fork). The WETH contract IS the route —
+// deposit()/withdraw() are exactly 1:1, no slippage, no router, no allowance.
+// Returns 'deposit' | 'withdraw' | null.
+export function wrapDirection(chainId, from, to) {
+  const weth = CHAIN_WETH[Number(chainId)];
+  if (!weth || !from || !to) return null;
+  const wl = weth.toLowerCase();
+  if (from === 'native' && to !== 'native' && to.toLowerCase() === wl) return 'deposit';
+  if (to === 'native' && from !== 'native' && from.toLowerCase() === wl) return 'withdraw';
+  return null;
+}
+
 function cacheKey(slug, tokenIn, tokenOut, amountIn) {
   return `${slug}:${tokenIn}:${tokenOut}:${amountIn}`;
 }
@@ -222,9 +236,18 @@ export function loadSwapTokens() {
   const opts = tokens.map(t =>
     `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)}</option>`
   ).join('');
+  // Repainting the options must not steal the pair the user already chose —
+  // this re-runs on every view switch and on every refresh, and re-entering
+  // Swap used to snap the form straight back to the defaults.
+  const keepFrom = from.value;
+  const keepTo = to.value;
   from.innerHTML = opts;
   to.innerHTML = opts;
-  if (from.options.length > 1) to.selectedIndex = 1;
+  const stillThere = (sel, v) => !!v && [...sel.options].some(o => o.value === v);
+  if (stillThere(from, keepFrom)) from.value = keepFrom;
+  else from.selectedIndex = 0;
+  if (stillThere(to, keepTo)) to.value = keepTo;
+  else if (to.options.length > 1) to.selectedIndex = 1;
 
   // Show an in-app chooser with logos on top of the native select, which stays
   // authoritative. A native select's option list is an OS popup that escapes
@@ -310,29 +333,63 @@ async function kyberBuild(slug, routeSummary, sender, recipient, slippageBps) {
 }
 
 // ── ParaSwap: fetch swap quote + build ──
-async function paraswapQuote(chainId, tokenIn, tokenOut, amountIn, fromAddr, slippageBps) {
+//
+// Measured 2026-10-03 against api.paraswap.io with NO credential:
+//   GET  /prices/?srcToken=…&destToken=…&amount=…&srcDecimals=…&destDecimals=…
+//            &side=SELL&network=…&slippage=0.5     → 200 { priceRoute }
+//   (the previous path-style /prices/1/0x…/0x…/amount answers
+//    400 {"error":"Invalid tokens"} — it is why this was rewritten)
+//   POST /transactions/{network}                   → 200 { to, data, value, … }
+//        (400 "Cannot specify both slippage and destAmount" if slippage is
+//         sent alongside a priceRoute that already carries destAmount)
+//
+// ignoreChecks: the build runs at QUOTE time, before doSwap's approve step.
+// ParaSwap gates its build on balance + TokenTransferProxy allowance, and the
+// allowance for a fresh token only exists AFTER that approve — gating here
+// would deadlock: no quote → no approval → no quote. The chain still enforces
+// everything at execution; ignoreChecks only skips a premature duplicate of
+// checks the executor already owns.
+//
+// approveTo: priceRoute.tokenTransferProxy is the contract that actually PULLS
+// the tokens. The calldata goes to a different address (Augustus, tx.to), and
+// a plain `approve(tx.to, …)` passes the send and then fails the swap.
+async function paraswapQuote(chainId, tokenIn, tokenOut, amountIn, fromAddr, slippageBps, srcDecimals, dstDecimals) {
   // tokenIn/Out: use NATIVE_SENTINEL for native
   const srcToken = tokenIn === NATIVE_SENTINEL ? '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' : tokenIn;
   const dstToken = tokenOut === NATIVE_SENTINEL ? '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' : tokenOut;
-  const url = `${PARASWAP_API}/prices/${chainId}/${srcToken}/${dstToken}/${amountIn}?side=SELL&slippage=${slippageBps / 100}`;
-  const res = await fetchWithTimeout(url);
+  const url = `${PARASWAP_API}/prices/?srcToken=${srcToken}&destToken=${dstToken}` +
+    `&amount=${amountIn}&srcDecimals=${srcDecimals}&destDecimals=${dstDecimals}` +
+    `&side=SELL&network=${chainId}&slippage=${slippageBps / 100}`;
+  const res = await fetchWithTimeout(url, { headers: { accept: 'application/json' } });
   if (!res.ok) throw new Error(`ParaSwap quote HTTP ${res.status}`);
   const json = await res.json();
-  if (!json.priceRoute?.destAmount) throw new Error('ParaSwap: empty quote');
-  // Now build tx
-  const buildUrl = `${PARASWAP_API}/transactions/${chainId}`;
-  const buildRes = await fetchWithTimeout(buildUrl, {
+  const priceRoute = json.priceRoute;
+  if (!priceRoute?.destAmount) throw new Error('ParaSwap: empty quote');
+  const buildRes = await fetchWithTimeout(`${PARASWAP_API}/transactions/${chainId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({
-      srcToken, dstToken, srcAmount: amountIn, destAmount: json.priceRoute.destAmount,
-      userAddress: fromAddr, slippage: slippageBps / 100,
-      priceRoute: json.priceRoute, side: 'SELL',
+      srcToken, destToken: dstToken,
+      srcAmount: amountIn, destAmount: priceRoute.destAmount,
+      userAddress: fromAddr,
+      priceRoute, side: 'SELL', network: chainId,
+      ignoreChecks: true,
     }),
   });
-  if (!buildRes.ok) throw new Error(`ParaSwap build HTTP ${buildRes.status}`);
+  if (!buildRes.ok) {
+    // The API's own message ("Not enough WETH balance", …) beats a bare number.
+    let detail = `HTTP ${buildRes.status}`;
+    try { detail = (await buildRes.json()).error || detail; } catch { /* keep the number */ }
+    throw new Error(`ParaSwap build ${detail}`);
+  }
   const tx = await buildRes.json();
-  return { data: tx.data, routerAddress: tx.to, amountOut: BigInt(json.priceRoute.destAmount) };
+  if (!tx.to || !tx.data) throw new Error('ParaSwap: empty build');
+  return {
+    data: tx.data,
+    routerAddress: tx.to,                       // where the calldata is SENT
+    approveTo: priceRoute.tokenTransferProxy,   // what PULLS the tokens
+    amountOut: BigInt(priceRoute.destAmount),
+  };
 }
 
 // ── get quote — AUTO-ROUTE or user-selected router ──
@@ -383,6 +440,20 @@ export async function getSwapQuote() {
         const built = await kyberBuild(slug, quoteData.routeSummary, userAddr, userAddr, slippageBps);
         const outAmount = BigInt(quoteData.routeSummary.amountOut ?? '0');
         return { source: 'KyberSwap', built, routerAddress: built.routerAddress, outAmount };
+      }
+      case 'paraswap': {
+        // The builder measured unauthenticated (see paraswapQuote) — it was in
+        // the registry and in the dropdown with no case here, so selecting it
+        // fell into the dex default and threw. Quote → approve proxy → send.
+        const ps = await paraswapQuote(
+          net.chainId, tokenIn, tokenOut, amountInWei, userAddr, slippageBps,
+          fromDecimals, toDecimals);
+        return {
+          source: 'ParaSwap',
+          built: { data: ps.data, routerAddress: ps.routerAddress, approveTo: ps.approveTo },
+          routerAddress: ps.routerAddress,
+          outAmount: ps.amountOut,
+        };
       }
       default: {
         // Every on-chain venue goes through the same two builders, chosen by the
@@ -440,6 +511,16 @@ export async function getSwapQuote() {
       `Slippage: ${escapeHtml(slippage)}%`;
   }
 
+  // ── native ↔ wrapped twin: direct WETH deposit/withdraw, never a DEX ──
+  const wrapDir = wrapDirection(net.chainId, from, to);
+  if (wrapDir) {
+    return showResult({
+      source: wrapDir === 'deposit' ? 'Wrap (direct)' : 'Unwrap (direct)',
+      wrap: { weth: CHAIN_WETH[Number(net.chainId)], direction: wrapDir },
+      outAmount: ethers.parseUnits(amt, fromDecimals),
+    });
+  }
+
   // If user selected a specific router, try ONLY that one
   if (selectedRouter !== 'auto') {
     try {
@@ -479,6 +560,33 @@ export async function getSwapQuote() {
     `<div class="quote-error-detail">${escapeHtml(errors.join(' · '))}</div>`;
 }
 
+// ── stale-quote guard ──────────────────────────────────────────────────────
+// The quote is a snapshot of one specific amount, token pair and chain, and the
+// calldata that will be sent was built from that snapshot. Every field the form
+// can move must be read back — `toToken` was WRITTEN into the quote and never
+// checked, so confirming "token in A" could broadcast a route built for token
+// out B: the dialog vouching for a swap the transaction was not.
+//
+// It THROWS instead of returning a message the caller may forget to print, and
+// doSwap turns that into a toast. Checked once before the confirmation dialogs
+// and once more inside runTx, right before approve/broadcast.
+export function assertQuoteFresh(quote, { from, to, chainId, wantWei } = {}) {
+  if (!quote) throw new Error('Get a quote first');
+  if (quote.amountInWei == null || wantWei == null || quote.amountInWei !== wantWei) {
+    throw new Error('Quote is stale — waiting for a fresh one');
+  }
+  if (quote.fromToken && quote.fromToken !== from) {
+    throw new Error('Quote is for a different token — re-quote');
+  }
+  if (quote.toToken && quote.toToken !== to) {
+    throw new Error('Quote stale — ulangi swap');
+  }
+  if (quote.chainId && chainId && Number(quote.chainId) !== Number(chainId)) {
+    throw new Error('Quote is from another network — re-quote');
+  }
+  return true;
+}
+
 // ── execute swap ──
 export async function doSwap() {
   if (!get('unlocked')) { requireUnlock(); return; }
@@ -488,23 +596,22 @@ export async function doSwap() {
   const net = getNetworkById(get('networkId'));
   const quote = get('swapQuote');
   if (!quote) return toast('Get a quote first', 'error');
+  // Activity/dialog text carries SYMBOLS, never raw select values — an 0xfff…
+  // address in an Activity row is unreadable (live report).
+  const dispSym = (v) => v === 'native' ? (net.symbol || 'ETH') : (tokenInfo(v)?.symbol || v);
 
   // The quote is a snapshot of one specific amount, token pair and chain, and
-  // the calldata that will be sent was built from that snapshot. The field can
+  // the calldata that will be sent was built from that snapshot. The form can
   // have moved on since — a 20% button, a paste, a swap of the token select —
   // and then the dialog would vouch for an amount the transaction does not use.
   // Refuse and make it re-quote rather than sign something else.
   const fromDecimals = from === 'native' ? 18 : (tokenInfo(from)?.decimals ?? 18);
   let wantWei = null;
   try { wantWei = ethers.parseUnits(amt, fromDecimals).toString(); } catch { wantWei = null; }
-  if (quote.amountInWei == null || quote.amountInWei !== wantWei) {
-    return toast('Quote is stale — waiting for a fresh one', 'error');
-  }
-  if (quote.fromToken && quote.fromToken !== from) {
-    return toast('Quote is for a different token — re-quote', 'error');
-  }
-  if (quote.chainId && quote.chainId !== Number(net.chainId)) {
-    return toast('Quote is from another network — re-quote', 'error');
+  try {
+    assertQuoteFresh(quote, { from, to, chainId: net.chainId, wantWei });
+  } catch (e) {
+    return toast(e?.message || 'Quote stale — ulangi swap', 'error');
   }
   // Show the slippage the route was actually built with, not a default that
   // was never wired to the active button.
@@ -513,7 +620,7 @@ export async function doSwap() {
   if (net.type === 'mainnet') {
     const ok = await confirmTx({
       title: 'MAINNET SWAP!',
-      rows: [{ k: 'From', v: `${amt} ${from}` }, { k: 'To', v: to }, { k: 'Network', v: net.name }, { k: 'Route', v: quote.source || '?' }],
+      rows: [{ k: 'From', v: `${amt} ${dispSym(from)}` }, { k: 'To', v: dispSym(to) }, { k: 'Network', v: net.name }, { k: 'Route', v: quote.source || '?' }],
       confirmText: 'Swap', danger: true
     });
     if (!ok) return;
@@ -524,8 +631,8 @@ export async function doSwap() {
     title: '✍️ SIGN SWAP',
     rows: [
       { k: 'Network', v: net.name },
-      { k: 'From', v: `${amt} ${from}` },
-      { k: 'To', v: `→ ${to}` },
+      { k: 'From', v: `${amt} ${dispSym(from)}` },
+      { k: 'To', v: `→ ${dispSym(to)}` },
       { k: 'Router', v: quote.source || 'Auto' },
       { k: 'Slippage', v: `${slipPct}%` }
     ],
@@ -535,22 +642,44 @@ export async function doSwap() {
   });
   if (!signOk) return toast('Swap cancelled', 'info');
 
-  if (!quote || quote.simulated || (!quote.built && !quote.uniswap)) {
+  if (!quote || quote.simulated || (!quote.built && !quote.uniswap && !quote.wrap)) {
     return toast('No valid quote — get a route first.', 'error');
   }
 
   await runTx('swap', $('#btnSwap'), async () => {
+    // Last look at the form before anything is signed or sent: the confirm
+    // dialog is not a lock, and a token select moved behind it must not be
+    // broadcast. Same guard, so the pair can never diverge between the dialog
+    // and the wire.
+    assertQuoteFresh(quote, { from, to, chainId: net.chainId, wantWei });
     const provider = get('provider');
     const signer = get('signer').connect(provider);
     const userAddr = get('address');
 
-    // ERC-20 approve if needed (shared by all routes)
-    if (from !== 'native') {
+    // ERC-20 approve if needed (shared by all routes). Wrap/unwrap needs no
+    // allowance: withdraw() burns the caller's own WETH, deposit() pays in ETH.
+    if (from !== 'native' && !quote.wrap) {
       const fromDecimals = tokenInfo(from)?.decimals ?? 18;
       const amountWei = ethers.parseUnits(amt, fromDecimals);
       const router = quote.built ? quote.built.routerAddress : quote.uniswap.router;
+      // ParaSwap sends its calldata to Augustus but the tokens are pulled by
+      // the TokenTransferProxy the priceRoute named — approving `router` there
+      // would broadcast fine and then fail the swap. Kyber/DEX routes carry no
+      // approveTo and keep approving the address they execute through.
+      const approveTo = (quote.built && quote.built.approveTo) || router;
       const c = new ethers.Contract(from, ERC20_ABI, signer);
-      const allowance = await c.allowance(userAddr, router);
+      // Balance BEFORE anything is approved. Broadcasting an approval for
+      // tokens the wallet does not hold costs real gas and then fails at the
+      // router anyway — a pointless two-transaction sequence the user cannot
+      // read. Reading it locally (no extra RPC: the allowance read is already
+      // a call) turns it into one sentence up front.
+      const bal = await c.balanceOf(userAddr);
+      if (bal < amountWei) {
+        throw new Error(
+          `Insufficient ${dispSym(from)} balance — you hold ` +
+          `${ethers.formatUnits(bal, fromDecimals)} ${dispSym(from)}, the swap needs ${amt}`);
+      }
+      const allowance = await c.allowance(userAddr, approveTo);
       if (allowance < amountWei) {
         toast('Approving token...', 'info');
         // The exact amount, not MaxUint256. An unlimited approval is permanent:
@@ -560,7 +689,7 @@ export async function doSwap() {
         // this token, with no second prompt. Approving amountWei limits the
         // exposure to this one swap. The trade-off is a second approval once
         // the allowance is spent, which is the correct order of those two costs.
-        const txApprove = await withTimeout(c.approve(router, amountWei), BROADCAST_TIMEOUT_MS, 'approve broadcast');
+        const txApprove = await withTimeout(c.approve(approveTo, amountWei), BROADCAST_TIMEOUT_MS, 'approve broadcast');
         const { timedOut: approveTimedOut } = await waitForReceipt(txApprove, { timeoutMs: 90000, label: 'approve confirmation' });
         if (approveTimedOut) {
           toast('Approve sent but not confirmed in time. Re-open Swap and try again once it lands.', 'info');
@@ -570,7 +699,20 @@ export async function doSwap() {
     }
 
     let tx;
-    if (quote.built) {
+    if (quote.wrap) {
+      // Direct WETH route (wrapDirection): exactly 1:1, no router, no pool.
+      const w = quote.wrap;
+      const wrapAmt = ethers.parseUnits(amt, 18);
+      const weth = new ethers.Contract(w.weth, [
+        'function deposit() payable',
+        'function withdraw(uint256 wad)',
+      ], signer);
+      tx = await withTimeout(
+        w.direction === 'deposit'
+          ? weth.deposit({ value: wrapAmt })
+          : weth.withdraw(wrapAmt),
+        BROADCAST_TIMEOUT_MS, 'swap broadcast');
+    } else if (quote.built) {
       // KyberSwap aggregator route
       tx = await withTimeout(signer.sendTransaction({
         to: quote.built.routerAddress,
@@ -585,7 +727,7 @@ export async function doSwap() {
       tx = await uniswapV2Swap(signer, u.router, u.tokenIn, u.tokenOut, u.amountIn, u.amountOutMin, userAddr);
     }
     toast('Swap tx sent! ⏳', 'info');
-    addActivity({ hash: tx.hash, type: 'swap', status: 'pending', ts: Date.now(), detail: `${amt} ${from} → ${to}`, symbols: [from, to] });
+    addActivity({ hash: tx.hash, type: 'swap', status: 'pending', ts: Date.now(), detail: `${amt} ${dispSym(from)} → ${dispSym(to)}`, symbols: [from, to] });
     const { receipt, timedOut } = await waitForReceipt(tx);
     if (timedOut) {
       // Sent but not confirmed in time. The pending activity entry is left as
@@ -593,7 +735,7 @@ export async function doSwap() {
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'swap', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${amt} ${from} → ${to}`, symbols: [from, to] });
+    addActivity({ hash: tx.hash, type: 'swap', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${amt} ${dispSym(from)} → ${dispSym(to)}`, symbols: [from, to] });
     toast(receipt.status === 1 ? 'Swap confirmed! 🎉' : 'Swap failed!', receipt.status === 1 ? 'success' : 'error');
     emit('refresh');
   });

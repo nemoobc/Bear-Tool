@@ -25,7 +25,7 @@ test('revoke: revokeDelegation is exported and wired', () => {
 
 test('revoke: revoke path sends a real type-4 tx to ZERO_ADDRESS', () => {
   assert.match(toolsSrc, /EIP7702\.ZERO_ADDRESS/, 'revoke must authorize to the zero address');
-  assert.match(toolsSrc, /authorizeSync\(\{ chainId: net\.chainId, address: EIP7702\.ZERO_ADDRESS, nonce \}\)/, 'must build the authorization');
+  assert.match(toolsSrc, /authorizeSync\(\{ chainId: net\.chainId, address: EIP7702\.ZERO_ADDRESS, nonce: authNonce \}\)/, 'must build the authorization (conditional nonce)');
   assert.match(toolsSrc, /authorizationList: \[authorization\]/, 'must send a type-4 transaction');
   assert.match(toolsSrc, /confirmText: 'Revoke', danger: true/,
     'revoke must still be confirmed explicitly, and marked dangerous');

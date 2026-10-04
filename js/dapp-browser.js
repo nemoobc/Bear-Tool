@@ -34,7 +34,7 @@ import { inspectUrl, classifyInput, VERDICT, renderSignalList, baseHost, matchHo
 import { sanitizeForStore, isSecretishUrl } from './security.js';
 import { getSecurityConfig, addBlockedHost, addTrustedHost, clearBrowsingData, listBlocked, listTrusted } from './dapp-sessions.js';
 import { openPairWalletConnect } from './walletconnect.js';
-import { get, on } from './state.js';
+import { get, set, on } from './state.js';
 import { getNetworkById } from './network.js';
 
 const LS = {
@@ -47,6 +47,9 @@ const LS = {
 const SEARCH_URL = 'https://duckduckgo.com/?q=';
 
 let catalog = [];
+/** Category face (glyph + tile colour) injected with the catalogue — the
+ *  discovery view owns the palette, this overlay only renders it. */
+let catStyles = {};
 let seq = 1;
 let tabs = [];
 let activeId = null;
@@ -164,6 +167,12 @@ const SHELL = `
   </div>
   <div class="dbr-tabs" id="dbrTabs" role="tablist" aria-label="Open tabs"></div>
   <div class="dbr-menu" id="dbrMenuPop" hidden role="menu"></div>
+  <div class="dbr-wc-hint" id="dbrWcHint" hidden>
+    <span class="dbr-wc-hint-txt">This site can't see the wallet directly — in the site choose
+      <strong>Connect -&gt; WalletConnect</strong>, copy the <code>wc:</code> link, then pair here.</span>
+    <button class="dbr-wc-btn" id="dbrWcPair" type="button" title="Pair via WalletConnect" aria-label="Pair via WalletConnect">🔗</button>
+    <button class="dbr-wc-btn" id="dbrWcHintX" type="button" title="Dismiss this hint" aria-label="Dismiss WalletConnect hint">✕</button>
+  </div>
   <div class="dbr-stage" id="dbrStage">
     <div class="dbr-home" id="dbrHomePage"></div>
     <div class="dbr-loading" id="dbrLoading" role="status" hidden>
@@ -216,6 +225,9 @@ function build() {
     loadingTxt: overlay.querySelector('#dbrLoadingTxt'),
     frame: overlay.querySelector('#dbrFrame'),
     blocked: overlay.querySelector('#dbrBlocked'),
+    wcHint: overlay.querySelector('#dbrWcHint'),
+    wcPair: overlay.querySelector('#dbrWcPair'),
+    wcHintX: overlay.querySelector('#dbrWcHintX'),
   };
 
   wire();
@@ -312,6 +324,10 @@ const originOf = (u) => { try { return new URL(u).origin.toLowerCase(); } catch 
 const securityOpts = () => ({ blockedHosts: listBlocked(), trustedHosts: listTrusted() });
 
 // ── the home / discover page ─────────────────────────────────────────────
+/** Glyph + colour for a category chip — injected via initDappBrowser; a
+ *  category the palette does not know renders a neutral tile, never nothing. */
+const catFace = (name) => catStyles[name] || { glyph: '📁', color: '#94A3B8' };
+
 function paintHome() {
   const cats = [...new Set(catalog.map((d) => d.category))];
   const recent = read(LS.history, []).slice(0, 8);
@@ -331,9 +347,12 @@ function paintHome() {
     <div class="dbr-sec-h">◆ Loadable in-app <span class="small dim">(${known.length} verified frameable)</span></div>
     <div class="dbr-grid">${known.map(cardHTML).join('')}</div>
     <div class="dbr-sec-h">▦ All ${catalog.length} DApps</div>
-    <div class="dbr-chips" role="group" aria-label="Filter by category">
-      <button class="dbr-chip on" data-cat="">All</button>
-      ${cats.map((c) => `<button class="dbr-chip" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join('')}
+    <div class="dbr-chips dbr-cats" role="group" aria-label="Filter by category">
+      ${['', ...cats].map((c, i) => {
+        const face = catFace(c || 'All');
+        const label = c || 'All';
+        return `<button class="dbr-chip dbr-chip-cat${i === 0 ? ' on' : ''}" data-cat="${escapeHtml(c)}" aria-pressed="${i === 0}" style="--cat:${face.color}"><span class="dbr-chip-ic" aria-hidden="true">${face.glyph}</span><span class="dbr-chip-lb">${escapeHtml(label)}</span></button>`;
+      }).join('')}
     </div>
     <div class="dbr-grid" id="dbrGridAll">${catalog.map(cardHTML).join('')}</div>
     <p class="small dim" id="dbrNoMatch" hidden>No DApp matches that filter.</p>`;
@@ -365,8 +384,8 @@ function paintHome() {
 
 const cardHTML = (d) => `
   <button class="dbr-card" data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}"
-          data-category="${escapeHtml(d.category || '')}">
-    <span class="dbr-card-ic" aria-hidden="true">${d.icon || '◈'}</span>
+          data-category="${escapeHtml(d.category || '')}" style="--cat:${catFace(d.category || '').color}">
+    <span class="dbr-card-ic" aria-hidden="true">${escapeHtml(d.icon || '◈')}</span>
     <span class="dbr-card-nm">${escapeHtml(d.name)}</span>
     <span class="dbr-card-ct">${escapeHtml(d.category || '')}${d.frameable === false ? ' ↗' : ''}</span>
   </button>`;
@@ -380,6 +399,14 @@ const cardHTML = (d) => `
  * @returns {boolean} whether the load went ahead
  */
 function navigate(rawUrl, name) {
+  // A wc: URI typed or pasted here is a pairing request, not a search query —
+  // classifyInput would send it to the local search results instead.
+  const rawTrim = String(rawUrl || '').trim();
+  if (rawTrim.toLowerCase().startsWith('wc:')) {
+    openPairWalletConnect(rawTrim);
+    el.url.value = active()?.url || '';
+    return false;
+  }
   const verdict = classifyInput(rawUrl);
 
   if (verdict.kind === 'blocked') {
@@ -838,11 +865,22 @@ function wire() {
   });
   el.url.addEventListener('focus', () => el.url.select());
 
+  // The one honest instruction at the exact moment it matters: the site is
+  // loaded and its own Connect button cannot reach the wallet from inside the
+  // sandbox. Pair button + dismiss (persisted) — the menu row and the omnibox
+  // wc: route remain for anyone who dismisses it.
+  el.wcPair.addEventListener('click', () => openPairWalletConnect());
+  el.wcHintX.addEventListener('click', () => {
+    set('dappWcHint', 'dismissed');
+    el.wcHint.hidden = true;
+  });
+
   // No page, no spinner: both real failures (error) and the silent one (neither
   // event ever arrives) end on the same screen with a way out.
   el.frame.addEventListener('load', () => {
     clearLoadTimers();
     el.loading.hidden = true;
+    if (el.wcHint) el.wcHint.hidden = get('dappWcHint') === 'dismissed';
     // A page that finally finishes AFTER the timeout sheet appeared replaces the
     // sheet with the real content — it is only about the load that just ended.
     if (el.blocked.querySelector('.dbr-report[data-kind="didnotload"]')) el.blocked.hidden = true;
@@ -901,6 +939,7 @@ function wire() {
  *  know about the discovery view and the gate stays testable on its own. */
 export function initDappBrowser(cfg = {}) {
   catalog = cfg.catalog || [];
+  catStyles = cfg.catStyle || {};
 }
 
 export function openDappBrowser(url, name) {

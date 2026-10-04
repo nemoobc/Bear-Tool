@@ -102,7 +102,9 @@ test('nav: Bridge shares the Swap button (one entry, second click chooses)', () 
     'separate Bridge sidebar item must be gone');
   assert.match(html, /class="nav-item nav-item-highlight" data-view="swap"/, 'Swap item stays');
   assert.match(html, /id="view-bridge"/, 'Bridge view must still exist');
-  assert.match(app, /if \(view === 'swap' && \$\('#view-swap'\)\?\.classList\.contains\('active'\)\) \{\s*showSwapBridgeChooser\(\);/,
+  assert.match(app, /const onSwapSide = \$\('#view-swap'\)\?\.classList\.contains\('active'\)\s*\|\|\s*\$\('#view-bridge'\)\?\.classList\.contains\('active'\);/,
+    'chooser must trigger from EITHER side — swap active OR bridge active (live report 2026-10-03: from Bridge the re-click skipped the chooser)');
+  assert.match(app, /if \(view === 'swap' && onSwapSide\) \{\s*showSwapBridgeChooser\(\);/,
     're-clicking Swap must open the chooser');
   assert.match(app, /function showSwapBridgeChooser\(\)/);
   assert.match(app, /const navView = view === 'bridge' \? 'swap' : view;/,
@@ -141,4 +143,69 @@ test('wallet name field: create/import forms collect a name, auto-named when bla
   assert.match(app, /wallet\.createWallet\(p1, \$\('#createName'\)\.value\)/, 'name must be passed to createWallet');
   assert.match(app, /wallet\.importWallet\(secret, pw, \$\('#importName'\)\.value\)/, 'name must be passed to importWallet');
   assert.match(app, /a\.name \|\| `Account \$\{i \+ 1\}`/, 'account list must prefer the saved name');
+});
+
+test('dashboard: saldo auto-refresh — visibilitychange + tick 60s, soft tanpa blank', () => {
+  // live report: "saldo ngga auto refresh"
+  assert.match(app, /function refreshDashboardBalance/,
+    'refresh entry point must exist');
+  assert.match(app, /addEventListener\('visibilitychange'/,
+    'tab kembali terlihat → saldo di-refresh');
+  assert.match(app, /setInterval\(refreshDashboardBalance, 60000\)/,
+    'ada tick berkala selama dashboard terbuka');
+  const at = app.indexOf('function refreshDashboardBalance');
+  const body = app.slice(at, app.indexOf('\n}', at));
+  assert.match(body, /get\('unlocked'\)/, 'wallet terkunci → tidak refresh');
+  assert.match(body, /document\.hidden/, 'tab tersembunyi → tidak refresh');
+  assert.match(body, /dashboard/, 'bukan tampilan dashboard → tidak refresh');
+  assert.match(body, /soft: true/, 'refresh jalan soft (tanpa spinner)');
+  // loadDashboard({soft:true}) must keep the current rows until the new
+  // snapshot lands — a spinner flash every minute is worse than a balance
+  // that is seconds old.
+  assert.match(app, /async function loadDashboard\(opts = \{\}\)/,
+    'loadDashboard must accept options');
+  assert.match(app, /if \(!soft\) assetList\.innerHTML = spinner/,
+    'spinner hanya untuk load penuh');
+  assert.match(app, /if \(!soft\)[\s\S]{0,220}loadNfts\(\)/,
+    'scan NFT lambat tidak dijalankan tiap tick refresh');
+
+  // Komentar di atas refreshDashboardBalance pernah mengklaim timer dipasang
+  // "in boot()" — padahal boot() baru didefinisikan BELUM tentu dipanggil,
+  // dan kedua pemicu itu terpasang langsung di listener DOMContentLoaded.
+  // Komentar yang salah lokasi membuat pembaca berikutnya "memperbaiki" kode
+  // yang sudah benar.
+  const listenerAt = app.indexOf(`window.addEventListener('DOMContentLoaded'`);
+  const timerAt = app.indexOf('setInterval(refreshDashboardBalance, 60000)');
+  const bootAt = app.indexOf('const boot = () =>');
+  assert.ok(listenerAt > -1 && timerAt > listenerAt && timerAt < bootAt,
+    'tick 60s + visibilitychange harus terpasang di listener DOMContentLoaded (sebelum boot didefinisikan)');
+  assert.match(app, /DOMContentLoaded handler at the top of this file/,
+    'komentar harus menunjuk lokasi yang benar');
+  assert.doesNotMatch(app, /Wired in boot\(\)/,
+    'klaim "Wired in boot()" sudah terbukti salah');
+});
+
+test('dashboard: refresh mode soft yang gagal TIDAK mengosongkan daftar saldo', () => {
+  // Kontrak di loadDashboard: soft = gagal → daftar lama dibiarkan. Menulis
+  // `assetList.innerHTML = error…` tanpa syarat membuat satu RPC yang gagal
+  // pada tick 60s menghapus seluruh daftar koin sampai tick berikutnya sukses.
+  const start = app.indexOf('async function loadDashboard');
+  const end = app.indexOf('function currentView()', start);
+  assert.ok(start > -1 && end > start, 'loadDashboard harus ditemukan');
+  const body = app.slice(start, end);
+  const cat = body.lastIndexOf('} catch (e) {');
+  assert.ok(cat > -1, 'loadDashboard must have an error path at all');
+  const tail = body.slice(cat);
+
+  assert.match(tail, /if \(!soft\) \{\s*assetList\.innerHTML = `<p class="small text-center">/,
+    'the error paragraph must sit behind the !soft gate');
+  assert.match(tail, /console\.warn\('\[BearTool\] asset list failed:'/,
+    'a soft failure is still logged, not swallowed');
+  const withoutGuarded = tail.replace(
+    /if \(!soft\) \{[\s\S]*?assetList\.innerHTML = `<p class="small text-center">/, '');
+  assert.ok(!withoutGuarded.includes('assetList.innerHTML = `<p'),
+    'ada tulis error assetList di luar gerbang !soft — mode soft akan mengosongkan daftar');
+  // and the hard path is not gutted: a full load still explains itself
+  assert.match(body, /assetList\.innerHTML = `<p class="small text-center">/,
+    'mode penuh tetap menampilkan pesan error');
 });

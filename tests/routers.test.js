@@ -149,3 +149,62 @@ test('routers: no hardcoded secrets', () => {
   const noSecret = !src.match(/qYSDUOSxp6|sk-[A-Za-z0-9]{20,}|-----BEGIN.*PRIVATE/);
   assert.ok(noSecret);
 });
+
+test('paraswapQuote: query-param prices API + approve target taken from the priceRoute', () => {
+  // Measured 2026-10-03 against api.paraswap.io unauthenticated:
+  //   path-style  /prices/1/0x…/0x…/amount   → 400 {"error":"Invalid tokens"}
+  //   query-style /prices/?srcToken=…        → 200 {priceRoute} full quote
+  // The priceRoute also carries tokenTransferProxy — the contract that pulls
+  // the tokens, which is NOT the address the calldata is sent to (Augustus).
+  const fn = swapSrc.slice(swapSrc.indexOf('async function paraswapQuote'),
+                           swapSrc.indexOf('// ── get quote'));
+  assert.match(fn, /prices\/\?srcToken=/,
+    'prices must be fetched from the query-param endpoint, not the dead path style');
+  assert.match(fn, /srcDecimals=/, 'the modern endpoint needs srcDecimals');
+  assert.match(fn, /destDecimals=/, 'the modern endpoint needs destDecimals');
+  assert.match(fn, /tokenTransferProxy/,
+    'approveTo must come from the priceRoute — no hardcoded proxy table');
+  assert.match(fn, /ignoreChecks/,
+    'build runs at quote time, BEFORE doSwap approves — gating on allowance deadlocks: no quote → no approval → no quote');
+  assert.match(fn, /approveTo:/, 'the returned build must carry the proxy address');
+});
+
+test('tryRouter wires paraswap, and doSwap approves built.approveTo when present', () => {
+  // Wiring is the actual bug: the function existed and was never called.
+  assert.match(swapSrc, /case 'paraswap'[\s\S]{0,500}paraswapQuote\(/,
+    "case 'paraswap' must call paraswapQuote");
+  assert.match(swapSrc, /built\.approveTo/,
+    'doSwap must approve the proxy the priceRoute names when the route carries one');
+});
+
+test('komentar DLN: klaim "five probes" cocok dengan daftar probe di komentar itu sendiri', () => {
+  // Komentar ini menolak satu aggregator berdasarkan pengukuran. Sebuah klaim
+  // "five probes" dengan satu artefak adalah klaim yang tak terbukti — jadi
+  // yang diuji: jumlahnya harus lima, bernomor berurutan, dengan status yang
+  // disebut, dan tidak boleh menyebut jalur yang tidak ada di daftar.
+  const at = src.indexOf('deBridge DLN');
+  assert.ok(at > -1, 'alasan DLN ditolak harus tetap tertulis');
+  const block = src.slice(at, src.indexOf('export const BRIDGE_ROUTERS'));
+  assert.match(block, /400 \/ 150 bytes/, 'status + ukuran body yang diukur harus disebut');
+  assert.match(block, /five of them/, 'jumlah probe disebut eksplisit');
+  const numbered = [...block.matchAll(/\((\d)\)/g)].map((m) => m[1]);
+  assert.deepEqual(numbered, ['1', '2', '3', '4', '5'],
+    `daftar probe harus tepat lima dan berurutan, bukan ${numbered.length} entri`);
+  for (const p of ['/v1/chainPairs', '/v1/quote', '/v1/order-book']) {
+    assert.ok(block.includes(p), `jalur yang diklaim diuji harus tertulis: ${p}`);
+  }
+
+  // Bukti fisik ikut diuji: klaim komentar = isi folder fixture.
+  const fx = new URL('./fixtures/dln/', import.meta.url);
+  const status = readFileSync(new URL('status.txt', fx), 'utf8').trim().split('\n');
+  assert.equal(status.length, 5, 'status.txt harus memuat lima probe');
+  for (const line of status) {
+    assert.match(line, /^\d: HTTP 400 \/ 150 bytes$/, `probe tidak 400/150: ${line}`);
+  }
+  const bodies = [1, 2, 3, 4, 5].map((n) =>
+    readFileSync(new URL(`body_dln${n}`, fx)));
+  assert.ok(bodies.every((b) => b.equals(bodies[0])),
+    'kelima body harus identik (nginx 400 polos, bukan JSON)');
+  assert.ok(block.includes('tests/fixtures/dln/'),
+    'komentar harus menunjuk bukti yang benar-benar ada di repo');
+});

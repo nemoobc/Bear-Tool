@@ -207,14 +207,19 @@ test('a reverted deploy is not recorded as a deployed token', () => {
 // it, so a private key sat in the live DOM for the rest of the session.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('the sponsor key is wiped from the DOM once it validates', () => {
+test('sponsor keys never sit in the document', () => {
   const t = read('js/eip7702-tools.js');
   const validations = t.match(/return toast\('Invalid sponsor private key', 'error'\);/g) || [];
-  assert.equal(validations.length, 4, 'there are four sponsor-key entry points');
-  const wipes = t.match(/wipeKeyField\('#rescueSponsorKey'\); wipeKeyField\('#claimSponsorKey'\);/g) || [];
-  assert.equal(wipes.length, 4,
-    'every entry point must clear the field after validation, so a valid key ' +
-    'does not sit in the document for the rest of the session');
+  assert.equal(validations.length, 5, 'there are five sponsor-key entry points (revoke now has one too)');
+  // The old contract was "wipe the input after validation". The input is gone
+  // (2026-10-03): sponsor keys are derived from the keystore by
+  // sponsorKeyFromPicker() and never enter the DOM — so the guard is now
+  // "no field to leak into + every entry point goes through the picker".
+  const view = read('src/views/deploy.jsx');
+  assert.ok(!/id="rescueSponsorKey"/.test(view) && !/id="claimSponsorKey"/.test(view),
+    'no sponsor-key input exists — there is nothing to leave a key in');
+  assert.equal((t.match(/sponsorKeyFromPicker\(/g) || []).length, 6,
+    'the picker helper is defined once and used by all five entry points (revoke included)');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,11 +231,44 @@ test('the sponsor key is wiped from the DOM once it validates', () => {
 
 test('the swap router is approved for the amount being swapped, not the maximum', () => {
   const s = read('js/swap.js');
-  assert.doesNotMatch(s, /approve\(\s*\w+\s*,\s*ethers\.MaxUint256\s*\)/,
-    'an unlimited approval hands the router a permanent right to the whole ' +
-    'balance; approve the exact amountWei instead');
-  assert.match(s, /approve\(\s*router\s*,\s*amountWei\s*\)/,
+  // Comments are stripped so a rule quoted in prose cannot satisfy the check —
+  // the very failure mode section 1 of this file documents.
+  const code = s
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+
+  const unlimited = [
+    /approve\(\s*[^,()]*,\s*\(?\s*(?:ethers\.)?MaxUint256\b/,
+    // The bigint spelling of the same number: 2n ** 256n (and 2n**256n).
+    /approve\(\s*[^,()]*,\s*\(?\s*2n\s*\*\*\s*256n/,
+  ];
+  for (const re of unlimited) {
+    assert.doesNotMatch(code, re,
+      `an unlimited approval hands the router a permanent right to the whole ` +
+      `balance; approve the exact amountWei instead (${re})`);
+  }
+  // A detector that cannot fail is not a detector: every pattern must catch
+  // the shape it exists to catch, or the gate above is decorative.
+  for (const sample of [
+    'c.approve(router, ethers.MaxUint256)',
+    'c.approve(approveTo, MaxUint256)',
+    'c.approve(router, 2n ** 256n)',
+    'c.approve(router, 2n**256n)',
+  ]) {
+    assert.ok(unlimited.some((re) => re.test(sample)),
+      `pola detektor tidak mengenali bentuk unlimited approval: ${sample}`);
+  }
+
+  // Target: `approveTo` when the route names a separate transfer proxy
+  // (ParaSwap pulls via tokenTransferProxy — NOT the address the calldata is
+  // sent to), `router` for every other route. Both are local names, both exact
+  // amount — the point of this test is the amount, never an unlimited grant.
+  assert.match(code, /approve\(\s*(?:router|approveTo)\s*,\s*amountWei\s*\)/,
     'the approval must cover this swap, so the next one asks again');
+  // …and the proxy it names must be the one the quote carried, read from
+  // priceRoute — a hardcoded proxy table is how the two ever drift apart.
+  assert.match(code, /approveTo:\s*priceRoute\.tokenTransferProxy/,
+    'the ParaSwap approval target must be priceRoute.tokenTransferProxy');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

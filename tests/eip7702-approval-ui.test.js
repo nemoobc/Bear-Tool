@@ -70,6 +70,32 @@ test('the check button disables itself while it runs, and comes back', () => {
   assert.match(app, /finally \{\s*\n\s*if \(btn\) \{ btn\.disabled = false/, 'released even on throw');
 });
 
+test('#btnClearLogs hanya muncul kalau ≥1 jaringan benar-benar di-check', () => {
+  // `scanned` dulu diisi literal `true` setelah panggilan tidak melempar, jadi
+  // tombol Delete logs selalu muncul — termasuk ketika nihil jaringan di-check
+  // dan tidak ada log baru sama sekali.
+  const start = app.indexOf('async function runEip7702Check(');
+  const end = app.indexOf('function renderActivity(', start);
+  assert.ok(start > -1 && end > start, 'runEip7702Check harus ditemukan');
+  const body = app.slice(start, end);
+
+  assert.match(body, /const results = await checkAllNetworks\(/,
+    'nilai kembalian checkAllNetworks harus dibaca');
+  assert.match(body, /scanned = Array\.isArray\(results\) && results\.length > 0/,
+    'scanned = ada minimal SATU hasil, bukan literal true');
+  assert.doesNotMatch(body, /scanned = true/,
+    'flag yang selalu benar membuat reveal tidak pernah bisa menolak');
+  assert.match(body, /if \(clearBtn\) clearBtn\.hidden = !scanned/,
+    'reveal tetap memakai flag itu');
+  assert.match(body, /catch \(e\) \{[\s\S]{0,300}clearBtn\.hidden = !scanned/,
+    'jalur gagal tetap lewat finally yang memakai flag yang sama');
+  // checkAllNetworks mengembalikan satu hasil per jaringan yang ditelusuri
+  // (js/eip7702-support.js:175-183) — kontrak yang diandalkan di atas.
+  const probe = raw('../js/eip7702-support.js');
+  assert.match(probe, /export async function checkAllNetworks[\s\S]{0,300}return results;/,
+    'walker must return the results, or `results.length` is meaningless');
+});
+
 test('the rendered verdicts use pills that exist in the stylesheet', () => {
   for (const cls of ['eip7702-ok', 'eip7702-no', 'eip7702-q', 'eip7702-pill', 'eip7702-rpc']) {
     assert.ok(css.includes(cls), `css carries .${cls}`);

@@ -280,9 +280,53 @@ export function getCustomNetworks() {
   catch { return []; }
 }
 
+// ── network type detection (auto) ─────────────────────────────────────────
+// Testnet chain ids that are neither in NETWORKS nor CHAIN_PRESETS but must
+// still land as testnet when their RPC is pasted into Add Network. Kept
+// explicit: there is no on-chain way to ask "are you a testnet?", and the
+// fallback for an unknown REMOTE chain is deliberately 'mainnet' — mislabelling
+// a testnet mainnet only adds a warning, mislabelling a mainnet testnet
+// removes the danger prompt (live report 2026-10-03: pasting Sepolia's RPC
+// put a MAINNET badge on the network list).
+const TESTNET_CHAIN_IDS = new Set([
+  5,        // Goerli
+  17000,    // Holesky
+  80001,    // Polygon Mumbai
+  43113,    // Avalanche Fuji
+  59140,    // Linea Sepolia
+  534351,   // Scroll Sepolia
+]);
+// Dev chains: anvil/hardhat defaults.
+const LOCAL_DEV_CHAIN_IDS = new Set([1337, 31337]);
+
+/**
+ * Verdict for a chain: 'testnet' | 'mainnet'.
+ * @param {number|string} chainId
+ * @param {string} [rpcUrl] loopback endpoints are dev nodes — including a
+ *   mainnet FORK — and are labelled testnet regardless of the chain id.
+ */
+export function detectNetworkType(chainId, rpcUrl) {
+  try {
+    const h = new URL(String(rpcUrl || '')).hostname.toLowerCase();
+    if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]'
+        || h.endsWith('.localhost')) return 'testnet';
+  } catch { /* not a URL — fall through to the id rules */ }
+  const id = Number(chainId);
+  if (LOCAL_DEV_CHAIN_IDS.has(id)) return 'testnet';
+  // The app's own catalogues already carry a verdict per chain.
+  const known = NETWORKS.find(n => Number(n.chainId) === id)
+    || CHAIN_PRESETS.find(p => Number(p.chainId) === id);
+  if (known) return known.type;
+  if (TESTNET_CHAIN_IDS.has(id)) return 'testnet';
+  return 'mainnet';
+}
+
 export function addCustomNetwork(net) {
   const list = getCustomNetworks();
-  list.push({ ...net, id: 'custom-' + Date.now(), type: net.type || 'mainnet', custom: true });
+  // Fallback type is DETECTED, not assumed mainnet.
+  list.push({ ...net, id: 'custom-' + Date.now(),
+    type: net.type || detectNetworkType(net.chainId, Array.isArray(net.rpc) ? net.rpc[0] : net.rpc),
+    custom: true });
   localStorage.setItem(CUSTOM_KEY, JSON.stringify(list));
   return list;
 }
@@ -367,7 +411,20 @@ export function getNetworkById(id) {
 
 // try RPCs in order, return first working provider
 export async function getProvider(chainId) {
-  const net = getNetwork(chainId);
+  // The ACTIVE network wins when it carries this chainId. getNetwork() finds
+  // the FIRST chainId match in [...NETWORKS, ...custom], so a user endpoint
+  // added for an existing chain (Add Network → paste 127.0.0.1:8546 → chain
+  // 11155111) was shadowed by the builtin entry: the picker showed the custom
+  // network as active while every call silently ran on the default public
+  // node — a funded fork read as balance 0 (live bug; the same silent-
+  // substitution class the override refusal below was written against).
+  // ChainId mismatches fall through to the old lookup, so cross-chain
+  // getProvider(chainId) callers behave exactly as before.
+  const activeId = get('networkId');
+  const active = getAllNetworks().find(
+    (n) => n.id === activeId && n.chainId === Number(chainId),
+  );
+  const net = active || getNetwork(chainId);
   if (!net) throw new Error('Unknown network chainId ' + chainId);
   const failures = [];
 
@@ -407,7 +464,17 @@ export async function getProvider(chainId) {
       }
     };
     try {
-      const p = new ethers.JsonRpcProvider(url, Number(chainId), { staticNetwork: true });
+      // batchMaxCount: 1 — ONE request per POST, stall window off (ethers
+      // forces stallTime 0 at maxCount 1, provider-jsonrpc.js:257). ethers
+      // defaults queue everything into JSON-ARRAY posts (batchMaxCount 100,
+      // stall 10ms), and getFeeData alone fires THREE parallel calls — so the
+      // first payload of every send is an array. An endpoint (or middlebox)
+      // that rejects or swallows arrays kills every tx at the fee step while
+      // sequential reads keep working: the reported "fundex sends, Bear never
+      // does" shape, 100% reproducible, invisible to a suite that runs on
+      // anvil (which accepts arrays). fundex/viem never batches. Three small
+      // single posts per fee fetch is the cheapest reliability in this file.
+      const p = new ethers.JsonRpcProvider(url, Number(chainId), { staticNetwork: true, batchMaxCount: 1 });
       // `staticNetwork: true` tells ethers to TRUST the chainId above and skip
       // eth_chainId entirely — so `p.getNetwork()` returns the number we
       // declared, and every chain check built on it (bridge's four TOCTOU

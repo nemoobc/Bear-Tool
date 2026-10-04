@@ -54,7 +54,27 @@ const POPULAR_DAPPS = [
 // The browser itself lives in dapp-browser.js: tabs, the pre-load security
 // gate, the omnibox and the menu. This file stays the catalogue plus the
 // discovery view, so the security checks can be unit-tested without the grid.
-initDappBrowser({ catalog: POPULAR_DAPPS });
+// ── category face — OKX-style icon tiles ─────────────────────────────────
+// One source for BOTH dApps surfaces: this view's filter row and the browser
+// overlay's category row (passed through initDappBrowser below). The old face
+// was a text pill; the tile colour rides as a --cat custom property so the CSS
+// never hardcodes a palette. A category missing from the map falls back to a
+// neutral tile, so a new catalogue entry renders instead of breaking the row.
+export const CAT_STYLE = {
+  All:        { glyph: '🌐', color: '#FFC93C' },
+  Swap:       { glyph: '🔁', color: '#6366F1' },
+  Lending:    { glyph: '🏦', color: '#0EA5E9' },
+  Staking:    { glyph: '🌾', color: '#10B981' },
+  NFT:        { glyph: '🖼️', color: '#F59E0B' },
+  Explorer:   { glyph: '🔍', color: '#64748B' },
+  Governance: { glyph: '🗳️', color: '#A855F7' },
+  Identity:   { glyph: '🏷️', color: '#EC4899' },
+  Wallet:     { glyph: '🛡️', color: '#22C55E' },
+  Bridge:     { glyph: '🌉', color: '#F97316' },
+};
+export const catStyle = (name) => CAT_STYLE[name] || { glyph: '📁', color: '#94A3B8' };
+
+initDappBrowser({ catalog: POPULAR_DAPPS, catStyle: CAT_STYLE });
 
 /**
  * Open a dApp in the in-app browser, or hand it to a new browser tab when the
@@ -89,7 +109,7 @@ export function renderDapps(container) {
          data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}"
          data-frameable="${d.frameable ? '1' : '0'}" data-category="${escapeHtml(d.category)}"
          aria-label="${escapeHtml(d.name)}, ${escapeHtml(d.category)}${d.frameable ? '' : ', opens in a new tab'}">
-      <div class="dapp-icon">${d.icon}</div>
+      <div class="dapp-icon" style="--cat:${catStyle(d.category).color}">${escapeHtml(d.icon)}</div>
       <div class="dapp-name">${escapeHtml(d.name)}</div>
       <div class="dapp-category">${escapeHtml(d.category)}</div>
       <div class="dapp-frame-note">${d.frameable ? 'In-app' : '↗ New tab'}</div>
@@ -104,8 +124,8 @@ export function renderDapps(container) {
       <div class="dapps-filters">
         <input type="text" id="dappSearch" class="input input-sm" placeholder="🔍 Filter ${POPULAR_DAPPS.length} DApps by name or category..." autocomplete="off" aria-label="Filter DApps" />
         <div class="dapp-chips" role="group" aria-label="Filter by category">
-          <button class="dapp-chip active" data-cat="" aria-pressed="true">All</button>
-          ${cats.map((c) => `<button class="dapp-chip" data-cat="${escapeHtml(c)}" aria-pressed="false">${escapeHtml(c)}</button>`).join('')}
+          <button class="dapp-chip active" data-cat="" aria-pressed="true" style="--cat:${catStyle('All').color}"><span class="dapp-chip-ic" aria-hidden="true">${catStyle('All').glyph}</span><span class="dapp-chip-lb">All</span></button>
+          ${cats.map((c) => `<button class="dapp-chip" data-cat="${escapeHtml(c)}" aria-pressed="false" style="--cat:${catStyle(c).color}"><span class="dapp-chip-ic" aria-hidden="true">${catStyle(c).glyph}</span><span class="dapp-chip-lb">${escapeHtml(c)}</span></button>`).join('')}
         </div>
       </div>
       <div class="dapp-note">

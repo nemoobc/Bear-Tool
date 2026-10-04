@@ -32,6 +32,14 @@ export default defineConfig({
     ...(process.env.BEAR_STORAGE_STATE ? { storageState: process.env.BEAR_STORAGE_STATE } : {}),
     viewport: { width: 1280, height: 800 },
     launchOptions: {
+      // BEAR_CHROMIUM_PATH: point the runner at a system Chromium when
+      // Playwright's own download refuses the platform (Termux reports
+      // "Unsupported platform: android" and blocks `playwright install`).
+      // Termux's x11-repo ships chromium at $PREFIX/lib/chromium/chrome.
+      // Unset on CI/normal Linux → registry browsers, behavior unchanged.
+      ...(process.env.BEAR_CHROMIUM_PATH
+        ? { executablePath: process.env.BEAR_CHROMIUM_PATH }
+        : {}),
       args: [
         '--no-sandbox',
         // soljson wasm (~9 MB) compiles synchronously on the main thread —

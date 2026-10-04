@@ -299,7 +299,7 @@ function renderSessions(root) {
  * "this page did not load" fallback — both moments where the user is holding a
  * wc: URI with nowhere to put it.
  */
-export function openPairWalletConnect() {
+export function openPairWalletConnect(prefill = '') {
   openModal(`
     <button class="modal-close" type="button" data-close-modal>Close</button>
     <h2>WalletConnect</h2>
@@ -311,6 +311,7 @@ export function openPairWalletConnect() {
     </div>
     <div class="flex gap-8">
       <button class="btn btn-primary" id="wcPairGo" type="button">Connect</button>
+      <button class="btn btn-ghost" id="wcPairPaste" type="button">Paste</button>
       <button class="btn btn-ghost" type="button" data-close-modal>Cancel</button>
     </div>
     <div id="wcPairMsg" class="small" role="status" aria-live="polite"></div>
@@ -320,7 +321,21 @@ export function openPairWalletConnect() {
   const msg = document.getElementById('wcPairMsg');
   const input = document.getElementById('wcPairUri');
   const go = document.getElementById('wcPairGo');
+  const paste = document.getElementById('wcPairPaste');
   const sessionsRoot = document.getElementById('wcSessions');
+  const fill = (uri) => { if (uri) { input.value = uri; input.focus(); input.select(); } };
+  fill(prefill);
+  // Clipboard read is permission-gated on mobile Chrome: a refusal shows a
+  // message instead of throwing — the manual paste path stays open.
+  paste.onclick = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      fill((text || '').trim());
+      if (!input.value) msg.textContent = 'Clipboard is empty.';
+    } catch {
+      msg.textContent = 'Clipboard refused by the browser — paste manually.';
+    }
+  };
   input.focus();
   renderSessions(sessionsRoot);
 

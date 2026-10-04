@@ -281,6 +281,167 @@ contract BearERC1155 {
     }
 }`;
 
+// ── feature-flag source builders (OZ-parity, self-contained) ──
+// The OpenZeppelin wizard toggles burnable/mintable/pausable/cap
+// (github.com/OpenZeppelin/contracts-wizard). The browser solc has no
+// import resolver, so Ownable/Pausable cannot be imported — the same
+// features are generated INLINE onto the templates above. Flag-off output
+// is byte-identical to the shipped template, so the default path never
+// changes. ERC-20 gains an owner only when mintable or pausable asks for
+// one; the default ERC-20 stays ownerless like today.
+
+function erc20Source(f = {}) {
+  const owner = Boolean(f.mintable || f.pausable);
+  const capStr = String(f.cap ?? '').trim();
+  const hasCap = /^\d+$/.test(capStr) && BigInt(capStr) > 0n;
+  let s = ERC20_SOURCE;
+
+  if (owner || f.pausable || hasCap) {
+    const state =
+      (hasCap ? '    uint256 public immutable cap;\n' : '') +
+      (owner ? '    address public owner;\n' : '') +
+      (f.pausable ? '    bool public paused;\n' : '');
+    s = s.replace('    uint256 public totalSupply;\n',
+      '    uint256 public totalSupply;\n' + state);
+  }
+  if (hasCap) {
+    s = s.replace('uint8 _decimals, uint256 _supply)',
+      'uint8 _decimals, uint256 _supply, uint256 _cap)');
+  }
+  if (owner || hasCap) {
+    const ctor =
+      (hasCap ? '        require(_cap >= _supply, "ERC20: cap below initial supply");\n        cap = _cap;\n' : '') +
+      (owner ? '        owner = msg.sender;\n' : '');
+    s = s.replace('        totalSupply = _supply;', ctor + '        totalSupply = _supply;');
+  }
+  if (owner || f.pausable) {
+    const mods =
+      (owner ? `
+    modifier onlyOwner() {
+        require(msg.sender == owner, "ERC20: caller is not owner");
+        _;
+    }
+` : '') +
+      (f.pausable ? `
+    modifier whenNotPaused() {
+        require(!paused, "ERC20: paused");
+        _;
+    }
+
+    function pause() external onlyOwner {
+        paused = true;
+    }
+
+    function unpause() external onlyOwner {
+        paused = false;
+    }
+` : '') + '\n';
+    s = s.replace('    function transfer(address to, uint256 value) external returns (bool) {',
+      mods + '    function transfer(address to, uint256 value) external returns (bool) {');
+  }
+  if (f.pausable) {
+    s = s.replace('function transfer(address to, uint256 value) external returns (bool)',
+      'function transfer(address to, uint256 value) external whenNotPaused returns (bool)');
+    s = s.replace('function transferFrom(address from, address to, uint256 value) external returns (bool)',
+      'function transferFrom(address from, address to, uint256 value) external whenNotPaused returns (bool)');
+  }
+
+  let extra = '';
+  if (f.burnable) {
+    extra += `
+    function burn(uint256 value) external {
+        uint256 bal = balanceOf[msg.sender];
+        require(bal >= value, "ERC20: insufficient balance");
+        unchecked { balanceOf[msg.sender] = bal - value; }
+        totalSupply -= value;
+        emit Transfer(msg.sender, address(0), value);
+    }
+`;
+  }
+  if (f.mintable) {
+    extra += `
+    function mint(address to, uint256 value) external onlyOwner {
+        require(to != address(0), "ERC20: mint to zero address");` +
+      (hasCap ? `
+        require(totalSupply + value <= cap, "ERC20: cap exceeded");` : '') + `
+        totalSupply += value;
+        balanceOf[to] += value;
+        emit Transfer(address(0), to, value);
+    }
+`;
+  }
+  if (extra) s = s.replace(/\n}$/, extra + '\n}');
+  return s;
+}
+
+function erc721Source(f = {}) {
+  let s = ERC721_SOURCE;
+  if (f.mintable === false) {
+    s = s.replace(`    function mint(address to) external onlyOwner returns (uint256) {
+        require(to != address(0), "ERC721: mint to zero address");
+        uint256 id = ++totalSupply;
+        _balances[to] += 1;
+        _owners[id] = to;
+        emit Transfer(address(0), to, id);
+        return id;
+    }
+
+`, '');
+  }
+  if (f.burnable) {
+    s = s.replace(`        return string(buffer);
+    }
+}`, `        return string(buffer);
+    }
+
+    function burn(uint256 id) external {
+        address holder = ownerOf(id);
+        require(msg.sender == holder, "ERC721: burn from non-owner");
+        delete _owners[id];
+        unchecked { _balances[holder] -= 1; }
+        // totalSupply doubles as the next-id counter; burned ids are never reused.
+        emit Transfer(holder, address(0), id);
+    }
+}`);
+  }
+  return s;
+}
+
+function erc1155Source(f = {}) {
+  let s = ERC1155_SOURCE;
+  if (f.mintable === false) {
+    s = s.replace(`    function mint(address to, uint256 id, uint256 value) external onlyOwner {
+        _move(address(0), to, id, value);
+    }
+
+`, '');
+  }
+  if (f.burnable) {
+    s = s.replace(`        emit TransferSingle(msg.sender, from, to, id, value);
+    }
+}`, `        emit TransferSingle(msg.sender, from, to, id, value);
+    }
+
+    function burn(uint256 id, uint256 value) external {
+        address from = msg.sender;
+        uint256 bal = _balances[id][from];
+        require(bal >= value, "ERC1155: insufficient balance");
+        unchecked { _balances[id][from] = bal - value; }
+        emit TransferSingle(msg.sender, from, address(0), id, value);
+    }
+}`);
+  }
+  return s;
+}
+
+// Compose the source the deploy step compiles. `buildTokenSource(id)` with
+// no flags returns exactly the shipped template (default path = today).
+export function buildTokenSource(standardId, flags = {}) {
+  if (standardId === 'erc721') return erc721Source(flags);
+  if (standardId === 'erc1155') return erc1155Source(flags);
+  return erc20Source(flags);
+}
+
 // ── wizard metadata ──
 export const STANDARDS = {
   erc20: {
@@ -292,7 +453,12 @@ export const STANDARDS = {
     icon: '🪙',
     fields: [
       { id: 'deploySupply', label: 'Initial supply', type: 'number', placeholder: '1000000', value: '1000000' },
-      { id: 'deployDecimals', label: 'Decimals', type: 'number', value: '18', min: 0, max: 18 }
+      { id: 'deployDecimals', label: 'Decimals', type: 'number', value: '18', min: 0, max: 18 },
+      { id: 'deployCap', label: 'Cap (max supply, empty = unlimited)', type: 'number', placeholder: 'none' },
+      // OZ order (ERC20Controls.svelte): Mintable → Burnable → Pausable.
+      { id: 'deployMintable', label: 'Mintable (owner can mint more)', type: 'checkbox' },
+      { id: 'deployBurnable', label: 'Burnable (holders can burn their own)', type: 'checkbox' },
+      { id: 'deployPausable', label: 'Pausable (owner can pause transfers)', type: 'checkbox' }
     ]
   },
   erc721: {
@@ -303,7 +469,9 @@ export const STANDARDS = {
     preview: 'ERC-721 NFT Contract',
     icon: '🖼️',
     fields: [
-      { id: 'deployBaseUri', label: 'Base URI', type: 'text', placeholder: 'ipfs://…/' }
+      { id: 'deployBaseUri', label: 'Base URI', type: 'text', placeholder: 'ipfs://…/' },
+      { id: 'deployMintable', label: 'Mintable (owner can mint)', type: 'checkbox', value: true },
+      { id: 'deployBurnable', label: 'Burnable (holders can burn)', type: 'checkbox' }
     ]
   },
   erc1155: {
@@ -314,7 +482,9 @@ export const STANDARDS = {
     preview: 'ERC-1155 Multi-Token Contract',
     icon: '🎟️',
     fields: [
-      { id: 'deployBaseUri', label: 'Metadata URI', type: 'text', placeholder: 'ipfs://…/{id}.json' }
+      { id: 'deployBaseUri', label: 'Metadata URI', type: 'text', placeholder: 'ipfs://…/{id}.json' },
+      { id: 'deployMintable', label: 'Mintable (owner can mint)', type: 'checkbox', value: true },
+      { id: 'deployBurnable', label: 'Burnable (holders can burn)', type: 'checkbox' }
     ]
   }};
 
@@ -325,7 +495,30 @@ export function getStandard(id) {
 // Markup for the per-standard extra fields (name/symbol stay in index.html).
 export function extraFieldsHtml(id) {
   const std = getStandard(id);
-  return std.fields.map(f => `
+  const out = [];
+  const pills = [];
+  const flushPills = () => {
+    if (!pills.length) return;
+    // One "Features" group (OZ's checkbox-group): toggles sit side by side
+    // instead of each eating a full form row.
+    out.push(`<div class="feature-group" role="group" aria-label="Features">${pills.join('')}</div>`);
+    pills.length = 0;
+  };
+  for (const f of std.fields) {
+    // Feature toggles (OZ parity): pill BUTTONS, not a naked checkbox —
+    // live report: "kasih tombol aja jangan kotak". The input stays in the
+    // DOM (deploy.js reads .checked, tests pin type=checkbox) but is visually
+    // replaced by the label pill; the parenthetical description becomes a
+    // tooltip, like the wizard's short name + HelpTooltip.
+    if (f.type === 'checkbox') {
+      const m = /^(.+?)\s*\((.+)\)$/.exec(f.label) || [null, f.label, null];
+      pills.push(
+        `<label class="toggle-pill" for="${f.id}"${m[2] ? ` title="${m[2]}"` : ''}>` +
+        `<input type="checkbox" id="${f.id}"${f.value ? ' checked' : ''}> ${m[1]}</label>`);
+      continue;
+    }
+    flushPills();
+    out.push(`
       <div class="field">
         <label for="${f.id}">${f.label}</label>
         <input class="input" id="${f.id}" type="${f.type}"
@@ -333,12 +526,16 @@ export function extraFieldsHtml(id) {
           ${f.value !== undefined ? `value="${f.value}"` : ''}
           ${f.min !== undefined ? `min="${f.min}"` : ''}
           ${f.max !== undefined ? `max="${f.max}"` : ''}>
-      </div>`).join('');
+      </div>`);
+  }
+  flushPills();
+  return out.join('');
 }
 
-// Validate the form and return { name, symbol, args } for the constructor.
-// Throws Error with a user-facing message — the wizard shows it as-is.
-export function buildDeployPlan({ standard, name, symbol, supply, decimals, baseUri }) {
+// Validate the form and return { name, symbol, args, flags } for the
+// constructor. Throws Error with a user-facing message — the wizard shows it
+// as-is. `flags` drives buildTokenSource (OZ-parity feature toggles).
+export function buildDeployPlan({ standard, name, symbol, supply, decimals, baseUri, cap, burnable, mintable, pausable }) {
   const std = getStandard(standard);
   const cleanName = String(name || '').trim();
   const cleanSymbol = String(symbol || '').trim();
@@ -354,46 +551,56 @@ export function buildDeployPlan({ standard, name, symbol, supply, decimals, base
     const supplyStr = String(supply ?? '').trim();
     if (!/^\d+$/.test(supplyStr)) throw new Error('Initial supply must be a whole number');
     if (BigInt(supplyStr) <= 0n) throw new Error('Initial supply must be greater than zero');
-    return {
-      standard: std.id,
-      name: cleanName,
-      symbol: cleanSymbol,
-      args: [cleanName, cleanSymbol, dec, ethers.parseUnits(supplyStr, dec)],
-      summary: [
-        { k: 'Standard', v: 'ERC-20' },
-        { k: 'Name', v: cleanName },
-        { k: 'Symbol', v: cleanSymbol },
-        { k: 'Decimals', v: String(dec) },
-        { k: 'Supply', v: `${supplyStr} ${cleanSymbol}` }
-      ]
+    // Cap (OZ-parity): optional whole number, at least the premint — a cap
+    // below supply would make the very first Transfer revert on-chain.
+    const capRaw = String(cap ?? '').trim();
+    const flags = {
+      burnable: Boolean(burnable),
+      mintable: Boolean(mintable),
+      pausable: Boolean(pausable),
+      cap: capRaw
     };
+    if (capRaw) {
+      if (!/^\d+$/.test(capRaw)) throw new Error('Cap must be a whole number');
+      if (BigInt(capRaw) <= 0n) throw new Error('Cap must be greater than zero');
+      if (BigInt(capRaw) < BigInt(supplyStr)) throw new Error('Cap must be at least the initial supply');
+    }
+    const args = [cleanName, cleanSymbol, dec, ethers.parseUnits(supplyStr, dec)];
+    if (capRaw) args.push(ethers.parseUnits(capRaw, dec));
+    const summary = [
+      { k: 'Standard', v: 'ERC-20' },
+      { k: 'Name', v: cleanName },
+      { k: 'Symbol', v: cleanSymbol },
+      { k: 'Decimals', v: String(dec) },
+      { k: 'Supply', v: `${supplyStr} ${cleanSymbol}` }
+    ];
+    if (capRaw) summary.push({ k: 'Cap', v: `${capRaw} ${cleanSymbol}` });
+    const on = [flags.burnable && 'Burnable', flags.mintable && 'Mintable', flags.pausable && 'Pausable'].filter(Boolean);
+    if (on.length) summary.push({ k: 'Features', v: on.join(', ') });
+    return { standard: std.id, name: cleanName, symbol: cleanSymbol, args, flags, summary };
   }
 
   const uri = String(baseUri || '').trim();
+  // NFT standards: mintable defaults ON (their template has always minted);
+  // unchecked → false, checked/absent → true.
+  const nftFlags = { mintable: mintable !== false, burnable: Boolean(burnable) };
+  const nftFeatures = [nftFlags.burnable && 'Burnable', nftFlags.mintable && 'Mintable'].filter(Boolean);
   if (std.id === 'erc721') {
-    return {
-      standard: std.id,
-      name: cleanName,
-      symbol: cleanSymbol,
-      args: [cleanName, cleanSymbol, uri],
-      summary: [
-        { k: 'Standard', v: 'ERC-721' },
-        { k: 'Name', v: cleanName },
-        { k: 'Symbol', v: cleanSymbol },
-        { k: 'Base URI', v: uri || '(empty)' }
-      ]
-    };
-  }
-  return {
-    standard: std.id,
-    name: cleanName,
-    symbol: cleanSymbol,
-    args: [cleanName, cleanSymbol, uri],
-    summary: [
-      { k: 'Standard', v: 'ERC-1155' },
+    const summary = [
+      { k: 'Standard', v: 'ERC-721' },
       { k: 'Name', v: cleanName },
       { k: 'Symbol', v: cleanSymbol },
-      { k: 'Metadata URI', v: uri || '(empty)' }
-    ]
-  };
+      { k: 'Base URI', v: uri || '(empty)' }
+    ];
+    if (nftFeatures.length) summary.push({ k: 'Features', v: nftFeatures.join(', ') });
+    return { standard: std.id, name: cleanName, symbol: cleanSymbol, args: [cleanName, cleanSymbol, uri], flags: nftFlags, summary };
+  }
+  const summary = [
+    { k: 'Standard', v: 'ERC-1155' },
+    { k: 'Name', v: cleanName },
+    { k: 'Symbol', v: cleanSymbol },
+    { k: 'Metadata URI', v: uri || '(empty)' }
+  ];
+  if (nftFeatures.length) summary.push({ k: 'Features', v: nftFeatures.join(', ') });
+  return { standard: std.id, name: cleanName, symbol: cleanSymbol, args: [cleanName, cleanSymbol, uri], flags: nftFlags, summary };
 }

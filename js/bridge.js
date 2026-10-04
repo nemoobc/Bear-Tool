@@ -255,7 +255,11 @@ export async function doBridge() {
   box.classList.remove('hidden');
   routeBox.classList.add('hidden');
   routeBox.innerHTML = '';
-  execBtn.classList.add('hidden');
+  // The button stays VISIBLE but disabled while no quote exists — hiding it
+  // left the screen with no bridge button at all when a quote failed (live
+  // report, 2026-10-03). Disabled = honest "waiting for a route";
+  // doBridgeExec still refuses a missing/stale quote on its own.
+  execBtn.disabled = true;
   try {
     // Reject live drift before the fetch — the captured context must
     // still match the form/wallet at request time.
@@ -321,7 +325,7 @@ export async function doBridge() {
         <div class="route-row"><span class="route-label">From</span><span class="route-val">${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)}</span></div>
       `;
       routeBox.classList.remove('hidden');
-      execBtn.classList.remove('hidden');
+      execBtn.disabled = false;
     } else {
       if (seq !== quoteSeq) return;
       set('bridgeQuote', null);

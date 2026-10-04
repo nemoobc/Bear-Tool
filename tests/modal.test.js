@@ -110,3 +110,40 @@ test('css: fullscreen uses explicit class, dynamic viewport height, no overlay p
   const overlayBlock = css.slice(css.indexOf('.modal-overlay.welcome-screen {'), css.indexOf('}', css.indexOf('.modal-overlay.welcome-screen {')));
   assert.ok(overlayBlock.includes('padding: 0'), 'overlay padding must be 0 only for fullscreen');
 });
+
+test('css: token chart box never shrinks in the fullscreen flex modal', () => {
+  // Live bug: the token modal is a fixed-height flex column (.modal.welcome-screen).
+  // With a long tx history every section shrinks, and .token-modal-chart is the
+  // only child with overflow:hidden → its automatic min-size is 0 → the box is
+  // squeezed to a sliver and the canvas is clipped. User sees "chart ilang".
+  const css = readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
+  const start = css.indexOf('.token-modal-chart {');
+  assert.ok(start !== -1, '.token-modal-chart rule must exist');
+  const chartRule = css.slice(start, css.indexOf('}', start));
+  assert.ok(/flex:\s*0 0 auto|flex-shrink:\s*0/.test(chartRule),
+    `chart box must opt out of flex shrink, got: ${chartRule.trim()}`);
+  // Every sibling section in the fullscreen modal keeps its size too.
+  const gStart = css.indexOf('.modal.welcome-screen .token-modal-header,');
+  assert.ok(gStart !== -1, 'fullscreen section group must exist');
+  const groupRule = css.slice(gStart, css.indexOf('}', gStart));
+  assert.ok(/flex-shrink:\s*0/.test(groupRule),
+    `fullscreen modal sections must not shrink, got: ${groupRule.trim()}`);
+});
+
+test('css: active account card is colored, first card clears the close float', () => {
+  // Live report: "pemilihan wallet harusnya dikasih warna — putih semua, user
+  // bingung pas switch" + "3 kotak presisi tapi 1 kotaknya ngga". The modal's
+  // ✕ is float:right / 44px (see .receive-qr comment), so the FIRST block row
+  // is shortened by exactly that — 264px → 220px on a 360px screen.
+  const css = readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
+  const aStart = css.indexOf('.asset-row.active');
+  assert.ok(aStart !== -1, '.asset-row.active rule must exist (active wallet = colored)');
+  const activeRule = css.slice(aStart, css.indexOf('}', aStart));
+  assert.ok(activeRule.includes('var(--honey)'), `active card must be filled honey, got: ${activeRule.trim()}`);
+  assert.ok(activeRule.includes('box-shadow'), `active card must get depth, got: ${activeRule.trim()}`);
+  const rStart = css.indexOf('.asset-row {');
+  assert.ok(rStart !== -1, '.asset-row rule must exist');
+  const rowRule = css.slice(rStart, css.indexOf('}', rStart));
+  assert.ok(/clear:\s*(both|right)/.test(rowRule),
+    `asset rows must clear the modal ✕ float so the first card keeps full width, got: ${rowRule.trim()}`);
+});

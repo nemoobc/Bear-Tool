@@ -171,3 +171,34 @@ test('i18n: the swap label is "Swap", not translated to "Tukar"', () => {
     assert.ok(!/Tukar/.test(t), `swap.title must not say Tukar, got "${t}"`);
   }
 });
+// ── live-test fixes (2026-10-03): kontrak presentasi ──
+test('nav Swap menawarkan pilihan juga saat sedang di Bridge', () => {
+  assert.match(jsApp, /view === 'swap' && onSwapSide/,
+    'syarat chooser harus mencakup sisi Bridge, bukan hanya #view-swap');
+  assert.match(jsApp, /view-bridge'\)\?\.classList\.contains\('active'\)/,
+    '#view-bridge ikut diperiksa');
+});
+
+test('activity: kapital di depan + waktu pendek, bukan huruf kecil mentah', () => {
+  assert.match(jsApp, /activity-action">\$\{escapeHtml\(titleCase\(a\.type\)\)\} — \$\{escapeHtml\(titleCase\(a\.status\)\)\}/,
+    'baris activity harus titleCase (live report: "swap — success")');
+  assert.match(jsApp, /fmtTimeShort\(a\.ts\)/, 'daftar activity memakai waktu pendek');
+});
+
+test('send: picker in-app seperti swap, bukan select polos OS', () => {
+  assert.match(html, /data-picker="sendToken"[\s\S]{0,600}?id="sendTokenPanel"/,
+    'markup token-picker send utuh (trigger + panel)');
+  assert.match(html, /id="sendToken"[\s\S]{0,400}?token-picker-panel|token-picker-native" id="sendToken"/,
+    'select native disembunyikan di balik picker');
+});
+
+test('bridge: tombol Execute selalu ada — disabled saat belum ada rute', () => {
+  assert.match(html, /id="btnBridgeExec"/, 'tombol ada di markup');
+  assert.ok(!/className="btn btn-success btn-block btn-lg hidden" id="btnBridgeExec"/.test(html),
+    'tombol tidak boleh berawal tersembunyi');
+  const bridgeJs = fs.readFileSync(new URL('../js/bridge.js', import.meta.url), 'utf8');
+  assert.match(bridgeJs, /execBtn\.disabled = true/, 'quote mulai → disable');
+  assert.match(bridgeJs, /execBtn\.disabled = false/, 'quote valid → enable');
+  assert.ok(!/execBtn\.classList\.add\('hidden'\)/.test(bridgeJs),
+    'jangan sembunyikan tombol lagi');
+});

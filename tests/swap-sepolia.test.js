@@ -98,3 +98,21 @@ test('swap: a failed pre-estimate must not block the send — no buffer, path un
   assert.deepEqual(out, req, 'tanpa estimate tanpa buffer — jalur kirim persis seperti sebelum fix');
   assert.equal(out.gasLimit, undefined);
 });
+
+test('wrapDirection: native ↔ wrapped twin rute langsung, tak pernah lewat DEX', async () => {
+  // Live report 2026-10-03: "pair eth -> weth error" — native dan wrapped
+  // twin-nya tidak punya pool, jadi setiap quote DEX untuk pasangan ini mati.
+  const { wrapDirection } = await import(new URL('../js/swap.js', import.meta.url).href);
+  const WETH_SEPOLIA = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14';
+  assert.equal(wrapDirection(SEPOLIA, 'native', WETH_SEPOLIA), 'deposit',
+    'ETH → WETH = WETH.deposit(), tanpa router, tanpa pool');
+  assert.equal(wrapDirection(SEPOLIA, WETH_SEPOLIA, 'native'), 'withdraw',
+    'WETH → ETH = WETH.withdraw()');
+  assert.equal(wrapDirection(SEPOLIA, 'native', WETH_SEPOLIA.toLowerCase()), 'deposit',
+    'case-insensitive');
+  assert.equal(wrapDirection(SEPOLIA, 'native', 'native'), null, 'bukan pasangan wrap');
+  assert.equal(wrapDirection(SEPOLIA, 'native', '0x1234000000000000000000000000000000005678'), null,
+    'token lain bukan WETH');
+  assert.equal(wrapDirection(999999, 'native', WETH_SEPOLIA), null,
+    'chain tanpa entri WETH tidak boleh menebak');
+});

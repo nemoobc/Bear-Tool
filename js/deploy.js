@@ -11,7 +11,7 @@ import { get, requireUnlock, addActivity, emit } from './state.js';
 import { getNetworkById, getProvider, getGasPrice } from './network.js';
 import { waitForReceipt } from './safetx.js';
 import { compileContract } from './solc.js';
-import { getStandard, extraFieldsHtml, buildDeployPlan } from './contracts.js';
+import { getStandard, extraFieldsHtml, buildDeployPlan, buildTokenSource } from './contracts.js';
 import { saveDeployed } from './registry.js';
 
 const { ethers } = globalThis;
@@ -75,7 +75,11 @@ export async function doDeploy() {
       symbol: $('#deploySymbol')?.value,
       supply: $('#deploySupply')?.value,
       decimals: $('#deployDecimals')?.value,
-      baseUri: $('#deployBaseUri')?.value
+      baseUri: $('#deployBaseUri')?.value,
+      cap: $('#deployCap')?.value,
+      burnable: $('#deployBurnable')?.checked,
+      mintable: $('#deployMintable')?.checked,
+      pausable: $('#deployPausable')?.checked
     });
   } catch (e) {
     return toast(e.message, 'error');
@@ -87,7 +91,9 @@ export async function doDeploy() {
 
   try {
     const t0 = Date.now();
-    const compiled = await compileContract(std.source, std.contract, {
+    // Compose the source from the wizard flags (burnable/mintable/pausable/
+    // cap) — the raw std.source path is gone; flag-off = the same template.
+    const compiled = await compileContract(buildTokenSource(std.id, plan.flags), std.contract, {
       onStatus: (msg) => setDeployStatus(escapeHtml(msg))
     });
     const seconds = ((Date.now() - t0) / 1000).toFixed(1);
