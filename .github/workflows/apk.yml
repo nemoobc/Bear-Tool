@@ -10,22 +10,9 @@ name: Android APK
 # without src/ (the old way) shipped an APK whose only script 404'd and
 # rendered a blank app.
 
+# Push trigger DIHAPUS (user 2026-10-05: "apk jangan trigger") — build APK
+# boros runner tiap push tanpa nilai. Jalankan manual via workflow_dispatch.
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'android/**'
-      - 'js/**'
-      - 'css/**'
-      - 'src/**'
-      - 'assets/**'
-      - 'index.html'
-      - 'vite.config.js'
-      - 'capacitor.config.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tools/make-assets.mjs'
-      - '.github/workflows/apk.yml'
   workflow_dispatch:
 
 jobs:
