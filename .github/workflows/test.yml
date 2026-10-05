@@ -1,6 +1,7 @@
 name: Bear Tool — Auto Test
 
 on:
+  workflow_dispatch:
   push:
     branches: [master, gh-pages]
   pull_request:
