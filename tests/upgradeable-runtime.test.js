@@ -147,7 +147,10 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
     return t.skip(`toolchain unavailable: ${e?.message || e}`);
   }
   const { child, url } = started;
-  const provider = new ethers.JsonRpcProvider(url);
+  // batchMaxCount:1 + cacheTimeout:-1 — ethers v6's default response cache
+      // races anvil's instan-mine here: a stale eth_getTransactionCount answers
+      // with an old nonce and the proxy deploy dies NONCE_EXPIRED (seen on CI).
+      const provider = new ethers.JsonRpcProvider(url, undefined, { batchMaxCount: 1, cacheTimeout: -1 });
   const deployer = new ethers.Wallet(KEY, provider);
   const stranger = new ethers.Wallet(ethers.Wallet.createRandom().privateKey, provider);
   try {

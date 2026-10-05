@@ -34,7 +34,7 @@ const spyFetch = async (url, opts) => {
 globalThis.fetch = spyFetch;
 
 let n = 0;
-await import(`../js/debug-collector.js?case=${++n}`);
+const dcMod = await import(`../js/debug-collector.js?case=${++n}`);
 
 const relayCalls = () => calls.filter((c) => c.url.includes(':7331/report'));
 const lastRelay = () => JSON.parse(relayCalls()[relayCalls().length - 1].body);
@@ -65,6 +65,7 @@ test('fetch gagal jaringan → net-fail tercatat, error tetap melempar ke pemang
   assert.equal(body.kind, 'net-fail');
   assert.equal(body.detail.url, 'https://rpc.example/x');
   mode = 'ok';
+  dcMod.resetRelayState(); // relay tadi menolak — uji berikut butuh percobaan segar
 });
 
 test('balasan JSON-RPC ber-error (HTTP 200) → rpc-error tercatat', async () => {

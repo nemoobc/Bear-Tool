@@ -40,7 +40,12 @@ export const FORK_NETWORKS = {
   // drpc: serve N-50000 + 3/3 stabil (1rpc: 1/3; lainnya mati).
   ethereum:          { chainId: 1,      rpc: 'https://eth.drpc.org',                        type: 'mainnet' },
   bsc:               { chainId: 56,     rpc: 'https://bsc-dataseed.binance.org',             type: 'mainnet' },
-  // drpc.org, bukan publicnode: anvil mem-pinning block lalu suite menggiling
+  // drpc.org juga utk optimism (bukan mainnet.optimism.io): run 37338189440's
+// fork-send optimism instance mem-pin block lalu KEHILANGAN tx sendiri
+// (send#13 receipt=null, balance 0 setelah 75s) sementara instance lain di
+// chain yang sama LULUS — rate-limit upstream saat ~14 fork start paralel.
+// Drpc sama dipercaya utk eth/polygon (comment di atas).
+// drpc.org, bukan publicnode: anvil mem-pinning block lalu suite menggiling
   // beberapa menit, dan publicnode polygon BUKAN arsip — retention singkat +
   // backend broker 5xx/529 → `historical state ... is not available` muncul
   // SETELAH pin menua (fork-poly4 lolos 20s → fork-poly5 mati pada run yang
@@ -48,7 +53,7 @@ export const FORK_NETWORKS = {
   // hanya drpc.org serve state N-50000 dan 3/3 eth_call stabil.
   polygon:           { chainId: 137,    rpc: 'https://polygon.drpc.org',                     type: 'mainnet' },
   arbitrum:          { chainId: 42161,  rpc: 'https://arb1.arbitrum.io/rpc',                 type: 'mainnet' },
-  optimism:          { chainId: 10,     rpc: 'https://mainnet.optimism.io',                  type: 'mainnet' },
+  optimism:          { chainId: 10,     rpc: 'https://optimism.drpc.org',                   type: 'mainnet' },
   base:              { chainId: 8453,   rpc: 'https://mainnet.base.org',                     type: 'mainnet' },
   sepolia:           { chainId: 11155111, rpc: 'https://ethereum-sepolia-rpc.publicnode.com', type: 'testnet' },
   amoy:              { chainId: 80002,  rpc: 'https://polygon-amoy-bor-rpc.publicnode.com',  type: 'testnet' },

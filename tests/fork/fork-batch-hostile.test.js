@@ -144,6 +144,9 @@ function startHostileProxy(upstreamUrl) {
         return;
       }
       stats.singles++;
+      const t0 = Date.now();
+      let rpc = '?';
+      try { rpc = JSON.parse(body)?.method || '?'; } catch { /* not json */ }
       try {
         const up = await fetch(upstreamUrl, {
           method: 'POST',
@@ -151,9 +154,11 @@ function startHostileProxy(upstreamUrl) {
           body,
         });
         const text = await up.text();
+        if (process.env.BH_DEBUG) console.error(`[proxy] ${rpc} ${up.status} ${Date.now() - t0}ms ${text.slice(0, 300)}`);
         res.writeHead(up.status, { 'content-type': 'application/json' });
         res.end(text);
-      } catch {
+      } catch (e) {
+        if (process.env.BH_DEBUG) console.error(`[proxy] ${rpc} FETCH_ERR ${Date.now() - t0}ms ${e?.message}`);
         res.writeHead(502, { 'content-type': 'application/json' });
         res.end('{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"upstream down"}}');
       }
@@ -192,9 +197,18 @@ after(async () => {
  *  the path a user's Settings → Custom RPC takes, then hand doSend the result. */
 async function providerThroughProxy() {
   const { network } = await startFork();
+  // The override key is the APP's network id (getProvider reads
+  // getRpcOverrides()[net.id]). Only optimism-sepolia's app id ('op-sepolia')
+  // differs from its FORK_NETWORKS key ('optimism-sepolia') — keying off
+  // network.name silently skipped the override on that one leg: the provider
+  // fell through to the PUBLIC endpoint (zero traffic through the proxy,
+  // ANVIL_ACCOUNT balance 0 on the real chain → both tests failed with
+  // "Not enough balance"). Resolve by chainId so every leg is correct.
+  const appNet = netMod.getAllNetworks().find(n => n.chainId === Number(network.chainId));
+  const overrideKey = appNet?.id ?? network.name;
   globalThis.localStorage.setItem(
     'bear.rpcOverrides',
-    JSON.stringify({ [network.name]: [proxy.url] }),
+    JSON.stringify({ [overrideKey]: [proxy.url] }),
   );
   const provider = await netMod.getProvider(network.chainId);
   state.set('provider', provider);

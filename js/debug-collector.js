@@ -51,7 +51,16 @@ function record(kind, detail) {
   ship(entry);
 }
 
+// Circuit breaker: the relay is optional dev tooling, but a POST into a dead
+// port still paints a red net::ERR_CONNECTION_REFUSED line in the browser
+// console for EVERY recorded failure (a coingecko 429 storm once produced 46).
+// First refusal ends all further attempts for this page run; the ring keeps
+// recording in memory, and a relay that IS listening keeps working.
+let relayDown = false;
+export function resetRelayState() { relayDown = false; }
+
 function ship(entry) {
+  if (relayDown) return;
   try {
     // keepalive: still delivered if the page unloads right after the failure.
     fetch(RELAY, {
@@ -60,8 +69,8 @@ function ship(entry) {
       keepalive: true,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...entry, ring: ring.slice(-10) }),
-    }).catch(() => { /* relay down = silent */ });
-  } catch { /* noop */ }
+    }).catch(() => { relayDown = true; });
+  } catch { relayDown = true; }
 }
 
 // The EIP-7702 support scan reports one rpc-error per endpoint — a full sweep

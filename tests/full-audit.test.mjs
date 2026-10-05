@@ -242,7 +242,7 @@ describe('4. JS NULL SAFETY AUDIT', () => {
 
   it('loadBridgeChains returns early if element missing', () => {
     const js = readFileSync(join(ROOT, 'js/bridge.js'), 'utf8');
-    assert.ok(js.includes('if (!from || !to || !tok) return'), 'loadBridgeChains missing null guard');
+    assert.ok(js.includes("if (!from || !to || !$('#bridgeToken')) return"), 'loadBridgeChains missing null guard');
     log('✓ loadBridgeChains has null guard');
   });
 
