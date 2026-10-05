@@ -11,7 +11,7 @@
 // NO simulated fallback, no fake "listed", no pretend order.
 
 import { $, toast, escapeHtml } from './ui.js';
-import { get } from './state.js';
+import { get, requireUnlock } from './state.js';
 import { runTx, waitForReceipt } from './safetx.js';
 import { getNetworkById } from './network.js';
 import { SEAPORT_BY_CHAIN, SEAPORT_ABI } from './seaport-abi.js';
@@ -146,6 +146,9 @@ function statusLabel({ isValidated, isCancelled, totalFilled, totalSize }) {
 export async function cancelOrder(btn, orderHashes, chainId) {
   const seaportAddr = SEAPORT_BY_CHAIN[chainId];
   if (!seaportAddr) throw new Error('OpenSea: Seaport 1.5 not deployed on this chain');
+  // Item 12: locked wallet → raise the password prompt instead of throwing a
+  // dead "wallet locked" error the user cannot act on from here.
+  if (!get('unlocked')) { requireUnlock(); return; }
   const signer = get('signer');
   if (!signer) throw new Error('OpenSea: wallet locked');
 
@@ -166,6 +169,8 @@ export async function cancelOrder(btn, orderHashes, chainId) {
 export async function fulfillBasicOrder(btn, parameters, chainId) {
   const seaportAddr = SEAPORT_BY_CHAIN[chainId];
   if (!seaportAddr) throw new Error('OpenSea: Seaport 1.5 not deployed on this chain');
+  // Item 12: same as cancelOrder — locked → password prompt, not a dead error.
+  if (!get('unlocked')) { requireUnlock(); return; }
   const signer = get('signer');
   if (!signer) throw new Error('OpenSea: wallet locked');
 

@@ -65,10 +65,12 @@ function ship(entry) {
 }
 
 // The EIP-7702 support scan reports one rpc-error per endpoint — a full sweep
-// fills the ring (and the relay file) in seconds. Settings' "Delete logs"
-// button calls this: drop the in-memory ring so the NEXT report no longer
-// carries the old entries, and ask the relay to truncate its file. Relay down
-// (Pages origin, no listener) = silent drop, same contract as ship().
+// fills the ring (and the relay file) in seconds. Dev tooling: reachable from
+// the console and the tests, NOT from Settings — that button deletes the
+// check's output (#eip7702Results, js/app.js), which is a different job.
+// Drop the in-memory ring so the NEXT report no longer carries the old
+// entries, and ask the relay to truncate its file. Relay down (Pages origin,
+// no listener) = silent drop, same contract as ship().
 export function clearLogs() {
   ring.length = 0;
   try {

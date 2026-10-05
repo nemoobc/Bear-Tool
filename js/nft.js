@@ -13,6 +13,7 @@ import { $, escapeHtml } from './ui.js';
 import { get, set } from './state.js';
 import { getNetworkById, ERC721_ABI } from './network.js';
 import { listDeployed } from './registry.js';
+import { detectNfts } from './nft-detect.js';
 
 const { ethers } = globalThis;
 
@@ -237,6 +238,51 @@ function wireNftImport() {
   inp.addEventListener('input', () => inp.removeAttribute('aria-invalid'));
 }
 
+// One card template for BOTH paths — the indexer list and the on-chain
+// scan — because a second template is how two lists start disagreeing
+// about what an NFT is. The floor line appears only when a provider
+// actually answered one: OpenSea per collection slug (with its own
+// floor_price_symbol), Alchemy inline on ETH/Polygon.
+function nftCardHtml(nft) {
+  const sym = nft.floorSymbol || getNetworkById(get('networkId'))?.symbol || 'ETH';
+  const floor = nft.floor != null && Number.isFinite(Number(nft.floor))
+    ? `<div class="small nft-floor">Floor: ${escapeHtml(String(nft.floor))} ${escapeHtml(sym)}</div>` : '';
+  const img = nft.image
+    ? `<img src="${escapeHtml(nft.image)}" alt="${escapeHtml(nft.name)}" loading="lazy" onerror="this.style.display='none'">`
+    : '<div class="nft-card" style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:2rem">🐻</div>';
+  const tok = escapeHtml(String(nft.contractAddress ?? ''));
+  const id = escapeHtml(String(nft.tokenId ?? ''));
+  return `
+        <div class="nft-card">
+          ${img}
+          <div class="meta">${escapeHtml(nft.name)}<br><span class="small">${escapeHtml(nft.collection)}</span></div>
+          ${floor}
+          <div class="openSea-actions">
+            <button class="btn-small" data-opensea="list" data-token="${tok}" data-id="${id}">List</button>
+            <button class="btn-small" data-opensea="cancel" data-token="${tok}" data-id="${id}">Cancel</button>
+            <button class="btn-small" data-opensea="fulfill" data-token="${tok}" data-id="${id}">Fulfill</button>
+          </div>
+        </div>`;
+}
+
+// Both empty states share one shell and one wiring step: a second copy
+// is how "Switch network" quietly stops working in one of them.
+function nftEmptyHtml(title, hintHtml) {
+  return '<div class="nft-empty" role="status">' +
+    '<div class="nft-empty-title">' + escapeHtml(title) + '</div>' +
+    '<div class="nft-empty-hint">' + hintHtml + '</div>' +
+    '<button class="btn btn-sm btn-secondary" id="nftSwitchNetwork">Switch network</button>' +
+    '</div>';
+}
+
+function wireNftEmpty(netLabel) {
+  const name = document.getElementById('nftEmptyNet');
+  if (name) name.textContent = netLabel;
+  document.getElementById('nftSwitchNetwork')?.addEventListener('click', () => {
+    document.getElementById('networkPill')?.click();
+  });
+}
+
 export async function loadNfts() {
   // Not `unlocked`. Enumerating NFTs only reads the chain with an address that
   // is already public, and the app restores a read-only account on boot — so
@@ -248,40 +294,50 @@ export async function loadNfts() {
   if (!grid) return;
   wireNftImport();
   const provider = get('provider');
+  const netLabel = net.name + ' (chain ' + net.chainId + ')';
   try {
+    // Owner-wide auto-detect first — only with a BYO key saved in
+    // Settings → NFT auto-detect. detectNfts answers items:null when no
+    // indexer is available here (no key, chain outside both providers'
+    // coverage, or the calls failed) and the on-chain scan below takes
+    // over; items:[] means the indexer ANSWERED with zero, which is the
+    // whole truth for this address on this chain.
+    const det = await detectNfts({
+      address: get('address'),
+      chainId: net.chainId,
+      openSeaKey: get('nftKeyOpenSea') || '',
+      alchemyKey: get('nftKeyAlchemy') || '',
+    });
+    if (det.items && det.items.length) {
+      grid.innerHTML = det.items.map(nftCardHtml).join('');
+      return;
+    }
+    if (det.items !== null) {
+      const who = det.source === 'opensea' ? 'OpenSea' : 'Alchemy';
+      grid.innerHTML = nftEmptyHtml('NFT not found',
+        who + ' reports 0 NFTs for this address on <span id="nftEmptyNet"></span> — ' +
+        'owner-wide detection covers every collection you own, not just a curated list. ' +
+        'An NFT on another chain will not appear here.');
+      wireNftEmpty(netLabel);
+      return;
+    }
     const targets = nftScanTargets(net.chainId, registryFor(net.chainId), importedFor(net.chainId));
     const items = await enumerateNfts(get('address'), net.chainId, provider, targets);
     if (items.length) {
-      grid.innerHTML = items.map(nft => `
-        <div class="nft-card">
-          ${nft.image ? `<img src="${escapeHtml(nft.image)}" alt="${escapeHtml(nft.name)}" loading="lazy" onerror="this.style.display='none'">` : '<div class="nft-card" style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:2rem">🐻</div>'}
-          <div class="meta">${escapeHtml(nft.name)}<br><span class="small">${escapeHtml(nft.collection)}</span></div>
-          <div class="openSea-actions">
-            <button class="btn-small" data-opensea="list" data-token="${nft.contractAddress}" data-id="${nft.tokenId}">List</button>
-            <button class="btn-small" data-opensea="cancel" data-token="${nft.contractAddress}" data-id="${nft.tokenId}">Cancel</button>
-            <button class="btn-small" data-opensea="fulfill" data-token="${nft.contractAddress}" data-id="${nft.tokenId}">Fulfill</button>
-          </div>
-        </div>`).join('');
+      grid.innerHTML = items.map(nftCardHtml).join('');
     } else {
       // .nft-empty spans the grid and centres on both axes — see the CSS note.
       // Two very different situations end up here, so the hint says how many
       // collections were actually scanned: an undetected contract (the old
       // curated-only blind spot) no longer hides behind a bare "no NFT".
       const n = targets.length;
-      grid.innerHTML =
-        '<div class="nft-empty" role="status">' +
-          '<div class="nft-empty-title">NFT not found</div>' +
-          '<div class="nft-empty-hint">This wallet holds no NFT on ' +
-            '<span id="nftEmptyNet"></span>. Scanned ' + n + ' collection' + (n === 1 ? '' : 's') +
-            ' on this network (curated + your deployed + imported). ' +
-            'An NFT on another chain will not appear here.</div>' +
-          '<button class="btn btn-sm btn-secondary" id="nftSwitchNetwork">Switch network</button>' +
-        '</div>';
-      const netName = document.getElementById('nftEmptyNet');
-      if (netName) netName.textContent = net.name + ' (chain ' + net.chainId + ')';
-      document.getElementById('nftSwitchNetwork')?.addEventListener('click', () => {
-        document.getElementById('networkPill')?.click();
-      });
+      const hasKey = !!(get('nftKeyOpenSea') || get('nftKeyAlchemy'));
+      grid.innerHTML = nftEmptyHtml('NFT not found',
+        'This wallet holds no NFT on <span id="nftEmptyNet"></span>. Scanned ' + n +
+        ' collection' + (n === 1 ? '' : 's') + ' on this network (curated + your deployed + imported). ' +
+        (hasKey ? '' : 'Add a free API key in Settings → NFT auto-detect to detect every collection you own, not just these. ') +
+        'An NFT on another chain will not appear here.');
+      wireNftEmpty(netLabel);
     }
   } catch {
     grid.innerHTML =

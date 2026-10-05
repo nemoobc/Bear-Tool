@@ -447,9 +447,82 @@ async function executeBatch() {
 // ── rescue atomic ──
 function toggleRescueFields() {
   const type = $('#rescueType').value;
-  $('#rescueTokenWrap').classList.toggle('hidden', type === 'eth');
+  // Token address is required for BOTH remaining types (ETH-only was dropped);
+  // only the token-id and amount boxes stay type-specific.
+  $('#rescueTokenWrap')?.classList.remove('hidden');
   $('#rescueTokenIdWrap')?.classList.toggle('hidden', type !== 'erc721');
   $('#rescueAmountWrap')?.classList.toggle('hidden', type !== 'erc20');
+}
+
+// ── pasted rescue contract: probe it on-chain before trusting it ──
+// Read-only (no compile): SAFE/RESCUER are public immutables on the rescue
+// helper. RESCUER is the deployer here — the contract is broadcast by the
+// sponsor signer, so RESCUER === deployer wallet. A mismatch is not fatal by
+// itself, but reusing it can only revert (onlyRescuer), so the flow asks
+// "deploy baru?" instead of silently burning gas.
+const RESCUE_PROBE_ABI = [
+  'function SAFE() view returns (address)',
+  'function RESCUER() view returns (address)'
+];
+// Minimal encode-only fragments — no solc round-trip for a pasted contract.
+const RESCUE_MANUAL_ABI = [
+  'function rescueERC20(address token, uint256 amount)',
+  'function rescueERC721(address token, uint256[] tokenIds)',
+  'function SAFE() view returns (address)',
+  'function RESCUER() view returns (address)'
+];
+
+async function probeRescueContract(addr, provider, expectSafe, expectRescuer) {
+  let code;
+  try { code = await provider.getCode(addr); }
+  catch { return { ok: false, reason: 'RPC error — the contract could not be verified' }; }
+  if (!code || code === '0x') return { ok: false, reason: 'no contract code at that address' };
+  try {
+    const c = new ethers.Contract(addr, RESCUE_PROBE_ABI, provider);
+    const [safe, rescuer] = await Promise.all([c.SAFE(), c.RESCUER()]);
+    const det = { safe: String(safe), rescuer: String(rescuer) };
+    if (expectSafe && safe.toLowerCase() !== expectSafe.toLowerCase()) {
+      return { ...det, ok: false, reason: `SAFE mismatch — this contract forwards to ${wallet.shortAddress(safe)}, not your SAFE` };
+    }
+    if (expectRescuer && rescuer.toLowerCase() !== expectRescuer.toLowerCase()) {
+      return { ...det, ok: false, reason: `deployer/RESCUER ${wallet.shortAddress(rescuer)} ≠ sponsor ${wallet.shortAddress(expectRescuer)} — onlyRescuer would revert` };
+    }
+    return { ...det, ok: true };
+  } catch {
+    return { ok: false, reason: 'not a Bear rescue contract (SAFE/RESCUER could not be read)' };
+  }
+}
+
+// Live paste → detect, mirroring wireTokenDetect: state shows before Execute,
+// so a wrong address is caught while the user still has the field focused.
+function wireRescueHelperDetect() {
+  const input = $('#rescueHelperAddr');
+  const out = $('#rescueHelperDetect');
+  if (!input || !out) return;
+  const clear = () => { out.textContent = ''; out.className = 'small'; };
+  const run = async () => {
+    const addr = input.value.trim();
+    if (!addr) { clear(); return; }
+    if (!wallet.isValidAddress(addr)) { out.textContent = 'Invalid address'; out.className = 'small'; return; }
+    out.textContent = 'Checking contract on-chain…';
+    try {
+      const net = getNetworkById(get('networkId'));
+      const provider = await getProvider(net.chainId);
+      const det = await probeRescueContract(addr, provider, null, null);
+      if (input.value.trim() !== addr) return; // stale — field moved on
+      if (det.ok) {
+        out.textContent = `Detected rescue contract — SAFE ${wallet.shortAddress(det.safe)} · deployer ${wallet.shortAddress(det.rescuer)}`;
+        out.className = 'small';
+      } else {
+        out.textContent = det.reason + ' — Execute will ask to deploy a new one.';
+        out.className = 'small';
+      }
+    } catch (e) {
+      out.textContent = 'Could not read that contract — ' + (e?.shortMessage || e?.message || String(e));
+    }
+  };
+  input.addEventListener('input', run);
+  input.addEventListener('paste', () => setTimeout(run, 0));
 }
 
 // MAX: read the target's full ERC-20 balance and fill the amount field with
@@ -488,7 +561,7 @@ async function executeRescue() {
   if (sponsorKey === null) return;            // password prompt cancelled
 
   if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
-  if (type !== 'eth' && !wallet.isValidAddress(tokenAddr)) return toast('Invalid token contract address', 'error');
+  if (!wallet.isValidAddress(tokenAddr)) return toast('Invalid token contract address', 'error');
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
 
   const derived = deriveTargetAddress();
@@ -544,6 +617,39 @@ async function executeRescue() {
       return toast('Could not read the token balance — ' + (e?.shortMessage || e?.message || e), 'error');
     }
   }
+
+  // Pasted helper address: probe it on-chain AFTER the balance guard (T5:
+  // amount problems must fail before ANY prompt) and BEFORE the confirmation,
+  // so a mismatch is decided up front — "deploy baru?" (OK = fresh deploy
+  // path, Cancel = abort), never a silent reuse of a contract that can only
+  // revert.
+  const manualHelperRaw = $('#rescueHelperAddr')?.value.trim() || '';
+  let manualHelper = null;
+  if (manualHelperRaw) {
+    if (!wallet.isValidAddress(manualHelperRaw)) return toast('Invalid contract address', 'error');
+    const det = await probeRescueContract(manualHelperRaw, provider, safe, sponsorAddress);
+    if (det.ok) {
+      manualHelper = { address: manualHelperRaw, abi: RESCUE_MANUAL_ABI, reused: true };
+      // Record it: the probe proved SAFE+RESCUER match, which is exactly the
+      // registry predicate — next run reuses it without pasting again.
+      saveDeployed('rescue', manualHelperRaw,
+        { chainId: Number(net.chainId), safe, target, sponsor: sponsorAddress, abi: RESCUE_MANUAL_ABI });
+      toast('Using the pasted rescue contract: ' + wallet.shortAddress(manualHelperRaw), 'info');
+    } else {
+      const okProbe = await confirmTx({
+        title: 'Pasted contract unusable — deploy a new one?',
+        rows: [
+          { k: 'Contract', v: manualHelperRaw },
+          { k: 'Detected', v: det.reason },
+          { k: 'Action', v: 'Deploy a fresh rescue helper (saved, reused on later runs)' },
+        ],
+        confirmText: 'Deploy baru',
+      });
+      if (!okProbe) return toast('Rescue cancelled — paste a matching contract or leave the field empty.', 'info');
+      // fall through to the registry/ensure-deploy path below
+    }
+  }
+
   {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'RESCUE ON MAINNET!' : `Rescue from ${wallet.shortAddress(target)}?`,
@@ -570,9 +676,10 @@ async function executeRescue() {
     const sponsorSigner = sponsorSignerOf(sponsorKey, provider);
 
     // Match on what the constructor actually received — SAFE and the sponsor
-    // (RESCUER). Belum ada → deploy di sini setelah konfirmasi eksplisit
-    // (tidak pernah senyap), sesuai teks kartu Helper Contracts.
-    const helper = await ensureDeployedHelper('rescue', 'Rescue', chainId,
+    // (RESCUER). Pasted contract already probed OK → use it directly (no
+    // registry round-trip). Belum ada → deploy di sini setelah konfirmasi
+    // eksplisit (tidak pernah senyap).
+    const helper = manualHelper || await ensureDeployedHelper('rescue', 'Rescue', chainId,
       item => item.safe?.toLowerCase() === safe.toLowerCase()
         && item.sponsor?.toLowerCase() === sponsorAddress.toLowerCase(),
       provider,
@@ -587,14 +694,13 @@ async function executeRescue() {
       });
     if (!helper) return;
     const rescueContract = new ethers.Contract(helper.address, helper.abi, provider);
-    if (helper.reused) toast('Reusing rescue contract: ' + wallet.shortAddress(helper.address), 'info');
+    if (helper.reused) toast('Using rescue contract: ' + wallet.shortAddress(helper.address), 'info');
     const rescueAddr = await rescueContract.getAddress();
 
-    // Build calldata based on token type
+    // Build calldata by token type (ETH-only rescue was dropped per user
+    // request — ERC-20 + ERC-721 are the two assets worth sweeping).
     let calldata;
-    if (type === 'eth') {
-      calldata = rescueContract.interface.encodeFunctionData('rescueETH');
-    } else if (type === 'erc20') {
+    if (type === 'erc20') {
       // Explicit amount: manual entry or MAX (which reads the full balance
       // into the field). The old all-sweep took the choice away.
       calldata = rescueContract.interface.encodeFunctionData('rescueERC20', [tokenAddr, rescueWei]);
@@ -602,6 +708,8 @@ async function executeRescue() {
       const ids = tokenIds.split(',').map(s => BigInt(s.trim())).filter(n => n >= 0n);
       if (!ids.length) return toast('Enter valid token IDs', 'error');
       calldata = rescueContract.interface.encodeFunctionData('rescueERC721', [tokenAddr, ids]);
+    } else {
+      return toast('Unsupported asset type', 'error');
     }
 
     // Delegate target to the rescue contract, then sweep in the same tx:
@@ -931,47 +1039,14 @@ export async function sponsorKeyFromPicker(selId) {
 
 export function renderHelperStatus() {
   renderSponsorPickers();
-  const list = $('#helperStatusList');
-  if (!list) return;
-  const net = getNetworkById(get('networkId'));
-  const chainId = Number(net?.chainId || 0);
-
-  const row = (label, ok, detail, action) => `
-    <div class="helper-row ${ok ? 'ok' : 'missing'}">
-      <div class="helper-head">
-        <span class="helper-name">${escapeHtml(label)}</span>
-        <span class="helper-state">${ok ? '✅ deployed' : '❌ not deployed'}</span>
-      </div>
-      <div class="small">${detail}</div>
-      ${action}
-    </div>`;
-
-  const batch = findDeployed('batch', chainId);
-  const rescue = listDeployed('rescue', chainId);
-  const airdrop = listDeployed('airdrop', chainId);
-  const short = (a) => (a ? escapeHtml(wallet.shortAddress(a)) : '—');
-
-  list.innerHTML = [
-    row('Batch Call', !!batch,
-      batch
-        ? `Recorded at <span class="mono">${short(batch.address)}</span> · re-checked on-chain before reuse.`
-        : 'No batch helper on this chain yet. It takes no constructor arguments, so you can deploy it now.',
-      `<button class="btn btn-sm ${batch ? 'btn-ghost' : 'btn-primary'}" id="btnDeployBatchHelper">${batch ? 'Deploy another' : 'Deploy batch helper'}</button>`),
-    row('Rescue Atomic', rescue.length > 0,
-      rescue.length
-        ? `Bound to SAFE + sponsor: ${rescue.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
-        : 'Bound to SAFE + sponsor (the gas payer) — deploy it first.',
-      `<button class="btn btn-sm ${rescue.length ? 'btn-ghost' : 'btn-primary'}" id="btnDeployRescueHelper">${rescue.length ? 'Deploy another' : 'Deploy rescue helper'}</button>`),
-    row('Claim Airdrop', airdrop.length > 0,
-      airdrop.length
-        ? `Bound to sponsor: ${airdrop.map(r => `<span class="mono">${short(r.address)}</span>`).join(', ')}`
-        : 'Bound to the sponsor wallet (gas payer) — deploy it first.',
-      `<button class="btn btn-sm ${airdrop.length ? 'btn-ghost' : 'btn-primary'}" id="btnDeployAirdropClaimer">${airdrop.length ? 'Deploy another' : 'Deploy airdrop claimer'}</button>`)
-  ].join('');
-
-  $('#btnDeployBatchHelper')?.addEventListener('click', deployBatchHelper);
-  $('#btnDeployRescueHelper')?.addEventListener('click', deployRescueHelper);
-  $('#btnDeployAirdropClaimer')?.addEventListener('click', deployAirdropClaimer);
+  // Item: the dedicated "Check address (delegation)" box auto-fills with the
+  // detected (active) wallet so Check reads THAT address by default.
+  const rev = $('#revokeTarget');
+  if (rev && !rev.value.trim() && get('address')) rev.value = get('address');
+  // The Helper Contracts card is GONE (user request): each flow card carries
+  // its own static "Deploy contract" button, bound ONCE in
+  // bindEip7702ToolsEvents(). Re-rendering rows + re-binding listeners here
+  // would stack duplicate click handlers on the static buttons.
 }
 
 // Explicit "deploy the helper first" action for Batch (no constructor args).
@@ -994,7 +1069,7 @@ export async function deployBatchHelper() {
         { k: 'Network', v: net.name },
         { k: 'From', v: get('address') },
       ],
-      confirmText: 'Sign',
+      confirmText: 'Confirm',
       danger: net.type === 'mainnet',
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
@@ -1006,7 +1081,6 @@ export async function deployBatchHelper() {
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `batch → ${addr}` });
     toast('Batch helper deployed: ' + wallet.shortAddress(addr), 'success');
     renderDeployedRegistry();
-    showDeployedResult('batch', 'Batch helper', addr, net);
     renderHelperStatus();
   } catch (e) {
     toast(e?.message || String(e), 'error');
@@ -1048,7 +1122,7 @@ export async function deployRescueHelper() {
         { k: 'Rescue target', v: target },
         { k: 'Sponsor (executor / RESCUER)', v: wallet.shortAddress(sponsorSigner.address) },
       ],
-      confirmText: 'Sign',
+      confirmText: 'Confirm',
       danger: net.type === 'mainnet',
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
@@ -1059,7 +1133,8 @@ export async function deployRescueHelper() {
     saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, sponsor: sponsorSigner.address, abi });
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
     toast('Rescue helper deployed: ' + wallet.shortAddress(addr), 'success');
-    showDeployedResult('rescue', 'Rescue helper', addr, net);
+    const det = $('#rescueHelperDetect');
+    if (det) det.textContent = 'Deployed: ' + addr;
     renderHelperStatus();
     renderDeployedRegistry();
   } catch (e) {
@@ -1094,7 +1169,7 @@ export async function deployAirdropClaimer() {
         { k: 'Target', v: targetAddress },
         { k: 'Sponsor', v: wallet.shortAddress(sponsorSigner.address) },
       ],
-      confirmText: 'Sign',
+      confirmText: 'Confirm',
       danger: net.type === 'mainnet',
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
@@ -1108,7 +1183,6 @@ export async function deployAirdropClaimer() {
     saveDeployed('airdrop', addr, { chainId: Number(net.chainId), target: targetAddress, rescuer: sponsorAddress, abi });
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `airdrop → ${addr}` });
     toast('Airdrop claimer deployed: ' + wallet.shortAddress(addr), 'success');
-    showDeployedResult('airdrop', 'Airdrop claimer', addr, net);
     renderHelperStatus();
     renderDeployedRegistry();
   } catch (e) {
@@ -1119,23 +1193,10 @@ export async function deployAirdropClaimer() {
 }
 
 // ── deployed-contract registry UI ──
-// After a helper lands on-chain, name + address go on screen immediately with
-// a copy button, instead of only a toast that disappears. `data-copy` is
-// handled globally, so the button needs no listener of its own.
-function showDeployedResult(type, label, addr, net) {
-  const box = $('#helperResult');
-  if (!box) return;
-  box.innerHTML = `<div class="asset-row">
-      <div class="asset-info">
-        <div class="asset-name">${escapeHtml(label)} deployed</div>
-        <div class="asset-symbol"><span class="mono">${escapeHtml(addr)}</span></div>
-        <div class="small dim">${escapeHtml(net?.name || '')}</div>
-      </div>
-      <button class="copy-btn" data-copy="${escapeHtml(addr)}" title="Copy contract address" aria-label="Copy contract address"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
-    </div>`;
-  box.classList.remove('hidden');
-}
-
+// After a helper lands on-chain, name + address go on screen immediately in
+// the Deployed Contracts card (renderDeployedRegistry below, `data-copy`
+// handled globally), instead of only a toast that disappears. The old
+// #helperResult box lived on the removed Helper Contracts card.
 export function renderDeployedRegistry() {
   const list = $('#deployedRegistryList');
   if (!list) return;
@@ -1220,8 +1281,15 @@ export async function revokeDelegation() {
   const sponsorAddress = sponsorAddressOf(sponsorKey);
   if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
 
+  // Item 12: locked wallet + the target IS the active wallet (no pasted key)
+  // → the signing key only exists after unlock, so raise the password prompt
+  // NOW instead of crashing on get('signer').connect (null). Pasted target key
+  // or a foreign target still works without unlock.
+  const isSelf = target.toLowerCase() === (get('address') || '').toLowerCase();
+  if (isSelf && !get('unlocked') && !addressFromKey(key)) { requireUnlock(); return; }
+
   let targetSigner;
-  if (target.toLowerCase() === (get('address') || '').toLowerCase()) {
+  if (isSelf) {
     targetSigner = get('signer').connect(provider);
   } else if (!addressFromKey(key)) {
     return toast('Target is not the active wallet — provide its private key', 'error');
@@ -1393,16 +1461,24 @@ export function bindEip7702ToolsEvents() {
   // Batch (view-deploy only if batch elements exist)
   $('#btnBatchAdd')?.addEventListener('click', addBatchItem);
   $('#btnBatchExecute')?.addEventListener('click', executeBatch);
+  // Per-flow "Deploy contract" buttons (the Helper Contracts card is gone —
+  // each card carries its own now).
+  $('#btnDeployBatchHelper')?.addEventListener('click', deployBatchHelper);
 
   // Rescue
   $('#rescueType')?.addEventListener('change', toggleRescueFields);
   $('#btnRescueMax')?.addEventListener('click', fillMaxRescueAmount);
   $('#btnRescue')?.addEventListener('click', executeRescue);
+  $('#btnDeployRescueHelper')?.addEventListener('click', deployRescueHelper);
   // Paste → detect token/NFT identity + the DRAINNER's balance (not sponsor)
   wireTokenDetect('#rescueTokenAddr', '#rescueTokenDetect', { idSel: '#rescueTokenId' });
+  // Paste → probe an existing rescue contract (SAFE/RESCUER deployer) on-chain
+  wireRescueHelperDetect();
+  toggleRescueFields();   // reflect the default (erc20) visibility on load
 
   // Claim
   $('#btnClaim')?.addEventListener('click', executeClaim);
+  $('#btnDeployAirdropClaimer')?.addEventListener('click', deployAirdropClaimer);
   wireTokenDetect('#claimToken', '#claimTokenDetect', { keySel: '#claimTargetKey' });
 
   // Revoke delegation (Tools card)

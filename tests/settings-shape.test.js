@@ -35,20 +35,22 @@ function view(id) {
   return html.slice(at, end);
 }
 
-test('Settings holds the five things it always had, plus the check, in four groups', () => {
+test('Settings holds the five things it always had, plus the check, in five groups', () => {
   const v = view('settings');
   for (const id of ['setLang', 'setCurrency', 'setAutoLock', 'setTestnet', 'btnClearAllData', 'btn7702Check']) {
     assert.ok(v.includes(`id="${id}"`), `#${id} must be in Settings`);
   }
   // Theme is a button group rather than a select, so it has no id of its own.
   assert.match(v, /Theme/, 'Theme must be in Settings');
-  // Four groups: Appearance (language, currency, theme), Safety (auto-lock,
-  // testnet mode), EIP-7702 support (asked for by name), and the delete alone
-  // in its own group. The delete is separated rather than stacked because it
-  // is the one irreversible thing on the page and it should read as a
-  // conclusion, not as another preference.
-  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 4);
-  assert.equal((v.match(/set-group-h/g) || []).length, 4);
+  // Five groups: Appearance (language, currency, theme), Safety (auto-lock,
+  // testnet mode), NFT auto-detect (the two BYO index keys — added with M3,
+  // because an empty gallery is exactly what someone opens Settings to fix),
+  // EIP-7702 support (asked for by name), and the delete alone in its own
+  // group. The delete is separated rather than stacked because it is the one
+  // irreversible thing on the page and it should read as a conclusion, not as
+  // another preference.
+  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 5);
+  assert.equal((v.match(/set-group-h/g) || []).length, 5);
   // And the check sits before the delete, not after it — the ordering rule
   // below is the one the "five things" count was standing in for.
   assert.ok(v.indexOf('id="btn7702Check"') < v.indexOf('id="btnClearAllData"'),
@@ -65,20 +67,25 @@ test('there is no Save button, and no dead control standing in for one', () => {
   // the div is filled by it (both pinned in eip7702-approval-ui.test.js), so
   // neither is a Save button wearing a working button's clothes.
   const ALLOWED = ['setLang', 'setCurrency', 'setAutoLock', 'setTestnet', 'btnClearAllData',
-    'btn7702Check', 'eip7702Results'];
+    'btn7702Check', 'eip7702Results',
+    // The two BYO key fields are inputs (self-closing): the hunt's
+    // "text after the tag" walk skips past them into the NEXT field's
+    // label copy, which is content, not a dead control.
+    'setNftKeyOpenSea', 'setNftKeyAlchemy'];
   const dead = [...v.matchAll(/id="(\w+)"[^>]*>\s*(?:<[^>]+>\s*)*[A-Za-z]/g)]
     .filter(([, id]) => !ALLOWED.includes(id));
   assert.equal(dead.length, 0, `unexpected controls in Settings: ${dead.map((d) => d[1]).join(', ')}`);
 });
 
-test('the testnet switch is in Settings AND in the picker, on one writer', () => {
+test('the testnet switch lives in Settings only, on one writer', () => {
   // It was in Settings, then it was moved out, then it was reported missing from
-  // Settings and put back. Two controls for one setting is the shape that drifts:
-  // one gets flipped and the other keeps asserting the old value, so the page
-  // contradicts the app. The rule that makes that impossible is that the
-  // setting has exactly ONE writer and both switches only read back from it.
+  // Settings and put back, and the picker kept its own copy until 2026-10-04,
+  // when the duplicate was removed: one toggle per setting. The rule that makes
+  // drift impossible is that the setting has exactly ONE writer and the switch
+  // only reads back from it.
   assert.ok(view('settings').includes('id="setTestnet"'), 'Settings must have the testnet switch');
-  assert.match(app, /id="netShowTestnet"/, 'the picker keeps its copy, beside the list it filters');
+  assert.doesNotMatch(app, /id="netShowTestnet"/,
+    'the picker copy is gone — a second toggle for the same setting is the duplicate that was reported');
 
   const writer = /function setTestnetVisible\(on, redraw\) \{[\s\S]*?\n\}/.exec(app);
   assert.ok(writer, 'there must be one named function that owns settings.testnet');
@@ -88,21 +95,20 @@ test('the testnet switch is in Settings AND in the picker, on one writer', () =>
   assert.deepEqual(assignments, ['on'],
     `settings.testnet must be written in exactly one place, found: ${assignments.join(' | ')}`);
 
-  // Both switches must go through it, never through their own copy of the logic.
+  // The switch must go through it, never through its own copy of the logic.
   assert.match(app, /\$\('#setTestnet'\)\?\.addEventListener\('change',[\s\S]{0,120}setTestnetVisible\(/,
     'the Settings switch must call the shared writer');
-  assert.match(app, /\$\('#netShowTestnet'\)\?\.addEventListener\('change',[\s\S]{0,140}setTestnetVisible\(/,
-    'the picker switch must call the same writer');
 
-  // And both must be re-read from storage, or a switch can boot showing a state
+  // And it must be re-read from storage, or a switch can boot showing a state
   // the app does not hold — which is the original bug: the knob moved, the
   // setting stayed, and only a Save button ever made them agree.
-  assert.match(app, /function syncTestnetSwitches\(\)/, 'both switches read back from one place');
+  assert.match(app, /function syncTestnetSwitches\(\)/, 'the switch reads back from one place');
   assert.match(app, /syncTestnetSwitches\(\);\s*\n/, 'and it must run when the page is bound');
-  assert.equal((app.match(/\$\('#setTestnet'\)/g) || []).length >= 1, true);
-  for (const id of ['#setTestnet', '#netShowTestnet']) {
-    assert.ok(new RegExp(`\\$\\('${id}'\\)`).test(app), `${id} must be reachable from the sync`);
-  }
+  assert.ok(/\$\('#setTestnet'\)/.test(app), '#setTestnet must be reachable from the sync');
+  // The network list still FOLLOWS the setting: flipping it in Settings must
+  // change what the picker shows on its next open.
+  assert.match(app, /function showNetworkModal\(\) \{[\s\S]{0,400}getAllNetworks\(\)/,
+    'the picker builds from the filtered list');
 });
 
 test('the switch is a pill with a centred knob, not a circle', () => {
@@ -214,15 +220,30 @@ test('the five bottom-bar slots are the ones the design chose', () => {
   }
 });
 
-test('EIP-7702 scan: tombol delete logs muncul setelah scan (markup + wiring)', () => {
+test('EIP-7702 scan: tombol delete results muncul setelah scan (markup + wiring)', () => {
   const v = view('settings');
-  assert.ok(v.includes('id="btnClearLogs"'), '#btnClearLogs must live in the EIP-7702 group');
-  assert.match(v, /id="btnClearLogs"[^>]*hidden/,
+  assert.ok(v.includes('id="btnClearEipResults"'), '#btnClearEipResults must live in the EIP-7702 group');
+  assert.match(v, /id="btnClearEipResults"[^>]*hidden/,
     'button starts hidden — it appears only after the scan finishes');
-  assert.ok(v.indexOf('id="btnClearLogs"') < v.indexOf('id="btnClearAllData"'),
-    'the logs button must not push the irreversible delete out of last place');
-  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 4,
-    'no new settings group — the button joins the EIP-7702 group');
-  assert.ok(app.includes('btnClearLogs'), 'app.js must reveal the button after the scan');
-  assert.ok(app.includes('clearLogs'), 'app.js must call clearLogs() on click');
+  assert.ok(v.includes('Delete results'), 'label names what it deletes: the check output');
+  assert.ok(!v.includes('Delete logs'), 'label must not claim to delete debug logs — it does not');
+  assert.ok(v.indexOf('id="btnClearEipResults"') < v.indexOf('id="btnClearAllData"'),
+    'the results button must not push the irreversible delete out of last place');
+  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 5,
+    'the button joins the EIP-7702 group (five groups now: Appearance, Safety, NFT keys, EIP-7702, delete)');
+  assert.ok(app.includes('btnClearEipResults'), 'app.js must reveal the button after the scan');
+  // Kontrak perilaku: klik = KOSONGKAN output cek (#eip7702Results), bukan
+  // clearLogs() — permintaan live: "itu bukan delete debug tapi delete output
+  // yang udah cek dukungan EIP". Debug ring tetap milik dev tooling sendiri.
+  const at = app.indexOf("on('#btnClearEipResults', 'click'");
+  assert.ok(at > -1, 'handler klik delete-results harus ada');
+  const handler = app.slice(at, app.indexOf('});', at));
+  assert.match(handler, /\$\('#eip7702Results'\)[\s\S]*out\.innerHTML = ''/,
+    'klik harus mengosongkan #eip7702Results (output hasil cek)');
+  assert.match(handler, /el\.hidden = true/,
+    'tombol menyembunyikan dirinya setelah output dihapus');
+  assert.doesNotMatch(app, /import \{ clearLogs/,
+    'app.js tak boleh mengimpor clearLogs — itu bukan urusan tombol ini');
+  assert.doesNotMatch(app, /clearLogs\s*\(/,
+    'app.js tak boleh memanggil clearLogs() di mana pun (bukan delete debug)');
 });

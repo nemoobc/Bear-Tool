@@ -16,11 +16,16 @@ globalThis.ethers = { JsonRpcProvider: class {} };
 
 const net = await import('../js/network.js');
 
-test('NETWORKS: 12 networks, 6 mainnet + 6 testnet', () => {
-  assert.equal(net.NETWORKS.length, 12);
+test('NETWORKS: 23 networks, 17 mainnet + 6 testnet', () => {
+  // 2026-10-05: +11 mainnet promoted from CHAIN_PRESETS (4 L1: Avalanche,
+  // Gnosis, Celo, Sonic · 7 L2: Linea, Scroll, Blast, Mantle, zkSync Era,
+  // Unichain, World Chain). Every addition was probe-verified for eth_chainId
+  // (2 endpoints each, publicnode or drpc among them) and confirmed present
+  // in LI.FI's 70-chain set (docs/research/bridge-tokens-2026-10-05.md A5).
+  assert.equal(net.NETWORKS.length, 23);
   const main = net.NETWORKS.filter(n => n.type === 'mainnet');
   const test = net.NETWORKS.filter(n => n.type === 'testnet');
-  assert.equal(main.length, 6);
+  assert.equal(main.length, 17);
   assert.equal(test.length, 6);
 });
 
@@ -37,8 +42,31 @@ test('NETWORKS: every network has non-empty rpc + explorer + symbol', () => {
   }
 });
 
-test('POPULAR_TOKENS: Ethereum mainnet has 19 tokens', () => {
-  assert.equal(net.POPULAR_TOKENS[1].length, 19);
+test('POPULAR_TOKENS: Ethereum mainnet has 23 tokens', () => {
+  // 19 curated entries + the four swap-list extras (rETH, cbETH, wstETH, FRAX)
+  // that used to live in a SECOND POPULAR_TOKENS inside js/swap.js. One source
+  // of truth now: swap re-exports this map (HUKUM 10).
+  assert.equal(net.POPULAR_TOKENS[1].length, 23);
+});
+
+test('POPULAR_TOKENS: every shipped mainnet carries a curated list', () => {
+  // "disetiap jaringan list coin sesuaikan" — a mainnet with no list leaves the
+  // picker with only the native coin. ≥2 = native + at least one ERC-20 stable/wrap.
+  for (const n of net.NETWORKS.filter(x => x.type === 'mainnet')) {
+    const list = net.POPULAR_TOKENS[n.chainId] || [];
+    assert.ok(list.length >= 2, `${n.id} (${n.chainId}) has ${list.length} curated tokens, needs ≥2`);
+  }
+});
+
+test('POPULAR_TOKENS: every testnet carries a list, except BSC testnet (no curated source)', () => {
+  // 97 has no official token list anywhere (research C: LI.FI rejects it,
+  // Circle publishes none, BNB docs 404) — native-only is the honest state.
+  const NO_SOURCE = new Set([97]);
+  for (const n of net.NETWORKS.filter(x => x.type === 'testnet')) {
+    if (NO_SOURCE.has(n.chainId)) continue;
+    const list = net.POPULAR_TOKENS[n.chainId] || [];
+    assert.ok(list.length >= 1, `${n.id} (${n.chainId}) has no curated tokens`);
+  }
 });
 
 test('getNetwork(1) → ethereum; getNetworkById(sepolia) → testnet', () => {

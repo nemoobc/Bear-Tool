@@ -96,6 +96,10 @@ export function addActivity(item) {
         ts: prev.ts || item.ts,
         // Only replace detail when the caller actually supplied one.
         detail: item.detail || prev.detail,
+        // The network a row belongs to is the one it was CREATED on. A
+        // pending→receipt update must not inherit whatever network the user
+        // was standing on when the receipt arrived.
+        netId: prev.netId || item.netId || state.networkId || '',
       };
       // A pending row that turns out to be final moves back to the top, which is
       // where the newest thing belongs.
@@ -105,9 +109,15 @@ export function addActivity(item) {
       return merged;
     }
   }
-  state.activity.unshift(item);
+  // Stamp at birth: the activity view is filtered per network, so a row
+  // without a netId would surface under every network — the bug where testnet
+  // and mainnet history sat in one undivided list.
+  const stamped = (item && typeof item === 'object' && !item.netId)
+    ? { ...item, netId: state.networkId || '' }
+    : item;
+  state.activity.unshift(stamped);
   persistActivity();
-  return item;
+  return stamped;
 }
 
 function persistActivity() {

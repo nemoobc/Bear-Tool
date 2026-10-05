@@ -21,14 +21,19 @@ before(async () => {
     env: { ...process.env, BEAR_DEBUG_PORT: String(PORT), BEAR_DEBUG_FILE: FILE },
     stdio: 'ignore',
   });
-  for (let i = 0; i < 50; i++) {
+  // 15s, not 5s: this hook spawns a Node child while the suite runs 8 test
+  // files in parallel on Termux, where a cold node startup occasionally takes
+  // >5s under load — that budget turned into an intermittent red for ALL
+  // eight tests in this file (observed 2 of 5 full runs; standalone green).
+  // A slow box must not read as a broken relay.
+  for (let i = 0; i < 150; i++) {
     try {
       const r = await fetch(URL_, { method: 'OPTIONS' });
       if (r.status === 204) return;
     } catch { /* belum siap */ }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error('relay tidak menyala dalam 5s');
+  throw new Error('relay tidak menyala dalam 15s');
 });
 
 after(() => {

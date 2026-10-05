@@ -13,6 +13,43 @@ const bridgeSrc = readFileSync(new URL('../js/bridge.js', import.meta.url), 'utf
 // Halaman = index.html + section view (M2: src/views/*.jsx).
 const htmlSrc = appSource();
 
+const { NETWORKS } = await import('../js/network.js');
+const { BRIDGE_ROUTERS } = await import('../js/routers.js');
+
+// ── Bridge registry ∩ shipped networks ──
+// The lifi entry exists to answer ONE question honestly: which of the chains
+// this wallet can actually connect to can LI.FI quote. Research 2026-10-05
+// (docs/research/bridge-tokens-2026-10-05.md A5) proved two claims wrong the
+// hard way: 97 and 80002 are REJECTED by LI.FI (HTTP 400 code 1011) while
+// listed here — a dead route offered in a picker is worse than no route.
+
+test('routers: lifi chains ⊆ NETWORKS — no route to a chain the wallet cannot connect to', () => {
+  const lifi = BRIDGE_ROUTERS.find(r => r.id === 'lifi');
+  const shipped = new Set(NETWORKS.map(n => n.chainId));
+  for (const c of lifi.chains) {
+    assert.ok(shipped.has(c), `lifi claims chain ${c} which is not in NETWORKS`);
+  }
+});
+
+test('routers: lifi does not claim chains LI.FI rejects (97 & 80002 → 400 code 1011)', () => {
+  const lifi = BRIDGE_ROUTERS.find(r => r.id === 'lifi');
+  for (const dead of [97, 80002]) {
+    assert.ok(!lifi.chains.includes(dead),
+      `chain ${dead} must not be claimed: LI.FI answers 400 code 1011 for it (probe 2026-10-05)`);
+  }
+});
+
+test('routers: every shipped mainnet is bridgeable via lifi', () => {
+  // All 17 mainnets were confirmed inside LI.FI's 70-chain EVM set (research
+  // A5) before they were promoted into NETWORKS — the promise must hold as
+  // NETWORKS grows, or the bridge silently has no router on a new chain.
+  const lifi = BRIDGE_ROUTERS.find(r => r.id === 'lifi');
+  for (const n of NETWORKS.filter(x => x.type === 'mainnet')) {
+    assert.ok(lifi.chains.includes(n.chainId),
+      `${n.id} (${n.chainId}) is a shipped mainnet but lifi.chains does not cover it`);
+  }
+});
+
 // ── Router Registry ──
 test('routers: exports SWAP_ROUTERS', () => {
   assert.match(src, /export\s+(const|let)\s+SWAP_ROUTERS/);
@@ -87,12 +124,17 @@ test('routers: exports getBestBridgeRouter', () => {
   assert.match(src, /export\s+function\s+getBestBridgeRouter/);
 });
 test('routers: all chains are numbers', () => {
-  const chains = [...src.matchAll(/chains:\s*\[([\d,\s]+)\]/g)];
+  // Grab each chains:[…] block, drop // line comments, then every remaining
+  // token must be a plain integer. (The old regex demanded ] straight after
+  // the numbers, so a commented array — added when the lifi list grew to 21
+  // chains — silently made the entry uncheckable instead of checked.)
+  const chains = [...src.matchAll(/chains:\s*\[([\s\S]*?)\]/g)];
   assert.ok(chains.length >= 8, `Expected >=8 router entries, got ${chains.length}`);
   // Every chainId in the registry must be a plain integer — a stray string or a
   // trailing comma typo silently excludes a venue from every chain filter.
   for (const [, body] of chains) {
-    for (const part of body.split(',')) {
+    const code = body.replace(/\/\/[^\n]*/g, '');
+    for (const part of code.split(',')) {
       const s = part.trim();
       if (!s) continue;
       assert.match(s, /^\d+$/, `chainId "${s}" is not a plain integer`);

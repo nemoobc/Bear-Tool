@@ -17,6 +17,16 @@ jobs:
         with:
           node-version: '20'
 
+      # The M9 runtime proof (tests/upgradeable-runtime.test.js) compiles the
+      # generated contracts and DRIVES them on a throwaway anvil chain — slots,
+      # one-shot initialize, the upgrade gate. Without foundry that test skips
+      # (honest, and says why), which would mean no CI job ever executes the
+      # proxy pair: a regression in the generated Solidity would sail through a
+      # green suite. The suite below already runs with BEAR_SOLC=1, so the
+      # compiler half of the proof is in place — this is the chain half.
+      - name: Install foundry (anvil — M9 proxy runtime proof)
+        uses: foundry-rs/foundry-toolchain@v1
+
       - name: Install dependencies
         run: npm ci
 
@@ -36,6 +46,13 @@ jobs:
           # Fail loudly: a gate that does not run is decoration.
           grep -q "fail 0" /tmp/npm-test.log || {
             echo "::error::npm test reported failures"; exit 1; }
+          # And fail loudly if the M9 proxy runtime proof was SKIPPED — "fail 0"
+          # is unchanged by a skipped test, so a runner without anvil on PATH
+          # would stay green while proving nothing about the deployed proxy pair.
+          if grep -qE "foundry anvil is not installed|toolchain unavailable:" /tmp/npm-test.log; then
+            echo "::error::M9 proxy runtime proof did not run in CI"
+            exit 1
+          fi
 
   static-analysis:
     name: Static Analysis

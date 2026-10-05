@@ -34,6 +34,24 @@ export default function DeployView() {
               <div id="deployExtra"></div>
               <button type="button" className="btn btn-primary btn-block btn-lg" id="btnDeploy">Deploy Contract</button>
               <div id="deployStatus" className="deploy-status hidden"></div>
+              {/* Export row (wizard parity): appears after a successful
+                  compile — copy the generated source, keep the .sol, take
+                  the ABI. Buttons are plain .btn so no stylesheet grows. */}
+              <div id="deployExport" className="deploy-export hidden" role="group" aria-label="Contract export">
+                <button type="button" className="btn btn-ghost" data-export="copy-source"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy source</button>
+                <button type="button" className="btn btn-ghost" data-export="download-sol">⬇️ Download .sol</button>
+                <button type="button" className="btn btn-ghost" data-export="copy-abi"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy ABI</button>
+              </div>
+              {/* Auto-verify (M10): Sourcify publishes the source with NO key;
+                  Etherscan V2 needs one BYO key, and that single key then works
+                  on every Etherscan-run explorer (the chainid in the URL picks
+                  the chain). Stored in localStorage like the OpenSea key above —
+                  a public read key, never a wallet secret. Local chains skip
+                  with a reason instead of pretending. */}
+              <div className="field">
+                <label htmlFor="deployVerifyKey">Etherscan API key (optional — for auto-verify)</label>
+                <input className="input" id="deployVerifyKey" type="password" autoComplete="off" spellCheck={false} placeholder="YourApiKeyToken" />
+              </div>
             </div>
           </div>
 
@@ -46,81 +64,39 @@ export default function DeployView() {
           {/* ═══════════ CLAIM AIRDROP ═══════════ */}
           
         
-          {/* EIP-7702 suite, moved here from the old separate view-eip7702 */}
-
-          <div className="card">
-            <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg> <span data-i18n="deploy.helper">Helper Contracts</span> <span className="helper-required" data-i18n="deploy.helperStep">step 1</span></div>
-            <p className="small mb-8">Batch Call, Rescue and Claim Airdrop all run through a helper contract that must exist on this chain first. Deploy it here (Batch), or let the flow deploy it for you — it is <strong>reused</strong> on later runs instead of redeployed.</p>
-            <div id="helperStatusList"><p className="small text-center">Checking deployed helpers…</p></div>
-      <div id="helperResult" className="hidden" role="status" aria-live="polite"></div>
-          </div>
-          <div className="card">
-            <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> <span data-i18n="nav.eip7702">EIP-7702</span> — Smart EOA</div>
-            <div id="delegateStatus" className="delegate-status eoa">
-              <span className="label">Status:</span>
-              <span id="delegateStatusText">Checking...</span>
-            </div>
-            <div className="danger-box">
-              ⚠️ <strong>EIP-7702</strong> lets your EOA borrow smart-contract code. A malicious delegation = total compromise.
-              Only delegate to audited implementations. Mainnet requires RPC with type-4 support (Alchemy/QuickNode).
-            </div>
-            <div className="eip7702-wizard">
-              <div className="wizard-steps">
-                <div className="wizard-step active" data-step="1"><span className="step-num">1</span><span className="step-text">Enter address</span></div>
-                <div className="wizard-step" data-step="2"><span className="step-num">2</span><span className="step-text">Configure chain</span></div>
-                <div className="wizard-step" data-step="3"><span className="step-num">3</span><span className="step-text">Confirm & sign</span></div>
-              </div>
-              <div className="wizard-content">
-                <div className="field">
-                  <label htmlFor="delegateAddr">Implementation contract address</label>
-                  <input className="input" id="delegateAddr" placeholder="0x..." />
-                </div>
-                <div className="field">
-                  <label htmlFor="delegateChainId">Chain ID (default = current network)</label>
-                  <input className="input" id="delegateChainId" type="number" placeholder="auto (current chain)" />
-                </div>
-                <div className="field">
-                  {/* min-height, not just a bigger box: this is the one toggle
-                       that hands a signature to every chain at once, so its tap
-                       target has to be as easy to hit as it is to regret. It
-                       measured 23px, under the 32px floor used everywhere else. */}
-                  <label className="flex gap-8 check-target" style={{ alignItems: 'center', cursor: 'pointer' }}>
-                    <input type="checkbox" id="delegateAnyChain" style={{ width: '20px', height: '20px', flex: '0 0 auto' }} />
-                    <span>Allow ALL chains (chainId 0 — replay risk!)</span>
-                  </label>
-                </div>
-                <div className="flex gap-8">
-                  <button type="button" className="btn btn-primary" id="btnDelegate">Delegate</button>
-                  <button type="button" className="btn btn-danger" id="btnRevoke">Revoke</button>
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* EIP-7702 — the standalone "Smart EOA" card (manual delegate to an
+              arbitrary implementation) and the "Helper Contracts" status card
+              are GONE per user request: every flow now owns its own Deploy
+              contract button, and delegation status lives in the topbar badge
+              + the Revoke card's Check address. */}
 
           <div className="card">
             <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg> <span data-i18n="eip7702.batch">Batch Call</span></div>
             <p className="small mb-8">Queue any calls, then Execute in three separate transactions — helper deploy (only if missing), delegation, then execution. Each step reports on its own and the total value is checked against your balance before you confirm. Delegation stays active until you revoke it.</p>
             <div className="batch-queue" id="batchList"></div>
             <button type="button" className="btn btn-ghost mb-8" id="btnBatchAdd">+ Add action</button>
-            <button type="button" className="btn btn-primary btn-block" id="btnBatchExecute">Execute Batch</button>
+            <div className="flex gap-8 mb-8">
+              <button type="button" className="btn btn-secondary" id="btnDeployBatchHelper">Deploy contract</button>
+              <button type="button" className="btn btn-primary" id="btnBatchExecute">Execute Batch</button>
+            </div>
           </div>
 
           <div className="card">
             <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> <span data-i18n="eip7702.rescue">Rescue Atomic</span></div>
-            <p className="small mb-8">Rescue ETH/ERC20/ERC721 from a locked wallet. Deploy rescue contract once, target signs authorization, sponsor pays gas and executes the sweep.</p>
+            <p className="small mb-8">Rescue ERC-20/ERC-721 from a locked wallet. Deploy rescue contract once, target signs authorization, sponsor pays gas and executes the sweep.</p>
             <div className="field">
               <label htmlFor="rescueType">Asset type</label>
               {/* defaultValue di <select>, bukan selected di <option>: React
                   memperingat untuk yang terakhir. defaultValue membuat React
                   menyetel defaultSelected pada opsi — atribut selected="" di
-                  DOM, sama persis dengan markup HTML aslinya. */}
-              <select className="input" id="rescueType" defaultValue="eth">
-                <option value="eth">ETH</option>
+                  DOM, sama persis dengan markup HTML aslinya. ETH-only rescue
+                  is dropped per user request (ERC-20 + NFT only). */}
+              <select className="input" id="rescueType" defaultValue="erc20">
                 <option value="erc20">ERC-20</option>
                 <option value="erc721">ERC-721</option>
               </select>
             </div>
-            <div className="field hidden" id="rescueTokenWrap">
+            <div className="field" id="rescueTokenWrap">
               <label htmlFor="rescueTokenAddr">Token address</label>
               <input className="input" id="rescueTokenAddr" placeholder="0x..." />
               {/* Paste → identity (ERC-20 / NFT) + the DRAINER's balance */}
@@ -130,7 +106,7 @@ export default function DeployView() {
               <label htmlFor="rescueTokenId">Token ID</label>
               <input className="input" id="rescueTokenId" placeholder="0 or id" />
             </div>
-            <div className="field hidden" id="rescueAmountWrap">
+            <div className="field" id="rescueAmountWrap">
               <label htmlFor="rescueAmount">Token amount (ERC-20)</label>
               <div className="input-group">
                 <input className="input" id="rescueAmount" placeholder="Amount or MAX" autoComplete="off" />
@@ -145,6 +121,19 @@ export default function DeployView() {
               </select>
               <div className="small">Options fill from your saved wallets — pick any to sponsor from it.</div>
             </div>
+            {/* Helper contract control, per user request: the standalone
+                Helper Contracts card is gone, so each flow carries its own
+                Deploy button. The address box is OPTIONAL — paste an existing
+                rescue contract and it is probed on-chain (code + SAFE/RESCUER
+                deployer) before use; a mismatch with this flow's SAFE/sponsor
+                asks "deploy baru?" instead of silently reusing a helper that
+                can only revert (onlyRescuer). Empty = registry auto-lookup. */}
+            <div className="field">
+              <label htmlFor="rescueHelperAddr">Contract address (optional — paste to reuse an existing rescue contract)</label>
+              <input className="input" id="rescueHelperAddr" placeholder="0x… (empty = auto / deploy)" spellCheck="false" autoComplete="off" />
+              <div className="small" id="rescueHelperDetect" role="status" aria-live="polite" style={{ marginTop: '6px' }}></div>
+            </div>
+            <button type="button" className="btn btn-secondary btn-block mb-8" id="btnDeployRescueHelper">Deploy contract</button>
             <div className="field">
               <label htmlFor="rescueTargetKey">Private Key (Drainner)</label>
               <div className="input-group">
@@ -195,6 +184,7 @@ export default function DeployView() {
               </select>
               <div className="small">Options fill from your saved wallets — pick any to sponsor from it.</div>
             </div>
+            <button type="button" className="btn btn-secondary btn-block mb-8" id="btnDeployAirdropClaimer">Deploy contract</button>
             <button type="button" className="btn btn-success btn-block" id="btnClaim">Claim + Forward</button>
             <div id="claimResult" className="small claim-result hidden" style={{ marginTop: '10px' }} role="status"></div>
           </div>
@@ -203,8 +193,11 @@ export default function DeployView() {
             <div className="card-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg> <span data-i18n="eip7702.revokeTitle">Revoke EIP-7702 Delegation</span></div>
             <p className="small mb-8">Remove a delegation from an EOA (back to plain EOA). Works for the active wallet, or any wallet whose private key you hold. A malicious delegation = total compromise — revoke it immediately.</p>
             <div className="field">
-              <label htmlFor="revokeTarget">Target address</label>
-              <input className="input" id="revokeTarget" placeholder="0x... (default: current wallet)" />
+              <label htmlFor="revokeTarget">Check address (delegation)</label>
+              {/* Auto-filled with the detected (active) address on load — the
+                  check reads THIS address's delegation only; the sponsor is
+                  just the gas payer. */}
+              <input className="input" id="revokeTarget" placeholder="0x… (auto: current wallet)" data-auto-fill="address" />
             </div>
             <div className="field">
               <label htmlFor="revokeKey">Private key (optional — only if target is not the active wallet)</label>

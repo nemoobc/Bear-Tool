@@ -34,14 +34,14 @@ test('dashboard: total balance = sum of holding value, not sum of unit prices', 
 test('dashboard: asset row shows the user holding value, not the unit price', () => {
   assert.match(
     app,
-    /class="usd">\$\{t\.usd \? escapeHtml\(fmtUsd\(holdingUsd\(t\)\)\)/,
-    'asset row USD cell must be the holding value'
+    /class="usd">\$\{t\.usd != null && !Number\.isNaN\(Number\(t\.usd\)\) \? escapeHtml\(fmtUsd\(holdingUsd\(t\)\)\) : '—'\}/,
+    'asset row USD cell must be the holding value — known price (incl $0.00) shows the number, unknown shows —'
   );
 });
 
 test('dashboard: token modal separates holding value from unit price', () => {
-  assert.match(app, /holding = Number\(ethers\.formatUnits\(balance \|\| '0', decimals\)\) \* usd/,
-    'modal must compute holding value = amount × unit price');
+  assert.match(app, /holding = Number\(ethers\.formatUnits\(balance \|\| '0', decimals\)\) \* \(usd \?\? 0\)/,
+    'modal must compute holding value = amount × unit price (0.00 is a known price)');
   assert.match(app, /fmtUsd\(holding\)/, 'modal headline must be the holding value');
   assert.match(app, /@ \$\{escapeHtml\(fmtUsd\(usd\)\)\} \/ \$\{escapeHtml\(symbol\)\}/,
     'modal must label the unit price separately');
@@ -52,8 +52,8 @@ test('dashboard: mini chart renders real 24h history (no random walk)', () => {
   assert.match(app, /async function drawMiniChart\(\{ symbol, address, timeframe/);
   assert.match(app, /fetchOHLC\(\{ address, chainId, days \}\)/,
     'chart must source real OHLC data');
-  assert.match(app, /paintMessage\(`No \$\{timeframe\} data`\)/,
-    'must show an honest empty state instead of invented data');
+  assert.match(app, /paintMessage\(rateLimited \? `Rate-limited[^`]*` : `No \$\{timeframe\} data`\)/,
+    'must show an honest empty state instead of invented data — and name the rate limit when that is the cause');
   // and the data source itself is exported by price.js
   assert.match(price, /export async function fetchPriceHistory/);
   assert.match(price, /export async function fetchOHLC/);

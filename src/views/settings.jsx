@@ -66,19 +66,11 @@ export default function SettingsView() {
                 </select>
               </div>
 
-              {/* The testnet switch lives in BOTH Settings and the network
-                   picker, and they are the same switch: one function
-                   (setTestnetVisible) writes the setting and both controls read
-                   it back from the same place. Two controls for one setting is
-                   normally a bug waiting to happen — one gets changed and the
-                   other keeps lying — so the rule here is that neither control
-                   owns anything. Move it, and move both.
-
-                   Settings is where a person looks for a preference, and this is
-                   the one that was reported missing from here. The picker copy
-                   stays because a filter you cannot reach from the thing it
-                   filters is a trap: search the list, and the switch that turns
-                   the filter off is gone. */}
+              {/* The testnet switch lives ONLY in Settings (the picker copy was
+                   removed 2026-10-04: it duplicated this on/off — one toggle
+                   per setting). setTestnetVisible remains the single writer and
+                   this control reads back from it. The picker list follows the
+                   stored setting on every open. */}
               <div className="field">
                 <div className="field-row">
                   <div>
@@ -95,6 +87,31 @@ export default function SettingsView() {
               </div>
             </div>
 
+            {/* NFT auto-detect keys — BYO. The gallery could only scan a
+                 curated list of contracts, so "every NFT I own" and floor
+                 price were unreachable without an indexer (research
+                 research-nft-detect.md, 2026-10-04: owner-wide on-chain
+                 enumeration ≈ 2.4M RPC calls on Ethereum, and Seaport has
+                 no listing event, so floor cannot be read from chain state
+                 at all). Both providers below are free tier with CORS
+                 proven from this page; a key stays in this browser's
+                 storage and only travels with the requests it authorises.
+                 Empty = nothing changes: the on-chain scan keeps running
+                 exactly as before. */}
+            <div className="set-group">
+              <h4 className="set-group-h" data-i18n="set.group.nftkeys">NFT auto-detect</h4>
+              <div className="field">
+                <label htmlFor="setNftKeyOpenSea" data-i18n="set.nftkey.opensea">OpenSea API key (optional)</label>
+                <p className="small dim" data-i18n="set.nftkey.opensea.hint">Owner-wide NFT list + floor price on Ethereum, Polygon, Arbitrum, Optimism and Base. Free tier: 600 reads/hour (instant key, valid 7 days). BNB Chain is not covered by OpenSea.</p>
+                <input type="password" className="input" id="setNftKeyOpenSea" placeholder="os_…" autoComplete="off" spellCheck={false} />
+              </div>
+              <div className="field">
+                <label htmlFor="setNftKeyAlchemy" data-i18n="set.nftkey.alchemy">Alchemy API key (optional)</label>
+                <p className="small dim" data-i18n="set.nftkey.alchemy.hint">Fallback when OpenSea refuses or hits its limit: 30M compute units/month free. Floor price included on Ethereum and Polygon. BNB Chain is not covered.</p>
+                <input type="password" className="input" id="setNftKeyAlchemy" placeholder="alch_…" autoComplete="off" spellCheck={false} />
+              </div>
+            </div>
+
             {/* EIP-7702 is a capability question, not a preference: you cannot
                  set it, you can only find out. The check talks to every RPC in
                  the network table with an estimate that can never execute, so it
@@ -107,12 +124,13 @@ export default function SettingsView() {
                 <p className="small dim">Ask every network we ship whether it accepts EIP-7702 set-code transactions, and show which RPC endpoint answered. Read-only: no signature, no broadcast, no cost.</p>
                 <button type="button" className="btn btn-primary btn-block" id="btn7702Check">Check all networks</button>
                 <div id="eip7702Results" className="mt-16"></div>
-                {/* A full sweep writes one rpc-error line per endpoint straight
-                     into the debug log (~25 per run). The button stays hidden
-                     until the scan finishes — app.js reveals it in the success
-                     path so a failed run never offers to "delete logs" the user
-                     never generated. */}
-                <button type="button" className="btn btn-ghost btn-block mt-8" id="btnClearLogs" hidden>🗑 Delete logs</button>
+                {/* This deletes the check's OUTPUT — the rows left on screen
+                     after a sweep — not the debug log: the collector ring and
+                     the relay file are dev tooling and stay put. It stays
+                     hidden until the scan finishes — app.js reveals it in the
+                     success path so a failed run never offers to "delete
+                     output" that was never produced. */}
+                <button type="button" className="btn btn-ghost btn-block mt-8" id="btnClearEipResults" hidden>🗑 Delete results</button>
               </div>
             </div>
 

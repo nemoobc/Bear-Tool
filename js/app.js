@@ -9,7 +9,7 @@
 // pembungkus fetch sebelum modul lain dieksekusi, sehingga kegagalan
 // boot pun ikut tertangkap (auto-report → tools/debug-relay.mjs,
 // senyap bila relay tak ada).
-import { clearLogs } from './debug-collector.js';
+import './debug-collector.js';
 
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider, getDelegation,
@@ -22,12 +22,12 @@ import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPasswo
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity,
          reconcileActivity, activityMatchesSymbol } from './state.js';
-import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate } from './price.js';
+import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate, isRateLimit } from './price.js';
 import { waitForReceipt, withTimeout } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
 import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
-import { bindEip7702Events, loadEip7702 } from './eip7702.js';
+import { loadEip7702 } from './eip7702.js';
 import { checkAllNetworks, summarize, STATUS as EIP7702_STATUS } from './eip7702-support.js';
 import { bindEip7702ToolsEvents } from './eip7702-tools.js';
 import { bindDeployEvents } from './deploy.js';
@@ -43,6 +43,7 @@ import { renderSecurityCenter } from './security-center.js';
 import { scanTransaction } from './security.js';
 import { createProvider, announceLock, announceAccounts, disconnectOrigin, PROVIDER_FLAG } from './dapp-bridge.js';
 import { siteAllowed } from './dapp-sessions.js';
+import { startUpdateGuard } from './update-guard.js';
 import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers, cancelListing, listNft, parseOpenSeaInput } from './opensea-api.js';
 
 const { ethers } = globalThis;
@@ -361,6 +362,11 @@ window.addEventListener('DOMContentLoaded', () => {
       toast('Copy failed', 'error');
     }
   });
+
+  // A tab open across a rebuild keeps the old bundle in memory; without
+  // this the user retests a fix and still sees the old bug (phantom
+  // regressions). Polls the served index.html; banners, never auto-reloads.
+  startUpdateGuard();
 });
 
 // ── settings ──
@@ -684,7 +690,7 @@ function installBridge() {
               : []),
             ...(worst ? [{ k: 'Why', v: worst.detail }] : []),
           ],
-          confirmText: worst && worst.level === 'fail' ? 'Send anyway' : 'Sign',
+          confirmText: worst && worst.level === 'fail' ? 'Send anyway' : 'Confirm',
           cancelText: 'Cancel',
         });
         if (!okToSign) return null;
@@ -972,7 +978,9 @@ async function updateDelegationBadge() {
   }
 }
 
-function updateTopbar() {
+// Exported: walletconnect.js repaints the pill after a dApp-driven chain
+// switch, so the topbar and the chain the dApp was told agree.
+export function updateTopbar() {
   const net = getNetworkById(get('networkId'));
   const pill = $('#networkPill');
   pill.className = 'network-pill ' + (net?.type || 'mainnet');
@@ -1145,7 +1153,7 @@ function showSeedPhrase(mnemonic, address) {
     <div class="card" style="box-shadow:none;background:var(--cream)">
       <div class="seed-words">${words.map((w, i) => `<div class="seed-word"><b>${i + 1}.</b><span>${escapeHtml(w)}</span></div>`).join('')}</div>
     </div>
-    <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(mnemonic)}">📋 Copy seed phrase</button>
+    <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(mnemonic)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy seed phrase</button>
     <div class="field">
       <p class="question-label" id="seedQLabel">Select word #${ask[qPos] + 1} to confirm</p>
       <div class="seed-choices" id="seedChoices" role="group" aria-labelledby="seedQLabel"></div>
@@ -1281,57 +1289,13 @@ function resetLock() {
   window.addEventListener(ev, resetLock, { passive: true })
 );
 
-// ── network SVG logos ──
-function getNetworkLogo(name, size = 24) {
-  const n = (name || '').toLowerCase();
-  // Ethereum — blue diamond
-  if (n === 'ethereum' || n === 'eth') {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/></svg>`;
-  }
-  // Sepolia — blue diamond with S
-  if (n === 'sepolia') {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/><text x="12" y="15" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">S</text></svg>`;
-  }
-  // Arbitrum — blue circle with A chevron
-  if (n.includes('arbitrum')) {
-    const isTest = n.includes('sepolia');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#28A0F0"/><path d="M8 16l4-10 4 10" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 13h5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
-  }
-  // Optimism — red circle with OP
-  if (n.includes('optimism') || n === 'op mainnet' || n === 'op sepolia') {
-    const isTest = n.includes('sepolia');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#FF0420"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">OP</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
-  }
-  // Base — blue circle with B
-  if (n === 'base' || n === 'base sepolia') {
-    const isTest = n.includes('sepolia');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#0052FF"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="9" font-weight="800" font-family="Arial">B</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
-  }
-  // Polygon — purple hexagon
-  if (n.includes('polygon') || n === 'amoy') {
-    const isTest = n.includes('amoy');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,1 21,6.5 21,17.5 12,23 3,17.5 3,6.5" fill="#8247E5"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">POL</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
-  }
-  // BSC — yellow diamond
-  if (n.includes('bnb') || n.includes('bsc')) {
-    const isTest = n.includes('testnet');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L2 12l10 10 10-10z" fill="#F0B90B"/><path d="M8 9h8l-4 6z" fill="#2D2A32"/><path d="M8 9l4-4 4 4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 15l4 4 4-4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
-  }
-  // Avalanche — red triangle
-  if (n.includes('avalanche')) {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,2 2,22 22,22" fill="#E84142"/><text x="12" y="18" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">AVAX</text></svg>`;
-  }
-  // Custom / unknown — satellite icon
-  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="10" fill="#9B5DE5"/><circle cx="12" cy="12" r="4" fill="white"/><line x1="12" y1="2" x2="12" y2="6" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="18" x2="12" y2="22" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="2" y1="12" x2="6" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="18" y1="12" x2="22" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`;
-}
 
 // ── network modal ──
 /**
- * The single writer of settings.testnet. Two switches show it — the one in
- * Settings and the one beside the network list it filters — and when they were
- * wired separately they drifted: the picker wrote the setting and the Settings
- * switch kept showing the old value, so the app remembered one thing and the
- * page claimed another. One writer, both controls read back from here.
+ * The single writer of settings.testnet. One switch shows it — the one in
+ * Settings — and it reads back from here rather than from its own last-known
+ * value (the original bug: the knob moved, the setting stayed, only a Save
+ * made them agree).
  *
  * Hiding testnets can strand the app on a chain that nothing lists any more, so
  * the move off a testnet happens first and the toast says so, rather than
@@ -1367,10 +1331,10 @@ function setTestnetVisible(on, redraw) {
   redraw?.();
 }
 
-/** Both switches show the stored setting, never their own last-known value. */
+/** The Settings switch shows the stored setting, never its own last-known value. */
 function syncTestnetSwitches() {
   const on = (get('settings') || {}).testnet !== false;
-  for (const el of [$('#setTestnet'), $('#netShowTestnet')]) {
+  for (const el of [$('#setTestnet')]) {
     if (el && el.checked !== on) el.checked = on;
   }
 }
@@ -1391,20 +1355,10 @@ function showNetworkModal() {
       <div class="mb-8 mt-16">
         <span class="badge badge-testnet">TESTNET</span>
       </div>
-      <!-- The testnet switch lives here, not in Settings. Settings is for what a
-           person changes about the app; this is about which chains are on
-           screen, so it belongs beside the list it filters. It also used to sit
-           in Settings where it only took effect on Save - it went green, the knob
-           moved, the setting stayed true and all six testnets stayed listed. A
-           control that visibly changes and changes nothing.
-
-           Deliberately a sibling of the .mb-8 badge, not a child: the search
-           box hides .mb-8 when no row matches, and a filter you cannot reach
-           once you have searched is a filter you cannot turn back off. -->
-      <label class="net-filter">
-        <input type="checkbox" id="netShowTestnet" ${get('settings').testnet !== false ? 'checked' : ''}>
-        <span data-i18n="net.showTestnet">Show testnets</span>
-      </label>
+      <!-- The testnet switch lives in Settings only (removed from here
+           2026-10-04: one toggle per setting, reported as a duplicate of the
+           Settings on/off). The list below simply follows settings.testnet —
+           flip it in Settings and reopen this picker. -->
       ${nets.filter(n => n.type === 'testnet').map(n => netRow(n)).join('')}
     </div>
     <hr class="mt-16 mb-16">
@@ -1412,13 +1366,6 @@ function showNetworkModal() {
   `;
   openModal(html);
   applyTranslations();
-
-  // Applies the moment it is flipped. Both this switch and the one in Settings
-  // call setTestnetVisible, so the setting has exactly one writer and the two
-  // controls can never disagree about it.
-  $('#netShowTestnet')?.addEventListener('change', (e) => {
-    setTestnetVisible(!!e.target.checked, () => showNetworkModal());
-  });
 
   // network search
   // Remove a custom network. Never the active one without moving off it first:
@@ -1460,6 +1407,13 @@ function showNetworkModal() {
   }
   $('#addNetBtn').onclick = showAddNetworkModal;
   $all('[data-net]').forEach(el => el.addEventListener('click', () => {
+    // The network you are standing on is not a destination: re-selecting it
+    // used to re-run the whole switch (toast "Network switched" + dashboard
+    // reload) for a network that never changed.
+    if (el.dataset.netCurrent !== undefined) {
+      toast('Already on this network', 'info');
+      return;
+    }
     set('networkId', el.dataset.net);
     localStorage.setItem('bear.networkId', el.dataset.net);
     closeModal();
@@ -1470,7 +1424,10 @@ function showNetworkModal() {
 }
 
 function netRow(n) {
-  const active = n.id === get('networkId') ? 'style="border-left:8px solid var(--mint)"' : '';
+  const isCurrent = n.id === get('networkId');
+  const active = isCurrent
+    ? 'style="border-left:8px solid var(--mint)" data-net-current="1" aria-disabled="true"'
+    : '';
   // A custom network is the only kind the user put there themselves, so it is
   // the only kind they can take away. removeCustomNetwork() existed and was
   // never called from anywhere: add a network, get it forever, with no control
@@ -1485,7 +1442,12 @@ function netRow(n) {
   const tail = n.custom
     ? `<button class="btn-icon net-remove" data-remove-net="${escapeHtml(n.id)}"
          aria-label="Remove ${escapeHtml(n.name)}" title="Remove this network">✕</button>`
-    : `<span class="badge ${n.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(titleCase(n.type))}</span>`;
+    : isCurrent
+      // The section header already says MAINNET/TESTNET, so the current row
+      // spends its one trailing slot answering the real question: why nothing
+      // happens when I tap this.
+      ? `<span class="badge">✓ Current</span>`
+      : `<span class="badge ${n.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(titleCase(n.type))}</span>`;
   return `<div class="asset-row" data-net="${escapeHtml(n.id)}" ${active}>
     <div class="net-logo">${getNetworkLogo(n.name, 32)}</div>
     <div class="asset-info"><div class="asset-name">${escapeHtml(n.name)}</div>
@@ -1854,11 +1816,11 @@ function showAccountModal() {
         ${isPkOnly ? '' : `
         <div class="small mt-8">Seed phrase</div>
         <div class="card" style="box-shadow:none"><div class="mono">${escapeHtml(secret)}</div></div>
-        <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(secret)}">📋 Copy seed phrase</button>`}
+        <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(secret)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy seed phrase</button>`}
         ${pk ? `
         <div class="small mt-8">Private key — active account</div>
         <div class="card" style="box-shadow:none"><div class="mono">${escapeHtml(pk)}</div></div>
-        <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(pk)}">📋 Copy private key</button>`
+        <button class="copy-btn btn btn-ghost btn-block mt-8" data-copy="${escapeHtml(pk)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy private key</button>`
         : `<div class="small mt-8">⚠️ Private key could not be derived for the active account.</div>`}
         <button class="btn btn-primary btn-block" type="button" data-close-modal>Close</button>
       `);
@@ -2041,7 +2003,7 @@ function holdingUsd(t) {
 // The cache + mark rendering now live in js/token-logo.js so the dashboard and
 // the Swap/Bridge pickers cannot drift apart. Re-exported here because several
 // call sites in this file still use the old local names.
-import { tokenLogoHTML, getCachedLogo, cacheLogo, guardTokenLogos, readLogoCache as loadLogoCache, logoKeyFor } from './token-logo.js';
+import { tokenLogoHTML, getCachedLogo, cacheLogo, guardTokenLogos, readLogoCache as loadLogoCache, logoKeyFor, getNetworkLogo } from './token-logo.js';
 import { explainError } from './errors.js';
 const MANUAL_LOGO_SYMS = new Set(['eth', 'ether', 'usdc', 'usdt', 'dai', 'wbtc', 'link', 'uni', 'aave', 'reth', 'cbeth', 'wsteth', 'frax']);
 
@@ -2091,7 +2053,7 @@ function renderAssets(tokens) {
   const filter = ($('#tokenSearchInput')?.value || '').toLowerCase();
   const filtered = filter ? tokens.filter(t => (t.symbol || '').toLowerCase().includes(filter)) : tokens;
   assetList.innerHTML = filtered.map((t, i) => `
-    <div class="asset-row asset-clickable" data-token-idx="${i}" data-symbol="${escapeHtml(t.symbol || '')}" data-address="${escapeHtml(t.address || '')}" data-decimals="${t.decimals || 18}" data-balance="${escapeHtml(t.balance || '0')}" data-usd="${t.usd || 0}">
+    <div class="asset-row asset-clickable" data-token-idx="${i}" data-symbol="${escapeHtml(t.symbol || '')}" data-address="${escapeHtml(t.address || '')}" data-decimals="${t.decimals || 18}" data-balance="${escapeHtml(t.balance || '0')}" data-usd="${t.usd ?? ''}">
       <div class="token-icon-svg">${getLogo(t)}</div>
       <div class="asset-info">
         <div class="asset-name">${escapeHtml(t.symbol)}</div>
@@ -2099,7 +2061,7 @@ function renderAssets(tokens) {
       </div>
       <div class="asset-balance">
         <div class="amount">${escapeHtml(fmtAmount(t.balance, t.decimals))}</div>
-        <div class="usd">${t.usd ? escapeHtml(fmtUsd(holdingUsd(t))) : '—'}</div>
+        <div class="usd">${t.usd != null && !Number.isNaN(Number(t.usd)) ? escapeHtml(fmtUsd(holdingUsd(t))) : '—'}</div>
       </div>
       <div class="asset-arrow"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
     </div>`).join('');
@@ -2129,11 +2091,14 @@ function showTokenActions(el) {
   const address = el.dataset.address;
   const decimals = parseInt(el.dataset.decimals) || 18;
   const balance = el.dataset.balance;
-  const usd = parseFloat(el.dataset.usd) || 0;
+  // Known price (even 0.00) → show the number; unknown → '—'. data-usd=""
+  // marks unknown, so a legitimate 0 is not mistaken for "no price".
+  const usdRaw = el.dataset.usd;
+  const usd = (usdRaw === '' || usdRaw == null || Number.isNaN(Number(usdRaw))) ? null : Number(usdRaw);
   const net = getNetworkById(get('networkId'));
   // Holding value (what the user owns) vs unit price (price of 1 token)
   let holding = 0;
-  try { holding = Number(ethers.formatUnits(balance || '0', decimals)) * usd; } catch { holding = 0; }
+  try { holding = Number(ethers.formatUnits(balance || '0', decimals)) * (usd ?? 0); } catch { holding = 0; }
   if (!Number.isFinite(holding)) holding = 0;
 
   // The transactions of THIS token, newest first. Rows written before the
@@ -2149,14 +2114,19 @@ function showTokenActions(el) {
        <button class="copy-btn" type="button" data-copy="${escapeHtml(address)}" title="Copy contract address" aria-label="Copy contract address"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`
     : `<span class="tm-addr-k">Contract</span><span class="tm-addr-v">Native asset — no contract</span>`;
 
+  // One renderer for list and modal (token-logo.js): the modal used to carry
+  // its own getLogoSVG map with 13 hardcoded symbols, so a BNB/POL/cached
+  // logo that the list showed turned into a peach initial disc here — the
+  // reported "logo disappears when I press the coin". tokenLogoHTML takes the
+  // contract so a cached mark cannot be reached through a counterfeit ticker.
   openModal(`
     <div class="token-modal-header">
-      <div class="token-modal-icon">${getLogoSVG(symbol)}</div>
+      <div class="token-modal-icon">${tokenLogoHTML(symbol, 48, { address })}</div>
       <div class="token-modal-info">
         <div class="token-modal-symbol">${escapeHtml(symbol)}</div>
         <div class="token-modal-balance">${escapeHtml(fmtAmount(balance, decimals))} ${escapeHtml(symbol)}</div>
-        <div class="token-modal-usd">${usd ? escapeHtml(fmtUsd(holding)) : '—'}</div>
-        ${usd ? `<div class="small" style="opacity:0.7">@ ${escapeHtml(fmtUsd(usd))} / ${escapeHtml(symbol)}</div>` : ''}
+        <div class="token-modal-usd">${usd != null ? escapeHtml(fmtUsd(holding)) : '—'}</div>
+        ${usd != null ? `<div class="small" style="opacity:0.7">@ ${escapeHtml(fmtUsd(usd))} / ${escapeHtml(symbol)}</div>` : ''}
       </div>
     </div>
     <div class="token-modal-addr">${contractBlock}</div>
@@ -2206,6 +2176,10 @@ function showTokenActions(el) {
   window._tokenModalSymbol = symbol;
   window._tokenModalAddress = address;
 
+  // A cached CoinGecko <img> can be dead; guardTokenLogos swaps it for the
+  // generated mark instead of leaving a broken-image icon in the header.
+  guardTokenLogos($('#modalBox'));
+
   // A transaction row opens the same full record the Activity view uses:
   // the local row first, then the on-chain truth (block, status, gas, fee).
   // openModal rewrites the same #modalBox, so this IS a navigation, not a
@@ -2231,38 +2205,6 @@ function showTokenActions(el) {
   $('#tokenReceive').onclick = () => { const s = window._tokenModalSymbol; closeModal(); showReceiveModal(get('address'), s); };
   $('#tokenSwap').onclick = () => { closeModal(); switchView('swap'); };
   $('#tokenHistory').onclick = () => { closeModal(); switchView('activity'); };
-}
-
-function getLogoSVG(sym) {
-  const s = (sym || '').toLowerCase();
-  // Use 'm' suffix to avoid collision with getLogo's indexed suffixes
-  const logos = {
-    eth:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="ethGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#627EEA"/><stop offset="100%" stop-color="#8B9FE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#ethGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="22" font-weight="800" font-family="Arial">Ξ</text></svg>`,
-    usdc:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdcGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2775CA"/><stop offset="100%" stop-color="#4A9AE8"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdcGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">$</text></svg>`,
-    usdt:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="usdtGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#26A17B"/><stop offset="100%" stop-color="#3DD68C"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#usdtGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">₮</text></svg>`,
-    dai:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="daiGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F5AC37"/><stop offset="100%" stop-color="#F8C967"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#daiGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">D</text></svg>`,
-    wbtc:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wbtcGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F7931A"/><stop offset="100%" stop-color="#F8B34A"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wbtcGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="18" font-weight="800" font-family="Arial">B</text></svg>`,
-    link:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="linkGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2A5ADA"/><stop offset="100%" stop-color="#5B8DEF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#linkGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="20" font-weight="800" font-family="Arial">⬡</text></svg>`,
-    uni:    `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="uniGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF007A"/><stop offset="100%" stop-color="#FF4DA6"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#uniGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="20" font-weight="800" font-family="Arial">U</text></svg>`,
-    aave:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="aaveGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B6509E"/><stop offset="100%" stop-color="#2EBAC6"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#aaveGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">AA</text></svg>`,
-    reth:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="rethGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E84142"/><stop offset="100%" stop-color="#FF6B6B"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#rethGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">rΞ</text></svg>`,
-    cbeth:  `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="cbethGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0052FF"/><stop offset="100%" stop-color="#4D8BFF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#cbethGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">cb</text></svg>`,
-    wsteth: `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="wstGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00A3FF"/><stop offset="100%" stop-color="#66C2FF"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#wstGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="14" font-weight="800" font-family="Arial">wΞ</text></svg>`,
-    frax:   `<svg viewBox="0 0 48 48" width="48" height="48"><defs><linearGradient id="fraxGm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000"/><stop offset="100%" stop-color="#333"/></linearGradient></defs><circle cx="24" cy="24" r="24" fill="url(#fraxGm)"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="Arial">FX</text></svg>`
-  };
-  if (s === 'eth' || s === 'ether') return logos.eth;
-  if (s === 'usdc') return logos.usdc;
-  if (s === 'usdt') return logos.usdt;
-  if (s === 'dai') return logos.dai;
-  if (s === 'wbtc') return logos.wbtc;
-  if (s === 'link') return logos.link;
-  if (s === 'uni') return logos.uni;
-  if (s === 'aave') return logos.aave;
-  if (s === 'reth') return logos.reth;
-  if (s === 'cbeth') return logos.cbeth;
-  if (s === 'wsteth') return logos.wsteth;
-  if (s === 'frax') return logos.frax;
-  return `<svg viewBox="0 0 48 48" width="48" height="48"><circle cx="24" cy="24" r="24" fill="#FFD9C0"/><text x="24" y="32" text-anchor="middle" fill="#2D2A32" font-size="16" font-weight="800" font-family="Arial">${(sym || '?').slice(0, 1).toUpperCase()}</text></svg>`;
 }
 
 function showReceiveModal(address, symbol) {
@@ -2328,15 +2270,21 @@ async function drawMiniChart({ symbol, address, timeframe = '24h' }) {
 
   const days = CHART_TF_DAYS[timeframe] || 1;
   let candles = [];
+  // A rate limit is NOT "this coin has no chart" — say which one it is, or the
+  // modal lies about someone's coin exactly when the data does exist.
+  let rateLimited = false;
   try {
     const chainId = getNetworkById(get('networkId'))?.chainId;
     candles = await fetchOHLC({ address, chainId, days });
-  } catch { candles = []; }
+  } catch (e) {
+    rateLimited = isRateLimit(e);
+    candles = [];
+  }
 
   if (!canvas.isConnected || document.getElementById('tokenPriceChart') !== canvas) return;
 
   if (!candles.length || candles.length < 2) {
-    paintMessage(`No ${timeframe} data`);
+    paintMessage(rateLimited ? `Rate-limited — try again in a minute` : `No ${timeframe} data`);
     return;
   }
 
@@ -2424,7 +2372,6 @@ function bindViews() {
   bindSendEvents();
   bindSwapEvents();
   bindBridgeEvents();
-  bindEip7702Events();
   bindEip7702ToolsEvents();
   bindDeployEvents();
 
@@ -2442,14 +2389,16 @@ function bindViews() {
     on('#btnApprovalScan', 'click', scanApprovals);
     on('#btnApprovalRevokeAll', 'click', revokeAllApprovals);
     on('#btn7702Check', 'click', runEip7702Check);
-    // "Delete logs" (live request: muncul setiap selesai scan) — drops the
-    // collector ring and truncates the relay file, then hides itself until
-    // the next scan finishes.
-    on('#btnClearLogs', 'click', () => {
-      clearLogs();
-      const el = $('#btnClearLogs');
+    // "Delete results" (live request: muncul setiap selesai scan) — wipes the
+    // EIP-7702 check output from the panel, then hides itself until the next
+    // scan produces output again. It does NOT touch the debug log; that ring
+    // is dev tooling (js/debug-collector.js) and is not this button's job.
+    on('#btnClearEipResults', 'click', () => {
+      const out = $('#eip7702Results');
+      if (out) out.innerHTML = '';
+      const el = $('#btnClearEipResults');
       if (el) el.hidden = true;
-      toast('Debug logs deleted', 'success');
+      toast('Results deleted', 'success');
     });
 
   // There is no Save button on this page any more, and every control here is
@@ -2495,12 +2444,22 @@ function bindViews() {
     startAutoLock();
     toast('Auto-lock set to ' + (minutes === 0 ? 'never' : minutes + ' min'), 'success');
   });
-  // The testnet switch, in Settings. The network picker has the same switch
-  // beside the list it filters; both go through setTestnetVisible, so this is
-  // the second control for one setting, not a second opinion about it.
+  // The testnet switch, in Settings — the only copy (the picker duplicate was
+  // removed 2026-10-04: one toggle per setting). It goes through
+  // setTestnetVisible, so this is the single control for the setting.
   $('#setTestnet')?.addEventListener('change', (e) => {
     setTestnetVisible(e.target.checked);
   });
+  // NFT auto-detect keys (Settings → NFT auto-detect). Read back on bind,
+  // trimmed on change, never echoed anywhere else — BYO credentials that
+  // only ride along the two NFT requests they authorise. Empty key = the
+  // gallery's on-chain scan, unchanged (js/nft-detect.js contract).
+  for (const [sel, key] of [['#setNftKeyOpenSea', 'nftKeyOpenSea'], ['#setNftKeyAlchemy', 'nftKeyAlchemy']]) {
+    const inp = $(sel);
+    if (!inp) continue;
+    inp.value = get(key) || '';
+    inp.addEventListener('change', (e) => set(key, e.target.value.trim()));
+  }
   // One delete, in the Safety group, where the consequences are spelled out
   // beside it. It used to also sit at the very bottom of the page below the
   // whole Security Center, so a destructive action appeared twice on one screen
@@ -2512,7 +2471,7 @@ function bindViews() {
   // Auto-lock is a dropdown — reflect the saved value (not the HTML default)
   const autoLockEl = $('#setAutoLock');
   if (autoLockEl) autoLockEl.value = String(get('settings').autoLock ?? 5);
-  // Both testnet switches, from the stored setting rather than from the markup.
+  // The testnet switch, from the stored setting rather than from the markup.
   // A switch that boots showing "on" while the setting says "off" is a control
   // that will be flipped by someone who was told the opposite.
   syncTestnetSwitches();
@@ -2753,12 +2712,13 @@ function renderEip7702Results(results) {
 async function runEip7702Check() {
   const out = $('#eip7702Results');
   const btn = $('#btn7702Check');
-  const clearBtn = $('#btnClearLogs');
+  const clearBtn = $('#btnClearEipResults');
   if (!out) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
   // Hidden while running; the success path reveals it (live request: "setiap
-  // selesai scan nanti muncul tombol delete logs"). A failed scan leaves it
-  // hidden — there are no fresh logs to delete then.
+  // selesai scan nanti muncul tombol [hapus hasil cek]"). A failed scan leaves
+  // it hidden — an error line is not check output, so there is nothing to
+  // delete then.
   if (clearBtn) clearBtn.hidden = true;
   out.innerHTML = spinner(64, 'Asking every network…');
   let scanned = false;
@@ -2772,9 +2732,9 @@ async function runEip7702Check() {
     });
     // `scanned` means "≥1 network was really asked", not "the call did not
     // throw": checkAllNetworks returns one result per network it walked, and
-    // an empty walk is no scan — nothing fresh in the log to delete, so the
-    // button stays hidden (it used to be revealed unconditionally, because
-    // this flag was a literal `true`).
+    // an empty walk is no scan — no output on screen to delete, so the button
+    // stays hidden (it used to be revealed unconditionally, because this flag
+    // was a literal `true`).
     scanned = Array.isArray(results) && results.length > 0;
   } catch (e) {
     out.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Checking support'))}</p>`;
@@ -2789,7 +2749,15 @@ function renderActivity() {
   loadActivity();
   const list = $('#activityList');
   if (!list) return;
-  if (!get('activity').length) {
+  // Two networks in one undivided list was the reported bug: rows recorded on
+  // another network no longer sit beside these ones. Rows written before
+  // netId existed (history from older builds) stay visible under their own
+  // heading — an honest "not recorded" beats silently losing history.
+  const activeId = get('networkId');
+  const mine = get('activity').filter((a) => a && a.netId === activeId);
+  const older = get('activity').filter((a) => a && !a.netId);
+  const visible = [...mine, ...older];
+  if (!visible.length) {
     list.innerHTML = `<div class="empty-state">
       <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       <p>No transactions yet</p>
@@ -2821,7 +2789,7 @@ function renderActivity() {
     };
     return `<div class="activity-icon ${cls}">${svgs[cls] || svgs.send}</div>`;
   };
-  list.innerHTML = get('activity').map((a, i) => `
+  const rowHTML = (a, i) => `
     <div class="activity-item activity-item--openable" role="button" tabindex="0"
          data-act-index="${i}">
       ${actSvg(a.type)}
@@ -2829,7 +2797,13 @@ function renderActivity() {
         <div class="activity-action">${escapeHtml(titleCase(a.type))} — ${escapeHtml(titleCase(a.status))}</div>
         <div class="activity-meta">${escapeHtml(a.detail)} · ${escapeHtml(fmtTimeShort(a.ts))}</div>
       </div>
-    </div>`).join('');
+    </div>`;
+  const olderHead = older.length
+    ? `<div class="activity-netsep"><span class="small dim">· Network not recorded (older entries) ·</span></div>`
+    : '';
+  // mine first, then older — the order `visible` was built in, so
+  // data-act-index maps straight to visible[i].
+  list.innerHTML = mine.map(rowHTML).join('') + olderHead + older.map(rowHTML).join('');
   // Tapping a row opens the full record. There is deliberately no explorer link
   // inside the row: role="button" makes the whole subtree presentational, so a
   // nested <a> loses its role while staying in the tab order (a link announced
@@ -2838,7 +2812,7 @@ function renderActivity() {
   // the Explorer link instead, where it has a real label to sit on.
   const openRow = (row) => {
     if (!row) return;
-    showActivityDetail(get('activity')[Number(row.dataset.actIndex)]);
+    showActivityDetail(visible[Number(row.dataset.actIndex)]);
   };
   $all('.activity-item--openable').forEach(row => {
     row.addEventListener('click', () => openRow(row));
@@ -2854,7 +2828,13 @@ function renderActivity() {
 // mismatch between them is exactly what someone reads this panel to find.
 async function showActivityDetail(a) {
   if (!a) return;
-  const net = getNetworkById(get('networkId'));
+  // The row's own network, not whatever happens to be active: a sepolia row
+  // opened while standing on mainnet used to get mainnet's explorer link and
+  // mainnet's provider ("Not found on Ethereum"). Legacy rows without netId
+  // fall back to the active network — nothing else is known about them.
+  const activeId = get('networkId');
+  const rowNetId = a.netId || activeId;
+  const net = getNetworkById(rowNetId);
   const row = (k, v, mono = false) =>
     `<div class="dsig-row"><div class="dsig-k">${escapeHtml(k)}</div><div class="dsig-v${mono ? ' mono' : ''}">${v}</div></div>`;
   const val = (v) => escapeHtml(v == null || v === '' ? '—' : String(v));
@@ -2879,7 +2859,13 @@ async function showActivityDetail(a) {
   const box = $('#actChain');
   const hasHash = a.hash && a.hash.startsWith('0x');
   if (!hasHash) { box.innerHTML = `<p class="small dim">No transaction hash recorded for this entry.</p>`; return; }
-  const provider = get('provider');
+  let provider;
+  if (rowNetId === activeId) {
+    provider = get('provider');
+  } else {
+    // Off-network row: read it from ITS chain, not the active one.
+    provider = await getProvider(net.chainId).catch(() => null);
+  }
   if (!provider) {
     box.innerHTML = `<p class="small dim">Connect a network to read this transaction from the chain.</p>`;
     return;
@@ -3084,7 +3070,12 @@ initAddressBook();
 async function renderHeroSpark(net) {
   const canvas = $('#heroSpark');
   if (!canvas || !net) return;
-  const history = await fetchPriceHistory({ address: null, chainId: net.chainId });
+  // fetchPriceHistory now surfaces a rate limit as a named error (price.js);
+  // the sparkline is cosmetic, so a throw must never reach the dashboard.
+  let history;
+  try {
+    history = await fetchPriceHistory({ address: null, chainId: net.chainId });
+  } catch { return; }
   if (!Array.isArray(history) || history.length < 2) return;
   const w = canvas.clientWidth || 200;
   const h = 40;

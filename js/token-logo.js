@@ -22,6 +22,13 @@ const TTL = 24 * 60 * 60 * 1000;
 // to the default disc.
 const MARKS = {
   eth:    ['#627EEA', '#8B9FE8', 'Ξ',  14],
+  // Native coins of every bundled network (item 11: all must render their own
+  // mark, not the generic peach disc): BNB/tBNB = BSC mainnet/testnet,
+  // POL = Polygon + Amoy (MATIC = the legacy ticker, same mark).
+  bnb:    ['#F0B90B', '#F3BA2F', '⬡',  13],
+  tbnb:   ['#F0B90B', '#F3BA2F', 't⬡', 10],
+  pol:    ['#8247E5', '#9D71F1', 'P',  13],
+  matic:  ['#8247E5', '#9D71F1', 'P',  13],
   usdc:   ['#2775CA', '#4A9AE8', '$',  11],
   usdt:   ['#26A17B', '#3DD68C', '₮',  12],
   dai:    ['#F5AC37', '#F8C967', 'D',  12],
@@ -33,6 +40,15 @@ const MARKS = {
   cbeth:  ['#0052FF', '#4D8BFF', 'cb', 11],
   wsteth: ['#00A3FF', '#66C2FF', 'wΞ', 10],
   frax:   ['#000000', '#333333', 'FX', 11],
+  // Native coins of the 2026-10-05 network growth (4 L1 + 7 L2). Linea/Scroll/
+  // Blast/zkSync/Unichain/World Chain ride on ETH above; these five are the new
+  // native tickers — without an entry each one wears the fallback peach disc
+  // (native-coin-marks.test.js pins the exact set).
+  avax:   ['#E84142', '#FF6B6B', '▲',  12],
+  xdai:   ['#04795B', '#0A9E6E', 'G',  13],
+  celo:   ['#FCFF52', '#D4E04A', 'C',  12],
+  s:      ['#F2A72B', '#FFB13C', 'S',  13],
+  mnt:    ['#65B3AE', '#8CD8D2', 'M',  13],
 };
 
 export function readLogoCache() {
@@ -137,3 +153,50 @@ export function guardTokenLogos(root) {
 }
 
 export { markSvg as tokenMarkSvg };
+
+// ── network SVG logos ──
+// Extracted from app.js so the network modal and every network picker render
+// the SAME brand marks — the Bridge chain pickers showed the raw emoji
+// .icon field instead, which never matched the list. One renderer, by construction.
+export function getNetworkLogo(name, size = 24) {
+  const n = (name || '').toLowerCase();
+  // Ethereum — blue diamond
+  if (n === 'ethereum' || n === 'eth') {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/></svg>`;
+  }
+  // Sepolia — blue diamond with S
+  if (n === 'sepolia') {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/><text x="12" y="15" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">S</text></svg>`;
+  }
+  // Arbitrum — blue circle with A chevron
+  if (n.includes('arbitrum')) {
+    const isTest = n.includes('sepolia');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#28A0F0"/><path d="M8 16l4-10 4 10" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 13h5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // Optimism — red circle with OP
+  if (n.includes('optimism') || n === 'op mainnet' || n === 'op sepolia') {
+    const isTest = n.includes('sepolia');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#FF0420"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">OP</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // Base — blue circle with B
+  if (n === 'base' || n === 'base sepolia') {
+    const isTest = n.includes('sepolia');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#0052FF"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="9" font-weight="800" font-family="Arial">B</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // Polygon — purple hexagon
+  if (n.includes('polygon') || n === 'amoy') {
+    const isTest = n.includes('amoy');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,1 21,6.5 21,17.5 12,23 3,17.5 3,6.5" fill="#8247E5"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">POL</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // BSC — yellow diamond
+  if (n.includes('bnb') || n.includes('bsc')) {
+    const isTest = n.includes('testnet');
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L2 12l10 10 10-10z" fill="#F0B90B"/><path d="M8 9h8l-4 6z" fill="#2D2A32"/><path d="M8 9l4-4 4 4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 15l4 4 4-4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  }
+  // Avalanche — red triangle
+  if (n.includes('avalanche')) {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,2 2,22 22,22" fill="#E84142"/><text x="12" y="18" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">AVAX</text></svg>`;
+  }
+  // Custom / unknown — satellite icon
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="10" fill="#9B5DE5"/><circle cx="12" cy="12" r="4" fill="white"/><line x1="12" y1="2" x2="12" y2="6" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="18" x2="12" y2="22" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="2" y1="12" x2="6" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="18" y1="12" x2="22" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`;
+}

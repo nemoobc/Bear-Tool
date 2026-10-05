@@ -16,7 +16,8 @@
 // this module costs nothing at boot and opens no socket until the user
 // actually pastes a wc: URI.
 import { openModal, closeModal, confirmTx, escapeHtml, toast } from './ui.js';
-import { get } from './state.js';
+import { get, set, requireUnlock } from './state.js';
+import { getNetworkById, getNetwork } from './network.js';
 
 export const WC_PROJECT_ID = '99909bde486039e2102663b92be74974';
 
@@ -26,13 +27,65 @@ export const WC_PROJECT_ID = '99909bde486039e2102663b92be74974';
 // it by default for the same reason.
 export const WC_SIGN_METHODS = ['personal_sign', 'eth_signTypedData_v4', 'eth_sendTransaction'];
 
+// Read/chain methods a dApp needs to even finish connecting. WalletConnect
+// validates the APPROVED namespace against what the dApp asked for: a session
+// granting only the three signing methods is rejected outright by any dApp
+// whose requiredNamespaces lists eth_accounts / wallet_switchEthereumChain
+// (most do) — the connect fails before a single signature is requested, which
+// is exactly the "cannot connect" symptom. eth_sign stays out for the same
+// reason it is out of WC_SIGN_METHODS.
+//
+// wallet_switchEthereumChain is answered WITHOUT a per-call prompt on purpose:
+// a chain switch is reversible and nagging on each one teaches people to click
+// through — the same reasoning audit-regression.test.js pins for the injected
+// shim (it only bars the method from PER_CALL_CONFIRM, not from being handled).
+// The target must be a network Bear Tool already ships: wallet_addEthereumChain
+// never installs the dApp's rpcUrls, so a page cannot point the wallet at its
+// own RPC.
+export const WC_READ_METHODS = [
+  'eth_chainId', 'net_version', 'eth_accounts', 'eth_requestAccounts',
+  'wallet_switchEthereumChain', 'wallet_addEthereumChain',
+];
+
+/** What the session actually grants: sign/spend + the read/chain calls above. */
+export const WC_SESSION_METHODS = [...WC_SIGN_METHODS, ...WC_READ_METHODS];
+
 const USER_REJECTED = { code: 4001, message: 'User rejected the request.' };
+// EIP-3085/3326: 4902 = the chain is not in the wallet. The message must say
+// what the user can DO about it, not just repeat the number.
+const CHAIN_UNKNOWN = (id) => ({
+  code: 4902,
+  message: `Bear Tool has no network with chain id ${id}. Add it in Settings → Networks, then ask again.`,
+});
 const METHOD_UNSUPPORTED = { code: -32601, message: 'Method not supported by Bear Tool.' };
 
 let kit = null;
 let initing = null;
 
 // -- pure helpers (unit-tested without a browser or a network) -------------
+
+/** WC dApps spell the field `gas` (JSON-RPC spelling); ethers v6 only reads
+ * gasLimit and silently DROPS `gas`, so a dapp-supplied limit never reached
+ * the node. Map it — an explicit gasLimit keeps winning — and drop the alias. */
+export function normalizeWcTx(raw) {
+  const tx = { ...(raw || {}) };
+  if (tx.gasLimit === undefined && tx.gas !== undefined) tx.gasLimit = tx.gas;
+  delete tx.gas;
+  return tx;
+}
+
+/** 'eip155:137' → 137; anything unparseable → null (caller treats that as
+ * "no chain claimed", not as a mismatch). */
+export function wcChainNumber(chainId) {
+  const m = /^eip155:(\d+)$/.exec(String(chainId || ''));
+  return m ? Number(m[1]) : null;
+}
+
+/** Native unit for value display on the ACTIVE network — every chain used to
+ * be labelled "ETH", which is wrong on most of the networks this app ships. */
+export function nativeUnit(net) {
+  return (net && net.symbol) || 'ETH';
+}
 
 /** A pairing URI is `wc:<version>-<topic>@<relay>?symKey=...` — anything else
  *  must never reach core.pair(), where a malformed value throws deep inside
@@ -155,7 +208,7 @@ async function handleProposal({ id, params }) {
       { k: 'dApp', v: dappName },
       { k: 'Account', v: shortAddr(addr) },
       { k: 'Chains', v: chains.join(', ') },
-      { k: 'Can request', v: WC_SIGN_METHODS.join(', ') },
+      { k: 'Can request', v: WC_SESSION_METHODS.join(', ') },
     ],
     confirmText: 'Connect',
   });
@@ -169,7 +222,7 @@ async function handleProposal({ id, params }) {
       eip155: {
         accounts: chains.map((c) => c + ':' + addr),
         chains,
-        methods: WC_SIGN_METHODS,
+        methods: WC_SESSION_METHODS,
         events: ['chainChanged', 'accountsChanged'],
       },
     },
@@ -182,6 +235,9 @@ async function handleRequest({ id, topic, params }) {
   const chainId = params?.chainId || 'eip155:1';
   const signer = get('signer');
   if (!signer) {
+    // Item 12: locked wallet → raise the local password prompt so the user can
+    // unlock, and tell the dApp why (the dApp retries on its own).
+    requireUnlock();
     await respondError(topic, id, { code: 5100, message: 'Wallet is locked.' });
     return;
   }
@@ -195,7 +251,7 @@ async function handleRequest({ id, topic, params }) {
         { k: 'Account', v: shortAddr(signer.address) },
         { k: 'Message', v: hexToPreview(hex) },
       ],
-      confirmText: 'Sign',
+      confirmText: 'Confirm',
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);
     return respond(topic, id, await signer.signMessage(hexToBytes(hex)));
@@ -206,6 +262,16 @@ async function handleRequest({ id, topic, params }) {
     let parsed = {};
     try { parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw || {}); } catch { parsed = {}; }
     const domain = parsed.domain || {};
+    // A typed-data signature is only valid for the domain's chain. Signing a
+    // Polygon-domain payload while the wallet sits on Ethereum produces a
+    // signature the dApp can never use, behind a dialog that looked fine.
+    const domChain = Number(domain.chainId);
+    const localNet = getNetworkById(get('networkId'));
+    if (Number.isFinite(domChain) && localNet && Number(localNet.chainId) !== domChain) {
+      const msg = `This signature targets chain ${domChain}, but Bear Tool is on ${localNet.name} (chain ${localNet.chainId}). Switch network first — nothing was signed.`;
+      toast(msg, 'error');
+      return respondError(topic, id, { code: -32000, message: msg });
+    }
     const ok = await confirmTx({
       title: 'Sign typed data?',
       rows: [
@@ -214,7 +280,7 @@ async function handleRequest({ id, topic, params }) {
         { k: 'Primary type', v: String(parsed.primaryType || '?') },
         { k: 'Account', v: shortAddr(signer.address) },
       ],
-      confirmText: 'Sign',
+      confirmText: 'Confirm',
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);
     const types = { ...(parsed.types || {}) };
@@ -223,7 +289,19 @@ async function handleRequest({ id, topic, params }) {
   }
 
   if (method === 'eth_sendTransaction') {
-    const tx = { ...((params.request.params && params.request.params[0]) || {}) };
+    const localNet = getNetworkById(get('networkId'));
+    const reqChain = wcChainNumber(chainId);
+    // The `chainId` row in the dialog used to be decoration: the transaction
+    // was signed with the LOCAL provider whatever the dApp asked for, so a
+    // dApp on Polygon could quietly push a transaction onto Ethereum behind a
+    // dialog that said "eip155:137". Refuse the mismatch instead of executing
+    // on the wrong chain.
+    if (reqChain !== null && localNet && Number(localNet.chainId) !== reqChain) {
+      const msg = `This dApp asked for chain ${reqChain}, but Bear Tool is on ${localNet.name} (chain ${localNet.chainId}). Switch network in Bear Tool and ask again — nothing was sent.`;
+      toast(msg, 'error');
+      return respondError(topic, id, { code: -32000, message: msg });
+    }
+    const tx = normalizeWcTx((params.request.params && params.request.params[0]) || {});
     const provider = get('provider');
     if (!provider) {
       return respondError(topic, id, { code: -32000, message: 'No provider for the current network.' });
@@ -233,7 +311,7 @@ async function handleRequest({ id, topic, params }) {
       rows: [
         { k: 'Chain', v: chainId },
         { k: 'To', v: shortAddr(tx.to || '') },
-        { k: 'Value', v: fmtValue(tx.value) },
+        { k: 'Value', v: fmtValue(tx.value, nativeUnit(localNet)) },
         { k: 'Data', v: tx.data && tx.data !== '0x' ? (String(tx.data).length / 2 - 1) + ' bytes' : 'none' },
       ],
       confirmText: 'Sign & Send',
@@ -243,6 +321,56 @@ async function handleRequest({ id, topic, params }) {
     const sent = await signer.connect(provider).sendTransaction(tx);
     toast('Transaction sent: ' + sent.hash.slice(0, 18) + '...', 'info');
     return respond(topic, id, sent.hash);
+  }
+
+  // -- read / chain calls: what a dApp needs just to finish connecting ------
+  // Answered without a prompt (see WC_READ_METHODS): no signature, no spend.
+  if (method === 'eth_accounts' || method === 'eth_requestAccounts') {
+    return respond(topic, id, [signer.address]);
+  }
+
+  if (method === 'eth_chainId' || method === 'net_version') {
+    const local = getNetworkById(get('networkId'));
+    // Not named `id`: that is the JSON-RPC request id from the handler's own
+    // parameter, and a local by that name puts every later `id` in the
+    // function out of its declaring block (tests/scope.test.js).
+    const localChain = Number(local?.chainId || 1);
+    return respond(topic, id, method === 'eth_chainId' ? '0x' + localChain.toString(16) : String(localChain));
+  }
+
+  if (method === 'wallet_switchEthereumChain' || method === 'wallet_addEthereumChain') {
+    const raw = String((params.request.params && params.request.params[0]?.chainId) || '');
+    const want = /^0x[0-9a-fA-F]+$/.test(raw) ? parseInt(raw, 16) : NaN;
+    if (!Number.isFinite(want)) {
+      return respondError(topic, id, { code: -32602, message: 'Invalid chain id: ' + (raw || 'missing') });
+    }
+    // wallet_addEthereumChain is deliberately treated as "switch if we know
+    // this chain, refuse otherwise". The dApp's rpcUrls / blockExplorerUrls
+    // are NEVER installed: a page must not be able to point the wallet at an
+    // RPC it controls, where it could answer whatever it likes to any later
+    // read. Bear Tool's own registry is the only source of chain truth.
+    const net = getNetwork(want);
+    if (!net) return respondError(topic, id, CHAIN_UNKNOWN(want));
+    if (net.id !== get('networkId')) {
+      // The same two writes the network menu performs (app.js [data-net]),
+      // followed by the same repaint, so the topbar pill and the dashboard
+      // agree with what this dApp was just told.
+      set('networkId', net.id);
+      try { localStorage.setItem('bear.networkId', net.id); } catch { /* private mode */ }
+      const app = await import('./app.js').catch(() => null);
+      app?.updateTopbar?.();
+      app?.refreshView?.('dashboard');
+      toast('Network switched to ' + net.name + ' (requested by the dApp).', 'info');
+      // EIP-1193 promises chainChanged — without it a dApp sits on a stale UI
+      // until it polls eth_chainId. Best-effort: the JSON-RPC response below
+      // is the authoritative answer.
+      kit.emitSessionEvent({
+        topic,
+        chainId: 'eip155:' + want,
+        event: { type: 'chainChanged', data: '0x' + want.toString(16) },
+      }).catch(() => { /* session may not list that chain — response still stands */ });
+    }
+    return respond(topic, id, null);
   }
 
   await respondError(topic, id, METHOD_UNSUPPORTED);
@@ -259,10 +387,10 @@ function hexToBytes(hex) {
   return bytes;
 }
 
-function fmtValue(v) {
+function fmtValue(v, unit = 'ETH') {
   if (v === undefined || v === null || v === '') return '0';
   try {
-    if (globalThis.ethers && globalThis.ethers.formatEther) return globalThis.ethers.formatEther(v) + ' ETH';
+    if (globalThis.ethers && globalThis.ethers.formatEther) return globalThis.ethers.formatEther(v) + ' ' + unit;
   } catch { /* fall through to raw */ }
   return String(v);
 }

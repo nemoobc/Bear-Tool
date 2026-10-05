@@ -77,3 +77,25 @@ test('the account pill and the topbar brand render the same file', () => {
   const pill = html.slice(html.indexOf('id="accountPill"'), html.indexOf('id="accountPill"') + 320);
   assert.ok(pill.includes(BRAND), 'the account pill must point at the same brand asset');
 });
+
+test('the account pill is the wallet mark: a wallet shape with the brand bear inside', () => {
+  // Redesign 2026-10-05: the pill was a bare bear on honey with no wallet
+  // shape at all. It now reads "wallet + bear": a wallet glyph carries the
+  // SAME bear.svg (the bear itself was not redrawn — see BRAND above).
+  const pill = html.slice(html.indexOf('id="accountPill"'));
+  const box = pill.slice(0, pill.indexOf('</div>') + 6);
+  assert.match(box, /pill-wallet/,
+    'the pill icon must sit in a .pill-wallet box (positioning context for glyph + bear)');
+  assert.match(box, /wallet-glyph/,
+    'the wallet shape (inline SVG) must be rendered inside the pill');
+  assert.match(box, /assets\/bear\.svg/,
+    'the wallet must carry the same brand bear file, unchanged');
+  // Decorative shape: no accessible name of its own — the pill's title and
+  // label already say what it is (WCAG 4.1.2, role=img would double-announce).
+  assert.match(box, /<svg[^>]*aria-hidden="true"/,
+    'the wallet glyph is decoration and must be aria-hidden');
+  // The bear stays ABOVE the wallet mouth in the DOM so the wallet pocket
+  // covers its lower edge — that overlap is what reads as "peeking out".
+  assert.ok(box.indexOf('pill-bear') < box.indexOf('wallet-glyph'),
+    'the bear img must come before the glyph so the pocket paints over its base');
+});

@@ -60,11 +60,82 @@ test('dapps: page has DApps container', () => {
 test('dapps: the in-app frame is hardened', () => {
   assert.match(browserSrc, /referrerpolicy="no-referrer"/, 'must not leak the wallet URL as a referrer');
   assert.match(browserSrc, /credentialless/, 'must run without ambient cookies or storage');
-  assert.match(browserSrc, /allow-scripts allow-forms allow-popups allow-modals/,
-    'sandbox must stay minimal: no allow-same-origin, no popups-to-escape-sandbox');
-  assert.ok(!/sandbox="[^"]*allow-same-origin/.test(browserSrc), 'allow-same-origin would give the page our origin');
+  assert.match(browserSrc, /'allow-scripts allow-forms allow-popups allow-modals'/,
+    'sandbox must stay minimal at its base: no popups-to-escape-sandbox, no top navigation');
+  // The markup itself never carries allow-same-origin — it is granted per
+  // navigation by sandboxFor(), and only across origins. A literal in the
+  // static sandbox attribute would be the unguarded version this file used to
+  // refuse (and would hand a same-origin page this app's localStorage, where
+  // the keystore lives). See dapp-browser-imports.test.js for the guard's unit
+  // tests: cross-origin gets the flag, this origin never does.
+  assert.ok(!/sandbox="[^"]*allow-same-origin/.test(browserSrc),
+    'allow-same-origin must never be in the static markup — only behind the sandboxFor guard');
   assert.ok(!/sandbox="[^"]*escape-sandbox/.test(browserSrc), 'escaping the sandbox would defeat the sandbox');
   assert.match(browserSrc, /allow=""/, 'no clipboard, microphone or camera for a dApp');
+  // The guard must actually be applied on every navigation, before the src.
+  const navAt = browserSrc.indexOf('setAttribute(\'sandbox\', sandboxFor(');
+  const srcAt = browserSrc.indexOf('el.frame.src = t.url');
+  assert.ok(navAt !== -1, 'paint() must decide the sandbox per navigation');
+  assert.ok(navAt < srcAt, 'the sandbox must be set BEFORE the src — after the load it is too late');
+});
+
+// The load bar: a real page load reports no progress to an embedding frame,
+// so the bar runs a phase (0→70% while loading, snap to 100% on load, hide on
+// failure). Every lifecycle hook must be wired or the bar would lie forever.
+test('dapps: load bar is wired to every load outcome', () => {
+  assert.match(browserSrc, /id="dbrLoadbar"/, 'the track must exist in the shell');
+  assert.match(browserSrc, /id="dbrLoadbarFill"/, 'the fill must exist in the shell');
+  assert.match(browserSrc, /loadbarStart\(\)/, 'navigation must start the bar (armLoadTimeout)');
+  assert.match(browserSrc, /loadbarDone\(\)/, 'a finished load must complete the bar');
+  assert.match(browserSrc, /loadbarFail\(\)/, 'a failed load must hide the bar, not freeze it');
+  // Start is armed exactly inside armLoadTimeout, before the phases.
+  const armAt = browserSrc.indexOf('function armLoadTimeout');
+  const startAt = browserSrc.indexOf('loadbarStart()', armAt);
+  const phaseAt = browserSrc.indexOf('LOAD_PHASE_MS.slow', armAt);
+  assert.ok(armAt !== -1 && startAt > armAt && startAt < phaseAt,
+    'the bar must start when the watchdog is armed — before the phases run');
+  // Done must sit inside the frame "load" listener.
+  const loadAt = browserSrc.indexOf("addEventListener('load'");
+  const doneAt = browserSrc.indexOf('loadbarDone()', loadAt);
+  assert.ok(loadAt !== -1 && doneAt > loadAt && doneAt < loadAt + 400,
+    'the load listener must complete the bar');
+});
+
+// The tab switcher grid — OKX's card layout with MetaMask's 20-tab ceiling.
+test('dapps: tab grid switcher is wired end to end', () => {
+  assert.match(browserSrc, /id="dbrTabsBtn"/, 'the top-bar count button must exist');
+  assert.match(browserSrc, /id="dbrTabGrid"/, 'the grid dialog must exist');
+  assert.match(browserSrc, /const MAX_TABS = 20/, 'the ceiling is MetaMask\'s, pinned');
+  assert.match(browserSrc, /tabs\.length >= MAX_TABS/, 'addTab must enforce the ceiling');
+  assert.match(browserSrc, /el\.tabsBtn\?\.addEventListener\('click', \(\) => toggleTabGrid\(\)\)/,
+    'the count button must open the grid');
+  assert.match(browserSrc, /toggleTabGrid\(true\)/, 'closing a card re-renders the open grid');
+  // Escape must close the grid before it closes the whole browser.
+  const escAt = browserSrc.indexOf("e.key === 'Escape'");
+  const gridAt = browserSrc.indexOf('toggleTabGrid(false); return;', escAt);
+  const closeAt = browserSrc.indexOf('close();', escAt);
+  assert.ok(gridAt !== -1 && closeAt !== -1 && gridAt < closeAt,
+    'Escape must dismiss the grid first, the overlay second');
+  // The count must track the tabs.
+  assert.match(browserSrc, /el\.tabsBtn\.textContent = String\(tabs\.length\)/,
+    'the button must show how many tabs are open');
+});
+
+// The report sheet must be reversible: at 20s it may be WRONG (Aave loads at
+// ~38s), so "Show the page" lets the user look behind it and the ⚠ chip is the
+// way back until a real "load" retires both.
+test('dapps: the did-not-load report can be dismissed and reopened', () => {
+  assert.match(browserSrc, /data-act="peek"/, 'the sheet must offer "Show the page"');
+  assert.match(browserSrc, /id="dbrPeak"/, 'the ⚠ chip must exist');
+  assert.match(browserSrc, /el\.peak\.onclick = \(\) => showDidNotLoad\(\)/, 'the chip reopens the report');
+  assert.match(browserSrc, /const LOAD_PHASE_MS = \{[^}]*timeout: 20000/,
+    '20s: slow enough for a heavy dApp, inside the e2e 25s window');
+  // Both paths that mean "a real page state began" must retire the chip.
+  const loadAt = browserSrc.indexOf("addEventListener('load'");
+  assert.ok(browserSrc.indexOf('el.peak.hidden = true', loadAt) - loadAt < 500,
+    'a finished load hides the chip');
+  assert.match(browserSrc, /if \(el\.peak\) el\.peak\.hidden = true; \/\/ a new navigation/,
+    'a new navigation hides it too');
 });
 
 test('dapps: every navigation goes through the security gate', () => {

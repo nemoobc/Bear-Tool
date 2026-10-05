@@ -11,7 +11,7 @@ const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 import { $, toast, confirmTx, escapeHtml, spinnerDots, fmtAmount } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, withTimeout } from './safetx.js';
-import { getNetworkById, ERC20_ABI } from './network.js';
+import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import { SWAP_ROUTERS, getSwapRoutersForChain, getBestSwapRouter, getRouterAddress, getQuoterAddress, CHAIN_NAMES } from './routers.js';
 import { initTokenPicker } from './token-picker.js';
 import { resolveMax } from './max-ui.js';
@@ -92,36 +92,25 @@ const CHAIN_WETH = {
   8453: '0x4200000000000000000000000000000000000006', // Base WETH
   42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum WETH
   11155111: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14', // Sepolia WETH (verified on-chain via router.WETH())
+  // 2026-10-05: the new ETH-native mainnets — wrap/unwrap works here because
+  // native ETH ↔ WETH is a deposit()/withdraw() call, no router, no quote
+  // needed. Avalanche/Gnosis/Celo/Sonic/Mantle stay OUT: their wrapped natives
+  // (WAVAX/WXDAI/…) were not in the verified token table, and a wrong wrap
+  // address is a send-to-nowhere.
+  130: '0x4200000000000000000000000000000000000006', // Unichain WETH
+  324: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', // zkSync Era WETH
+  480: '0x4200000000000000000000000000000000000006', // World Chain WETH
+  59144: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', // Linea WETH
+  534352: '0x5300000000000000000000000000000000000004', // Scroll WETH
+  81457: '0x4300000000000000000000000000000000000004', // Blast WETH
 };
 
 // ── Extended popular tokens ──
-export const POPULAR_TOKENS = {
-  1: [ // Ethereum Mainnet
-    { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', symbol: 'WETH', decimals: 18 },
-    { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', decimals: 6 },
-    { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6 },
-    { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', symbol: 'DAI', decimals: 18 },
-    { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', symbol: 'WBTC', decimals: 8 },
-    { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18 },
-    { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', symbol: 'UNI', decimals: 18 },
-    { address: '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9', symbol: 'AAVE', decimals: 18 },
-    { address: '0xae78736Cd615f374D3085123A210448E74Fc6393', symbol: 'rETH', decimals: 18 },
-    { address: '0xBe9895146f7AF43049ca1c1AE358B0541Ea49704', symbol: 'cbETH', decimals: 18 },
-    { address: '0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0', symbol: 'wstETH', decimals: 18 },
-    { address: '0x9e1028F5F1D5eDE59748FFceE5532509976840E0', symbol: 'FRAX', decimals: 18 },
-  ],
-11155111: [ // Sepolia
-    { address: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14', symbol: 'WETH', decimals: 18 },
-    { address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', symbol: 'USDC', decimals: 6 },
-    { address: '0x779877A7B0D9E8603169DdbD7836e478b4624789', symbol: 'LINK', decimals: 18 },
-  ],
-  42161: [ // Arbitrum
-    { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', decimals: 18 },
-    { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 },
-    { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', decimals: 6 },
-    { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18 },
-  ],
-};
+// POPULAR_TOKENS used to be a SECOND map in this file with its own copy of the
+// ethereum/sepolia/arbitrum rows — the two drifted the moment either changed.
+// One source of truth now: swap re-exports the curated map from network.js
+// (HUKUM 10; tests/network.test.js + tests/token-list.test.js pin it there).
+export { POPULAR_TOKENS };
 
 // chainId → KyberSwap API slug
 const KYBER_CHAIN_SLUG = {
@@ -283,8 +272,12 @@ export function loadSwapTokens() {
 export function flipSwap() {
   const from = $('#swapFrom'), to = $('#swapTo');
   const tmp = from.value; from.value = to.value; to.value = tmp;
-  // refresh balances (which also triggers auto-quote if amount > 0)
+  // Repaint BOTH pickers. Each picker repoints its logo/symbol on its OWN
+  // select's 'change' (token-picker.js paintTrigger), so dispatching only on
+  // `from` left the To trigger showing the old token: ETH=USDC, flip →
+  // displayed "USDC = USDC" while the values had actually swapped.
   from.dispatchEvent(new Event('change'));
+  to.dispatchEvent(new Event('change'));
 }
 
 function debounce(fn, ms) {
@@ -636,8 +629,8 @@ export async function doSwap() {
       { k: 'Router', v: quote.source || 'Auto' },
       { k: 'Slippage', v: `${slipPct}%` }
     ],
-    confirmText: 'Sign & Swap',
-    cancelText: 'Cancel Sign',
+    confirmText: 'Confirm & Swap',
+    cancelText: 'Cancel',
     danger: false
   });
   if (!signOk) return toast('Swap cancelled', 'info');

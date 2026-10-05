@@ -116,20 +116,18 @@ test('E2E-probe: runTx double-submit lock blocks re-entry', async () => {
   assert.equal(calls, 1, 'second call must be blocked by pending lock');
 });
 
-// ── 4. EIP-7702 chainId guard (mainnet blocks chainId 0) ──
-test('E2E-probe: EIP-7702 chainId guard logic', () => {
+// ── 4. EIP-7702: manual delegate form gone, mainnet still classified ──
+test('E2E-probe: Smart EOA manual form is removed (no chainId-0 input path)', () => {
   const net = network.getNetworkById('ethereum');
   assert.equal(net.type, 'mainnet');
-  // replicate doEip7702 guard: anyChain + chainId 0 on mainnet → blocked
-  const anyChain = true;
-  const inputVal = 0;
-  const chainId = anyChain ? 0 : (inputVal > 0 ? inputVal : net.chainId);
-  let blocked = false;
-  if (chainId === 0 && net.type === 'mainnet') blocked = true;
-  assert.equal(blocked, true, 'chainId 0 must be blocked on mainnet');
-  // default (no input, no anyChain) → active chain
-  const chainId2 = false ? 0 : (0 > 0 ? 0 : net.chainId);
-  assert.equal(chainId2, 1);
+  // The manual delegate/revoke form (delegateAddr/delegateChainId/
+  // delegateAnyChain/btnDelegate) was removed with the Smart EOA card —
+  // the only input path that could ever build a chainId-0 authorization.
+  // Flows take the chainId from the active network, never from a field.
+  const html = appSource();
+  for (const id of ['delegateAddr', 'delegateChainId', 'delegateAnyChain', 'btnDelegate', 'btnRevoke']) {
+    assert.ok(!html.includes(`id="${id}"`), `#${id} must be gone with the Smart EOA card`);
+  }
 });
 
 // ── 5. i18n EN/ID ──
@@ -259,6 +257,43 @@ test('E2E-probe: swap quote encodes amount in SELL token decimals', async () => 
   assert.ok(!body.includes('parseEther(amt)'), 'parseEther(amt) is wrong for ERC-20 with decimals≠18');
 });
 
+test('E2E-probe: flipSwap repaints BOTH pickers (stale To trigger = "USDC = USDC")', async () => {
+  const fs = await import('node:fs');
+  const swapJs = fs.readFileSync(new URL('../js/swap.js', import.meta.url), 'utf8');
+  const i = swapJs.indexOf('export function flipSwap');
+  assert.ok(i !== -1, 'flipSwap must exist in js/swap.js');
+  const body = swapJs.slice(i, swapJs.indexOf('\n}', i));
+  // The picker display syncs on its OWN select's 'change' (token-picker.js).
+  // Dispatching on `from` only left the To trigger showing the OLD token —
+  // flip ETH=USDC and both sides rendered "USDC". Both selects must fire.
+  assert.match(body, /from\.dispatchEvent\(new Event\('change'\)\)/,
+    'flipSwap must dispatch change on the From select (repaint + balance)');
+  assert.match(body, /to\.dispatchEvent\(new Event\('change'\)\)/,
+    'flipSwap must dispatch change on the To select too — otherwise its picker display stays stale');
+});
+
+test('E2E-probe: network icons share ONE renderer (bridge picker == network list)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const dir = new URL('../js/', import.meta.url);
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));
+  // Exactly one definition, in token-logo.js — the network LIST (app.js) and
+  // the Bridge chain PICKER (token-picker.js) must render the same marks.
+  // The picker used to paint the raw emoji `n.icon` field instead, so the
+  // bridge chain icon never matched the icon in the network list.
+  const defs = files.filter((f) => fs.readFileSync(path.join(dir.pathname, f), 'utf8')
+    .includes('function getNetworkLogo'));
+  assert.deepStrictEqual(defs, ['token-logo.js'],
+    `getNetworkLogo must be defined exactly once (found: ${defs.join(', ')})`);
+  const picker = fs.readFileSync(path.join(dir.pathname, 'token-picker.js'), 'utf8');
+  assert.match(picker, /getNetworkLogo\(n\.name, 18\)/,
+    'network picker rows must paint with getNetworkLogo (the list renderer)');
+  assert.match(picker, /getNetworkLogo\(n\.name, 16\)/,
+    'network picker trigger must paint with getNetworkLogo (the list renderer)');
+  assert.ok(!picker.includes("n.icon || '🛰️'"),
+    'network picker must not fall back to the raw emoji .icon field');
+});
+
 test('E2E-probe: swap & bridge have NO simulated fallback (real routes or honest error)', async () => {
   const swapJs = (await import('node:fs')).readFileSync(new URL('../js/swap.js', import.meta.url), 'utf8');
   const bridgeJs = (await import('node:fs')).readFileSync(new URL('../js/bridge.js', import.meta.url), 'utf8');
@@ -277,25 +312,39 @@ test('E2E-probe: swap & bridge have NO simulated fallback (real routes or honest
   assert.ok(!bridgeJs.includes('btnBridgeQuote'), 'bridge must not depend on a Get Route button');
 });
 
-test('E2E-probe: bridge is native-only, context-bound, fail-closed (supersedes old ERC-20 token contract)', async () => {
-  const bridgeJs = (await import('node:fs')).readFileSync(new URL('../js/bridge.js', import.meta.url), 'utf8');
+test('E2E-probe: bridge = native + curated ERC-20, context-bound, fail-closed (spec 2026-10-05)', async () => {
+  const fs = await import('node:fs');
+  const bridgeJs = fs.readFileSync(new URL('../js/bridge.js', import.meta.url), 'utf8');
   const i = bridgeJs.indexOf('export async function doBridge()');
   const body = bridgeJs.slice(i, bridgeJs.indexOf('export async function doBridgeExec()'));
-  // NATIVE ONLY: non-native selection rejected loudly, never silently substituted
-  assert.ok(body.includes("tok !== 'native'"), 'bridge must fail closed on non-native token selection');
-  assert.ok(body.includes('native_only_reject'), 'ERC-20 rejection must have a clear user-facing message');
-  // Quote URL is strictly native on both sides (0x0) — no fromToken===toToken ERC-20 contract
-  assert.ok(body.includes('fromToken=${NATIVE}&toToken=${NATIVE}'), 'quote must request native on both chains');
-  assert.ok(!body.includes('fromToken=${tokenAddr}'), 'old same-address ERC-20 contract must be gone');
+  const execBody = bridgeJs.slice(bridgeJs.indexOf('export async function doBridgeExec()'));
+  // Fail closed on an UNMAPPABLE token — no curated twin, no fetch, loud message.
+  assert.ok(body.includes("if (tok !== 'native')"), 'bridge must branch fail-closed on non-native selection');
+  assert.ok(body.includes("t('bridge.token_not_routable')"), 'unmappable ERC-20 must have a clear user-facing message');
+  // Quote URL: curated addresses per context, or 0x0 native on both sides.
+  assert.ok(bridgeJs.includes('function quoteUrl('), 'URL built from one context-bound builder');
+  assert.ok(bridgeJs.includes('fromToken=${context.tokenAddress || NATIVE}&toToken=${context.toTokenAddress || NATIVE}'),
+    'quote must request the curated pair (or native 0x0/0x0)');
   // Context captured before any await; stale quote state cleared
   assert.ok(body.includes('Object.freeze({'), 'quote context must be immutable');
   assert.ok(body.includes("set('bridgeQuote', null)"), 'old quote state must be cleared before await');
   assert.ok((body.match(/seq !== quoteSeq/g) || []).length >= 4, 'out-of-order responses must be ignored via seq id');
-  // Response validated field-by-field against context
-  assert.ok(body.includes('Quote fromChain mismatch'), 'action.fromChainId must be validated');
-  assert.ok(body.includes('Quote toChain mismatch'), 'action.toChainId must be validated');
-  assert.ok(body.includes('Quote tx value exceeds requested amount'), 'tx value must be capped at requested amount');
-  assert.ok(body.includes('txReq.chainId'), 'txRequest.chainId must be validated');
+  // Response validated field-by-field against context (validateQuote, shared
+  // by quote time and the post-approval re-quote)
+  assert.ok(bridgeJs.includes('function validateQuote('), 'validation lives in one shared function');
+  assert.ok(bridgeJs.includes('Quote fromChain mismatch'), 'action.fromChainId must be validated');
+  assert.ok(bridgeJs.includes('Quote toChain mismatch'), 'action.toChainId must be validated');
+  assert.ok(bridgeJs.includes('Quote tx value exceeds requested amount'), 'native tx value must be capped at requested amount');
+  assert.ok(bridgeJs.includes('Quote tx value must be 0 for an ERC-20 bridge'), 'ERC-20 route must reject native value');
+  assert.ok(bridgeJs.includes('Quote fromToken mismatch'), 'ERC-20 fromToken must equal the curated source address');
+  assert.ok(bridgeJs.includes('Quote toToken mismatch'), 'ERC-20 toToken must equal the curated destination twin');
+  assert.ok(bridgeJs.includes('Quote approvalAddress invalid'), 'approval spender must be validated');
+  assert.ok(bridgeJs.includes('txReq.chainId'), 'txRequest.chainId must be validated');
+  // ERC-20 execution: allowance → exact approve (reset-0 if stale) → RE-QUOTE
+  assert.ok(execBody.includes('encodeFunctionData(\'allowance\''), 'allowance read on-chain before signing');
+  assert.ok(execBody.includes('encodeFunctionData(\'approve\''), 'approve built from quote-bound spender');
+  assert.ok(execBody.includes('decideApproval('), 'approval decision from the shared helper');
+  assert.ok(execBody.includes('Route changed during approval'), 'fresh quote with another spender must abort');
 });
 
 // ── 9. EIP-7702 authorization API regression (ethers 6.14 has authorizeSync, NOT signAuthorization) ──
@@ -309,11 +358,15 @@ test('E2E-probe: ethers Wallet has authorizeSync (runtime proof)', async () => {
 
 test('E2E-probe: 7702 modules use authorizeSync, not nonexistent signAuthorization', async () => {
   const fs = await import('node:fs');
-  for (const f of ['eip7702.js', 'eip7702-tools.js']) {
+  // eip7702.js is now a thin loadEip7702() stub (manual form removed) — the
+  // only module that builds authorizations is eip7702-tools.js.
+  for (const f of ['eip7702-tools.js']) {
     const js = fs.readFileSync(new URL(`../js/${f}`, import.meta.url), 'utf8');
     assert.ok(!js.includes('signAuthorization'), `${f}: signAuthorization does not exist in ethers 6.14 → dead button`);
     assert.ok(js.includes('authorizeSync({'), `${f}: must call authorizeSync(...)`);
   }
+  const stub = fs.readFileSync(new URL('../js/eip7702.js', import.meta.url), 'utf8');
+  assert.ok(!stub.includes('sendTransaction'), 'eip7702.js stub must not broadcast anything');
 });
 
 test('E2E-probe: EIP-7702 flows save + reuse deployed contracts via registry', async () => {
@@ -349,50 +402,61 @@ test('E2E-probe: approval scan is honest about its window and has no 10-event ca
   assert.ok(app.includes('scannedFrom'), 'scan window must be tracked and shown');
 });
 
+// IDs created dynamically by wallet.js modals/forms — not static HTML.
+// Keep this list honest: an entry for an id nothing creates (or nothing
+// references any more) hides a real break instead of explaining one.
+// Module scope on purpose: the ID probe CONSUMES it and the "really created"
+// probe AUDITS it — one list, two tests, no drift between them.
+const dynamicSkip = new Set([
+  'pwCancel','confirmYes','confirmNo','pwOk','pwInput',
+  'cnRpc','clearConfirm','importSecret',
+  'importPw','lockBtn','wImport','createPw2','exportBtn','seedDone',
+  'importBtn','unlockPw','cnSave','wCreate','createPw','unlockBtn',
+  'clearBtn','createBtn','addAccBtn','seedConfirm','addNetBtn',
+  'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart',
+  'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge',
+  'createName','importName','deploySupply','deployDecimals','deployBaseUri',
+  // wizard feature options — generated by extraFieldsHtml (contracts.js fields)
+  'deployCap','deployBurnable','deployMintable','deployPausable',
+  'deployPermit','deployVotes','deployEnumerable','deployUriStorage','deployAccess',
+  // M7 (2026-10-04): Callback / Flash Minting toggles + compiler configuration,
+  // all rendered by extraFieldsHtml from the field declarations in contracts.js.
+  'deployCallback','deployFlashMint','deployLanguage','deployEvmVersion',
+  'deployOptimizer','deployRuns',
+  // M8 (2026-10-04): ERC-721 manual token ids + fallback image URL.
+  'deployAutoInc','deployImage',
+  // M9 (2026-10-04): the upgradeable toggle + its proxy-type select, both
+  // rendered per standard by extraFieldsHtml (fields in contracts.js).
+  'deployUpgradeable','deployProxyType',
+  // 2026-10-04: the Helper Contracts card + Smart EOA card were removed. Each
+  // flow card now carries a STATIC "Deploy contract" button (deploy.jsx), so
+  // these ids need no skip — they are in the markup like any other.
+  'deployStatus',
+  // Add-network picker + token autodetect + the testnet filter, all injected
+  // at runtime. Asserted to be generated by the tests below, so this list
+  // cannot quietly excuse an id that nothing ever creates.
+  'cnForm','cnIcon','cnNameLabel','cnChainLabel','cnSearch',
+  'cnNoMatch','tdIcon','tdSymbol','tdName','tdDecimals','tdNote',
+  // Seed-phrase confirmation (showSeedPhrase). Rebuilt per question by
+  // paint(), so the choices container cannot live in index.html — and the
+  // restart button replaced the ✕ that used to orphan an unsaved wallet.
+  'seedChoices','seedQLabel','seedProg','seedRestart',
+  // Import sheet (showImportModal) — the Back button that returns to welcome
+  'importBack',
+  // Create sheet (showCreateModal) — same
+  'createBack',
+  // Custom-RPC detection inside the Add-network picker (showAddNetworkModal)
+  'cnCustomBtn','cnNameField','cnName','cnDetect',
+  // Activity detail sheet (showActivityDetail) — the on-chain block fills in
+  // after the modal is already open, so it cannot live in index.html
+  'actChain'
+]);
+
 test('E2E-probe: every $(\'#id\') reference across ALL js files exists in the page markup', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
   const html = appSource();
   const htmlIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
-  // IDs created dynamically by wallet.js modals/forms — not static HTML.
-  // Keep this list honest: an entry for an id nothing creates (or nothing
-  // references any more) hides a real break instead of explaining one.
-  const dynamicSkip = new Set([
-    'pwCancel','confirmYes','confirmNo','pwOk','pwInput',
-    'cnRpc','clearConfirm','importSecret',
-    'importPw','lockBtn','wImport','createPw2','exportBtn','seedDone',
-    'importBtn','unlockPw','cnSave','wCreate','createPw','unlockBtn',
-    'clearBtn','createBtn','addAccBtn','seedConfirm','addNetBtn',
-    'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart',
-    'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge',
-    'createName','importName','deploySupply','deployDecimals','deployBaseUri',
-    // wizard feature options — generated by extraFieldsHtml (contracts.js fields)
-    'deployCap','deployBurnable','deployMintable','deployPausable',
-    'btnDeployBatchHelper','btnDeployRescueHelper','btnDeployAirdropClaimer',
-    'deployStatus','helperStatusList',
-    // Add-network picker + token autodetect + the testnet filter, all injected
-    // at runtime. Asserted to be generated by the tests below, so this list
-    // cannot quietly excuse an id that nothing ever creates.
-    'cnForm','cnIcon','cnNameLabel','cnChainLabel','cnSearch',
-    'cnNoMatch','tdIcon','tdSymbol','tdName','tdDecimals','tdNote',
-    // The testnet filter, generated with the network list it filters. It used to
-    // be a Settings switch bound to #setTestnet, which meant the control that
-    // decides which chains are on screen lived two screens away from them.
-    'netShowTestnet',
-    // Seed-phrase confirmation (showSeedPhrase). Rebuilt per question by
-    // paint(), so the choices container cannot live in index.html — and the
-    // restart button replaced the ✕ that used to orphan an unsaved wallet.
-    'seedChoices','seedQLabel','seedProg','seedRestart',
-    // Import sheet (showImportModal) — the Back button that returns to welcome
-    'importBack',
-    // Create sheet (showCreateModal) — same
-    'createBack',
-    // Custom-RPC detection inside the Add-network picker (showAddNetworkModal)
-    'cnCustomBtn','cnNameField','cnName','cnDetect',
-    // Activity detail sheet (showActivityDetail) — the on-chain block fills in
-    // after the modal is already open, so it cannot live in index.html
-    'actChain'
-  ]);
   const dir = path.resolve(fileURLToPath(new URL('../js/', import.meta.url)));
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
   const missing = [];
@@ -422,8 +486,6 @@ test('E2E-probe: runtime-injected ids are really created (dynamicSkip is not a b
     'cnForm','cnIcon','cnNameLabel','cnChainLabel','cnSearch','cnNoMatch',
     // Add-token autodetect panel
     'tdIcon','tdSymbol','tdName','tdDecimals','tdNote',
-    // Testnet filter, generated with the network list (showNetworkModal)
-    'netShowTestnet',
     // Seed confirmation (showSeedPhrase) — all four are rebuilt per question
     'seedChoices','seedQLabel','seedProg','seedRestart',
     // Import sheet (showImportModal)
@@ -439,6 +501,20 @@ test('E2E-probe: runtime-injected ids are really created (dynamicSkip is not a b
     assert.ok(
       app.includes(`id="${id}"`),
       `#${id} is in dynamicSkip but nothing generates it — remove it from the skip list or create it`
+    );
+  }
+  // Wizard ids are a second dynamic family: extraFieldsHtml() prints
+  // `id="${f.id}"` from the STANDARDS field declarations in contracts.js, so a
+  // static grep of app.js cannot see them either. Same bargain as mustAppear —
+  // every wizard id in dynamicSkip must be declared as a real field, otherwise
+  // the skip entry would be hiding a rename.
+  const contractsSrc = fs.readFileSync(new URL('../js/contracts.js', import.meta.url), 'utf8');
+  const staticIds = new Set([...appSource().matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+  const wizardIds = [...dynamicSkip].filter((id) => id.startsWith('deploy') && !staticIds.has(id));
+  for (const id of wizardIds) {
+    assert.ok(
+      contractsSrc.includes(`id: '${id}'`),
+      `#${id} is in dynamicSkip but no contracts.js field declares it — remove it from the skip list or declare it`
     );
   }
   // And the generators themselves must still exist.

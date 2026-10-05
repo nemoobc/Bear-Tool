@@ -66,7 +66,11 @@ let phaseTimers = [];
 // progress stays honest while the page still has a chance (3s / 10s attention
 // thresholds), and only a full 15s earns the fallback panel — with nothing on
 // the stage covered, so any partial render is visible the whole way.
-const LOAD_PHASE_MS = { slow: 3000, verySlow: 10000, timeout: 15000 };
+// 20s, not 15: a real dApp (Aave, measured) fires "load" only after ~38s on a
+// weak device, and 15s put an accusation on screen while the page was merely
+// slow. The e2e window (25s) still clears this with margin, and the sheet now
+// carries a way out in both directions ("Show the page" + the ⚠ chip).
+const LOAD_PHASE_MS = { slow: 3000, verySlow: 10000, timeout: 20000 };
 
 /** Per-session memory of a gate decision, so the same host is not nagged twice. */
 const sessionVerdicts = new Map();
@@ -164,7 +168,9 @@ const SHELL = `
     <button class="dbr-btn dbr-ic dbr-net" id="dbrNet" title="Switch network" aria-label="Current network — switch network">
       <span class="dbr-net-ic" id="dbrNetIc" aria-hidden="true"></span>
     </button>
+    <button class="dbr-btn dbr-ic dbr-tabcount" id="dbrTabsBtn" title="Open tabs" aria-label="Open tabs" aria-haspopup="dialog" aria-expanded="false">1</button>
   </div>
+  <div class="dbr-loadbar" id="dbrLoadbar" hidden aria-hidden="true"><span class="dbr-loadbar-fill" id="dbrLoadbarFill"></span></div>
   <div class="dbr-tabs" id="dbrTabs" role="tablist" aria-label="Open tabs"></div>
   <div class="dbr-menu" id="dbrMenuPop" hidden role="menu"></div>
   <div class="dbr-wc-hint" id="dbrWcHint" hidden>
@@ -183,6 +189,9 @@ const SHELL = `
       sandbox="allow-scripts allow-forms allow-popups allow-modals"
       referrerpolicy="no-referrer" credentialless allow="" hidden></iframe>
     <div class="dbr-blocked" id="dbrBlocked" hidden></div>
+    <button class="dbr-peak" id="dbrPeak" hidden title="The page may still be loading — open the report again"
+            aria-label="Open the page report">⚠</button>
+    <div class="dbr-tabgrid" id="dbrTabGrid" hidden role="dialog" aria-label="Open tabs"></div>
   </div>
   <div class="dbr-bar" id="dbrBar" role="toolbar" aria-label="Browser controls">
     <button class="dbr-bbtn" id="dbrBack" title="Back" aria-label="Back">‹</button>
@@ -215,6 +224,8 @@ function build() {
     connect: overlay.querySelector('#dbrConnect'),
     net: overlay.querySelector('#dbrNet'),
     netIc: overlay.querySelector('#dbrNetIc'),
+    tabsBtn: overlay.querySelector('#dbrTabsBtn'),
+    tabGrid: overlay.querySelector('#dbrTabGrid'),
     bar: overlay.querySelector('#dbrBar'),
     menu: overlay.querySelector('#dbrMenu'),
     menuPop: overlay.querySelector('#dbrMenuPop'),
@@ -223,8 +234,11 @@ function build() {
     homePage: overlay.querySelector('#dbrHomePage'),
     loading: overlay.querySelector('#dbrLoading'),
     loadingTxt: overlay.querySelector('#dbrLoadingTxt'),
+    loadbar: overlay.querySelector('#dbrLoadbar'),
+    loadbarFill: overlay.querySelector('#dbrLoadbarFill'),
     frame: overlay.querySelector('#dbrFrame'),
     blocked: overlay.querySelector('#dbrBlocked'),
+    peak: overlay.querySelector('#dbrPeak'),
     wcHint: overlay.querySelector('#dbrWcHint'),
     wcPair: overlay.querySelector('#dbrWcPair'),
     wcHintX: overlay.querySelector('#dbrWcHintX'),
@@ -236,6 +250,11 @@ function build() {
 // ── rendering ────────────────────────────────────────────────────────────
 function paintTabs() {
   const bar = el.tabs;
+  if (el.tabsBtn) {
+    el.tabsBtn.textContent = String(tabs.length);
+    el.tabsBtn.title = `Open tabs (${tabs.length})`;
+    el.tabsBtn.setAttribute('aria-label', `Open tabs (${tabs.length})`);
+  }
   bar.innerHTML = tabs.map((t) => `
     <div class="dbr-tab${t.id === activeId ? ' on' : ''}${t.incognito ? ' incog' : ''}" role="tab"
          aria-selected="${t.id === activeId}" tabindex="0" data-tab="${t.id}"
@@ -259,6 +278,81 @@ function paintTabs() {
     b.addEventListener('click', (e) => { e.stopPropagation(); closeTab(b.dataset.close); });
   });
   bar.querySelector('#dbrNew')?.addEventListener('click', () => addTab());
+}
+
+/** host + path for the tab-grid cards — a card is not an address bar. */
+function shortUrl(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    return u.host + (u.pathname === '/' ? '' : u.pathname);
+  } catch {
+    return String(url);
+  }
+}
+
+/**
+ * The tab switcher grid — OKX's layout: cards, not chips.
+ *
+ * The strip under the address bar shows names only; at ten tabs it scrolls and
+ * nothing tells you what is actually open. The count button in the top bar
+ * opens this grid: one card per tab with its address, a close button on each,
+ * a close-all, and a new-tab button. It is a dialog so the keyboard (Escape)
+ * and screen readers treat it as a layer above the page.
+ */
+function toggleTabGrid(force) {
+  const grid = el.tabGrid;
+  if (!grid) return;
+  const open = force ?? grid.hidden;
+  grid.hidden = !open;
+  el.tabsBtn?.setAttribute('aria-expanded', String(open));
+  if (!open) return;
+
+  const card = (t) => `
+    <div class="dbr-tg-card${t.id === activeId ? ' on' : ''}" role="button" tabindex="0"
+         data-tg="${t.id}" aria-label="Switch to ${escapeHtml(t.name || 'New tab')}">
+      <button class="dbr-tg-x" data-tg-close="${t.id}" aria-label="Close ${escapeHtml(t.name || 'tab')}">×</button>
+      <span class="dbr-tg-ic" aria-hidden="true">${t.incognito ? '🕶' : '◍'}</span>
+      <span class="dbr-tg-nm">${escapeHtml(t.name || 'New tab')}</span>
+      <span class="dbr-tg-url">${escapeHtml(shortUrl(t.url))}</span>
+    </div>`;
+
+  grid.innerHTML = `
+    <div class="dbr-tg-head">
+      <span class="dbr-tg-title">Open tabs (${tabs.length})</span>
+      <button class="btn btn-sm btn-secondary" data-tg-all>✕ Close all</button>
+    </div>
+    <div class="dbr-tg-cards">${tabs.map(card).join('')}</div>
+    <div class="dbr-tg-foot">
+      <button class="btn btn-sm btn-primary" data-tg-new>＋ New tab</button>
+      <button class="btn btn-sm btn-secondary" data-tg-done>Done</button>
+    </div>`;
+
+  grid.querySelectorAll('[data-tg]').forEach((n) => {
+    const go = (e) => {
+      if (e.target.closest('[data-tg-close]')) return;
+      select(n.dataset.tg);
+      toggleTabGrid(false);
+    };
+    n.addEventListener('click', go);
+    n.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); }
+    });
+  });
+  grid.querySelectorAll('[data-tg-close]').forEach((b) => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); closeTab(b.dataset.tgClose); toggleTabGrid(true); });
+  });
+  grid.querySelector('[data-tg-new]')?.addEventListener('click', () => { addTab(); toggleTabGrid(false); });
+  grid.querySelector('[data-tg-all]')?.addEventListener('click', () => {
+    // Close every tab but the active one's replacement: the browser must keep
+    // at least one tab alive (closing all is what "✕ Close browser" is for).
+    const keep = tabs.find((t) => t.id === activeId) || tabs[0];
+    tabs.forEach((t) => { if (t !== keep) closeTab(t.id); });
+    toast('Other tabs closed', 'info');
+    toggleTabGrid(true);
+  });
+  grid.querySelector('[data-tg-done]')?.addEventListener('click', () => toggleTabGrid(false));
+  grid.querySelector('.dbr-tg-cards [data-tg]')?.focus();
 }
 
 function paintSecure(verdict) {
@@ -287,6 +381,7 @@ function paint() {
   if (onHome) {
     loadedUrl = '';
     clearLoadTimers();
+    loadbarFail();
     paintHome();
     el.url.value = '';
     el.secure.className = 'dbr-secure';
@@ -302,6 +397,12 @@ function paint() {
   // src is left alone so the page survives a tab round-trip.
   if (t.url !== loadedUrl) {
     loadedUrl = t.url;
+    // Sandbox decided per navigation (see sandboxFor): modern dApps (Next.js
+    // and friends) crash to a blank frame without their own storage — that is
+    // the "ambiguous screen" bug — while a page from THIS origin must never
+    // get allow-same-origin, or its scripts could walk into Bear Tool's
+    // localStorage.
+    el.frame.setAttribute('sandbox', sandboxFor(t.url));
     el.frame.src = t.url;
     el.loading.hidden = false;
     armLoadTimeout();
@@ -341,9 +442,9 @@ function paintHome() {
       the page runs in its own origin with no cookies, no referrer and no clipboard.</p>
     </div>
     ${bms.length ? `<div class="dbr-sec-h">★ Bookmarks</div>
-      <div class="dbr-mini">${bms.map((b) => `<button class="dbr-chip" data-open="${escapeHtml(b.url)}">${escapeHtml(b.name || baseHost(b.url))}</button>`).join('')}</div>` : ''}
+      <div class="dbr-mini">${bms.map((b) => `<button class="dbr-chip" data-open="${escapeHtml(b.url)}" data-name="${escapeHtml(b.name || baseHost(b.url))}">${escapeHtml(b.name || baseHost(b.url))}</button>`).join('')}</div>` : ''}
     ${recent.length ? `<div class="dbr-sec-h">🕘 Recent</div>
-      <div class="dbr-mini">${recent.map((h) => `<button class="dbr-chip" data-open="${escapeHtml(h.url)}">${escapeHtml(h.name || baseHost(h.url))}</button>`).join('')}</div>` : ''}
+      <div class="dbr-mini">${recent.map((h) => `<button class="dbr-chip" data-open="${escapeHtml(h.url)}" data-name="${escapeHtml(h.name || baseHost(h.url))}">${escapeHtml(h.name || baseHost(h.url))}</button>`).join('')}</div>` : ''}
     <div class="dbr-sec-h">◆ Loadable in-app <span class="small dim">(${known.length} verified frameable)</span></div>
     <div class="dbr-grid">${known.map(cardHTML).join('')}</div>
     <div class="dbr-sec-h">▦ All ${catalog.length} DApps</div>
@@ -358,7 +459,7 @@ function paintHome() {
     <p class="small dim" id="dbrNoMatch" hidden>No DApp matches that filter.</p>`;
 
   el.homePage.querySelectorAll('[data-open]').forEach((b) => {
-    b.addEventListener('click', () => go(b.dataset.open));
+    b.addEventListener('click', () => go(b.dataset.open, b.dataset.name));
   });
   el.homePage.querySelectorAll('.dbr-card').forEach((c) => {
     c.addEventListener('click', () => go(c.dataset.url, c.dataset.name));
@@ -398,6 +499,34 @@ const cardHTML = (d) => `
  * Navigate, but only after the gate has agreed.
  * @returns {boolean} whether the load went ahead
  */
+/**
+ * The sandbox flags for one navigation — decided per URL, not once in markup.
+ *
+ * Modern dApps (Next.js, Aave, most of the catalogue) crash to a blank frame
+ * without their own origin storage: the console shows
+ * "Failed to read 'localStorage' … sandboxed and lacks the allow-same-origin
+ * flag" and the page dies behind an empty screen (probe 2026-10-05: Aave,
+ * edge pixels 0.5% → 4.1% once the flag was added).
+ *
+ * The same flag on a page from BEAR TOOL'S OWN origin would be the opposite
+ * disaster: allow-scripts + allow-same-origin there means the frame can reach
+ * into this app's localStorage, where the keystore lives. So the flag is
+ * granted only across origins — cross-site frames get THEIR origin back (not
+ * ours), and a same-origin frame stays on the minimal set.
+ *
+ * Everything else (no allow-top-navigation, no allow-downloads) is unchanged.
+ */
+export function sandboxFor(url, selfOrigin = (typeof location !== 'undefined' ? location.origin : '')) {
+  const BASE = 'allow-scripts allow-forms allow-popups allow-modals';
+  try {
+    const target = new URL(String(url), selfOrigin || undefined);
+    if (target.origin === selfOrigin) return BASE;
+    return BASE + ' allow-same-origin';
+  } catch {
+    return BASE;
+  }
+}
+
 function navigate(rawUrl, name) {
   // A wc: URI typed or pasted here is a pairing request, not a search query —
   // classifyInput would send it to the local search results instead.
@@ -566,7 +695,16 @@ function reportSheet(v, { canProceed }) {
 // ACTIONS
 // ═══════════════════════════════════════════════════════════════
 
+const MAX_TABS = 20; // MetaMask's own ceiling — beyond this the grid is unusable
+
 function addTab(opts = {}) {
+  // The tab strip grew without a limit: every stray "＋" stacked another live
+  // frame, each one a page that keeps running. The switcher grid says how many
+  // are open and this is where that number stops growing.
+  if (tabs.length >= MAX_TABS) {
+    toast(`Maximum ${MAX_TABS} tabs reached. Close one first.`, 'error');
+    return;
+  }
   const t = newTab(null, opts);
   tabs.push(t);
   activeId = t.id;
@@ -652,10 +790,13 @@ function rememberHistory(url, name) {
   write(LS.history, next.slice(0, 60));
 }
 
-function go(raw) {
+function go(raw, name) {
   const t = active();
   if (!t) return;
-  navigate(raw);
+  // Name matters: without it pushHistory falls back to the hostname, so
+  // opening Aave from the home grid renamed the tab (and the Recent entry
+  // that opened it) to "app.aave.com" on every visit.
+  navigate(raw, name);
 }
 
 /**
@@ -731,6 +872,7 @@ function toggleMenu(force) {
  */
 function showDidNotLoad() {
   el.loading.hidden = true;
+  loadbarFail();
   el.blocked.innerHTML = `<div class="dbr-report" data-kind="didnotload" role="alertdialog" aria-label="Page did not load">
     <div class="dbr-rep-h">⚠ This page did not load</div>
     <p class="small dim">${escapeHtml(el.frame.src || '')} never rendered here. Either the site refuses
@@ -738,10 +880,20 @@ function showDidNotLoad() {
     app can) or it never finished loading. Roughly half of all dApps block embedding; the honest way
     out is a real browser tab:</p>
     <div class="dbr-rep-btns"><button class="btn btn-sm btn-primary" data-act="popup">↗ Open in a new tab</button>
-    <button class="btn btn-sm btn-secondary" data-act="copy">📋 Copy URL</button>
+    <button class="btn btn-sm btn-secondary" data-act="peek">👁 Show the page</button>
+    <button class="btn btn-sm btn-secondary" data-act="copy"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy URL</button>
     <button class="btn btn-sm btn-secondary" data-act="wc">🔗 Pair via WalletConnect</button>
     <button class="btn btn-sm btn-secondary" data-act="back">Back</button></div></div>`;
   el.blocked.hidden = false;
+  // "Show the page": the sheet may be wrong. A slow frame (Aave fires load at
+  // ~38s) is behind it, alive, and the user must be able to look at it right
+  // now instead of arguing with a verdict. The ⚠ chip stays behind as the way
+  // back — and vanishes for good the moment the load really lands.
+  el.blocked.querySelector('[data-act="peek"]')?.addEventListener('click', () => {
+    el.blocked.hidden = true;
+    if (el.peak) el.peak.hidden = false;
+  });
+  if (el.peak) el.peak.onclick = () => showDidNotLoad();
   el.blocked.querySelector('[data-act="popup"]')?.addEventListener('click', () => {
     openExternal(el.frame.src);
   });
@@ -764,6 +916,8 @@ function showDidNotLoad() {
 /** Arm the phase watchdog for the src that was just assigned. */
 function armLoadTimeout() {
   clearLoadTimers();
+  loadbarStart();
+  if (el.peak) el.peak.hidden = true; // a new navigation erases the last report
   const phase = (ms, text) => phaseTimers.push(setTimeout(() => {
     if (el.loading.hidden) return; // stale: the load already landed
     if (text) { if (el.loadingTxt) el.loadingTxt.textContent = text; }
@@ -778,6 +932,39 @@ function armLoadTimeout() {
 function clearLoadTimers() {
   phaseTimers.forEach(clearTimeout);
   phaseTimers = [];
+}
+
+/**
+ * The thin progress bar under the address bar (OKX/MetaMask placement).
+ *
+ * A real page load reports no progress to an embedding frame — an iframe only
+ * ever says "load" or "error" — so the bar shows an honest phase instead of a
+ * fake percentage: it grows to 70% while the load runs, snaps to 100% when the
+ * frame says "load", and hides when the load fails. Slow is not broken, so the
+ * crawl from 0→70% deliberately takes longer than a normal page.
+ */
+function loadbarStart() {
+  if (!el.loadbar) return;
+  el.loadbar.hidden = false;
+  el.loadbarFill.style.transition = 'none';
+  el.loadbarFill.style.width = '0%';
+  // Next frame, so the transition from 0 is actually painted.
+  requestAnimationFrame(() => {
+    el.loadbarFill.style.transition = 'width 12s cubic-bezier(.1,.6,.3,1)';
+    el.loadbarFill.style.width = '70%';
+  });
+}
+
+function loadbarDone() {
+  if (!el.loadbar || el.loadbar.hidden) return;
+  el.loadbarFill.style.transition = 'width .25s ease-out';
+  el.loadbarFill.style.width = '100%';
+  setTimeout(() => { el.loadbar.hidden = true; }, 350);
+}
+
+function loadbarFail() {
+  if (!el.loadbar) return;
+  el.loadbar.hidden = true;
 }
 
 /**
@@ -817,6 +1004,15 @@ function paintNetwork() {
 function wire() {
   el.close.addEventListener('click', () => close());
   el.net.addEventListener('click', switchNetworkFromBrowser);
+
+  // The tab-count button opens the switcher grid; a click anywhere on the
+  // stage (the grid is inside it, but not on a card) closes it.
+  el.tabsBtn?.addEventListener('click', () => toggleTabGrid());
+  el.stage?.addEventListener('click', (e) => {
+    if (!el.tabGrid || el.tabGrid.hidden) return;
+    if (e.target.closest('.dbr-tg-card') || e.target.closest('.dbr-tg-foot') || e.target.closest('.dbr-tg-head')) return;
+    toggleTabGrid(false);
+  });
   paintNetwork();
   // The active chain can change while the browser is open — from another pill,
   // from a dApp request — so the badge tracks it instead of going stale.
@@ -879,13 +1075,15 @@ function wire() {
   // event ever arrives) end on the same screen with a way out.
   el.frame.addEventListener('load', () => {
     clearLoadTimers();
+    loadbarDone();
+    if (el.peak) el.peak.hidden = true;
     el.loading.hidden = true;
     if (el.wcHint) el.wcHint.hidden = get('dappWcHint') === 'dismissed';
     // A page that finally finishes AFTER the timeout sheet appeared replaces the
     // sheet with the real content — it is only about the load that just ended.
     if (el.blocked.querySelector('.dbr-report[data-kind="didnotload"]')) el.blocked.hidden = true;
   });
-  el.frame.addEventListener('error', () => { clearLoadTimers(); showDidNotLoad(); });
+  el.frame.addEventListener('error', () => { clearLoadTimers(); loadbarFail(); showDidNotLoad(); });
 
   // On document, not on the overlay.
   //
@@ -906,6 +1104,9 @@ function wire() {
       // A menu is the one thing that eats the first press: it is a popup sitting on
       // top of everything.
       if (!el.menuPop.hidden) { el.menuPop.hidden = true; return; }
+      // The tab grid is the next layer down: it must close before Escape is
+      // allowed to close the whole browser.
+      if (el.tabGrid && !el.tabGrid.hidden) { toggleTabGrid(false); return; }
       // An address bar that is mid-edit swallows Escape — the input's own handler
       // restores the page you are on and blurs, which is the right answer for "I typed
       // the wrong thing". An untouched one must not, and neither must an EMPTY one:

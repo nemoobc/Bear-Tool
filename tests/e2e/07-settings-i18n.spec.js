@@ -16,12 +16,10 @@ test.describe('Settings & i18n', () => {
     await expect(page.locator('.theme-btn')).toHaveCount(3);
     await expect(page.locator('#setAutoLock')).toBeVisible();
     await expect(page.locator('#btnClearAllData')).toBeVisible();
-      // Testnet mode IS in Settings, deliberately. It moved to the picker, was
-      // reported missing from Settings, and was put back: two controls for one
-      // setting, kept safe by a single writer. settings-shape.test.js lists the
-      // five things Settings must hold and setTestnet is one of them, and
-      // ui-nav.test.js requires both placements to be live. This assertion said 0,
-      // which is why it failed against a document that was right all along.
+      // Testnet mode lives ONLY here (the picker duplicate was removed
+      // 2026-10-04: reported as a second toggle for the same setting).
+      // settings-shape.test.js lists the five things Settings must hold and
+      // setTestnet is one of them, and ui-nav.test.js pins this placement.
       await expect(page.locator('#setTestnet')).toHaveCount(1);
     await expect(page.locator('#setRpc')).toHaveCount(0);
   });
@@ -84,30 +82,31 @@ test.describe('Settings & i18n', () => {
     await appClick(page, '#networkPill');
     await appClick(page, '#netListTestnet [data-net="sepolia"]');
     await expect(page.locator('#networkName')).toHaveText(/Sepolia/i);
-    // Turn testnets off from the picker, where the filter lives. It applies on
-    // the click - there is no Save step, which is what made the old Settings
-    // switch look like it worked while the setting stayed true.
-    // Choosing a network closes the picker, so the filter inside it has no box to
-    // click — which is why the tests below reopen the pill first, and this one did
-    // not. The app is right to close it; the test was reaching into a closed panel.
-    await appClick(page, '#networkPill');
-    await page.waitForSelector('#netShowTestnet', { timeout: 10_000 });
-    await appClick(page, '#netShowTestnet');
+    // Turn testnets off from Settings, the only switch (the picker duplicate
+    // was removed 2026-10-04). It applies on the click — no Save step.
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await page.waitForSelector('#setTestnet', { timeout: 10_000 });
+    await appClick(page, '#setTestnet');
+    // Standing on a chain that just got filtered away → moved to Ethereum.
     await expect(page.locator('#networkName')).toHaveText(/Ethereum/i);
+    await appClick(page, '#networkPill');
     await expect(page.locator('#netListTestnet [data-net="sepolia"]')).toHaveCount(0);
   });
 
-  test('the testnet filter stays reachable while testnets are hidden', async ({ page }) => {
+  test('the testnet filter in Settings empties and refills the picker list', async ({ page }) => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await appClick(page, '#setTestnet');              // OFF
     await appClick(page, '#networkPill');
-    await appClick(page, '#netShowTestnet');           // OFF
     await expect(page.locator('#netListTestnet [data-net]')).toHaveCount(0);
-    // The control itself must still be there, or a filter you cannot reach is a
-    // filter you cannot undo. This is the bug the placement was chosen to avoid.
-    await expect(page.locator('#netShowTestnet')).toBeVisible();
-    await appClick(page, '#netShowTestnet');           // back ON
+    await page.keyboard.press('Escape');
+    // One toggle, in Settings — flipping it back on refills the list.
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await expect(page.locator('#setTestnet')).toBeChecked();
+    await appClick(page, '#setTestnet');              // back ON
+    await appClick(page, '#networkPill');
     await expect(page.locator('#netListTestnet [data-net="sepolia"]')).toHaveCount(1);
     await appClick(page, '#netListTestnet [data-net="sepolia"]');
     await expect(page.locator('#networkName')).toHaveText(/Sepolia/i);
@@ -117,11 +116,12 @@ test.describe('Settings & i18n', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await appClick(page, '#networkPill');
-    await appClick(page, '#netShowTestnet');           // OFF
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await appClick(page, '#setTestnet');              // OFF
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await expect(page.locator('#setTestnet')).not.toBeChecked();
     await appClick(page, '#networkPill');
-    await expect(page.locator('#netShowTestnet')).not.toBeChecked();
     await expect(page.locator('#netListTestnet [data-net]')).toHaveCount(0);
   });
 

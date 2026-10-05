@@ -311,6 +311,21 @@ try {
   }
   const env = { ...process.env, BEAR_BASE_URL: BASE_URL };
 
+  // (3) Same repair as the BrowserStack path, needed there AND here:
+  //     playwright-core computes its registry directory from process.platform,
+  //     Termux reports "android", and computeDefaultCacheDirectory only knows
+  //     linux/darwin/win32 — so `playwright test` threw
+  //     `Unsupported platform: android` at import time (crash, exit 1) before
+  //     it ever learned that BEAR_CHROMIUM_PATH's executablePath means no
+  //     browser is looked up in that registry. An explicit
+  //     PLAYWRIGHT_BROWSERS_PATH makes the registry take the value verbatim
+  //     and skip the computation (playwright-core coreBundle.js registryDirectory).
+  //     Only applied where the default is unknown (Android); Linux/macOS/
+  //     Windows keep their platform default untouched.
+  if (!env.PLAYWRIGHT_BROWSERS_PATH && !['linux', 'darwin', 'win32'].includes(process.platform)) {
+    env.PLAYWRIGHT_BROWSERS_PATH = path.join(os.homedir(), '.cache', 'ms-playwright');
+  }
+
   // Two Termux-only repairs, both proven by running the suite on this machine.
   //
   // (1) tools/bin/playwright overrides the npm-generated launcher, whose

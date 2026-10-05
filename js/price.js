@@ -93,7 +93,7 @@ export async function ensureUsdRate() {
   const hit = cachedRate(cur);
   if (hit !== null) { publishRate(cur, hit); return hit; }
   try {
-    const res = await fetchWithTimeout(cgUrl('simple/price', {
+    const res = await cgFetch(cgUrl('simple/price', {
       ids: 'ethereum', vs_currencies: `usd,${cur}`,
     }));
     if (!res.ok) throw new Error('rate ' + res.status);
@@ -132,7 +132,9 @@ function saveLsCache(cache) {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)); } catch {}
 }
 
-function cacheKey(address) { return address || 'native'; }
+// Address keys are case-INSENSITIVE (0xAbC === 0xabc on-chain): one address
+// written in checksum case and read in lower case must hit the same entry.
+function cacheKey(address) { return address ? String(address).toLowerCase() : 'native'; }
 
 export function getPriceFromCache(address) {
   const key = cacheKey(address);
@@ -176,12 +178,47 @@ async function fetchWithTimeout(url, timeoutMs = 10000) {
   }
 }
 
+// ── CoinGecko rate limit (HTTP 429) ───────────────────────────
+// The keyless free tier answers 429 under load — proven by probe 2026-10-04:
+// binancecoin/ohlc → {"status":{"error_code":429,"error_message":"You've
+// exceeded the Rate Limit"}}. One 429 used to poison every follow-up: the
+// pseudo-candle fallback calls the SAME host and dies the same way, so the
+// chart collapsed to [] and the modal claimed "No 24h data" about a token
+// that may well have a chart.
+//
+// Now a 429 opens a short cooldown: CoinGecko calls inside it fail fast with
+// a NAMED error instead of hammering the API (which only deepens the
+// penalty), and the caller can tell "rate-limited" apart from "no data" and
+// say so on screen. DexScreener calls keep plain fetchWithTimeout — they are
+// a different host with a different limit.
+const CG_COOLDOWN_MS = 60_000;
+let cgCooldownUntil = 0;
+
+/** The one error that means "the limit, not the token". */
+export function rateLimitError() {
+  return new Error('CoinGecko rate-limited (HTTP 429) — cooldown active');
+}
+
+export function isRateLimit(e) {
+  return /rate-limit|429/.test(String((e && e.message) || ''));
+}
+
+async function cgFetch(url, timeoutMs = 10000) {
+  if (Date.now() < cgCooldownUntil) throw rateLimitError();
+  const res = await fetchWithTimeout(url, timeoutMs);
+  if (res.status === 429) {
+    cgCooldownUntil = Date.now() + CG_COOLDOWN_MS;
+    throw rateLimitError();
+  }
+  return res;
+}
+
 async function fetchCoinGeckoNative(chainId) {
   const id = NATIVE_COIN_IDS[chainId];
   if (!id) return null;
   // usd, always. See the rate block above — the display currency is applied once,
   // at the edge, by fmtUsd.
-  const res = await fetchWithTimeout(cgUrl('simple/price', { ids: id, vs_currencies: 'usd' }));
+  const res = await cgFetch(cgUrl('simple/price', { ids: id, vs_currencies: 'usd' }));
   if (!res.ok) throw new Error('CoinGecko ' + res.status);
   const data = await res.json();
   return data[id]?.usd ?? null;
@@ -231,7 +268,7 @@ async function fetchCoinGeckoTokens(chainId, addresses) {
   let consecutiveFailures = 0;
   for (const chunk of chunks) {
     try {
-      const res = await fetchWithTimeout(cgUrl(`simple/token_price/${platform}`,
+      const res = await cgFetch(cgUrl(`simple/token_price/${platform}`,
         { contract_addresses: chunk.join(','), vs_currencies: 'usd' }));
       if (!res.ok) {
         if (++consecutiveFailures >= 2) break;
@@ -319,10 +356,17 @@ export async function fetchAllPrices(tokens, chainId) {
     try {
       const prices = await fetchCoinGeckoTokens(chainId, missing.map(t => t.address));
       for (const t of missing) {
-        const p = prices[t.address.toLowerCase()]?.usd;
-        if (p !== undefined && p !== null) {
-          result.set(t.address, p);
-          cachePrice(t.address, p);
+        // fetchCoinGeckoTokens returns a FLAT map addr → number (it already
+        // unwraps v.usd and filters non-finite values). Reading `.usd` here
+        // always yielded undefined, so every CoinGecko-listed token fell
+        // through to DexScreener — whose /tokens/v1 answers [] for the majors
+        // — and rendered "—" even when CoinGecko had the price.
+        const raw = prices[t.address.toLowerCase()];
+        const p = typeof raw === 'number' ? raw : raw?.usd;
+        if (p !== undefined && p !== null && Number.isFinite(Number(p))) {
+          const n = Number(p);
+          result.set(t.address, n);
+          cachePrice(t.address, n);
         }
       }
     } catch { /* fall through to DexScreener */ }
@@ -360,7 +404,7 @@ export async function fetchOHLC({ address, chainId, days = 1 }) {
   if (!url) return [];
 
   try {
-    const res = await fetchWithTimeout(url, 12000);
+    const res = await cgFetch(url, 12000);
     if (!res.ok) throw new Error('CoinGecko OHLC ' + res.status);
     const data = await res.json();
     // CoinGecko OHLC format: [[timestamp, open, high, low, close], ...]
@@ -374,7 +418,11 @@ export async function fetchOHLC({ address, chainId, days = 1 }) {
     const shown = candles.map((c) => ({ ...c, open: usdToDisplay(c.open), high: usdToDisplay(c.high), low: usdToDisplay(c.low), close: usdToDisplay(c.close) }));
     historyCache.set(key, { data: shown, ts: Date.now() });
     return shown;
-  } catch {
+  } catch (e) {
+    // Rate-limited: the pseudo-candle fallback below calls the SAME host and
+    // the cooldown would just fail it again — surface the named error now so
+    // the modal can say "rate-limited" instead of "this coin has no data".
+    if (isRateLimit(e)) throw rateLimitError();
     // Fallback: convert price history to pseudo-candles
     try {
       const prices = await fetchPriceHistory({ address, chainId });
@@ -386,7 +434,10 @@ export async function fetchOHLC({ address, chainId, days = 1 }) {
         return { time: Date.now() - (prices.length - i) * 300000, open: p, high: Math.max(p, next), low: Math.min(p, next), close: next };
       });
       return candles.slice(0, -1);
-    } catch { return []; }
+    } catch (e2) {
+      if (isRateLimit(e2)) throw rateLimitError();
+      return [];
+    }
   }
 }
 
@@ -414,7 +465,7 @@ export async function fetchPriceHistory({ address, chainId }) {
   if (!url) return [];
 
   try {
-    const res = await fetchWithTimeout(url, 12000);
+    const res = await cgFetch(url, 12000);
     if (!res.ok) throw new Error('CoinGecko ' + res.status);
     const data = await res.json();
     const raw = (data.prices || [])
@@ -426,22 +477,27 @@ export async function fetchPriceHistory({ address, chainId }) {
     const sampled = Array.from({ length: target }, (_, k) => usdToDisplay(raw[Math.round(k * (raw.length - 1) / (target - 1))]));
     historyCache.set(key, { data: sampled, ts: Date.now() });
     return sampled;
-  } catch {
-    // DexScreener fallback for chart data
+  } catch (e) {
+    // DexScreener fallback for chart data — a DIFFERENT host, so it is still
+    // worth one shot even while CoinGecko is cooling down.
     try {
-      if (!address) return [];
-      const dsUrl = `https://api.dexscreener.com/tokens/v1/${chainId}/${address}`;
-      const dsRes = await fetchWithTimeout(dsUrl, 8000);
-      if (!dsRes.ok) return [];
-      const dsData = await dsRes.json();
-      const pair = Array.isArray(dsData) ? dsData[0] : dsData;
-      const history = pair?.priceHistory || pair?.h24 || [];
-      if (Array.isArray(history) && history.length >= 2) {
-        const sampled = Array.from({ length: Math.min(30, history.length) }, (_, k) => history[Math.round(k * (history.length - 1) / (Math.min(30, history.length) - 1))]);
-        historyCache.set(key, { data: sampled, ts: Date.now() });
-        return sampled;
+      if (address) {
+        const dsUrl = `https://api.dexscreener.com/tokens/v1/${chainId}/${address}`;
+        const dsRes = await fetchWithTimeout(dsUrl, 8000);
+        if (dsRes.ok) {
+          const dsData = await dsRes.json();
+          const pair = Array.isArray(dsData) ? dsData[0] : dsData;
+          const history = pair?.priceHistory || pair?.h24 || [];
+          if (Array.isArray(history) && history.length >= 2) {
+            const sampled = Array.from({ length: Math.min(30, history.length) }, (_, k) => history[Math.round(k * (history.length - 1) / (Math.min(30, history.length) - 1))]);
+            historyCache.set(key, { data: sampled, ts: Date.now() });
+            return sampled;
+          }
+        }
       }
     } catch { /* fallback failed */ }
+    // The limit was the cause → say so; a genuine gap in the data stays [].
+    if (isRateLimit(e)) throw rateLimitError();
     return [];
   }
 }

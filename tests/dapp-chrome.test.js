@@ -40,7 +40,11 @@ function topLevelIds(block) {
   let m;
   while ((m = re.exec(block))) {
     const [, close, tag, attrs] = m;
-    if (close) { depth--; continue; }
+    // The slice starts INSIDE its wrapper's opening tag, so that wrapper's own
+    // close is the first </…> seen. Without the floor it drove depth to -1 and
+    // every id that followed (the load bar, added 2026-10-05) fell out of the
+    // count while its children counted as top-level.
+    if (close) { depth = Math.max(0, depth - 1); continue; }
     if (depth === 0) {
       const id = /id="([^"]+)"/.exec(attrs);
       if (id) ids.push(id[1]);
@@ -58,9 +62,12 @@ const bottomIds = topLevelIds(bottomBar);
 test('top bar leads with ✕ and ends with the chain badge', () => {
   // Direct children with an id: the address pill is an un-id'd wrapper, so
   // #dbrSecure / #dbrUrl are asserted against it separately below.
+  // The chain badge still closes the BUTTONS; after it come the tab-count
+  // button (OKX's switcher opener) and the load bar's track — neither is a
+  // navigation control, both were added on purpose.
   assert.deepEqual(topIds,
-    ['dbrClose', 'dbrBm', 'dbrConnect', 'dbrNet'],
-    '✕ first, then ★, 🔗, chain badge last');
+    ['dbrClose', 'dbrBm', 'dbrConnect', 'dbrNet', 'dbrTabsBtn', 'dbrLoadbar'],
+    '✕ first, then ★, 🔗, chain badge, tab count, load bar');
   assert.ok(!topIds.includes('dbrBack'), 'navigation no longer crowds the top');
   // The verdict and the address share one pill, verdict first.
   assert.match(topBar, /<div class="dbr-urlwrap">\s*<span class="dbr-secure" id="dbrSecure"[\s\S]*?<input[^>]*id="dbrUrl"/,
@@ -76,8 +83,8 @@ test('the bottom bar is exactly five controls, in order', () => {
   assert.deepEqual(bottomIds,
     ['dbrBack', 'dbrFwd', 'dbrReload', 'dbrHome', 'dbrMenu'],
     'back, forward, reload, home, menu — five slots, one per action');
-  assert.equal(topIds.length + bottomIds.length, 9,
-    'the chrome did not sprout unaccounted controls');
+  assert.equal(topIds.length + bottomIds.length, 11,
+    'the chrome did not sprout unaccounted controls (6 top ids incl. tab count + load bar, 5 bottom)');
 });
 
 test('every control the e2e suite clicks by id is still in the shell', () => {
@@ -88,6 +95,16 @@ test('every control the e2e suite clicks by id is still in the shell', () => {
     'dbrMenuPop', 'dbrBar']) {
     assert.match(shell, new RegExp(`id="${id}"`), `${id} was dropped by the redesign`);
   }
+});
+
+// Hidden means hidden — for the whole sheet, not per component. The tab grid
+// intercepted every click on the report behind it through its own hidden
+// attribute, because .dbr-tabgrid's display:flex outranked the UA sheet. The
+// lock is global on purpose: the next display:flex written beside a hidden
+// element must not be able to repeat it.
+test('css: the hidden attribute outranks every author display rule', () => {
+  assert.match(css, /\[hidden\]\s*\{\s*display:\s*none\s*!important\s*;?\s*\}/,
+    'one global lock — a component-specific exception is the bug coming back');
 });
 
 test('the new chrome ids are wired, not decorative', () => {

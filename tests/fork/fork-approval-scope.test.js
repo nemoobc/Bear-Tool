@@ -125,6 +125,8 @@ test('js/swap.js still contains no unlimited approval', () => {
   // describing a behaviour the app no longer has.
   assert.doesNotMatch(swapSrc, /\.approve\(\s*[^,]+,\s*(?:ethers\.)?MaxUint256\s*\)/,
     'the swap path must never approve MaxUint256');
-  assert.match(swapSrc, /\.approve\(\s*router\s*,\s*amountWei\s*\)/,
+  // The address is `approveTo` (built.approveTo || router — the contract that
+  // actually pulls, js/swap.js:661-662), not the literal name `router`.
+  assert.match(swapSrc, /\.approve\(\s*\w+\s*,\s*amountWei\s*\)/,
     'the swap path must approve the amount being swapped');
 });

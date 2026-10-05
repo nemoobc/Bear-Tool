@@ -1,25 +1,35 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — bridge.js
-// Bridge view: NATIVE-token bridging only (fail closed).
+// Bridge view: native + CURATED ERC-20 (fail closed).
 // LI.FI quote (real API, fetch timeout) — NO simulated fallback:
 // a failed quote is an honest error, never a fake route.
 // Context-bound quote validation, guarded execution path.
 //
 // Security contract (bridge.test.js is the executable spec):
-//   1. Native only — ERC-20 selection is rejected loudly, never
-//      silently substituted with the native token.
+//   1. Two picker options max: native, plus the ONE curated stable
+//      family present on BOTH chains. Any ERC-20 not in POPULAR_TOKENS
+//      for the source chain, or without a curated destination twin,
+//      is rejected loudly BEFORE the fetch — never substituted.
 //   2. Quotes are bound to an immutable context: sequence id,
-//      networkId, chainId, address, token, from/to chains, amount.
+//      networkId, chainId, address, token (native or exact from/to
+//      addresses), decimals, from/to chains, amount.
 //   3. Quote state is cleared before any await; stale (out-of-order)
 //      responses are ignored by sequence id.
 //   4. API responses are validated field-by-field against the
-//      context (chains, token, address, amount, tx value/chainId,
-//      destination address + calldata sanity).
+//      context (chains, BOTH token addresses, address, amount,
+//      tx value/chainId — value must be 0 for ERC-20, >0 for native,
+//      approvalAddress sanity, destination address + calldata).
 //   5. Execution re-verifies the whole context against the live
 //      form, current account, state networkId and provider network
 //      BEFORE signing, and re-checks the provider network AFTER the
 //      awaited getNetwork() call (TOCTOU). Tx details come only
 //      from the quote-bound snapshot.
+//   6. ERC-20 execution: allowance is read on-chain against the
+//      quote-bound spender ONLY → approve (reset-0 first when a
+//      stale partial allowance exists, USDT-style) → RE-QUOTE and
+//      full re-validation (an approval wait can outlive the quote,
+//      research 2026-10-05 A2.7) → bridge tx. A fresh quote naming
+//      a different spender than we just approved aborts honestly.
 // ═══════════════════════════════════════════════════════════════
 
 import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
@@ -28,7 +38,7 @@ import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, withTimeout } from './safetx.js';
 const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 
-import { getAllNetworks, getNetworkById } from './network.js';
+import { getAllNetworks, getNetworkById, POPULAR_TOKENS } from './network.js';
 import { t } from './i18n.js';
 import { BRIDGE_ROUTERS, getBridgeRoutersForChain, CHAIN_NAMES } from './routers.js';
 import { initTokenPicker, initNetworkPicker, initOptionPicker } from './token-picker.js';
@@ -80,6 +90,79 @@ function saneTxData(data) {
 // execution destination sanity (quote-bound, checked again at exec)
 function saneExecAddress(addr) {
   return isAddress(addr) && String(addr).toLowerCase() !== ZERO_ADDRESS;
+}
+
+// ── curated ERC-20 helpers — the second token in the picker ──
+// Family = the stable/wrap slot a symbol fills, matched by lowercase prefix so
+// the on-chain spellings land in the same bucket: 'USDT0' (polygon), 'USD₮0'
+// (arbitrum), 'USDt' (avalanche) are all usdt; 'DAI.e' is dai.
+function familyOf(sym) {
+  const s = String(sym || '').toLowerCase();
+  if (s.startsWith('usdc')) return 'usdc';
+  if (s.startsWith('usdt') || s.startsWith('usd₮')) return 'usdt';
+  if (s.startsWith('usdb')) return 'usdb';
+  if (s.startsWith('dai')) return 'dai';
+  if (s.startsWith('weth')) return 'weth';
+  if (s.startsWith('wbtc')) return 'wbtc';
+  return null;
+}
+const FAMILY_PRIORITY = ['usdc', 'usdt', 'usdb', 'dai', 'weth', 'wbtc'];
+
+// LI.FI deny-lists the NATIVE token on these chains: live probe 2026-10-05
+// (every amount, both directions) → HTTP 400 code 1011 "Token 42220-0x00…00
+// is invalid or in deny list". ERC-20 on the SAME chain quotes fine (Celo
+// USDC → World Chain: 200, tool=layerswap), so the chain stays in the router
+// registry — only the NATIVE row drops out when a curated ERC-20 alternative
+// exists. If no alternative exists, native stays as the last resort and fails
+// honestly at quote time (an empty picker helps nobody).
+// Same signal that removed 97/80002 from lifi.chains (js/routers.js:140).
+const NATIVE_DENY_CHAINS = new Set([42220]);
+
+/**
+ * The picker options for a chain pair — at most TWO:
+ * native first (unless deny-listed), then the first family curated on BOTH
+ * chains (from the curated POPULAR_TOKENS list; the second row only appears
+ * when a destination twin address exists — a token without one is a bridge to
+ * nowhere). The returned ERC-20 entry carries the SOURCE address (what the
+ * wallet sends) and the twin address (what the quote asks LI.FI to deliver).
+ */
+export function bridgeTokenOptions(fromNet, toNet) {
+  const fromList = POPULAR_TOKENS[fromNet.chainId] || [];
+  const toList = POPULAR_TOKENS[toNet.chainId] || [];
+  const toFam = new Map(toList.map(t => [familyOf(t.symbol), t]));
+  let erc20 = null;
+  for (const fam of FAMILY_PRIORITY) {
+    const src = fromList.find(t => familyOf(t.symbol) === fam);
+    const dst = src ? toFam.get(fam) : null;
+    if (src && dst) {
+      erc20 = { value: src.address, symbol: src.symbol, decimals: src.decimals, toAddress: dst.address };
+      break;
+    }
+  }
+  const nativeDenied = NATIVE_DENY_CHAINS.has(fromNet.chainId) || NATIVE_DENY_CHAINS.has(toNet.chainId);
+  const opts = [];
+  if (!nativeDenied || !erc20) {
+    opts.push({
+      value: 'native', symbol: fromNet.symbol || 'Native', decimals: fromNet.decimals ?? 18, toAddress: null,
+    });
+  }
+  if (erc20) opts.push(erc20);
+  return opts;
+}
+
+/**
+ * The approval decision for an ERC-20 bridge at execution time.
+ * 'none' — native (skipApproval) or allowance already covers the amount.
+ * 'approve' — fresh allowance: one exact-amount approve, never unlimited.
+ * 'reset+approve' — a stale PARTIAL allowance: USDT-style tokens refuse
+ *   0→N in one call, so the old value must be zeroed first (LI.FI approvals
+ *   workflow, docs 2026-10-05).
+ */
+export function decideApproval({ skipApproval, allowance, amount }) {
+  if (skipApproval) return 'none';
+  if (allowance >= amount) return 'none';
+  if (allowance > 0n) return 'reset+approve';
+  return 'approve';
 }
 
 export function bindBridgeEvents() {
@@ -137,8 +220,8 @@ function debounce(fn, ms) {
 }
 
 export function loadBridgeChains() {
-  const from = $('#bridgeFromChain'), to = $('#bridgeToChain'), tok = $('#bridgeToken');
-  if (!from || !to || !tok) return;
+  const from = $('#bridgeFromChain'), to = $('#bridgeToChain');
+  if (!from || !to || !$('#bridgeToken')) return;
   const opts = getAllNetworks().map(n => `<option value="${escapeHtml(n.id)}">${escapeHtml(n.name)} (${escapeHtml(n.type)})</option>`).join('');
   from.innerHTML = opts;
   to.innerHTML = opts;
@@ -146,10 +229,11 @@ export function loadBridgeChains() {
   // default source = active network (so the quote matches the wallet)
   const activeId = get('networkId');
   if (activeId && [...from.options].some(o => o.value === activeId)) from.value = activeId;
-  // NATIVE ONLY — honest UI: ERC-20 is never offered, so nothing can pretend support.
-  const net = getNetworkById(get('networkId'));
-  const sym = net?.symbol || 'Native';
-  tok.innerHTML = `<option value="native">${escapeHtml(sym)} — ${escapeHtml(t('bridge.native_only'))}</option>`;
+  // Two options max: native first, then the ONE stable family curated on
+  // BOTH the source and destination chain (spec 2026-10-05, "pemilihan
+  // tokennya 1 harusnya ada 2"). The second row appears only when both
+  // chains carry a curated twin — no curated twin, no option, no pretend.
+  renderBridgeTokenOptions();
 
   // In-app pickers on top of the native selects, which stay authoritative.
   // A native select's option list is an OS popup that escapes the page on a
@@ -157,9 +241,6 @@ export function loadBridgeChains() {
   const nets = getAllNetworks();
   initNetworkPicker('bridgeFromChain', nets);
   initNetworkPicker('bridgeToChain', nets);
-  initTokenPicker('bridgeToken', [{
-    address: null, symbol: sym, decimals: net?.decimals ?? 18, balance: '0', usd: null,
-  }]);
   initOptionPicker('bridgeRouterSelect',
     [...($('#bridgeRouterSelect')?.options || [])].map((o) => o.textContent));
 
@@ -167,6 +248,12 @@ export function loadBridgeChains() {
   updateBridgeRouterOptions();
   from.addEventListener('change', updateBridgeRouterOptions);
   to.addEventListener('change', updateBridgeRouterOptions);
+  // The token list depends on the CHAIN PAIR (a family only qualifies when
+  // both chains curate it) — repainting on either change keeps option #2
+  // honest. Re-init is safe: initListPicker swaps the row/paint closures
+  // instead of stacking bindings (token-picker.js re-entry guard).
+  from.addEventListener('change', renderBridgeTokenOptions);
+  to.addEventListener('change', renderBridgeTokenOptions);
   // The router list is rebuilt when the chain pair changes, so repaint the
   // picker's trigger too or it keeps showing the old provider.
   $('#bridgeRouterSelect')?.addEventListener('change', () => {
@@ -194,6 +281,108 @@ function updateBridgeRouterOptions() {
   if ([...sel.options].some(o => o.value === currentVal)) sel.value = currentVal;
 }
 
+// Repaint #bridgeToken for the CURRENT chain pair. Keeps the selection when
+// it is still a valid option, otherwise falls back to native (never keeps a
+// token the new source chain does not curate). Called by loadBridgeChains and
+// on every from/to change.
+function renderBridgeTokenOptions() {
+  const tok = $('#bridgeToken');
+  if (!tok) return null;
+  const fromNet = getNetworkById($('#bridgeFromChain')?.value) || getNetworkById(get('networkId'));
+  const toNet = getNetworkById($('#bridgeToChain')?.value);
+  if (!fromNet || !toNet) return null;
+  const opts = bridgeTokenOptions(fromNet, toNet);
+  // Keep the selection only if it survives in the NEW list — checking the
+  // OLD options (pre-fix) meant a stale ERC-20 address could outlive a chain
+  // switch and land as an invalid value. Any drop falls back to the first
+  // option of the new list (native normally, the ERC-20 on deny-listed pairs).
+  const keep = opts.some(o => o.value === tok.value) ? tok.value : (opts[0]?.value ?? 'native');
+  tok.innerHTML = opts.map(o => {
+    const label = o.value === 'native'
+      ? `${o.symbol} — ${t('bridge.native')}`
+      : `${o.symbol} (ERC-20)`;
+    return `<option value="${escapeHtml(o.value)}">${escapeHtml(label)}</option>`;
+  }).join('');
+  tok.value = keep;
+  initTokenPicker('bridgeToken', opts.map(o => ({
+    address: o.value === 'native' ? null : o.value,
+    symbol: o.symbol, decimals: o.decimals, balance: '0', usd: null,
+  })));
+  return opts;
+}
+
+// The immutable URL builder — quote time and the post-approval re-quote build
+// it from the SAME context, so the two requests can never drift apart.
+function quoteUrl(context) {
+  const NATIVE = ZERO_ADDRESS;
+  return `https://li.quest/v1/quote?fromChain=${context.fromChainId}&toChain=${context.toChainId}` +
+    `&fromToken=${context.tokenAddress || NATIVE}&toToken=${context.toTokenAddress || NATIVE}` +
+    `&fromAmount=${context.amountSmallest}` +
+    `&fromAddress=${encodeURIComponent(context.address)}&toAddress=${encodeURIComponent(context.address)}`;
+}
+
+// Field-by-field validation of a LI.FI quote response against the captured
+// context. Throws on ANY mismatch — a mismatching/malicious response must
+// never reach execution. Used at quote time (doBridge) AND at the post-
+// approval re-quote inside doBridgeExec (an approval wait can outlive the
+// quote; research 2026-10-05 A2.7), so both paths validate identically.
+// Returns the immutable snapshot execution is allowed to use.
+function validateQuote(q, context) {
+  const txReq = q.transactionRequest;
+  const est = q.estimate || {};
+  if (!txReq?.to || !txReq?.data) throw new Error('LI.FI quote missing transactionRequest');
+  if (!sameChainId(q.action?.fromChainId, context.fromChainId)) throw new Error('Quote fromChain mismatch');
+  if (!sameChainId(q.action?.toChainId, context.toChainId)) throw new Error('Quote toChain mismatch');
+  const fromTok = q.action?.fromToken?.address;
+  const toTok = q.action?.toToken?.address;
+  const isNative = context.token === 'native';
+  if (isNative) {
+    if (!sameAddr(fromTok || ZERO_ADDRESS, ZERO_ADDRESS)) throw new Error('Quote fromToken is not native');
+    if (!sameAddr(toTok || ZERO_ADDRESS, ZERO_ADDRESS)) throw new Error('Quote toToken is not native');
+  } else {
+    // ERC-20: BOTH addresses must be exactly the curated pair from context —
+    // an substituted token on either side is a different contract entirely.
+    if (!sameAddr(fromTok, context.tokenAddress)) throw new Error('Quote fromToken mismatch');
+    if (!sameAddr(toTok, context.toTokenAddress)) throw new Error('Quote toToken mismatch');
+  }
+  if (!sameAddr(q.action?.fromAddress, context.address)) throw new Error('Quote fromAddress mismatch');
+  // toAddress was requested explicitly — the response must match it exactly.
+  if (!sameAddr(q.action?.toAddress, context.address)) throw new Error('Quote toAddress mismatch');
+  const ctxAmt = BigInt(context.amountSmallest);
+  if (BigInt(q.action?.fromAmount ?? -1) !== ctxAmt) throw new Error('Quote fromAmount mismatch');
+  if (BigInt(est?.fromAmount ?? -1) !== ctxAmt) throw new Error('Quote estimate.fromAmount mismatch');
+  if (!saneExecAddress(txReq.to)) throw new Error('Quote destination address invalid');
+  if (!saneTxData(txReq.data)) throw new Error('Quote calldata invalid');
+  if (!sameChainId(txReq.chainId, context.fromChainId)) throw new Error('Quote transactionRequest.chainId mismatch');
+  const txValue = BigInt(txReq.value ?? -1);
+  if (isNative) {
+    if (txValue <= 0n) throw new Error('Quote tx value missing for native bridge');
+    if (txValue > ctxAmt) throw new Error('Quote tx value exceeds requested amount');
+  } else if (txValue !== 0n) {
+    // ERC-20 funds move via the approval pull — native value riding along on
+    // an ERC-20 route is a mismatch, not a bonus. Fail closed.
+    throw new Error('Quote tx value must be 0 for an ERC-20 bridge');
+  }
+  let approvalAddress = null;
+  if (!isNative) {
+    if (!saneExecAddress(est?.approvalAddress)) throw new Error('Quote approvalAddress invalid');
+    approvalAddress = ethers.getAddress(est.approvalAddress);
+  }
+  const steps = (Array.isArray(q.includedSteps) && q.includedSteps.length)
+    ? q.includedSteps : (est?.steps || []);
+  const toolName = (s) => (typeof s?.tool === 'string' ? s.tool : (s?.tool?.key || s?.action?.tool || '?'));
+  const route = steps.length > 1 ? `${toolName(steps[0])} → ${toolName(steps[1])}`
+    : steps.length === 1 ? `${toolName(steps[0])} → done` : 'auto';
+  return {
+    tx: { to: ethers.getAddress(txReq.to), data: txReq.data, value: txValue, chainId: Number(context.fromChainId) },
+    approvalAddress,
+    skipApproval: !!est.skipApproval,
+    fee: est?.feeCosts?.[0]?.amountUSD ?? '?',
+    dur: est?.executionDuration ?? '?',
+    route,
+  };
+}
+
 export async function doBridge() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const fromNet = getNetworkById($('#bridgeFromChain').value);
@@ -204,12 +393,23 @@ export async function doBridge() {
   if (!fromNet || !toNet) return toast('Unknown network selected', 'error');
   if (fromNet.chainId === toNet.chainId) return toast('Choose two different chains', 'error');
 
-  // NATIVE ONLY — fail closed: reject non-native selection loudly.
-  // Never silently substitute the native token for an ERC-20 pick.
+  // Token selection: native, or a curated ERC-20 with a curated destination
+  // twin. Anything else fails closed BEFORE the fetch — a token we cannot map
+  // to a destination address must never reach the router, and never gets
+  // silently substituted with the native token.
   const tok = $('#bridgeToken').value;
+  let tokenMeta = null;
+  let toTokenAddress = null;
   if (tok !== 'native') {
-    set('bridgeQuote', null);
-    return toast(t('bridge.native_only_reject'), 'error');
+    const meta = (POPULAR_TOKENS[fromNet.chainId] || []).find(x => sameAddr(x.address, tok));
+    const twin = meta && (POPULAR_TOKENS[toNet.chainId] || [])
+      .find(x => familyOf(x.symbol) === familyOf(meta.symbol));
+    if (!meta || !twin) {
+      set('bridgeQuote', null);
+      return toast(t('bridge.token_not_routable'), 'error');
+    }
+    tokenMeta = meta;
+    toTokenAddress = twin.address;
   }
 
   // Quote must match the ACTIVE network — a quote for a chain the
@@ -224,9 +424,30 @@ export async function doBridge() {
   const userAddr = get('address');
   if (!userAddr || !isAddress(userAddr)) return toast('Unlock wallet first', 'error');
 
-  // Native = 18 decimals. Amount format already validated above, so this
-  // cannot throw here — it must be part of the immutable context.
-  const amountSmallest = ethers.parseUnits(amt, 18).toString();
+  // Amount precision follows the TOKEN: 18 for native, the curated decimals
+  // for an ERC-20 (USDC is 6 — 18 would inflate the amount a million-fold).
+  // The regex above validates the SHAPE, not the precision: a fully-precise
+  // paste ("5.1234567" into 6-decimal USDC) throws NUMERIC_FAULT here.
+  // Red-team 2026-10-05: without this catch the rejection escaped the caller
+  // (auto-quote runs with no .catch) — silent failure, the PREVIOUS quote
+  // stayed bound and Bridge stayed clickable. Fail closed: kill the quote,
+  // disable the button, hide the stale route, say WHY.
+  const decimals = tokenMeta ? tokenMeta.decimals : 18;
+  let amountSmallest;
+  try {
+    amountSmallest = ethers.parseUnits(amt, decimals).toString();
+  } catch {
+    quoteSeq++;                    // kill any in-flight quote request too —
+    // without this bump a response already on the wire could bind AFTER the
+    // clear below and repaint the route box for an amount that never parsed
+    // (exec still rejects it as stale; the UI must not lie in the meantime).
+    set('bridgeQuote', null);
+    $('#btnBridgeExec').disabled = true;
+    $('#bridgeRoute').classList.add('hidden');
+    $('#bridgeRoute').innerHTML = '';
+    $('#bridgeQuote').classList.add('hidden');
+    return toast(`Amount has more decimal places than this token supports (${decimals} decimals)`, 'error');
+  }
 
   // Immutable quote context + seq id captured BEFORE the first await
   // (confirmTx is an await — the old quote must die before it opens),
@@ -237,8 +458,11 @@ export async function doBridge() {
     networkId: get('networkId'),
     chainId: Number(fromNet.chainId),
     address: ethers.getAddress(userAddr),
-    token: 'native',
-    tokenSymbol: fromNet.symbol || 'native',
+    token: tok,
+    tokenAddress: tokenMeta ? ethers.getAddress(tokenMeta.address) : null,
+    toTokenAddress: tokenMeta ? ethers.getAddress(toTokenAddress) : null,
+    tokenDecimals: decimals,
+    tokenSymbol: tokenMeta ? tokenMeta.symbol : (fromNet.symbol || 'native'),
     fromChainId: Number(fromNet.chainId),
     toChainId: Number(toNet.chainId),
     amount: amt,
@@ -274,48 +498,30 @@ export async function doBridge() {
     // confirm dialog). Cleared again right before the fetch.
     set('bridgeQuote', null);
     // LI.FI quote (real API) — honest error on failure, never simulated.
-    // fromToken/toToken = 0x0 (native on both sides; no ERC-20 in scope);
+    // fromToken/toToken: the curated addresses (or 0x0 native on both sides);
     // toAddress pinned explicitly so the response destination is exact.
-    const NATIVE = ZERO_ADDRESS;
-    const url = `https://li.quest/v1/quote?fromChain=${fromNet.chainId}&toChain=${toNet.chainId}&fromToken=${NATIVE}&toToken=${NATIVE}&fromAmount=${amountSmallest}&fromAddress=${encodeURIComponent(userAddr)}&toAddress=${encodeURIComponent(userAddr)}`;
+    const url = quoteUrl(context);
     const res = await fetchWithTimeout(url);
     // this request was superseded while awaiting — ignore entirely
     if (seq !== quoteSeq) return;
     if (res.ok) {
       const q = await res.json();
       if (seq !== quoteSeq) return;
-      const txReq = q.transactionRequest;
-      const est = q.estimate || {};
-      if (!txReq?.to || !txReq?.data) throw new Error('LI.FI quote missing transactionRequest');
       // Field-by-field validation against the captured context —
       // a mismatching/malicious response must never reach execution.
-      if (!sameChainId(q.action?.fromChainId, context.fromChainId)) throw new Error('Quote fromChain mismatch');
-      if (!sameChainId(q.action?.toChainId, context.toChainId)) throw new Error('Quote toChain mismatch');
-      const fromTok = q.action?.fromToken?.address;
-      const toTok = q.action?.toToken?.address;
-      if (!sameAddr(fromTok || ZERO_ADDRESS, ZERO_ADDRESS)) throw new Error('Quote fromToken is not native');
-      if (!sameAddr(toTok || ZERO_ADDRESS, ZERO_ADDRESS)) throw new Error('Quote toToken is not native');
-      if (!sameAddr(q.action?.fromAddress, context.address)) throw new Error('Quote fromAddress mismatch');
-      // toAddress was requested explicitly — the response must match it exactly.
-      if (!sameAddr(q.action?.toAddress, context.address)) throw new Error('Quote toAddress mismatch');
-      const ctxAmt = BigInt(context.amountSmallest);
-      if (BigInt(q.action?.fromAmount ?? -1) !== ctxAmt) throw new Error('Quote fromAmount mismatch');
-      if (BigInt(est?.fromAmount ?? -1) !== ctxAmt) throw new Error('Quote estimate.fromAmount mismatch');
-      if (!saneExecAddress(txReq.to)) throw new Error('Quote destination address invalid');
-      if (!saneTxData(txReq.data)) throw new Error('Quote calldata invalid');
-      if (!sameChainId(txReq.chainId, context.fromChainId)) throw new Error('Quote transactionRequest.chainId mismatch');
-      const txValue = BigInt(txReq.value ?? -1);
-      if (txValue <= 0n) throw new Error('Quote tx value missing for native bridge');
-      if (txValue > ctxAmt) throw new Error('Quote tx value exceeds requested amount');
+      // Shared with the post-approval re-quote in doBridgeExec.
+      const bound = validateQuote(q, context);
       // Quote-bound immutable snapshot — execution uses ONLY this.
       set('bridgeQuote', {
         simulated: false,
         context,
-        tx: { to: ethers.getAddress(txReq.to), data: txReq.data, value: txValue, chainId: Number(context.fromChainId) }
+        approvalAddress: bound.approvalAddress,
+        skipApproval: bound.skipApproval,
+        tx: bound.tx
       });
-      const fee = est?.feeCosts?.[0]?.amountUSD ?? '?';
-      const dur = est?.executionDuration ?? '?';
-      const route = `${est?.steps?.[0]?.tool ?? '?'} → ${est?.steps?.[1]?.tool ?? 'done'}`;
+      const fee = bound.fee;
+      const dur = bound.dur;
+      const route = bound.route;
       box.innerHTML = '';
       box.classList.add('hidden');
       routeBox.innerHTML = `
@@ -340,7 +546,25 @@ export async function doBridge() {
   }
 }
 
+// ── single-flight guard ──
+// The ERC-20 flow spends SECONDS inside approve + re-quote with the button
+// still live. A double-click (or an impatient second tap) would run a SECOND
+// full exec in parallel: two allowance reads against a not-yet-mined approve,
+// a second approve, and — worst case — two bridge transfers. Red-team finding
+// 2026-10-05: one execution at a time, second entry rejected loudly.
+let execInFlight = false;
+
 export async function doBridgeExec() {
+  if (execInFlight) return toast('Bridge already in progress — wait for it to finish', 'error');
+  execInFlight = true;
+  try {
+    return await doBridgeExecInner();
+  } finally {
+    execInFlight = false;
+  }
+}
+
+async function doBridgeExecInner() {
   if (!get('unlocked')) { requireUnlock(); return; }
   // Reject absent / unbound / simulated quotes — there is no safe
   // default. An old pre-fix quote has no context and must not sign.
@@ -400,8 +624,8 @@ export async function doBridgeExec() {
       { k: 'Router', v: context.router || 'Auto' },
       { k: 'Est. time', v: '~2-10 min' }
     ],
-    confirmText: 'Sign & Bridge',
-    cancelText: 'Cancel Sign',
+    confirmText: 'Confirm & Bridge',
+    cancelText: 'Cancel',
     danger: false
   });
   if (!signOk) return toast('Bridge cancelled', 'info');
@@ -438,12 +662,104 @@ export async function doBridgeExec() {
     if (!connected?.sendTransaction) return toast('No signer available', 'error');
     if (connected.address && !sameAddr(connected.address, context.address)) return toast(t('bridge.account_changed'), 'error');
 
+    // ── ERC-20: allowance → approve → RE-QUOTE → bridge ──
+    // The approve spender comes ONLY from the quote-bound snapshot
+    // (q.approvalAddress, validated against the response at quote time).
+    // Native skips this block entirely: no allowance, no extra fetch.
+    let sendParams = { to, data, value, chainId };
+    if (context.tokenAddress) {
+      const spender = q.approvalAddress;
+      if (!saneExecAddress(spender)) return toast('Quote has no approval spender — bridge not signed', 'error');
+      const erc20 = new ethers.Interface([
+        'function allowance(address,address) view returns (uint256)',
+        'function approve(address,uint256) returns (bool)',
+      ]);
+      let allowance = 0n;
+      try {
+        const raw = await provider.call({
+          to: context.tokenAddress,
+          data: erc20.encodeFunctionData('allowance', [context.address, spender]),
+        });
+        allowance = BigInt(raw);
+      } catch {
+        // An unreadable allowance must stop the flow — never assume approval.
+        return toast('Could not read token allowance — bridge not signed', 'error');
+      }
+      const decision = decideApproval({
+        skipApproval: q.skipApproval, allowance, amount: BigInt(context.amountSmallest),
+      });
+      if (decision !== 'none') {
+        const sendApprove = async (amtWei, label) => {
+          const atx = await withTimeout(
+            connected.sendTransaction({
+              to: context.tokenAddress,
+              data: erc20.encodeFunctionData('approve', [spender, amtWei]),
+              value: 0n, chainId,
+            }),
+            BROADCAST_TIMEOUT_MS, `${label} broadcast`);
+          const r = await waitForReceipt(atx, { label });
+          if (r.timedOut || r.receipt?.status !== 1) throw new Error(`${label} not confirmed`);
+          return atx;
+        };
+        try {
+          if (decision === 'reset+approve') await sendApprove(0n, 'approval reset');
+          await sendApprove(BigInt(context.amountSmallest), 'approval');
+        } catch (e) {
+          return toast(`${explainError(e, 'Approval')} — bridge not signed`, 'error');
+        }
+        toast('Approval confirmed — refreshing route…', 'success');
+        // The original quote can outlive this approval wait (LI.FI quotes
+        // last minutes, research A2.7) — re-quote and validate from scratch.
+        if (get('bridgeQuote') !== q) return toast('Bridge context changed. Get a new route.', 'error');
+        let fresh;
+        try {
+          const res = await fetchWithTimeout(quoteUrl(context));
+          if (!res.ok) throw new Error(`LI.FI HTTP ${res.status}`);
+          fresh = validateQuote(await res.json(), context);
+        } catch (e) {
+          return toast(`Approval done, but no fresh route (${explainError(e, 're-quote')}) — try again`, 'error');
+        }
+        // A fresh quote may name a DIFFERENT spender than we just approved —
+        // executing against it would fail the allowance pull. Refuse honestly.
+        if (!sameAddr(fresh.approvalAddress, spender)) {
+          return toast('Route changed during approval — get a new quote', 'error');
+        }
+        if (get('bridgeQuote') !== q || $('#bridgeToken').value !== context.token ||
+            String($('#bridgeAmount').value) !== String(context.amount) ||
+            $('#bridgeFromChain').value !== fromNet.id || $('#bridgeToChain').value !== toNet.id ||
+            !sameAddr(get('address'), context.address)) {
+          return toast('Bridge context changed. Get a new route.', 'error');
+        }
+        // The entry guard ALSO pins unlocked / provider identity / networkId
+        // — those checks must not lapse during the 30–60s approve+re-quote
+        // window (critic 2026-10-05: asymmetric guard — first round closed
+        // unlocked/provider/networkId, round 2 proved from/to still drifted
+        // through, so the whole entry set is mirrored here). Locking the
+        // wallet or switching either select mid-flow now aborts exactly like
+        // drift in the amount, and the provider network is re-read AFTER the
+        // awaits (TOCTOU, same rule as the entry path).
+        if (!get('unlocked') || get('provider') !== provider ||
+            get('networkId') !== context.networkId) {   // network id is a STRING key, not a chainId
+          return toast('Bridge context changed. Get a new route.', 'error');
+        }
+        try {
+          const live = await provider.getNetwork();
+          if (!sameChainId(live.chainId, context.fromChainId)) {
+            return toast('Bridge context changed. Get a new route.', 'error');
+          }
+        } catch {
+          return toast('Provider network unavailable — bridge not signed', 'error');
+        }
+        sendParams = fresh.tx;
+      }
+    }
+
 // Every broadcast is wrapped. Only send.js bounded its broadcast with a
 // timeout; the bridge, swap and 7702 paths would wait on a node that never
 // answers, leaving the button spinning and the flow dead. 15s matches
 // send.js: a broadcast either gets a hash or it is not happening.
     const tx = await withTimeout(
-      connected.sendTransaction({ to, data, value, chainId }),
+      connected.sendTransaction(sendParams),
       BROADCAST_TIMEOUT_MS, 'bridge broadcast');
     toast('Bridge tx sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'bridge', status: 'pending', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}`, symbol: context.tokenSymbol });
@@ -467,7 +783,13 @@ function boundTxChecks(tx, context) {
   if (!saneTxData(tx.data)) throw new Error('Bridge calldata invalid');
   if (!sameChainId(tx.chainId, context.fromChainId)) throw new Error('Bridge tx chainId mismatch');
   const ctxAmt = BigInt(context.amountSmallest);
-  if (typeof tx.value !== 'bigint' || tx.value <= 0n) throw new Error('Bridge tx value missing');
-  if (tx.value > ctxAmt) throw new Error('Bridge tx value exceeds requested amount');
+  if (typeof tx.value !== 'bigint') throw new Error('Bridge tx value missing');
+  if (context.token === 'native') {
+    if (tx.value <= 0n) throw new Error('Bridge tx value missing');
+    if (tx.value > ctxAmt) throw new Error('Bridge tx value exceeds requested amount');
+  } else if (tx.value !== 0n) {
+    // ERC-20 route: funds move via approval pull, native value must be 0.
+    throw new Error('Bridge tx value must be 0 for ERC-20');
+  }
   return { to: tx.to, data: tx.data, value: tx.value, chainId: tx.chainId };
 }

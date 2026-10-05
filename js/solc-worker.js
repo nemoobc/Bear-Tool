@@ -3,7 +3,7 @@
 //
 // WHY THIS EXISTS (live bug, Android Chrome/150, 2026-10-03): Chrome refuses
 // SYNCHRONOUS WebAssembly compilation of buffers >8MB on the MAIN thread —
-// loading soljson.js (solc 0.8.28, ~9MB) in the page threw
+// loading soljson.js (solc 0.8.37, ~9MB) in the page threw
 //   RangeError: WebAssembly.Compile is disallowed on the main thread, if the
 //   buffer size is larger than 8MB.
 // The runtime never came up, so every Deploy/EIP-7702 compile on the user's

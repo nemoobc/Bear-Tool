@@ -129,3 +129,26 @@ test('walletconnect imports for real and its gates are pure', async () => {
   assert.equal(wc.hexToPreview('0xzz'), '0xzz', 'non-hex degrades to the raw string');
   assert.equal(wc.shortAddr('0x1234567890abcdef1234'), '0x1234...1234');
 });
+
+// The blank-frame fix (probe 2026-10-05): Aave and most modern dApps crash
+// without their own origin storage, while a page from THIS origin must never
+// be given the flag — allow-scripts + allow-same-origin there means the frame
+// can read Bear Tool's localStorage, where the keystore lives. One function
+// decides, per URL; both directions are pinned here.
+test('sandboxFor: cross-origin gets its storage back, this origin never does', async () => {
+  const mod = await import('../js/dapp-browser.js');
+  const SELF = 'https://wallet.example';
+  const base = 'allow-scripts allow-forms allow-popups allow-modals';
+
+  // Cross-origin — the Aave case: without the flag the page dies blank.
+  assert.equal(mod.sandboxFor('https://app.aave.com/', SELF), base + ' allow-same-origin');
+  // Same origin — the keystore case: the minimal set, no exceptions.
+  assert.equal(mod.sandboxFor('https://wallet.example/dashboard', SELF), base);
+  assert.equal(mod.sandboxFor(SELF, SELF), base);
+  // A different port/protocol is a different origin.
+  assert.equal(mod.sandboxFor('http://wallet.example/', SELF), base + ' allow-same-origin');
+  assert.equal(mod.sandboxFor('https://wallet.example:8443/', SELF), base + ' allow-same-origin');
+  // Unparseable input falls back to the minimal set — never to a wider one.
+  assert.equal(mod.sandboxFor('not a url', SELF), base);
+  assert.equal(mod.sandboxFor('', SELF), base);
+});

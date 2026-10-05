@@ -268,7 +268,7 @@ test.describe('dApp browser', () => {
 
     await expect(page.locator('#dbrLoading')).toBeVisible();
     await expect(page.locator('#dbrLoading .dbr-progress')).toBeVisible();
-    // LOAD_PHASE_MS.timeout is 15s; 25s leaves margin over a slow CI worker.
+    // LOAD_PHASE_MS.timeout is 20s; 25s leaves margin over a slow CI worker.
     // ONE assertion for both facts — the sheet must APPEAR WITH its text. The
     // earlier two-step (visible, then text) raced: #dbrBlocked is also the host
     // of the pre-load gate, so a transient gate state satisfied the visibility

@@ -70,10 +70,10 @@ test('the check button disables itself while it runs, and comes back', () => {
   assert.match(app, /finally \{\s*\n\s*if \(btn\) \{ btn\.disabled = false/, 'released even on throw');
 });
 
-test('#btnClearLogs hanya muncul kalau ≥1 jaringan benar-benar di-check', () => {
+test('#btnClearEipResults hanya muncul kalau ≥1 jaringan benar-benar di-check', () => {
   // `scanned` dulu diisi literal `true` setelah panggilan tidak melempar, jadi
-  // tombol Delete logs selalu muncul — termasuk ketika nihil jaringan di-check
-  // dan tidak ada log baru sama sekali.
+  // tombol Delete results selalu muncul — termasuk ketika nihil jaringan di-check
+  // dan tidak ada output sama sekali.
   const start = app.indexOf('async function runEip7702Check(');
   const end = app.indexOf('function renderActivity(', start);
   assert.ok(start > -1 && end > start, 'runEip7702Check harus ditemukan');

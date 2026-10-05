@@ -215,13 +215,16 @@ test('bridge: stale amount (form edited after quote) rejects', async (t) => {
   assert.ok(toasts.some(m => m.includes('no longer matches')));
 });
 
-test('bridge: ERC-20 selection is rejected loudly at quote, never signed', async (t) => {
+test('bridge: unknown ERC-20 (not curated for this chain) rejected loudly, no fetch', async (t) => {
+  // Spec change 2026-10-05: ERC-20 IS now supported, but only curated tokens
+  // — an address the wallet cannot map to a destination-chain twin must never
+  // reach LI.FI (a wrong toToken would be a wrong-contract bridge).
   const { toasts, spy } = setupExec(t, { quote: null, form: { token: '0xdAC17F958D2ee523a2206206994597C13D831ec7' } });
   await bridge.doBridge();
   assert.equal(spy.calls, 0);
-  assert.ok(toasts.some(m => m.toLowerCase().includes('native token bridging is supported')));
-  assert.equal(state.get('bridgeQuote'), null, 'no quote may exist for ERC-20 attempt');
-  assert.equal(globalThis.fetch.mock.callCount(), 0, 'no network call for ERC-20 selection');
+  assert.ok(toasts.some(m => m.toLowerCase().includes('no curated')), 'honest rejection naming the real reason');
+  assert.equal(state.get('bridgeQuote'), null, 'no quote may exist for an unmappable token');
+  assert.equal(globalThis.fetch.mock.callCount(), 0, 'no network call for an unmappable token');
 });
 
 test('bridge: absent / old unbound quote rejects before signer access', async (t) => {
@@ -233,14 +236,29 @@ test('bridge: absent / old unbound quote rejects before signer access', async (t
   }
 });
 
-test('bridge: token select renders native-only with clear label', () => {
+test('bridge: token picker shows 2 options — native + the common curated stable', () => {
+  // Spec 2026-10-05: the picker had ONE option (native) — "pemilihan tokennya 1
+  // harusnya ada 2". Second slot = first stable family (USDC > USDT > USDB >
+  // DAI > WETH > WBTC — order pinned by FAMILY_PRIORITY in js/bridge.js)
+  // curated on BOTH the source and destination chain, so the twin address for
+  // the quote always exists. sepolia ∩ ethereum = USDC.
   state.set('networkId', 'sepolia');
   state.set('tokens', [{ address: null, symbol: 'ETH', decimals: 18 }]);
+  // The mock element keeps .value independently of innerHTML (and its
+  // .options array is empty, so loadBridgeChains' own defaulting is a no-op)
+  // — pin the pair explicitly, otherwise #bridgeToChain carries the previous
+  // test's destination (bsc-testnet, no curated list) and option #2 never
+  // qualifies. sepolia ∩ ethereum = USDC.
+  document.querySelector('#bridgeFromChain').value = 'sepolia';
+  document.querySelector('#bridgeToChain').value = 'ethereum';
   bridge.loadBridgeChains();
-  const html = document.querySelector('#bridgeToken').innerHTML;
-  assert.ok(html.includes('value="native"'), 'only native option offered');
-  assert.ok(html.includes('native only'), 'clear native-only label');
-  assert.ok(!html.includes('USDT') && !html.includes('value="0x'), 'no ERC-20 options pretended');
+  const el = document.querySelector('#bridgeToken');
+  const html = el.innerHTML;
+  const opts = [...html.matchAll(/value="([^"]+)"/g)].map(m => m[1]);
+  assert.ok(opts.includes('native'), 'native always offered');
+  assert.equal(opts.length, 2, `exactly 2 options, got: ${opts.join(', ')}`);
+  assert.ok(opts.includes('0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'),
+    'second slot is sepolia USDC (source-chain address of the common stable)');
 });
 
 // ═════════ doBridge behavior — REAL call with mocked fetch ═════════
@@ -380,4 +398,329 @@ test('doBridge: auto-quote fetches immediately without confirmTx (safety at exec
   await bridge.doBridge();
   assert.equal(fetchCalled, true, 'fetch proceeds immediately (no confirm needed for quote)');
   assert.ok(state.get('bridgeQuote')?.context, 'quote context is set');
+});
+
+// ═════════ ERC-20 BRIDGE (spec 2026-10-05: 2 token di picker + approve flow) ═════════
+
+const USDC_SEP = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'; // Sepolia USDC (curated)
+const USDC_ARBSEP = '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d'; // Arb Sepolia USDC (curated)
+const APPROVER = '0x5555555555555555555555555555555555555555';
+const AMOUNT_5USDC = '5000000';
+
+function erc20Response({ fromChainId = 11155111, toChainId = 421614, amount = AMOUNT_5USDC } = {}) {
+  return {
+    estimate: {
+      fromAmount: amount, toAmount: '4990000', approvalAddress: APPROVER,
+      executionDuration: 2, feeCosts: [], gasCosts: []
+    },
+    action: {
+      fromChainId, toChainId,
+      fromToken: { address: USDC_SEP, chainId: fromChainId, symbol: 'USDC', decimals: 6 },
+      toToken: { address: USDC_ARBSEP, chainId: toChainId, symbol: 'USDC', decimals: 6 },
+      fromAddress: account, toAddress: account, fromAmount: amount
+    },
+    transactionRequest: { to: ROUTER, data: '0xdeadbeef', value: '0x0', chainId: fromChainId, gasLimit: '300000' },
+    includedSteps: [{ tool: 'across' }]
+  };
+}
+
+function setupERC20Quote(t) {
+  // amount '5' → parseUnits(5, 6) = 5000000 base units = AMOUNT_5USDC,
+  // so the response's fromAmount matches the context exactly.
+  const h = setupQuote(t, { toChain: 'arbitrum-sepolia', amount: '5' });
+  h.el('#bridgeToken').value = USDC_SEP;
+  return h;
+}
+
+test('doBridge: ERC-20 quote binds token addresses, 6-decimal amount, value 0x0, approvalAddress', async (t) => {
+  const { fetchMock } = setupERC20Quote(t);
+  fetchMock.mock.mockImplementation(async () => ({ ok: true, json: async () => erc20Response() }));
+  await bridge.doBridge();
+  const q = state.get('bridgeQuote');
+  assert.ok(q && !q.simulated, 'ERC-20 quote must bind');
+  const reqUrl = new URL(fetchMock.mock.calls[0].arguments[0]);
+  assert.equal(reqUrl.searchParams.get('fromToken'), USDC_SEP, 'quote asks for the SELECTED source token');
+  assert.equal(reqUrl.searchParams.get('toToken'), USDC_ARBSEP, 'quote asks for the destination twin');
+  assert.equal(reqUrl.searchParams.get('fromAmount'), AMOUNT_5USDC, '5 USDC → base units of 6 decimals');
+  assert.equal(q.context.tokenDecimals, 6, 'decimals travel with the context');
+  assert.equal(q.context.tokenSymbol, 'USDC');
+  assert.equal(q.approvalAddress.toLowerCase(), APPROVER.toLowerCase(), 'spender for approve must be bound');
+  assert.equal(q.tx.value, 0n, 'ERC-20 bridge tx must carry value 0');
+  assert.equal(q.context.amountSmallest, AMOUNT_5USDC);
+});
+
+test('doBridge: response token substituted (attacker fromToken) rejected', async (t) => {
+  const { fetchMock } = setupERC20Quote(t);
+  const bad = erc20Response();
+  bad.action.fromToken.address = '0x0000000000000000000000000000000000000001';
+  fetchMock.mock.mockImplementation(async () => ({ ok: true, json: async () => bad }));
+  await bridge.doBridge();
+  assert.equal(state.get('bridgeQuote'), null, 'fromToken mismatch must never bind');
+});
+
+test('doBridge: ERC-20 quote carrying native-style value > 0 rejected', async (t) => {
+  const { fetchMock } = setupERC20Quote(t);
+  const bad = erc20Response();
+  bad.transactionRequest.value = AMOUNT_5USDC;
+  fetchMock.mock.mockImplementation(async () => ({ ok: true, json: async () => bad }));
+  await bridge.doBridge();
+  assert.equal(state.get('bridgeQuote'), null, 'value > 0 on an ERC-20 route is a mismatch, never bound');
+});
+
+test('doBridge: destination chain has no curated twin → reject before any fetch', async (t) => {
+  // bsc-testnet carries no curated list (research: no official source exists)
+  const { fetchMock, toasts } = setupQuote(t, { toChain: 'bsc-testnet' });
+  fetchMock.mock.mockImplementation(async () => { throw new Error('must not fetch'); });
+  document.querySelector('#bridgeToken').value = USDC_SEP;
+  await bridge.doBridge();
+  assert.equal(state.get('bridgeQuote'), null);
+  assert.ok(toasts.some(m => m.toLowerCase().includes('no curated')), 'honest reason, zero network calls');
+  assert.equal(fetchMock.mock.callCount(), 0);
+});
+
+test('decideApproval: skip/covered → none; empty → approve; stale partial → reset+approve', () => {
+  assert.equal(bridge.decideApproval({ skipApproval: true, allowance: 0n, amount: 5n }), 'none');
+  assert.equal(bridge.decideApproval({ skipApproval: false, allowance: 9n, amount: 5n }), 'none');
+  assert.equal(bridge.decideApproval({ skipApproval: false, allowance: 5n, amount: 5n }), 'none');
+  assert.equal(bridge.decideApproval({ skipApproval: false, allowance: 0n, amount: 5n }), 'approve');
+  // USDT-style tokens refuse 0→N in one call: a stale non-zero allowance must
+  // be reset to 0 first, or the approve silently fails on-chain (LI.FI S3).
+  assert.equal(bridge.decideApproval({ skipApproval: false, allowance: 1n, amount: 5n }), 'reset+approve');
+});
+
+// ── execution order: approve BEFORE bridge, always quote-bound ──
+function setupERC20Exec(t, { allowance } = {}) {
+  elements.clear();
+  t.mock.method(globalThis, 'setTimeout', () => 0);
+  const fetchMock = t.mock.method(globalThis, 'fetch',
+    async () => ({ ok: true, json: async () => erc20Response() }));
+  const toasts = [];
+  t.mock.method(document.querySelector('#toast-wrap'), 'appendChild', el => toasts.push(el.textContent));
+  const el = (sel) => document.querySelector(sel);
+  el('#bridgeFromChain').value = 'sepolia';
+  el('#bridgeToChain').value = 'arbitrum-sepolia';
+  el('#bridgeToken').value = USDC_SEP;
+  el('#bridgeAmount').value = '5';
+  state.set('unlocked', true);
+  state.set('networkId', 'sepolia');
+  state.set('address', account);
+  const enc = ethers.AbiCoder.defaultAbiCoder();
+  state.set('provider', {
+    async getNetwork() { return { chainId: 11155111n }; },
+    async call({ to }) {
+      assert.equal(String(to).toLowerCase(), USDC_SEP.toLowerCase(), 'allowance read must target the selected token');
+      return enc.encode(['uint256'], [allowance]);
+    }
+  });
+  const spy = { txs: [] };
+  state.set('signer', {
+    address: account,
+    connect() { return this; },
+    async sendTransaction(tx) { spy.txs.push(tx); return { hash: '0x' + 'a'.repeat(64), wait: async () => ({ status: 1 }) }; }
+  });
+  state.set('bridgeQuote', {
+    simulated: false,
+    approvalAddress: APPROVER,
+    skipApproval: false,
+    context: {
+      networkId: 'sepolia', chainId: 11155111, fromChainId: 11155111, toChainId: 421614,
+      address: account, token: USDC_SEP, tokenAddress: USDC_SEP, toTokenAddress: USDC_ARBSEP,
+      tokenDecimals: 6, tokenSymbol: 'USDC',
+      amount: '5', amountSmallest: AMOUNT_5USDC
+    },
+    tx: { to: ROUTER, data: '0xdeadbeef', value: 0n, chainId: 11155111 }
+  });
+  return { toasts, spy, fetchMock };
+}
+
+const APPROVE_SELECTOR = '0x095ea7b3';
+const approveIface = new ethers.Interface(['function approve(address,uint256) returns (bool)']);
+
+async function clickSign() {
+  await new Promise(r => setImmediate(r));
+  const yes = document.querySelector('#confirmYes');
+  assert.ok(yes && typeof yes.onclick === 'function', 'sign confirm rendered');
+  yes.onclick();
+}
+
+test('exec: allowance 0 → approve first, THEN bridge (order + payload pinned)', async (t) => {
+  const { spy } = setupERC20Exec(t, { allowance: 0n });
+  const pending = bridge.doBridgeExec();
+  await clickSign();
+  await pending;
+  assert.equal(spy.txs.length, 2, 'approve then bridge');
+  const [approveTx, bridgeTx] = spy.txs;
+  assert.equal(approveTx.to.toLowerCase(), USDC_SEP.toLowerCase(), 'approve targets the token contract');
+  assert.ok(approveTx.data.startsWith(APPROVE_SELECTOR), 'approve selector');
+  const [spender, amt] = approveIface.decodeFunctionData('approve', approveTx.data);
+  assert.equal(spender.toLowerCase(), APPROVER.toLowerCase(), 'approve the quote-bound spender only');
+  assert.equal(amt, BigInt(AMOUNT_5USDC), 'approve the exact amount, not unlimited');
+  assert.equal(approveTx.value, 0n);
+  assert.equal(bridgeTx.to.toLowerCase(), ROUTER.toLowerCase(), 'bridge tx after approval');
+  assert.equal(bridgeTx.value, 0n, 'ERC-20 bridge tx carries no native value');
+});
+
+test('exec: allowance already covered → NO approve, straight to bridge, no extra fetch', async (t) => {
+  const { spy, fetchMock } = setupERC20Exec(t, { allowance: BigInt(AMOUNT_5USDC) });
+  const pending = bridge.doBridgeExec();
+  await clickSign();
+  await pending;
+  assert.equal(spy.txs.length, 1, 'only the bridge tx');
+  assert.equal(spy.txs[0].to.toLowerCase(), ROUTER.toLowerCase());
+  assert.equal(fetchMock.mock.callCount(), 0, 'no re-quote needed when nothing waited');
+});
+
+test('exec: stale partial allowance → reset to 0 first, then approve amount, then bridge', async (t) => {
+  const { spy } = setupERC20Exec(t, { allowance: 2500000n });
+  const pending = bridge.doBridgeExec();
+  await clickSign();
+  await pending;
+  assert.equal(spy.txs.length, 3, 'reset + approve + bridge');
+  const [reset, approve, bridgeTx] = spy.txs;
+  assert.ok(reset.data.startsWith(APPROVE_SELECTOR));
+  assert.equal(approveIface.decodeFunctionData('approve', reset.data)[1], 0n, 'first tx resets to zero');
+  assert.equal(approveIface.decodeFunctionData('approve', approve.data)[1], BigInt(AMOUNT_5USDC));
+  assert.equal(bridgeTx.to.toLowerCase(), ROUTER.toLowerCase());
+});
+
+// ═══════════ RED-TEAM — attack the approve flow itself (2026-10-05) ═══════════
+// The approve path moves user funds permission, so it gets attacker-shaped
+// tests, not just happy paths. Findings were: re-entrancy had NO lock (P1,
+// fixed with the single-flight guard in js/bridge.js), plus three
+// fail-closed checks that must stay proved by executable spec.
+
+test('RED-TEAM: double-click during the approve flow cannot run a second exec', async (t) => {
+  const { spy, toasts } = setupERC20Exec(t, { allowance: 0n });
+  const p1 = bridge.doBridgeExec();          // first tap — flag now held
+  const p2 = bridge.doBridgeExec();          // impatient second tap
+  assert.ok(toasts.some(m => m.includes('in progress')), 'second entry rejected loudly');
+  await clickSign();
+  await p1;
+  await p2;
+  assert.equal(spy.txs.length, 2, 'exactly ONE flow (approve+bridge), never four');
+});
+
+test('RED-TEAM: unreadable allowance (garbage RPC answer) aborts before ANY tx', async (t) => {
+  const { spy, toasts } = setupERC20Exec(t, { allowance: 0n });
+  state.get().provider.call = async () => '0xzz-nothex';   // not even hex
+  const pending = bridge.doBridgeExec();
+  await clickSign();
+  await pending;
+  assert.equal(spy.txs.length, 0, 'no approve, no bridge — never assume approval');
+  assert.ok(toasts.some(m => m.toLowerCase().includes('allowance')), 'honest error naming the real reason');
+});
+
+test('RED-TEAM: re-quote swaps the spender AFTER approval → bridge refuses to fire', async (t) => {
+  const { spy, toasts, fetchMock } = setupERC20Exec(t, { allowance: 0n });
+  fetchMock.mock.mockImplementation(async () => ({
+    ok: true,
+    json: async () => {
+      const r = erc20Response();
+      r.estimate.approvalAddress = '0x6666666666666666666666666666666666666666'; // attacker
+      return r;
+    }
+  }));
+  const pending = bridge.doBridgeExec();
+  await clickSign();
+  await pending;
+  assert.equal(spy.txs.length, 1, 'approve mined, bridge did NOT follow');
+  assert.ok(spy.txs[0].data.startsWith(APPROVE_SELECTOR));
+  assert.ok(toasts.some(m => m.includes('Route changed')), 'aborts with the real reason');
+  assert.equal(fetchMock.mock.callCount(), 1, 'exactly the one re-quote, no retry loop');
+});
+
+test('RED-TEAM: ERC-20 quote with zeroed approvalAddress is rejected, never bound', async (t) => {
+  const h = setupERC20Quote(t);
+  h.fetchMock.mock.mockImplementation(async () => ({
+    ok: true,
+    json: async () => {
+      const r = erc20Response();
+      r.estimate.approvalAddress = '0x0000000000000000000000000000000000000000';
+      return r;
+    }
+  }));
+  await bridge.doBridge();
+  assert.equal(state.get('bridgeQuote'), null, 'no quote bound with a zero spender');
+  assert.equal(h.fetchMock.mock.callCount(), 1, 'response consumed, nothing signed');
+});
+
+// ── follow-up specs for the critic VETO fixes (2026-10-05) ──
+
+test('RED-TEAM: full-precision amount dies BEFORE the fetch — stale quote killed, button off', async (t) => {
+  const h = setupERC20Quote(t);                  // USDC, 6 decimals
+  h.el('#bridgeAmount').value = '5.1234567';     // 7 decimals → NUMERIC_FAULT
+  await bridge.doBridge();
+  assert.equal(state.get('bridgeQuote'), null, 'the PREVIOUS quote must not survive');
+  assert.ok(h.toasts.some(m => m.toLowerCase().includes('decimal')), 'honest error naming precision');
+  assert.equal(h.fetchMock.mock.callCount(), 0, 'no request with an unrepresentable amount');
+  assert.equal(document.querySelector('#btnBridgeExec').disabled, true, 'Bridge disabled — nothing stale to fire');
+});
+
+test('bridge: LI.FI deny-listed native (Celo) → native row drops, ERC-20 row stays', async () => {
+  const n = await import('../js/network.js');
+  const celo = n.getNetworkById('celo'), base = n.getNetworkById('base');
+  const opts = bridge.bridgeTokenOptions(celo, base);
+  assert.ok(!opts.some(o => o.value === 'native'), 'deny-listed native is never offered');
+  assert.equal(opts.length, 1, 'the curated ERC-20 row is the only option');
+  assert.equal(opts[0].symbol, 'USDC');
+  assert.equal(opts[0].value, '0xcebA9300f2b948710d2653dD7B07f33A8B32118C', 'source = curated Celo USDC');
+  assert.equal(opts[0].toAddress, '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'twin = curated Base USDC');
+  // destination side of the deny list behaves the same
+  const back = bridge.bridgeTokenOptions(base, celo);
+  assert.ok(!back.some(o => o.value === 'native'), 'native dropped as DESTINATION too');
+  // denied chain WITHOUT a curated twin: native stays as the last resort
+  // (an empty picker helps nobody — it fails honestly at quote time instead)
+  const noTwin = bridge.bridgeTokenOptions(celo, n.getNetworkById('bsc-testnet'));
+  assert.equal(noTwin.length, 1, 'no ERC-20 alternative → keep native');
+  assert.equal(noTwin[0].value, 'native');
+});
+
+test('RED-TEAM: wallet locked during the approve+re-quote window → bridge tx aborts', async (t) => {
+  const { spy, toasts } = setupERC20Exec(t, { allowance: 0n });
+  // Flip the lock while the flow sits PAST runTx's entry guards: the
+  // allowance read happens inside, after sign confirmation.
+  const enc = ethers.AbiCoder.defaultAbiCoder();
+  state.get().provider.call = async () => {
+    state.set('unlocked', false);
+    return enc.encode(['uint256'], [0n]);
+  };
+  const pending = bridge.doBridgeExec();
+  await clickSign();
+  await pending;
+  assert.equal(spy.txs.length, 1, 'approve went out, bridge did NOT');
+  assert.ok(toasts.some(m => m.includes('context changed')), 'aborts with the drift message');
+});
+
+test('RED-TEAM: destination/source select swapped mid-approve → bridge tx aborts', async (t) => {
+  // Round-2 critic probes (GAP-A / GAP-B): the entry guard compares both
+  // selects, the post-approve guard must too — flipping EITHER select during
+  // the approve+re-quote window ends with txs=1, never a signature.
+  for (const flip of [() => { document.querySelector('#bridgeToChain').value = 'sepolia'; },
+                      () => { document.querySelector('#bridgeFromChain').value = 'no-such-network'; }]) {
+    const { spy, toasts } = setupERC20Exec(t, { allowance: 0n });
+    const enc = ethers.AbiCoder.defaultAbiCoder();
+    state.get().provider.call = async () => { flip(); return enc.encode(['uint256'], [0n]); };
+    const pending = bridge.doBridgeExec();
+    await clickSign();
+    await pending;
+    assert.equal(spy.txs.length, 1, 'approve only — select drift must never sign the bridge');
+    assert.ok(toasts.some(m => m.includes('context changed')), 'honest drift abort');
+  }
+});
+
+test('README pair numbers are pinned to the code (HUKUM 10)', async () => {
+  const n = await import('../js/network.js');
+  const b = await import('../js/bridge.js');
+  const nets = n.getAllNetworks();
+  let withE = 0, without = 0;
+  for (const a of nets) for (const c of nets) {
+    if (a.chainId === c.chainId) continue;
+    b.bridgeTokenOptions(a, c).some(o => o.value !== 'native') ? withE++ : without++;
+  }
+  const readme = (await import('node:fs')).readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.equal(withE + without, 506, '23 networks → 506 ordered pairs');
+  assert.ok(readme.includes(`${withE} of ${withE + without} ordered chain pairs carry a curated ERC-20 row`),
+    `README must state the measured pair count (${withE}/${withE + without})`);
+  assert.ok(readme.includes(`the other ${without} share no stable family`),
+    `README must state the native-only count (${without})`);
 });

@@ -129,13 +129,23 @@ export const SWAP_ROUTERS = [
 export const BRIDGE_ROUTERS = [
   {
     id: 'lifi', name: 'LI.FI', type: 'aggregator',
-    // Only the chains Bear Tool can actually be pointed at. This list used to
-    // include Avalanche, Fantom, Aurora and Gnosis, which are in no network list
-    // in js/network.js — so the registry claimed routes to chains the wallet
-    // cannot connect to, and the README repeated it as "all chains". A route
-    // that requires a chain the app does not have is a dead end, exactly like a
-    // router with no contract behind it.
-    chains: [1, 10, 56, 97, 137, 8453, 42161, 80002, 84532, 421614, 11155111, 11155420],
+    // The chains Bear Tool can actually be pointed at ∩ the chains LI.FI can
+    // quote. This list used to include Avalanche, Fantom, Aurora and Gnosis —
+    // which were in no network list in js/network.js — so the registry claimed
+    // routes to chains the wallet cannot connect to, and the README repeated
+    // it as "all chains". A route that requires a chain the app does not have
+    // is a dead end, exactly like a router with no contract behind it.
+    // 2026-10-05: +11 chains with the network growth (all 17 mainnets probe-
+    // confirmed inside LI.FI's 70-chain EVM set, research A5); −97/80002, which
+    // LI.FI REJECTS with HTTP 400 code 1011 while they sat in this list — a
+    // dead route offered in a picker is worse than no route. Routers.test.js
+    // pins: chains ⊆ NETWORKS, no 97/80002, every shipped mainnet covered.
+    chains: [
+      1, 10, 56, 137, 8453, 42161,            // original six mainnets
+      43114, 100, 42220, 146,                  // +4 L1: Avalanche, Gnosis, Celo, Sonic
+      59144, 534352, 81457, 5000, 324, 130, 480, // +7 L2: Linea, Scroll, Blast, Mantle, zkSync, Unichain, World Chain
+      84532, 421614, 11155111, 11155420        // testnets (97 & 80002 removed: LI.FI 400)
+    ],
     api: 'https://li.quest/v1',
   },
 ];

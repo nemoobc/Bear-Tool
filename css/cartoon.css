@@ -517,15 +517,32 @@ body::before {
 }
 .account-pill:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 
-/* The brand mark is an <img>, not a text glyph. A bare emoji took its size from
-   whatever font-size happened to be in scope and sat on the text baseline, so it
-   drifted with the platform's font and never matched the bear in the topbar.
-   An explicit box plus display:block makes it the same size everywhere and
-   removes the inline baseline gap underneath it. */
-.pill-bear {
-  width: 20px; height: 20px;
-  display: block;
+/* The pill icon is a lockup: the brand bear peeking out of a wallet pocket.
+   The wallet is an inline SVG painted AFTER the <img> in DOM order, so the
+   pocket covers the bear's lower edge — that overlap is what reads as "in the
+   wallet" rather than "floating above it". The bear file is unchanged; only
+   its box moved from a bare pill child to this positioning context. */
+.pill-wallet {
+  position: relative;
+  width: 26px; height: 26px;
   flex: 0 0 auto;
+}
+.wallet-glyph {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+}
+
+/* The brand mark is an <img>, not a text glyph: an explicit box keeps it the
+   same size everywhere and, with display:block, removes the inline baseline
+   gap underneath it. absolute + centered so the pocket overlaps its base. */
+.pill-bear {
+  position: absolute;
+  left: 50%; top: 1px;
+  transform: translateX(-50%);
+  width: 16px; height: 16px;
+  display: block;
 }
 
 .asset-bear {
@@ -749,6 +766,34 @@ select.input option, select.select option, .input option {
 }
 .toggle-pill:active { transform: translate(2px, 2px); box-shadow: none; }
 
+/* ═══════════ DEPLOY WIZARD — M7 compiler config + presets ═══════════ */
+/* Sub-heading inside the extra-fields column (report: "fitur compiler
+   configuration" as its own visible block, not one more form row). */
+.wizard-section-title {
+  margin: 18px 0 10px;
+  padding-top: 12px;
+  border-top: 2px dashed var(--ink);
+  font-weight: 800;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+/* Optimizer pill sits ON THE SAME ROW as the runs input. */
+.field-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.field-inline .toggle-pill { margin: 0; }
+.field-inline .input { flex: 1 1 120px; min-width: 0; }
+/* Premint preset buttons (100M / 500M / 1B / 100B) — clickable pills above
+   the supply input; `:has(input:checked)` never matches them, so they stay
+   white until :active gives the press feedback. */
+.preset-pill { font-size: 0.78rem; padding: 5px 12px; }
+.preset-pill:active { background: var(--honey); }
+
 /* ═══════════ BALANCE / DASHBOARD ═══════════ */
 .balance-hero {
   text-align: center;
@@ -938,6 +983,36 @@ select.input option, select.select option, .input option {
 .toast.info { border-left: 8px solid var(--sky); }
 @keyframes toast-in { from { transform: translateX(100%); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* ── update guard: a newer bundle is live, this tab still runs the old one ──
+   Fixed to the bottom so it cannot cover the view switcher on mobile the way
+   a centered modal would; reload is a button, never automatic. */
+.update-guard {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  background: var(--white);
+  border-top: var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.update-guard button {
+  padding: 6px 16px;
+  border: var(--border);
+  border-radius: 10px;
+  background: var(--honey);
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* ═══════════ BADGES ═══════════ */
 .badge {
   display: inline-block;
@@ -1041,6 +1116,9 @@ select.input option, select.select option, .input option {
 .nft-card:hover { transform: translateY(-4px) rotate(-1deg); box-shadow: var(--shadow); }
 .nft-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
 .nft-card .meta { padding: 8px; font-size: 0.8rem; font-weight: 600; }
+/* M3: floor price line (indexer path only) — shares the meta's side
+   padding so it reads as part of the card, not as floating text. */
+.nft-card .nft-floor { padding: 0 8px 8px; font-size: 0.75rem; font-weight: 600; color: var(--text-secondary, #64748B); }
 
 /* ═══════════ EIP-7702 ═══════════ */
 .delegate-status {
@@ -3223,6 +3301,33 @@ select.input option, select.select option, .input option {
 .dbr-bbtn { flex: 1 1 0; min-width: 44px; min-height: var(--touch-min, 44px); border: 1px solid var(--border); background: transparent; border-radius: 10px; cursor: pointer; font-size: 1.15rem; display: inline-flex; align-items: center; justify-content: center; }
 .dbr-bbtn:disabled { opacity: .35; cursor: default; }
 .dbr-bbtn:hover:not(:disabled) { background: rgba(127,127,127,.12); }
+/* Thin load bar under the address bar (OKX position). One track, one fill. */
+.dbr-loadbar { position: relative; height: 3px; flex: 0 0 auto; background: transparent; overflow: hidden; z-index: 1; }
+.dbr-loadbar-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0%; background: linear-gradient(90deg, var(--honey, #f5c542), var(--berry, #e0457b)); border-radius: 0 2px 2px 0; }
+
+/* Tab-count button in the top bar (OKX position): a number, not a word. */
+.dbr-tabcount { min-width: 30px; font-weight: 800; font-size: .8rem; line-height: 1; border: 2px solid var(--border); border-radius: 8px; padding: 5px 6px; background: var(--cream, #fff8e7); }
+
+/* Tab switcher grid: cards over the stage, two-up, one close per card. */
+.dbr-tabgrid { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; gap: var(--sp-8); padding: var(--sp-12); background: var(--bg, #fdf6e3); overflow-y: auto; }
+.dbr-tg-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
+.dbr-tg-title { font-weight: 800; font-size: .95rem; }
+.dbr-tg-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-8); }
+@media (max-width: 560px) { .dbr-tg-cards { grid-template-columns: 1fr; } }
+.dbr-tg-card { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 84px; padding: 10px 30px 10px 10px; border: 2px solid var(--ink); border-radius: var(--radius); background: var(--card, #fff); cursor: pointer; text-align: left; transition: transform .12s, box-shadow .12s; }
+.dbr-tg-card:hover, .dbr-tg-card:focus-visible { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+.dbr-tg-card.on { background: var(--honey, #f5c542); box-shadow: var(--shadow-sm); }
+.dbr-tg-ic { font-size: 1.1rem; }
+.dbr-tg-nm { font-weight: 700; font-size: .85rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbr-tg-url { font-size: .7rem; color: var(--ink-soft); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbr-tg-x { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border: 2px solid var(--ink); border-radius: 6px; background: var(--white, #fff); font-weight: 800; line-height: 1; cursor: pointer; }
+.dbr-tg-x:hover { background: var(--berry, #e0457b); color: #fff; }
+.dbr-tg-foot { display: flex; gap: var(--sp-8); margin-top: auto; padding-top: var(--sp-4); }
+
+/* The ⚠ report chip: left behind after "Show the page", the way back in. */
+.dbr-peak { position: absolute; right: 10px; bottom: 10px; z-index: 25; width: 34px; height: 34px; border: 2px solid var(--ink); border-radius: 50%; background: var(--honey, #f5c542); font-size: 1rem; font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm); }
+.dbr-peak:hover { background: var(--berry, #e0457b); color: #fff; }
+
 .dbr-tabs { display: flex; gap: 4px; padding: 5px 8px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--card, #fff); }
 .dbr-wc-hint { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; line-height: 1.35; background: var(--card, #fff); border-bottom: 1px solid var(--border); color: var(--muted, #666); flex: 0 0 auto; }
 .dbr-wc-hint-txt { flex: 1; min-width: 0; }
@@ -3289,10 +3394,17 @@ select.input option, select.select option, .input option {
 @keyframes dbrprog { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
 .dbr-loading-txt { display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 999px; background: var(--card, #fff); border: 1px solid var(--border, #ddd); font-size: .78rem; }
 .dbr-blocked { overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 22px 12px; }
-/* The flex rule above outranks the UA sheet's [hidden]{display:none}, so the
+/* The flex rules above outrank the UA sheet's [hidden]{display:none}, so the
  * panel with its hidden attribute SET stayed on screen after "Back" — the E2E
  * eternal-spinner test caught it red on CI (70c67de, toBeHidden 24x "visible").
- * Author display must never beat the hidden attribute: hidden means hidden. */
+ * Author display must never beat the hidden attribute: hidden means hidden.
+ *
+ * It happened TWICE more after that warning (the tab grid intercepted every
+ * click through its own hidden attribute; the WalletConnect hint ignored its
+ * dismissed state), each time by a new display:flex written next to the rule
+ * above it. One lock for the whole sheet instead of one per component:
+ * an author rule — any author rule, present or future — must not outrank it. */
+[hidden] { display: none !important; }
 .dbr-blocked[hidden] { display: none; }
 .dbr-report { max-width: 560px; border: 1px solid var(--border); border-radius: 14px; padding: 15px; background: var(--card, #fff); }
 .dbr-rep-h { font-weight: 800; margin-bottom: 4px; }
@@ -3510,33 +3622,8 @@ select.input option, select.select option, .input option {
 .set-group .field-row .small { margin: 2px 0 0; }
 .set-group .switch { flex: 0 0 auto; }
 
-/* The testnet filter in the network picker. It is a checkbox, not the big
-   switch, because it filters the list right below it rather than changing a
-   saved preference — but it still meets the 44px touch floor, because it is the
-   only way back to a hidden list once you have turned it off. */
-.net-filter {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  margin: 0 0 10px;
-  padding: 4px 8px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--ink-soft);
-  user-select: none;
-}
-.net-filter:hover { background: var(--cream); }
-.net-filter input[type="checkbox"] {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  accent-color: var(--mint);
-  cursor: pointer;
-}
-.net-filter:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* The testnet toggle used to sit here too as a checkbox (removed 2026-10-04 —
+   Settings already owns the on/off). */
 
 
 /* ── M4: delegation badge + activity icon families ── */

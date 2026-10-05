@@ -32,7 +32,7 @@ const deploySrc = fs.readFileSync(new URL('../js/deploy.js', import.meta.url), '
 test('deploy: solc loader uses the BROWSER build (soljson), never the Node CLI', () => {
   assert.match(solcJs.SOLC_URL, /\/soljson\.js$/, 'must load soljson.js (browser/wasm build)');
   assert.doesNotMatch(solcJs.SOLC_URL, /\/solc\.js$/, 'solc.js is the Node CLI wrapper and breaks in a browser');
-  assert.match(solcJs.SOLC_URL, /solc@0\.8\.28\//, 'compiler version must be pinned');
+  assert.match(solcJs.SOLC_URL, /solc@0\.8\.37\//, 'compiler version must be pinned');
   assert.match(solcJs.SOLC_URL, /^https:\/\/cdn\.jsdelivr\.net\//, 'CDN must be allow-listed by the CSP');
   assert.ok(Array.isArray(solcJs.SOLC_FALLBACK_URLS) && solcJs.SOLC_FALLBACK_URLS.length > 0, 'a fallback CDN must exist so a blocked primary does not look like a compile error');
   assert.ok(solcJs.SOLC_FALLBACK_URLS.every(u => /^https:\/\/unpkg\.com\//.test(u)), 'fallback CDN must be allow-listed by the CSP');
@@ -58,12 +58,62 @@ test('deploy: each standard has a self-contained template (no imports to resolve
     assert.ok(std, `${id} standard must exist`);
     assert.ok(std.source.includes(`contract ${std.contract}`), `${id} source must declare ${std.contract}`);
     assert.doesNotMatch(std.source, /^\s*import\s/m, `${id} must be self-contained (no import statements)`);
-    assert.match(std.source, /pragma solidity \^0\.8\.28;/, `${id} must pin the pragma the compiler ships`);
+    // Pragma tracks the shipped compiler (single source: solc.js SOLC_VERSION).
+    assert.match(std.source, new RegExp(`pragma solidity \\^${solcJs.SOLC_VERSION.replace(/\./g, '\\.')};`), `${id} must pin the pragma the compiler ships`);
     assert.ok(std.fields.length > 0, `${id} must declare its extra form fields`);
   }
   assert.match(contracts.getStandard('erc20').source, /function transferFrom\(/, 'ERC-20 must be a real token');
   assert.match(contracts.getStandard('erc721').source, /function ownerOf\(/, 'ERC-721 must be a real NFT');
   assert.match(contracts.getStandard('erc1155').source, /function safeBatchTransferFrom\(/, 'ERC-1155 must be real');
+});
+
+// ── compiler configuration passthrough (wizard: language / EVM version / optimization) ──
+// The fake compiler records the exact standard-JSON input, so these tests fail
+// if any knob stops reaching solc — no network, no wasm.
+function fakeCompiler(record) {
+  return {
+    compile: (json) => {
+      const input = JSON.parse(json);
+      record.push(input);
+      return JSON.stringify({
+        contracts: { [Object.keys(input.sources)[0]]: {
+          [input.sources ? Object.keys(input.sources)[0].replace(/\.sol$/, '') : 'X']: {
+            abi: [], evm: { bytecode: { object: '60806040' } }
+          }
+        } },
+        errors: []
+      });
+    }
+  };
+}
+
+test('compileContract: compiler-config knobs reach the solc standard-JSON input', async () => {
+  const seen = [];
+  solcJs.injectCompiler(fakeCompiler(seen));
+
+  // default path: no evmVersion key (compiler default = osaka) + Solidity
+  await solcJs.compileContract('contract A {}', 'A');
+  assert.equal(seen[0].language, 'Solidity', 'language defaults to Solidity');
+  assert.ok(!('evmVersion' in seen[0].settings), 'absent evmVersion must stay absent (flag-off = shipped behavior)');
+  assert.equal(seen[0].settings.optimizer.enabled, true, 'optimization defaults on');
+  assert.equal(seen[0].settings.optimizer.runs, 200, 'runs default 200');
+
+  // every wizard choice must survive the trip
+  await solcJs.compileContract('contract B {}', 'B', {
+    language: 'Solidity', evmVersion: 'london', optimizer: false, runs: 9999
+  });
+  assert.equal(seen[1].settings.evmVersion, 'london', 'evmVersion must be passed through');
+  assert.equal(seen[1].settings.optimizer.enabled, false, 'optimizer toggle must be passed through');
+  assert.equal(seen[1].settings.optimizer.runs, 9999, 'runs must be passed through');
+
+  // all 14 wizard EVM options are solc-accepted identifiers (each was probed
+  // against the real 0.8.37 wasm: 14/14 pass, 2026-10-04)
+  const evms = ['osaka', 'prague', 'cancun', 'shanghai', 'paris', 'london', 'berlin', 'istanbul',
+    'petersburg', 'constantinople', 'byzantium', 'spuriousDragon', 'tangerineWhistle', 'homestead'];
+  for (const evm of evms) {
+    await solcJs.compileContract('contract C {}', 'C', { evmVersion: evm });
+    assert.equal(seen.at(-1).settings.evmVersion, evm, `${evm} must reach solc`);
+  }
 });
 
 test('deploy: form validation rejects junk and builds constructor args', () => {
@@ -89,6 +139,32 @@ test('deploy: form validation rejects junk and builds constructor args', () => {
   assert.deepEqual(nft.args, ['Bears', 'BR', 'ipfs://x/']);
   const multi = contracts.buildDeployPlan({ standard: 'erc1155', name: 'Items', symbol: 'ITM', baseUri: 'ipfs://y/' });
   assert.deepEqual(multi.args, ['Items', 'ITM', 'ipfs://y/']);
+
+  // M7 (2026-10-04): symbol is normalised to UPPER CASE in the plan, and the
+  // compiler knobs reach compileContract or fail loudly.
+  const lower = contracts.buildDeployPlan({ standard: 'erc20', name: 'Bear', symbol: 'bear', supply: '1', decimals: 18 });
+  assert.equal(lower.symbol, 'BEAR', 'symbol is upper-cased once, in the plan');
+  assert.equal(lower.args[1], 'BEAR', 'the constructor argument carries the upper-case symbol');
+  const compilerPlan = contracts.buildDeployPlan({
+    standard: 'erc20', name: 'Bear', symbol: 'BEAR', supply: '1', decimals: 18,
+    evmVersion: 'cancun', optimizer: false, runs: '999',
+  });
+  assert.deepEqual(compilerPlan.compiler, { language: 'Solidity', evmVersion: 'cancun', optimizer: false, runs: 999 },
+    'compiler options reach the plan (and from there compileContract)');
+  err({ standard: 'erc20', name: 'Bear', symbol: 'BEAR', supply: '1', decimals: 18, evmVersion: 'paris2' });
+  err({ standard: 'erc20', name: 'Bear', symbol: 'BEAR', supply: '1', decimals: 18, runs: '999.5' });
+
+  // M8 (2026-10-04): ERC-721 — the fallback image is a 4th constructor arg
+  // ONLY when set; manual ids flip the flag the generator keys off.
+  const imgPlan = contracts.buildDeployPlan({ standard: 'erc721', name: 'Bears', symbol: 'BR', baseUri: 'ipfs://x/', image: 'https://x/y.png' });
+  assert.deepEqual(imgPlan.args, ['Bears', 'BR', 'ipfs://x/', 'https://x/y.png'], 'four args with an image');
+  const noImgPlan = contracts.buildDeployPlan({ standard: 'erc721', name: 'Bears', symbol: 'BR', baseUri: 'ipfs://x/' });
+  assert.deepEqual(noImgPlan.args, ['Bears', 'BR', 'ipfs://x/'], 'three args without one');
+  assert.equal(noImgPlan.flags.autoInc, true, 'auto-increment is the default');
+  assert.equal(contracts.buildDeployPlan({ standard: 'erc721', name: 'Bears', symbol: 'BR', baseUri: 'x', autoInc: false }).flags.autoInc,
+    false, 'unchecking the pill flips it');
+  err({ standard: 'erc721', name: 'B', symbol: 'S', baseUri: '', image: 'https://x/a"b.png' });
+  err({ standard: 'erc721', name: 'B', symbol: 'S', baseUri: '', image: 'https://x/' + 'a'.repeat(513) });
 });
 
 // ── part 2: real compilation (network, opt-in) ──
@@ -122,6 +198,7 @@ test('deploy: real solc compiles every template to real bytecode', { skip: proce
   });
   const raw = sandbox.Module.cwrap('solidity_compile', 'string', ['string', 'number']);
   solcJs.injectCompiler({ compile: (json) => raw(json, 1) });
+  console.log('[bear-solc] runtime ready, compiler injected');
 
   const expectations = {
     BearERC20: [['transfer', 'approve', 'transferFrom', 'balanceOf', 'totalSupply']],
@@ -129,7 +206,9 @@ test('deploy: real solc compiles every template to real bytecode', { skip: proce
     BearERC1155: [['balanceOf', 'balanceOfBatch', 'safeTransferFrom', 'safeBatchTransferFrom', 'uri', 'mint']]
   };
   for (const [id, std] of Object.entries({ erc20: contracts.getStandard('erc20'), erc721: contracts.getStandard('erc721'), erc1155: contracts.getStandard('erc1155') })) {
+    const tc = Date.now();
     const out = await solcJs.compileContract(std.source, std.contract);
+    console.log(`[bear-solc] template ${id} ok in ${Date.now() - tc}ms`);
     const names = out.abi.filter(e => e.type === 'function').map(e => e.name);
     for (const fn of expectations[std.contract][0]) {
       assert.ok(names.includes(fn), `${id} (${std.contract}) abi must expose ${fn}()`);
@@ -149,13 +228,71 @@ test('deploy: real solc compiles every template to real bytecode', { skip: proce
     ['erc721-burn', contracts.buildTokenSource('erc721', { mintable: true, burnable: true }), 'BearERC721', ['burn', 'mint', 'tokenURI']],
     ['erc721-nomint', contracts.buildTokenSource('erc721', { mintable: false }), 'BearERC721', ['ownerOf']],
     ['erc1155-burn', contracts.buildTokenSource('erc1155', { mintable: true, burnable: true }), 'BearERC1155', ['burn', 'mint', 'uri']],
+    // ── M1 OZ-parity round 2 (2026-10-04): every handwritten feature must
+    // produce REAL compilable solidity, not plausible-looking strings.
+    ['erc20-parity', contracts.buildTokenSource('erc20', { burnable: true, mintable: true, pausable: true, permit: true, votes: true, cap: '1000000', access: 'accesscontrol' }), 'BearERC20', ['permit', 'DOMAIN_SEPARATOR', 'delegate', 'getPastVotes', 'grantRole', 'hasRole', 'pause', 'mint']],
+    ['erc20-2step', contracts.buildTokenSource('erc20', { mintable: true, access: 'ownable2step' }), 'BearERC20', ['transferOwnership', 'acceptOwnership', 'mint']],
+    ['erc20-permit-plain', contracts.buildTokenSource('erc20', { permit: true, votes: true }), 'BearERC20', ['permit', 'delegate', 'transfer']],
+    ['erc721-parity', contracts.buildTokenSource('erc721', { mintable: true, burnable: true, pausable: true, enumerable: true, uriStorage: true }), 'BearERC721', ['tokenByIndex', 'tokenOfOwnerByIndex', 'setTokenURI', 'pause', 'burn', 'transferOwnership']],
+    ['erc721-nomint-acl', contracts.buildTokenSource('erc721', { mintable: false, pausable: true, enumerable: true, access: 'accesscontrol' }), 'BearERC721', ['grantRole', 'pause', 'tokenByIndex']],
+    ['erc1155-parity', contracts.buildTokenSource('erc1155', { mintable: true, burnable: true, pausable: true, access: 'accesscontrol' }), 'BearERC1155', ['grantRole', 'pause', 'burn', 'uri']],
+    // ── M7 (2026-10-04): Callback / Flash Minting + Managed access must be
+    // REAL Solidity too, in every combination the wizard can actually emit.
+    ['erc20-callback', contracts.buildTokenSource('erc20', { mintable: true, callback: true }), 'BearERC20', ['transferAndCall', 'transfer']],
+    ['erc20-flashmint', contracts.buildTokenSource('erc20', { mintable: true, flashmint: true }), 'BearERC20', ['flashLoan', 'maxFlashLoan', 'flashFee']],
+    ['erc20-m7-all', contracts.buildTokenSource('erc20', { mintable: true, burnable: true, pausable: true, permit: true, votes: true, callback: true, flashmint: true, cap: '1000000', access: 'managed' }), 'BearERC20', ['transferAndCall', 'flashLoan', 'permit', 'delegate', 'beginDefaultAdminTransfer', 'grantRole', 'pause']],
+    ['erc20-flashmint-cap', contracts.buildTokenSource('erc20', { mintable: true, flashmint: true, cap: '500', pausable: true, votes: true, access: 'managed' }), 'BearERC20', ['flashLoan', 'cap', 'pause', 'acceptDefaultAdminTransfer']],
+    ['erc721-managed', contracts.buildTokenSource('erc721', { mintable: true, pausable: true, access: 'managed' }), 'BearERC721', ['beginDefaultAdminTransfer', 'grantRole', 'pause', 'mint']],
+    ['erc721-managed-all', contracts.buildTokenSource('erc721', { mintable: true, pausable: true, access: 'managed', enumerable: true, uriStorage: true, burnable: true }), 'BearERC721', ['tokenByIndex', 'setTokenURI', 'burn', 'acceptDefaultAdminTransfer']],
+    ['erc1155-managed', contracts.buildTokenSource('erc1155', { mintable: true, pausable: true, access: 'managed' }), 'BearERC1155', ['beginDefaultAdminTransfer', 'grantRole', 'pause', 'mint']],
+    ['erc1155-managed-burn', contracts.buildTokenSource('erc1155', { mintable: true, access: 'managed', burnable: true }), 'BearERC1155', ['burn', 'grantRole']],
+    // ── M8 (2026-10-04): manual token ids and the fallback image must be real
+    // Solidity in every shape the ERC-721 wizard can emit.
+    ['erc721-manual', contracts.buildTokenSource('erc721', { mintable: true, autoInc: false }), 'BearERC721', ['mint', 'tokenURI']],
+    ['erc721-manual-enumerable', contracts.buildTokenSource('erc721', { mintable: true, enumerable: true, autoInc: false }), 'BearERC721', ['mint', 'tokenByIndex', 'tokenOfOwnerByIndex']],
+    ['erc721-manual-acl', contracts.buildTokenSource('erc721', { mintable: true, access: 'accesscontrol', autoInc: false }), 'BearERC721', ['mint', 'grantRole']],
+    ['erc721-manual-managed', contracts.buildTokenSource('erc721', { mintable: true, pausable: true, access: 'managed', autoInc: false }), 'BearERC721', ['mint', 'beginDefaultAdminTransfer', 'pause']],
+    ['erc721-manual-burn', contracts.buildTokenSource('erc721', { mintable: true, burnable: true, autoInc: false }), 'BearERC721', ['mint', 'burn']],
+    ['erc721-image', contracts.buildTokenSource('erc721', { mintable: true, image: 'https://example.com/bear.png' }), 'BearERC721', ['mint', 'tokenURI']],
+    ['erc721-image-uristorage', contracts.buildTokenSource('erc721', { mintable: true, image: 'https://example.com/bear.png', uriStorage: true, baseUri: 'ipfs://z/' }), 'BearERC721', ['mint', 'setTokenURI', 'tokenURI']],
+    ['erc721-m8-all', contracts.buildTokenSource('erc721', { mintable: true, burnable: true, pausable: true, enumerable: true, uriStorage: true, access: 'managed', autoInc: false, image: 'https://example.com/bear.png' }), 'BearERC721', ['mint', 'burn', 'setTokenURI', 'grantRole', 'tokenByIndex']],
+    ['erc721-nomint-manual', contracts.buildTokenSource('erc721', { mintable: false, enumerable: true, autoInc: false }), 'BearERC721', ['ownerOf', 'tokenByIndex']],
+    // ── M9 (2026-10-04): upgradeable (ERC-1967) builds. The constructor must
+    // really have become initialize(), the upgrade gate must really exist for
+    // each flavour of authority, and ERC1967Proxy must compile next to the
+    // token in the SAME pass — the deploy needs both creation codes.
+    ['erc20-upg-uups', contracts.buildTokenSource('erc20', { mintable: true, upgradeable: true, proxyType: 'uups' }), 'BearERC20', ['initialize', 'upgradeToAndCall']],
+    ['erc20-upg-transparent', contracts.buildTokenSource('erc20', { mintable: true, upgradeable: true, proxyType: 'transparent' }), 'BearERC20', ['initialize']],
+    ['erc20-upg-all-off', contracts.buildTokenSource('erc20', { upgradeable: true, proxyType: 'uups' }), 'BearERC20', ['initialize', 'upgradeToAndCall', 'setUpgrader']],
+    ['erc20-upg-roles', contracts.buildTokenSource('erc20', { mintable: true, pausable: true, upgradeable: true, access: 'accesscontrol', proxyType: 'uups' }), 'BearERC20', ['initialize', 'upgradeToAndCall', 'grantRole']],
+    ['erc20-upg-managed', contracts.buildTokenSource('erc20', { mintable: true, upgradeable: true, access: 'managed', proxyType: 'uups' }), 'BearERC20', ['initialize', 'upgradeToAndCall', 'beginDefaultAdminTransfer']],
+    ['erc721-upg-uups', contracts.buildTokenSource('erc721', { mintable: true, upgradeable: true, proxyType: 'uups', image: 'https://example.com/bear.png' }), 'BearERC721', ['initialize', 'upgradeToAndCall']],
+    ['erc1155-upg-transparent', contracts.buildTokenSource('erc1155', { mintable: true, upgradeable: true, proxyType: 'transparent' }), 'BearERC1155', ['initialize']],
   ];
   for (const [label, source, contract, fns] of combos) {
+    const tc = Date.now();
     const out = await solcJs.compileContract(source, contract);
+    console.log(`[bear-solc] combo ${label} ok in ${Date.now() - tc}ms`);
     const names = out.abi.filter(e => e.type === 'function').map(e => e.name);
     for (const fn of fns) assert.ok(names.includes(fn), `${label} abi must expose ${fn}()`);
     assert.ok(out.bytecode.startsWith('0x') && out.bytecode.length > 200, `${label} bytecode looks empty (${out.bytecode.length} chars)`);
-    if (label === 'erc721-nomint') assert.ok(!names.includes('mint'), 'a minted-off ERC-721 must not ship mint()');
+    if (label.startsWith('erc721-nomint')) assert.ok(!names.includes('mint'), `${label}: a mint-less ERC-721 must not ship mint()`);
+    // M9: an upgradeable source yields TWO deployable contracts, from one
+    // compilation. The proxy is what the user is handed, so a token-only
+    // result would compile "fine" and then fail at the deploy.
+    if (source.includes(`contract ${contracts.PROXY_CONTRACT}`)) {
+      const proxy = out.contracts?.[contracts.PROXY_CONTRACT];
+      assert.ok(proxy?.bytecode?.startsWith('0x') && proxy.bytecode.length > 200,
+        `${label}: ERC1967Proxy bytecode missing from the compilation output`);
+      assert.ok(proxy.abi.some(e => e.type === 'constructor'), `${label}: proxy ABI must carry its constructor`);
+      assert.ok(proxy.abi.some(e => e.type === 'fallback'), `${label}: proxy must expose the fallback that delegates`);
+      assert.ok(proxy.abi.some(e => e.type === 'function' && e.name === 'upgradeTo'),
+        `${label}: proxy ABI must carry the transparent admin upgrade()`);
+      assert.ok(out.abi.some(e => e.type === 'function' && e.name === 'initialize'),
+        `${label}: the token must expose initialize()`);
+      assert.equal(out.abi.some(e => e.type === 'constructor' && e.inputs?.length > 0), false,
+        `${label}: a parameterised constructor survived — it would run on the logic contract, not behind the proxy`);
+    }
   }
 });
 
@@ -170,14 +307,16 @@ test('tools: deploy helper tetap eksplisit, dan flow auto-deploy dgn konfirmasi'
   const view = html.slice(html.indexOf('id="view-deploy"'));
   assert.match(html, /id="view-deploy"/, 'the Tools view must exist');
   assert.doesNotMatch(html, /id="view-eip7702"/, 'the duplicate EIP-7702 view must be gone');
-  assert.match(view, /id="helperStatusList"/, 'Tools must show helper-contract status');
-  assert.ok(view.indexOf('id="helperStatusList"') < view.indexOf('id="batchList"'), 'step 1 must come before the batch queue');
+  assert.match(view, /id="btnDeployBatchHelper"/, 'each flow card carries its own Deploy contract button');
+  assert.ok(view.indexOf('id="btnDeployBatchHelper"') < view.indexOf('id="btnBatchExecute"'),
+    'the batch Deploy button sits in the action row next to Execute');
+  assert.doesNotMatch(view, /id="helperStatusList"/, 'the removed Helper Contracts card must not return');
   // explicit up-front deploy + the fixed compiler
   assert.match(tools, /export async function deployBatchHelper\(\)/, 'user must be able to deploy the helper up front');
   assert.match(tools, /export async function deployRescueHelper\(\)/, 'rescue helper must be deployable up front');
   assert.match(tools, /export async function deployAirdropClaimer\(\)/, 'airdrop claimer must be deployable up front');
   assert.match(tools, /import \{ compileContract \} from '\.\/solc\.js'/, 'helper compile must use the fixed solc loader');
-  assert.doesNotMatch(tools, /solc@0\.8\.28\/solc\.js/, 'the Node solc build must never be loaded again');
+  assert.doesNotMatch(tools, /solc@[\d.]+\/solc\.js/, 'the Node solc build must never be loaded again');
   assert.doesNotMatch(tools, /ensureSolcLoaded/, 'the broken loader must be gone');
   //── Kontrak DIUBAH (2026-10-03, banding dgn nemoobc/EIP-7702-TOOL):
   // "di fitur tools itu ada yang salah bikin user bingung ... fungsinya tu kek gitu"
@@ -269,11 +408,16 @@ test('P0 revoke: auth nonce self-sponsored = nonce + 1', () => {
 });
 
 test('P1 teks baris helper: binding sebenarnya (SAFE+sponsor), bukan locked wallet', () => {
+  // The Helper Contracts card is gone (2026-10-04): the binding text now
+  // lives in the flow-card paragraphs (deploy.jsx) + the confirm rows (tools).
   const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
-  assert.match(tools, /Bound to SAFE \+ sponsor/, 'baris rescue menyebut SAFE + sponsor');
-  assert.match(tools, /Bound to the sponsor wallet \(gas payer\)/, 'baris claim menyentuh sponsor sbg pembayar gas');
-  assert.doesNotMatch(tools, /takes your locked wallet/, 'teks keliru "locked wallet" pada rescue dihapus');
-  assert.doesNotMatch(tools, /locked wallet as rescuer/, 'teks keliru "locked wallet as rescuer" pada claim dihapus');
+  const view = fs.readFileSync(new URL('../src/views/deploy.jsx', import.meta.url), 'utf8');
+  assert.match(view, /sponsor pays gas and executes the sweep/, 'paragraf rescue menyentuh sponsor sbg eksekutor');
+  assert.match(view, /The sponsor pays gas/, 'paragraf claim menyentuh sponsor sbg pembayar gas');
+  assert.match(tools, /\{ k: 'SAFE destination', v: /, 'konfirmasi rescue menampilkan SAFE destination');
+  assert.match(tools, /\{ k: 'Gas sponsor \(executor\)', v: /, 'konfirmasi rescue menampilkan gas sponsor');
+  assert.doesNotMatch(tools + view, /takes your locked wallet/, 'teks keliru "locked wallet" pada rescue dihapus');
+  assert.doesNotMatch(tools + view, /locked wallet as rescuer/, 'teks keliru "locked wallet as rescuer" pada claim dihapus');
 });
 
 test('P1 kartu Batch & Claim punya paragraf alur step-by-step', () => {

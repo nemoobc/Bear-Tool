@@ -189,13 +189,18 @@ test('the constant the revoke button uses is the zero address', () => {
 });
 
 test('the revoke path never reuses the implementation address', async () => {
-  // eip7702.js has a delegate/revoke branch; revoke routes through
-  // revokeDelegation() so it can target an account that is not the unlocked
+  // The Smart EOA manual form was removed (2026-10-04); revoke now lives only
+  // on the Revoke card and routes through revokeDelegation() in
+  // eip7702-tools.js so it can target an account that is not the unlocked
   // wallet. That indirection was the fix for "revoked the wrong account and
   // reported success", so it is worth a guard.
-  const src = (await import('node:fs')).readFileSync(path.join(here, '..', 'js', 'eip7702.js'), 'utf8');
-  assert.match(src, /revokeDelegation\(\)/,
-    'the revoke button must call revokeDelegation(), not doEip7702("revoke")');
-  assert.match(src, /const impl = action === 'delegate'[\s\S]{0,80}ZERO_ADDRESS/,
-    'the revoke branch must select the zero address');
+  const fs = await import('node:fs');
+  const tools = fs.readFileSync(path.join(here, '..', 'js', 'eip7702-tools.js'), 'utf8');
+  assert.match(tools, /\$\('#btnRevokeDelegation'\)\?\.addEventListener\('click', revokeDelegation\)/,
+    'the revoke button must call revokeDelegation(), never a self-contained branch');
+  assert.match(tools, /address: EIP7702\.ZERO_ADDRESS/,
+    'the revoke authorization must select the zero address');
+  const stub = fs.readFileSync(path.join(here, '..', 'js', 'eip7702.js'), 'utf8');
+  assert.doesNotMatch(stub, /doEip7702/,
+    'the removed manual delegate/revoke branch must not linger in eip7702.js');
 });

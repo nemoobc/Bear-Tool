@@ -94,7 +94,7 @@ test('mobile nav: every sidebar view is reachable from the phone', () => {
   const toolsStart = html.indexOf('id="view-deploy"');
   const toolsEnd = html.indexOf('id="view-activity"');
   const tools = html.slice(toolsStart, toolsEnd === -1 ? undefined : toolsEnd);
-  for (const id of ['btnDelegate', 'btnRevoke', 'batchList', 'btnRescue', 'btnClaim', 'deployStandard']) {
+  for (const id of ['btnDeployBatchHelper', 'btnRescue', 'batchList', 'btnClaim', 'deployStandard', 'btnRevokeDelegation']) {
     assert.ok(tools.includes(`id="${id}"`), `#${id} must be inside Tools`);
   }
 });
@@ -109,33 +109,21 @@ test('the testnet filter is in Settings AND the picker, both live', () => {
   // It was in Settings, moved to the picker because a filter belongs beside the
   // list it filters, and was then reported missing from Settings and put back.
   // Both copies are deliberate and both are required:
-  //   - Settings, because that is where a person looks for a preference.
-  //   - The picker, because a filter you cannot reach from the thing it filters
-  //     is a trap: search the list, and the switch that turns the filter off is
-  //     gone with it.
-  // Two controls for one setting only stays safe if there is one writer, which
-  // tests/settings-shape.test.js pins down; this test pins the two placements
-  // and the picker-side behaviour.
+  //   - Settings, because that is where a person looks for a preference. The
+  //     picker copy was removed 2026-10-04 (reported duplicate: two toggles for
+  //     one setting); the picker list follows settings.testnet on every open.
+  // One control, one writer — the writer is pinned down by
+  // tests/settings-shape.test.js; this test pins the placement.
   assert.match(html, /id="setTestnet"/, 'Settings must carry the testnet switch');
-  assert.match(jsApp, /id="netShowTestnet"/,
-    'the picker must carry its own, generated with the list it filters');
-  // The picker copy only works if it is reachable while testnets are hidden, so
-  // it must not be inside the .mb-8 header that the search box hides when
-  // nothing matches.
-  const picker = jsApp.slice(jsApp.indexOf('id="netListTestnet"'));
-  const toggleAt = picker.indexOf('id="netShowTestnet"');
-  const headerAt = picker.indexOf('class="mb-8 mt-16"');
-  assert.ok(toggleAt > -1 && headerAt > -1, 'both the header and the filter must exist');
-  assert.ok(toggleAt > headerAt + 'class="mb-8 mt-16"'.length,
-    'the filter must be a sibling of the .mb-8 header, not inside it - a filter you cannot reach after searching is a filter you cannot turn back off');
-  // And it must apply the moment it is flipped, not on Save. The Save button is
-  // gone from this page, so a handler that only persisted on a click that no
-  // longer exists is a control that moves and changes nothing.
-  const handler = jsApp.slice(jsApp.indexOf("id=\"netShowTestnet\""));
-  assert.match(handler.slice(0, 900), /addEventListener\('change'/,
-    'the filter must react to the change itself');
-  assert.match(handler.slice(0, 900), /setTestnetVisible\(/,
-    'and it must go through the single writer both switches share');
+  assert.doesNotMatch(jsApp, /id="netShowTestnet"/,
+    'the picker must NOT carry a second toggle for the same setting');
+  // The picker must still honour the setting: its testnet rows are built from
+  // the filtered list, so hiding testnets in Settings empties this section.
+  const picker = jsApp.slice(jsApp.indexOf('function showNetworkModal('));
+  assert.match(picker, /getAllNetworks\(\)/,
+    'the picker must build from the filtered list, not the raw NETWORKS array');
+  assert.match(picker, /id="netListTestnet"/,
+    'the testnet section still exists (it just follows the setting)');
 });
 
 test('nft: empty state says "NFT not found" and never shows a native balance', () => {

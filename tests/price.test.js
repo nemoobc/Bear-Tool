@@ -131,3 +131,26 @@ test('price history: cached within TTL (no second network hit)', async () => {
   assert.deepEqual(first, second);
   assert.equal(calls.filter(u => u.includes('market_chart')).length, 1, 'second call must be served from cache');
 });
+
+// ── regression: CoinGecko token map is FLAT (addr → number) ──────
+// fetchCoinGeckoTokens already unwraps {usd} and stores a number, but the
+// consumer read `.usd` → always undefined → every listed token fell through
+// to DexScreener (which answers [] for USDT) → the row rendered "—" even
+// though CoinGecko had the price. Pins the flat-map shape end-to-end.
+test('price: CoinGecko token price (flat addr→number map) is consumed without DexScreener', async () => {
+  const calls = installFetch([
+    ['api.coingecko.com', jsonResponse({ '0xabc': { usd: 0.999868 } })],
+    ['api.dexscreener.com', jsonResponse({ pairs: [] })]
+  ]);
+
+  const result = await fetchAllPrices(
+    [{ address: '0xAbC', symbol: 'USDT', decimals: 6 }],
+    1
+  );
+
+  // The result map is keyed by the ORIGINAL-cased address passed in.
+  assert.equal(result.get('0xAbC'), 0.999868, 'flat number must be read directly');
+  assert.ok(!calls.some(u => u.includes('dexscreener')),
+    'CoinGecko hit → no DexScreener fallback may run');
+  assert.equal(getPriceFromCache('0xabc'), 0.999868, 'price lands in cache too');
+});

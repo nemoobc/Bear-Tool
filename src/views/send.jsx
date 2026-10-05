@@ -23,7 +23,7 @@ export default function SendView() {
                 <label htmlFor="sendTo">To address</label>
                 <div className="send-address-wrap">
                   <input className="input" id="sendTo" placeholder="0x... or ENS name" autoComplete="off" spellCheck="false" />
-                  <button type="button" className="btn btn-ghost btn-sm" id="btnSendPaste" title="Paste">📋</button>
+                  <button type="button" className="btn btn-ghost btn-sm" id="btnSendPaste" title="Paste"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg> </button>
                 </div>
                 <div className="send-ens-status hidden" id="sendEnsStatus"></div>
               </div>

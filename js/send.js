@@ -330,8 +330,8 @@ export async function doSend() {
       { k: 'To', v: wallet.shortAddress(to) },
       { k: 'Gas speed', v: gasSpeed }
     ],
-    confirmText: 'Sign & Send',
-    cancelText: 'Cancel Sign',
+    confirmText: 'Confirm & Send',
+    cancelText: 'Cancel',
     danger: false
   });
   if (!signOk) return toast('Transaction cancelled', 'info');

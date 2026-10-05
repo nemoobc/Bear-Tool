@@ -2,19 +2,33 @@
 // Bear Tool — solc.js
 // Real in-browser Solidity compiler. No server, no simulation.
 //
-// BUG IT FIXES: `solc@0.8.28/solc.js` on the CDN is the Node CLI wrapper
-// (it starts with `#!/usr/bin/env node` and calls `require(...)`), so loading
-// it with a browser <script> tag left `globalThis.solc` undefined and every
-// deploy threw "Cannot read properties of undefined (reading 'compile')".
+// BUG IT FIXES: the CDN's `solc.js` is the Node CLI wrapper (it starts with
+// `#!/usr/bin/env node` and calls `require(...)`), so loading it with a
+// browser <script> tag left `globalThis.solc` undefined and every deploy
+// threw "Cannot read properties of undefined (reading 'compile')".
 // The browser build is `soljson.js` (wasm, ~9 MB): it publishes a global
 // `Module`, whose exported `solidity_compile` we drive through `Module.cwrap`.
 // ═══════════════════════════════════════════════════════════════
 
-export const SOLC_VERSION = '0.8.28';
+// 0.8.37 (upgrade from 0.8.28, 2026-10-04): the wizard's EVM-version picker
+// needs `osaka`, which solc only accepts from 0.8.32 on (0.8.28 tops out at
+// `prague` and hard-errors on anything newer).
+export const SOLC_VERSION = '0.8.37';
+// Commit hash the runtime itself reports (`0.8.37+commit.f401782d.Emscripten.clang`,
+// observed when M6 loaded the real soljson). Both verifiers want the FULL id
+// string, and each wants it spelled differently — see SOLC_ID_* below.
+export const SOLC_COMMIT = 'f401782d';
+export const SOLC_LONG = `${SOLC_VERSION}+commit.${SOLC_COMMIT}`;
+// Sourcify takes the bare `0.8.37+commit.f401782d`; Etherscan's API documents
+// the leading `v` (docs.etherscan.io/api-reference/endpoint/verifysourcecode,
+// 2026-10-04). One source of truth, two spellings — not two sources of truth.
+export const SOLC_ID_SOURCIFY = SOLC_LONG;
+export const SOLC_ID_ETHERSCAN = `v${SOLC_LONG}`;
 export const SOLC_URL = `https://cdn.jsdelivr.net/npm/solc@${SOLC_VERSION}/soljson.js`;
-// SHA-384 of soljson.js 0.8.28 (verified 2026-09-20 from the jsdelivr mirror).
-// Both mirrors serve the identical npm artifact, so one integrity covers both.
-export const SOLC_INTEGRITY = 'sha384-KPNN359HSsJb+rJUYqYP9AKB4mS6MrE1akNLfiSAD3+3RwoAqohTYlzIQ24esQUb';
+// SHA-384 of soljson.js 0.8.37 (verified 2026-10-04; byte-identical from BOTH
+// mirrors — jsdelivr and unpkg hashed to the same sha384 — so one integrity
+// covers both. Runtime reports `0.8.37+commit.f401782d.Emscripten.clang`.)
+export const SOLC_INTEGRITY = 'sha384-Q/PQcFjuBNF8rqPraGnYlnNVV0Tbq/R/oYmS7enwnItWJNVQxKdC7kbbVfZ0GNkO';
 // Mirrors tried in order when the primary CDN fails (all allow-listed by the CSP).
 export const SOLC_FALLBACK_URLS = [
   `https://unpkg.com/solc@${SOLC_VERSION}/soljson.js`
@@ -164,21 +178,37 @@ export function loadCompiler({ onStatus } = {}) {
   return compilerPromise;
 }
 
+// The ONE standard-JSON-input builder. compileContract() sends exactly this to
+// solc, and verify.js publishes exactly this to Sourcify/Etherscan — so what
+// gets verified is what got compiled, by construction rather than by discipline.
+// A verifier that rebuilds the input by hand is how a "verified" contract ends
+// up differing from the one that was deployed.
+export function buildStandardJsonInput(source, contractName, opts = {}) {
+  const { optimizer = true, runs = 200, language = 'Solidity', evmVersion } = opts;
+  if (!source || !contractName) throw new Error('buildStandardJsonInput needs a source and a contract name');
+  const fileName = `${contractName}.sol`;
+  const settings = {
+    optimizer: { enabled: !!optimizer, runs },
+    outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object'] } }
+  };
+  if (evmVersion) settings.evmVersion = evmVersion;
+  return {
+    language,
+    sources: { [fileName]: { content: source } },
+    settings
+  };
+}
+
 // Compile one self-contained source → { abi, bytecode, warnings }.
 // `contractName` must match a contract declared in `source`.
+// Wizard compiler-config passthrough: `language` (Solidity default) and
+// `evmVersion` (omitted from settings entirely when absent → the compiler's
+// own default wins, so the flag-off path behaves exactly as before).
 export async function compileContract(source, contractName, opts = {}) {
-  const { optimizer = true, runs = 200, onStatus } = opts;
-  if (!source || !contractName) throw new Error('compileContract needs a source and a contract name');
+  const { onStatus } = opts;
+  const input = buildStandardJsonInput(source, contractName, opts);
   const fileName = `${contractName}.sol`;
   const solc = await loadCompiler({ onStatus });
-  const input = {
-    language: 'Solidity',
-    sources: { [fileName]: { content: source } },
-    settings: {
-      optimizer: { enabled: !!optimizer, runs },
-      outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object'] } }
-    }
-  };
   let output;
   try {
     // await: worker path returns a Promise, legacy seam/injected compilers
@@ -197,9 +227,19 @@ export async function compileContract(source, contractName, opts = {}) {
   }
   const contract = output.contracts?.[fileName]?.[contractName];
   if (!contract?.evm?.bytecode?.object) throw new Error('Compiler returned no bytecode for ' + contractName);
+  // Every deployable contract in the file, not just the requested one: M9's
+  // upgradeable build compiles the token AND ERC1967Proxy in one pass, and the
+  // deploy needs the proxy's ABI + creation code from the same compilation
+  // (two compilations of one source could disagree after a knob change).
+  // Interfaces/libraries carry no creation code and are skipped.
+  const contracts = {};
+  for (const [name, c] of Object.entries(output.contracts?.[fileName] || {})) {
+    if (c?.evm?.bytecode?.object) contracts[name] = { abi: c.abi, bytecode: '0x' + c.evm.bytecode.object };
+  }
   return {
     abi: contract.abi,
     bytecode: '0x' + contract.evm.bytecode.object,
+    contracts,
     warnings: (output.errors || []).filter(e => e.severity !== 'error').map(e => e.formattedMessage || e.message)
   };
 }

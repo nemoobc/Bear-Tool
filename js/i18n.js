@@ -28,9 +28,13 @@ const TRANSLATIONS = {
     'set.theme.dark': 'Dark',
     'set.theme.auto': 'Auto',
     'set.testnet.hint': 'OFF hides test networks (Sepolia, Amoy, …) from the network list.',
-    'net.showTestnet': 'Show testnets',
     'set.testnet': 'Testnet mode',
     'set.testnet.hint': 'Show test networks in the network list. Hiding them while you are on one moves you to Ethereum first.',
+    'set.group.nftkeys': 'NFT auto-detect',
+    'set.nftkey.opensea': 'OpenSea API key (optional)',
+    'set.nftkey.opensea.hint': 'Owner-wide NFT list + floor price on Ethereum, Polygon, Arbitrum, Optimism and Base. Free tier: 600 reads/hour (instant key, valid 7 days). BNB Chain is not covered by OpenSea.',
+    'set.nftkey.alchemy': 'Alchemy API key (optional)',
+    'set.nftkey.alchemy.hint': 'Fallback when OpenSea refuses or hits its limit: 30M compute units/month free. Floor price included on Ethereum and Polygon. BNB Chain is not covered.',
     'deploy.helper': 'Helper Contracts',
     'deploy.helperStep': 'step 1',
     'eip7702.revokeTitle': 'Revoke EIP-7702 Delegation',
@@ -91,8 +95,8 @@ const TRANSLATIONS = {
     'bridge.token': 'Token',
     'bridge.amount': 'Amount',
     'bridge.get_route': 'Get Route',
-    'bridge.native_only': 'native only (ERC-20 not supported)',
-    'bridge.native_only_reject': 'Only native token bridging is supported. ERC-20 bridging is not available.',
+    'bridge.native': 'native',
+    'bridge.token_not_routable': 'This token has no curated twin on the chosen destination — bridge native only.',
     'bridge.wrong_active_chain': 'Bridge source must be the active network. Switch network or re-select chains.',
     'bridge.stale_quote': 'Quote no longer matches the form. Get a new route.',
     'bridge.account_changed': 'Wallet account changed since the quote. Get a new route.',
@@ -129,7 +133,9 @@ const TRANSLATIONS = {
     'welcome.import': '📥 Import',
     'unlock.title': 'Welcome back! 🐻',
     'unlock.button': 'Unlock',
-    'locked.title': 'Auto-locked 🔒'
+    'locked.title': 'Auto-locked 🔒',
+    'update.msg': 'A new version of Bear Tool is ready.',
+    'update.reload': 'Reload'
   },
   id: {
     'nav.dashboard': 'Dasbor',
@@ -153,9 +159,13 @@ const TRANSLATIONS = {
     'set.theme.dark': 'Gelap',
     'set.theme.auto': 'Otomatis',
     'set.testnet.hint': 'MATI menyembunyikan test network (Sepolia, Amoy, …) dari daftar network.',
-    'net.showTestnet': 'Tampilkan testnet',
     'set.testnet': 'Mode testnet',
     'set.testnet.hint': 'Tampilkan jaringan test di daftar network. Kalau disembunyikan saat kamu sedang di testnet, aplikasi pindah ke Ethereum dulu.',
+    'set.group.nftkeys': 'Deteksi NFT otomatis',
+    'set.nftkey.opensea': 'API key OpenSea (opsional)',
+    'set.nftkey.opensea.hint': 'Daftar NFT seluruh pemilik + harga floor di Ethereum, Polygon, Arbitrum, Optimism, dan Base. Gratis: 600 baca/jam (key instan, berlaku 7 hari). BNB Chain tak dicakup OpenSea.',
+    'set.nftkey.alchemy': 'API key Alchemy (opsional)',
+    'set.nftkey.alchemy.hint': 'Cadangan saat OpenSea menolak atau kena batas: 30M compute unit/bulan gratis. Harga floor ikut di Ethereum dan Polygon. BNB Chain tak dicakup.',
     'nav.nft': 'NFT',
     'deploy.helper': 'Kontrak Helper',
     'deploy.helperStep': 'langkah 1',
@@ -217,8 +227,8 @@ const TRANSLATIONS = {
     'bridge.token': 'Token',
     'bridge.amount': 'Jumlah',
     'bridge.get_route': 'Dapatkan Rute',
-    'bridge.native_only': 'hanya native (ERC-20 tidak didukung)',
-    'bridge.native_only_reject': 'Hanya bridge token native yang didukung. Bridge ERC-20 tidak tersedia.',
+    'bridge.native': 'native',
+    'bridge.token_not_routable': 'Token ini tidak punya padanan terdaftar di jaringan tujuan — hanya native yang bisa di-bridge.',
     'bridge.wrong_active_chain': 'Sumber bridge harus jaringan aktif. Ganti jaringan atau pilih ulang chain.',
     'bridge.stale_quote': 'Kutipan tidak cocok lagi dengan form. Dapatkan rute baru.',
     'bridge.account_changed': 'Akun wallet berubah sejak kutipan. Dapatkan rute baru.',
@@ -255,7 +265,9 @@ const TRANSLATIONS = {
     'welcome.import': '📥 Impor',
     'unlock.title': 'Selamat Datang Kembali! 🐻',
     'unlock.button': 'Buka Kunci',
-    'locked.title': 'Terkunci otomatis 🔒'
+    'locked.title': 'Terkunci otomatis 🔒',
+    'update.msg': 'Versi baru Bear Tool sudah tersedia.',
+    'update.reload': 'Muat ulang'
   }
 };
 

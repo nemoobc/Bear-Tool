@@ -78,6 +78,121 @@ export const NETWORKS = [
     explorer: 'https://basescan.org',
     icon: '🔷', color: '#0052FF'
   },
+  // ── 2026-10-05 growth: 4 L1 + 7 L2 promoted from CHAIN_PRESETS ──
+  // Every RPC below answered eth_chainId with the claimed id (probe, same day,
+  // docs/research/bridge-tokens-2026-10-05.md): ≥2 endpoints each, publicnode
+  // or drpc among them. All 11 confirmed inside LI.FI's 70-chain EVM set, so
+  // the bridge router covers every shipped mainnet (routers.test.js pins it).
+  {
+    id: 'avalanche', name: 'Avalanche C-Chain', chainId: 43114, type: 'mainnet',
+    symbol: 'AVAX', decimals: 18,
+    rpc: [
+      'https://avalanche-c-chain-rpc.publicnode.com',
+      'https://api.avax.network/ext/bc/C/rpc'
+    ],
+    explorer: 'https://snowtrace.io',
+    icon: '❄️', color: '#E84142'
+  },
+  {
+    id: 'gnosis', name: 'Gnosis', chainId: 100, type: 'mainnet',
+    symbol: 'xDAI', decimals: 18,
+    rpc: [
+      'https://gnosis-rpc.publicnode.com',
+      'https://rpc.gnosischain.com'
+    ],
+    explorer: 'https://gnosisscan.io',
+    icon: '🦊', color: '#04795B'
+  },
+  {
+    id: 'celo', name: 'Celo', chainId: 42220, type: 'mainnet',
+    symbol: 'CELO', decimals: 18,
+    rpc: [
+      'https://celo-rpc.publicnode.com',
+      'https://forno.celo.org'
+    ],
+    explorer: 'https://celoscan.io',
+    icon: '🟠', color: '#FCFF52'
+  },
+  {
+    id: 'sonic', name: 'Sonic', chainId: 146, type: 'mainnet',
+    symbol: 'S', decimals: 18,
+    rpc: [
+      'https://sonic-rpc.publicnode.com',
+      'https://rpc.soniclabs.com'
+    ],
+    explorer: 'https://sonicscan.org',
+    icon: '🎵', color: '#F2A72B'
+  },
+  {
+    id: 'linea', name: 'Linea', chainId: 59144, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: [
+      'https://linea-rpc.publicnode.com',
+      'https://rpc.linea.build'
+    ],
+    explorer: 'https://lineascan.build',
+    icon: '📐', color: '#61DFFF'
+  },
+  {
+    id: 'scroll', name: 'Scroll', chainId: 534352, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: [
+      'https://scroll-rpc.publicnode.com',
+      'https://rpc.scroll.io'
+    ],
+    explorer: 'https://scrollscan.com',
+    icon: '📜', color: '#FFB0B0'
+  },
+  {
+    id: 'blast', name: 'Blast', chainId: 81457, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: [
+      'https://blast-rpc.publicnode.com',
+      'https://rpc.blast.io'
+    ],
+    explorer: 'https://blastscan.io',
+    icon: '💥', color: '#FCFC03'
+  },
+  {
+    id: 'mantle', name: 'Mantle', chainId: 5000, type: 'mainnet',
+    symbol: 'MNT', decimals: 18,
+    rpc: [
+      'https://mantle-rpc.publicnode.com',
+      'https://rpc.mantle.xyz'
+    ],
+    explorer: 'https://mantlescan.xyz',
+    icon: '🔱', color: '#65B3AE'
+  },
+  {
+    id: 'zksync', name: 'zkSync Era', chainId: 324, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: [
+      'https://mainnet.era.zksync.io',
+      'https://zksync.drpc.org'
+    ],
+    explorer: 'https://explorer.zksync.io',
+    icon: '🔁', color: '#8C8DFC'
+  },
+  {
+    id: 'unichain', name: 'Unichain', chainId: 130, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: [
+      'https://mainnet.unichain.org',
+      'https://unichain-rpc.publicnode.com'
+    ],
+    explorer: 'https://unichain.blockscout.com',
+    icon: '🦄', color: '#FF00A0'
+  },
+  {
+    id: 'worldchain', name: 'World Chain', chainId: 480, type: 'mainnet',
+    symbol: 'ETH', decimals: 18,
+    rpc: [
+      'https://worldchain.drpc.org',
+      'https://worldchain-mainnet.g.alchemy.com/public'
+    ],
+    explorer: 'https://worldscan.org',
+    icon: '🌎', color: '#2F343B'
+  },
   {
     id: 'sepolia', name: 'Sepolia', chainId: 11155111, type: 'testnet',
     symbol: 'ETH', decimals: 18,
@@ -161,29 +276,143 @@ export const POPULAR_TOKENS = {
     { address: '0x6B3595068778DD592e39A122f4f5a5cF09C90fE2', symbol: 'SUSHI', decimals: 18 },
     { address: '0xc00e94Cb662C3520282E6f5717214004A7f26888', symbol: 'COMP', decimals: 18 },
     { address: '0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2', symbol: 'MKR', decimals: 18 },
-    { address: '0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32', symbol: 'LDO', decimals: 18 }
+    { address: '0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32', symbol: 'LDO', decimals: 18 },
+    // Moved here from the DUPLICATE POPULAR_TOKENS that lived inside js/swap.js
+    // (2026-10-05): swap re-exports this map now, so the four exotic swap-list
+    // entries come along instead of being dropped.
+    { address: '0xae78736Cd615f374D3085123A210448E74Fc6393', symbol: 'rETH', decimals: 18 },
+    { address: '0xBe9895146f7AF43049ca1c1AE358B0541Ea49704', symbol: 'cbETH', decimals: 18 },
+    { address: '0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0', symbol: 'wstETH', decimals: 18 },
+    { address: '0x9e1028F5F1D5eDE59748FFceE5532509976840E0', symbol: 'FRAX', decimals: 18 }
   ],
   11155111: [
     { address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', symbol: 'USDC', decimals: 6 },
-    { address: '0x779877A7B0D9E8603169DdbD7836e478b4624789', symbol: 'LINK', decimals: 18 }
+    { address: '0x779877A7B0D9E8603169DdbD7836e478b4624789', symbol: 'LINK', decimals: 18 },
+    { address: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14', symbol: 'WETH', decimals: 18 }
+  ],
+  // ── 2026-10-05: the "list coin sesuaikan" pass ──
+  // Every shipped chain now carries a curated list. Addresses come from
+  // docs/research/bridge-tokens-2026-10-05.md (97 rows, each probe-verified
+  // on-chain: eth_getCode + decimals() + symbol() + EIP-55, same day).
+  // SYMBOL_DIFF rows wear the ON-CHAIN symbol (polygon USDT reads USDT0,
+  // arbitrum USDT reads USD₮0, BSC's WETH reads ETH). Legacy *.e/USDbC twins
+  // are left out on purpose: they read back the SAME symbol as the native
+  // issuance, which would put two identical labels in one picker.
+  10: [
+    { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18 },
+    { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', symbol: 'USDC', decimals: 6 },
+    { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', symbol: 'USDT', decimals: 6 },
+    { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 }
+  ],
+  56: [
+    { address: '0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3', symbol: 'DAI', decimals: 18 },
+    { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', symbol: 'USDC', decimals: 18 },
+    { address: '0x55d398326f99059fF775485246999027B3197955', symbol: 'USDT', decimals: 18 },
+    { address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', symbol: 'ETH', decimals: 18 }
+  ],
+  100: [
+    { address: '0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83', symbol: 'USDC', decimals: 6 },
+    { address: '0x4ECaBa5870353805a9F068101A40E0f32ed605C6', symbol: 'USDT', decimals: 6 },
+    { address: '0x8e5bBbb09Ed1ebdE8674Cda39A0c169401db4252', symbol: 'WBTC', decimals: 8 },
+    { address: '0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1', symbol: 'WETH', decimals: 18 }
+  ],
+  130: [
+    { address: '0x20CAb320A855b39F724131C69424240519573f81', symbol: 'DAI', decimals: 18 },
+    { address: '0x078D782b760474a361dDA0AF3839290b0EF57AD6', symbol: 'USDC', decimals: 6 },
+    { address: '0x0555E30da8f98308EdB960aa94C0Db47230d2B9c', symbol: 'WBTC', decimals: 8 },
+    { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 }
   ],
   137: [
     { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', symbol: 'USDC', decimals: 6 },
-    { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', symbol: 'USDT', decimals: 6 }
+    { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', symbol: 'USDT0', decimals: 6 },
+    { address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', symbol: 'DAI', decimals: 18 },
+    { address: '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6', symbol: 'WBTC', decimals: 8 },
+    { address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', symbol: 'WETH', decimals: 18 }
   ],
-  8453: [
-    { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6 }
+  146: [
+    { address: '0x29219dd400f2Bf60E5a23d13Be72B486D4038894', symbol: 'USDC', decimals: 6 },
+    { address: '0x6047828dc181963ba44974801FF68e538dA5eaF9', symbol: 'USDT', decimals: 6 },
+    { address: '0x0555E30da8f98308EdB960aa94C0Db47230d2B9c', symbol: 'WBTC', decimals: 8 },
+    { address: '0x50c42dEAcD8Fc9773493ED674b675bE577f2634b', symbol: 'WETH', decimals: 18 }
+  ],
+  324: [
+    { address: '0x1d17CBcF0D6D143135aE902365D2E5e2A16538D4', symbol: 'USDC', decimals: 6 },
+    { address: '0x493257fD37EDB34451f62EDf8D2a0C418852bA4C', symbol: 'USDT', decimals: 6 },
+    { address: '0xBBeB516fb02a01611cBBE0453Fe3c580D7281011', symbol: 'WBTC', decimals: 8 },
+    { address: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', symbol: 'WETH', decimals: 18 }
+  ],
+  480: [
+    { address: '0x79A02482A880bCE3F13e09Da970dC34db4CD24d1', symbol: 'USDC', decimals: 6 },
+    { address: '0x03C7054BCB39f7b2e5B2c7AcB37583e32D70Cfa3', symbol: 'WBTC', decimals: 8 },
+    { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 }
   ],
   42161: [
     { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 },
-    { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', decimals: 6 }
+    { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USD₮0', decimals: 6 },
+    { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18 },
+    { address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', symbol: 'WBTC', decimals: 8 },
+    { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', decimals: 18 }
   ],
-  10: [
-    { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', symbol: 'USDC', decimals: 6 }
+  42220: [
+    { address: '0xcebA9300f2b948710d2653dD7B07f33A8B32118C', symbol: 'USDC', decimals: 6 },
+    { address: '0x617f3112bf5397D0467D315cC709EF968D9ba546', symbol: 'USDT', decimals: 6 },
+    { address: '0x90Ca507a5D4458a4C6C6249d186b6dCb02a5BCCd', symbol: 'DAI', decimals: 18 },
+    { address: '0xBAAB46E28388d2779e6E31Fd00cF0e5Ad95E327B', symbol: 'WBTC', decimals: 8 },
+    { address: '0x122013fd7dF1C6F636a5bb8f03108E876548b455', symbol: 'WETH', decimals: 18 }
   ],
-  56: [
-    { address: '0x55d398326f99059fF775485246999027B3197955', symbol: 'USDT', decimals: 18 },
-    { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', symbol: 'USDC', decimals: 18 }
+  43114: [
+    { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC', decimals: 6 },
+    { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', symbol: 'USDt', decimals: 6 },
+    { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', symbol: 'DAI.e', decimals: 18 },
+    { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', symbol: 'WETH.e', decimals: 18 },
+    { address: '0x50b7545627a5162F82A992c33b87aDc75187B218', symbol: 'WBTC.e', decimals: 8 }
+  ],
+  5000: [
+    { address: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9', symbol: 'USDC', decimals: 6 },
+    { address: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', symbol: 'USDT', decimals: 6 },
+    { address: '0xCAbAE6f6Ea1ecaB08Ad02fE02ce9A44F09aebfA2', symbol: 'WBTC', decimals: 8 },
+    { address: '0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111', symbol: 'WETH', decimals: 18 }
+  ],
+  534352: [
+    { address: '0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4', symbol: 'USDC', decimals: 6 },
+    { address: '0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df', symbol: 'USDT', decimals: 6 },
+    { address: '0xcA77eB3fEFe3725Dc33bccB54eDEFc3D9f764f97', symbol: 'DAI', decimals: 18 },
+    { address: '0x3C1BCa5a656e69edCD0D4E36BEbb3FcDAcA60Cf1', symbol: 'WBTC', decimals: 8 },
+    { address: '0x5300000000000000000000000000000000000004', symbol: 'WETH', decimals: 18 }
+  ],
+  59144: [
+    { address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', symbol: 'USDC', decimals: 6 },
+    { address: '0xA219439258ca9da29E9Cc4cE5596924745e12B93', symbol: 'USDT', decimals: 6 },
+    { address: '0x4AF15ec2A0BD43Db75dd04E62FAA3B8EF36b00d5', symbol: 'DAI', decimals: 18 },
+    { address: '0x3aAB2285ddcDdaD8edf438C1bAB47e1a9D05a9b4', symbol: 'WBTC', decimals: 8 },
+    { address: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', symbol: 'WETH', decimals: 18 }
+  ],
+  81457: [
+    { address: '0x4300000000000000000000000000000000000003', symbol: 'USDB', decimals: 18 },
+    { address: '0xF7bc58b8D8f97ADC129cfC4c9f45Ce3C0E1D2692', symbol: 'WBTC', decimals: 8 },
+    { address: '0x4300000000000000000000000000000000000004', symbol: 'WETH', decimals: 18 }
+  ],
+  8453: [
+    { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6 },
+    { address: '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2', symbol: 'USDT', decimals: 6 },
+    { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', symbol: 'DAI', decimals: 18 },
+    { address: '0x0555E30da8f98308EdB960aa94C0Db47230d2B9c', symbol: 'WBTC', decimals: 8 },
+    { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 }
+  ],
+  80002: [
+    { address: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', symbol: 'USDC', decimals: 6 }
+  ],
+  421614: [
+    { address: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', symbol: 'USDC', decimals: 6 },
+    { address: '0x980B62Da83eFf3D4576C647993b0c1D7faf17c73', symbol: 'WETH', decimals: 18 }
+  ],
+  84532: [
+    { address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', symbol: 'USDC', decimals: 6 },
+    { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 }
+  ],
+  11155420: [
+    { address: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7', symbol: 'USDC', decimals: 6 },
+    { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 }
   ]
 };
 
@@ -227,7 +456,7 @@ export const EIP7702 = {
 // ═══════════════════════════════════════════════════════════════
 // CHAIN_PRESETS — catalogue for the "Add network" picker.
 //
-// The 12 networks in NETWORKS are what the app ships with. These are the OTHER
+// The 23 networks in NETWORKS are what the app ships with. These are the OTHER
 // common EVM chains, offered as one-tap presets so nobody has to type a name,
 // chainId, symbol, explorer and RPC by hand. Every entry's RPC was verified to
 // answer eth_chainId with the chainId claimed here (see docs/CHAIN-PRESETS.md
@@ -235,22 +464,11 @@ export const EIP7702 = {
 // stays editable for anyone behind a private endpoint.
 // ═══════════════════════════════════════════════════════════════
 export const CHAIN_PRESETS = [
-  { name: 'Celo', chainId: 42220, type: 'mainnet', symbol: 'CELO', icon: '🟠', color: '#FCFF52',
-    rpc: ['https://celo-rpc.publicnode.com'], explorer: 'https://celoscan.io' },
-  { name: 'Gnosis', chainId: 100, type: 'mainnet', symbol: 'xDAI', icon: '🦊', color: '#04795B',
-    rpc: ['https://gnosis-rpc.publicnode.com'], explorer: 'https://gnosisscan.io' },
-  { name: 'Avalanche C-Chain', chainId: 43114, type: 'mainnet', symbol: 'AVAX', icon: '❄️', color: '#E84142',
-    rpc: ['https://avalanche-c-chain-rpc.publicnode.com'], explorer: 'https://snowtrace.io' },
-  { name: 'Sonic', chainId: 146, type: 'mainnet', symbol: 'S', icon: '🎵', color: '#F2A72B',
-    rpc: ['https://sonic-rpc.publicnode.com'], explorer: 'https://sonicscan.org' },
-  { name: 'Linea', chainId: 59144, type: 'mainnet', symbol: 'ETH', icon: '📐', color: '#61DFFF',
-    rpc: ['https://linea-rpc.publicnode.com'], explorer: 'https://lineascan.build' },
-  { name: 'Scroll', chainId: 534352, type: 'mainnet', symbol: 'ETH', icon: '📜', color: '#FFB0B0',
-    rpc: ['https://scroll-rpc.publicnode.com'], explorer: 'https://scrollscan.com' },
-  { name: 'Blast', chainId: 81457, type: 'mainnet', symbol: 'ETH', icon: '💥', color: '#FCFC03',
-    rpc: ['https://blast-rpc.publicnode.com'], explorer: 'https://blastscan.io' },
-  { name: 'Mantle', chainId: 5000, type: 'mainnet', symbol: 'MNT', icon: '🔱', color: '#65B3AE',
-    rpc: ['https://mantle-rpc.publicnode.com'], explorer: 'https://mantlescan.xyz' },
+  // 2026-10-05: the 8 presets that graduated into NETWORKS (Celo, Gnosis,
+  // Avalanche, Sonic, Linea, Scroll, Blast, Mantle) are gone from here — a
+  // chain listed BOTH as shipped and as an addable preset is the same network
+  // in two places (HUKUM 10). zksync/unichain/worldchain went straight into
+  // NETWORKS (never presets). What remains are the OTHER common EVM chains.
   { name: 'Moonbeam', chainId: 1284, type: 'mainnet', symbol: 'GLMR', icon: '🌙', color: '#53CBC8',
     rpc: ['https://1rpc.io/glmr'], explorer: 'https://moonbeam.moonscan.io' },
   { name: 'Cronos', chainId: 25, type: 'mainnet', symbol: 'CRO', icon: '⏱️', color: '#002D74',
@@ -263,7 +481,7 @@ export const CHAIN_PRESETS = [
     rpc: ['https://1rpc.io/mode'], explorer: 'https://explorer.mode.network' },
   { name: 'Metis Andromeda', chainId: 1088, type: 'mainnet', symbol: 'METIS', icon: '🟠', color: '#00DACC',
     rpc: ['https://andromeda.metis.io/?owner=1088'], explorer: 'https://explorer.metis.io' },
-  { name: 'hoodi', chainId: 560048, type: 'testnet', symbol: 'ETH', icon: '🧪', color: '#8B95C4',
+  { name: 'Hoodi', chainId: 560048, type: 'testnet', symbol: 'ETH', icon: '🧪', color: '#8B95C4',
     rpc: ['https://ethereum-hoodi-rpc.publicnode.com'], explorer: 'https://hoodi.etherscan.io' }
 ];
 // Chains deliberately NOT listed, because no public RPC answered eth_chainId
@@ -296,8 +514,26 @@ const TESTNET_CHAIN_IDS = new Set([
   59140,    // Linea Sepolia
   534351,   // Scroll Sepolia
 ]);
-// Dev chains: anvil/hardhat defaults.
-const LOCAL_DEV_CHAIN_IDS = new Set([1337, 31337]);
+// Dev chains: anvil/hardhat defaults. Exported so verify.js can be honest
+// about a chain no public explorer has ever heard of (M10).
+export const LOCAL_DEV_CHAIN_IDS = new Set([1337, 31337]);
+
+/**
+ * Is this RPC endpoint a loopback/dev node? Single home for the host test —
+ * detectNetworkType() labels those chains testnet AND verify.js refuses to
+ * claim a public explorer exists for them, from one list of hosts.
+ * @param {string} rpcUrl
+ */
+export function isLoopbackRpc(rpcUrl) {
+  try {
+    const h = new URL(String(rpcUrl || '')).hostname.toLowerCase();
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]'
+      || h.endsWith('.localhost');
+  } catch { /* not a URL — a custom entry can be a bare host:port */ }
+  const bare = String(rpcUrl || '').toLowerCase();
+  return bare.startsWith('localhost') || bare.startsWith('127.0.0.1')
+    || bare.startsWith('[::1]') || bare.startsWith('::1');
+}
 
 /**
  * Verdict for a chain: 'testnet' | 'mainnet'.
@@ -306,11 +542,7 @@ const LOCAL_DEV_CHAIN_IDS = new Set([1337, 31337]);
  *   mainnet FORK — and are labelled testnet regardless of the chain id.
  */
 export function detectNetworkType(chainId, rpcUrl) {
-  try {
-    const h = new URL(String(rpcUrl || '')).hostname.toLowerCase();
-    if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]'
-        || h.endsWith('.localhost')) return 'testnet';
-  } catch { /* not a URL — fall through to the id rules */ }
+  if (isLoopbackRpc(rpcUrl)) return 'testnet';
   const id = Number(chainId);
   if (LOCAL_DEV_CHAIN_IDS.has(id)) return 'testnet';
   // The app's own catalogues already carry a verdict per chain.

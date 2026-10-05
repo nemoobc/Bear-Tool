@@ -22,7 +22,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { $, escapeHtml, fmtAmount, fmtUsd, titleCase } from './ui.js';
-import { tokenLogoHTML, guardTokenLogos, readLogoCache as readCache } from './token-logo.js';
+import { tokenLogoHTML, guardTokenLogos, readLogoCache as readCache, getNetworkLogo } from './token-logo.js';
 
 let OPEN = null;
 
@@ -230,7 +230,7 @@ export function initNetworkPicker(selectId, networks) {
       const active = sel.value === n.id;
       return `<button type="button" class="token-row${active ? ' active' : ''}" role="option"
         aria-selected="${active}" data-value="${escapeHtml(n.id)}">
-        <span class="token-row-logo"><span class="net-logo" style="font-size:18px">${escapeHtml(n.icon || '🛰️')}</span></span>
+        <span class="token-row-logo">${getNetworkLogo(n.name, 18)}</span>
         <span class="token-row-text">
           <span class="token-row-sym">${escapeHtml(n.name)}</span>
           <span class="token-row-bal">Chain ${escapeHtml(String(n.chainId))} · ${escapeHtml(titleCase(n.type))}</span>
@@ -242,7 +242,7 @@ export function initNetworkPicker(selectId, networks) {
       if (!n) return;
       const slot = trigger.querySelector('[data-logo]');
       const sym = trigger.querySelector('[data-symbol]');
-      if (slot) slot.innerHTML = `<span class="net-logo" style="font-size:16px">${escapeHtml(n.icon || '🛰️')}</span>`;
+      if (slot) slot.innerHTML = getNetworkLogo(n.name, 16);
       if (sym) sym.textContent = n.name || '—';
       trigger.setAttribute('aria-label', `Choose network, currently ${n.name || 'unknown'}`);
     },
