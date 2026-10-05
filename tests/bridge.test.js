@@ -385,6 +385,32 @@ test('doBridge: old request race — late stale response cannot overwrite newer 
   assert.equal(q?.context?.amount, '0.6');
 });
 
+test('doBridge: NUMERIC_FAULT amount kills the in-flight quote response (seq bump)', async (t) => {
+  // bridge.js:440 bumps quoteSeq when parseUnits throws — without the bump
+  // a response already on the wire could bind a quote for an amount that
+  // never parsed. Race it for real: quote 1 in flight, then a 7-decimal
+  // amount against 6-decimal USDC, then let response 1 land.
+  const { fetchMock, toasts, el } = setupERC20Quote(t);
+  let resolveGate;
+  const gate = new Promise(r => { resolveGate = r; });
+  fetchMock.mock.mockImplementation(async () => {
+    await gate;
+    return { ok: true, json: async () => erc20Response() };
+  });
+  const p1 = bridge.doBridge();                 // quote 1 now in flight
+  await new Promise(r => setImmediate(r));
+  assert.equal(fetchMock.mock.callCount(), 1, 'first quote request is on the wire');
+  el('#bridgeAmount').value = '5.1234567';      // 7 decimals > USDC's 6
+  await bridge.doBridge();                      // NUMERIC_FAULT → quoteSeq++
+  assert.ok(toasts.some(m => m.toLowerCase().includes('decimal')), 'honest precision error');
+  assert.equal(fetchMock.mock.callCount(), 1, 'the fault path never fetches');
+  assert.equal(state.get('bridgeQuote'), null, 'fault path clears the quote');
+  resolveGate();
+  await p1;
+  assert.equal(state.get('bridgeQuote'), null,
+    'late response must NOT bind after the seq bump');
+});
+
 test('doBridge: auto-quote fetches immediately without confirmTx (safety at exec time)', async (t) => {
   const { fetchMock } = setupQuote(t);
   // mainnet chain → auto-quote path (no confirmTx in doBridge, only in doBridgeExec)
@@ -706,6 +732,24 @@ test('RED-TEAM: destination/source select swapped mid-approve → bridge tx abor
     assert.equal(spy.txs.length, 1, 'approve only — select drift must never sign the bridge');
     assert.ok(toasts.some(m => m.includes('context changed')), 'honest drift abort');
   }
+});
+
+test('RED-TEAM: live chain flips during the approve+re-quote window → bridge tx aborts (TOCTOU)', async (t) => {
+  // The hoisted approvalWindowDrift re-reads getNetwork AFTER the awaits —
+  // an RPC whose reported chain changes while the flow sits in the approve
+  // window must abort before the bridge signature, exactly like form drift.
+  const { spy, toasts } = setupERC20Exec(t, { allowance: 0n });
+  const enc = ethers.AbiCoder.defaultAbiCoder();
+  const provider = state.get('provider');
+  provider.call = async () => {
+    provider.getNetwork = async () => ({ chainId: 999n });   // flip mid-window
+    return enc.encode(['uint256'], [0n]);
+  };
+  const pending = bridge.doBridgeExec();
+  await clickSign();
+  await pending;
+  assert.equal(spy.txs.length, 1, 'approve went out, bridge did NOT');
+  assert.ok(toasts.some(m => m.includes('context changed')), 'honest drift abort, not a signature');
 });
 
 test('README pair numbers are pinned to the code (HUKUM 10)', async () => {

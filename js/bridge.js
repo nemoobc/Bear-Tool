@@ -383,6 +383,40 @@ function validateQuote(q, context) {
   };
 }
 
+/**
+ * Everything the exec entry guard pins, re-checked after the 30–60s
+ * approve+re-quote window — hoisted to ONE source of truth so the two
+ * sites cannot drift apart again (critic 2026-10-05: the mirror was found
+ * asymmetric twice — first unlocked/provider/networkId, then the from/to
+ * selects; a third edit must not be able to re-asymmetrize them).
+ * Returns the toast to show, or null when the context still holds.
+ *
+ * Async on purpose: the live provider network is re-read AFTER the awaits
+ * (TOCTOU, same rule as the entry path) — locking the wallet or switching
+ * chains mid-window aborts exactly like drift in the amount.
+ */
+export async function approvalWindowDrift(q, context, provider, fromNet, toNet) {
+  if (get('bridgeQuote') !== q || $('#bridgeToken').value !== context.token ||
+      String($('#bridgeAmount').value) !== String(context.amount) ||
+      $('#bridgeFromChain').value !== fromNet.id || $('#bridgeToChain').value !== toNet.id ||
+      !sameAddr(get('address'), context.address)) {
+    return 'Bridge context changed. Get a new route.';
+  }
+  if (!get('unlocked') || get('provider') !== provider ||
+      get('networkId') !== context.networkId) {   // network id is a STRING key, not a chainId
+    return 'Bridge context changed. Get a new route.';
+  }
+  try {
+    const live = await provider.getNetwork();
+    if (!sameChainId(live.chainId, context.fromChainId)) {
+      return 'Bridge context changed. Get a new route.';
+    }
+  } catch {
+    return 'Provider network unavailable — bridge not signed';
+  }
+  return null;
+}
+
 export async function doBridge() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const fromNet = getNetworkById($('#bridgeFromChain').value);
@@ -724,32 +758,10 @@ async function doBridgeExecInner() {
         if (!sameAddr(fresh.approvalAddress, spender)) {
           return toast('Route changed during approval — get a new quote', 'error');
         }
-        if (get('bridgeQuote') !== q || $('#bridgeToken').value !== context.token ||
-            String($('#bridgeAmount').value) !== String(context.amount) ||
-            $('#bridgeFromChain').value !== fromNet.id || $('#bridgeToChain').value !== toNet.id ||
-            !sameAddr(get('address'), context.address)) {
-          return toast('Bridge context changed. Get a new route.', 'error');
-        }
-        // The entry guard ALSO pins unlocked / provider identity / networkId
-        // — those checks must not lapse during the 30–60s approve+re-quote
-        // window (critic 2026-10-05: asymmetric guard — first round closed
-        // unlocked/provider/networkId, round 2 proved from/to still drifted
-        // through, so the whole entry set is mirrored here). Locking the
-        // wallet or switching either select mid-flow now aborts exactly like
-        // drift in the amount, and the provider network is re-read AFTER the
-        // awaits (TOCTOU, same rule as the entry path).
-        if (!get('unlocked') || get('provider') !== provider ||
-            get('networkId') !== context.networkId) {   // network id is a STRING key, not a chainId
-          return toast('Bridge context changed. Get a new route.', 'error');
-        }
-        try {
-          const live = await provider.getNetwork();
-          if (!sameChainId(live.chainId, context.fromChainId)) {
-            return toast('Bridge context changed. Get a new route.', 'error');
-          }
-        } catch {
-          return toast('Provider network unavailable — bridge not signed', 'error');
-        }
+        // The entry guard's whole set, one source of truth — see
+        // approvalWindowDrift (hoisted from this exact site, critic R3).
+        const driftMsg = await approvalWindowDrift(q, context, provider, fromNet, toNet);
+        if (driftMsg) return toast(driftMsg, 'error');
         sendParams = fresh.tx;
       }
     }
