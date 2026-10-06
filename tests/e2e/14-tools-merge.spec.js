@@ -175,9 +175,9 @@ test.describe('Tools merge — in the browser', () => {
     expect(views.filter((v) => v === 'deploy').length, 'exactly one Tools entry').toBe(1);
   });
 
-  test('Approvals is still its own view', async ({ page }) => {
-    await appClick(page, '.nav-item[data-view="approval"]');
-    await expect(page.locator('#view-approval')).toHaveClass(/active/);
+  test('Discord is still its own view', async ({ page }) => {
+    await appClick(page, '.nav-item[data-view="discord"]');
+    await expect(page.locator('#view-discord')).toHaveClass(/active/);
     await expect(page.locator('#view-deploy')).not.toHaveClass(/active/);
   });
 });

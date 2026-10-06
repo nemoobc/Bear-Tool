@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — app.js (entry point, slim orchestrator)
 // Boot, router, topbar, wallet lifecycle modals, dashboard,
-// approvals, activity, settings. Feature logic lives in modules:
+// discord, activity, settings. Feature logic lives in modules:
 // send.js / swap.js / bridge.js / eip7702.js / deploy.js / nft.js.
 // ═══════════════════════════════════════════════════════════════
 
@@ -23,7 +23,6 @@ import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity,
          reconcileActivity, activityMatchesSymbol, getCustomTokens, persistCustomToken } from './state.js';
 import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate, isRateLimit, fitCandles } from './price.js';
-import { waitForReceipt, withTimeout } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
 import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
@@ -37,6 +36,7 @@ import { t, setLang, applyTranslations } from './i18n.js';
 import { renderDapps, POPULAR_DAPPS } from './dapps.js';
 import { dappBrowserOnLock } from './dapp-browser.js';
 import { renderSecurityCenter } from './security-center.js';
+import { renderDiscord, bindDiscordPanel, finishOAuthRedirect } from './discord.js';
 // scanTransaction finally has a caller. It has been written and tested since
 // before the Security Center existed, and nothing invoked it — which is why
 // that panel had to be rewritten to say the checks are not applied.
@@ -52,6 +52,16 @@ const { ethers } = globalThis;
 window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   setUnlockHandler(showUnlockModal);
+  // A "Login with Discord" return lands here (redirect URI = this page) on
+  // whatever view was last open. Finish the exchange, strip the one-shot
+  // code, then take the user to the view that started it. The no-?code case
+  // is a two-parameter URLSearchParams check and returns immediately.
+  finishOAuthRedirect().then((done) => {
+    if (done) {
+      toast('Connected to Discord', 'success');
+      switchView('discord');
+    }
+  }).catch((e) => toast(e.message, 'error'));
   on('refresh', async () => {
     if (!get('address')) return;
     // Awaited: the swap form's balance line and the token lists read the
@@ -438,7 +448,7 @@ function bindNav() {
 
 // ── mobile nav, generated from the sidebar ──
 // The bottom bar used to be a hand-written list of 6 buttons while the sidebar
-// had 9, so EIP-7702, Approvals and Tools were reachable on desktop and simply
+// had 9, so EIP-7702, Discord and Tools were reachable on desktop and simply
 // did not exist on a phone. Building it from the sidebar makes that class of
 // drift impossible: add a view to the sidebar and mobile gets it too.
 //
@@ -460,7 +470,7 @@ const REACHABLE_ON_MOBILE = {
   deploy: 'Dashboard quick action (Tools)',
   nft: 'Dashboard quick action',
   bridge: 'Second press of Swap',
-  approval: 'Dashboard quick action (Approvals)',
+  discord: 'Dashboard quick action (Discord)',
 };
 
 function syncMobileNav() {
@@ -549,6 +559,10 @@ export function refreshView(view) {
   // tell the user why the DApps screen was blank. Browsing a catalogue of links
   // is not a wallet operation, so it is rendered before the guard.
   if (view === 'dapps') renderDapps($('#dappsContainer'));
+  // The Discord view talks to Discord, not to the chain: like the dApp
+  // catalogue it renders before the address guard, or a locked wallet shows
+  // an empty page with no way to connect.
+  if (view === 'discord') renderDiscord($('#discordRoot'));
   if (!get('address')) return;
   if (view === 'dashboard') loadDashboard();
   if (view === 'send') loadSendTokens();
@@ -557,14 +571,11 @@ export function refreshView(view) {
   if (view === 'deploy') { loadEip7702(); bindOpenSeaPanel(); }
   if (view === 'nft') loadNfts();
   if (view === 'activity') renderActivity();
-  // The Security Center moved from Settings to Approvals, so it renders with
-  // this view, alongside everything else a person opens Approvals to see.
-  // The scan now runs on arrival too: a tab whose whole job is to show you
-  // what you have left open is useless if it waits to be started by hand.
-  if (view === 'approval') {
-    renderSecurityCenter($('#securityCenter'));
-    autoScanApprovals();
-  }
+  // The Security Center is back in Settings (M3) — its documented original
+  // home, and the only home left once Approvals was removed. It lives in a
+  // collapsed <details>, which is what fixes the reason it left: an expanded
+  // six-section block made Settings 2500px and buried the delete button.
+  if (view === 'settings') renderSecurityCenter($('#securityCenter'));
 
 }
 
@@ -2446,11 +2457,9 @@ function bindViews() {
     // must never be able to take the wallet down.
     const on = (sel, ev, fn) => $(sel)?.addEventListener(ev, fn);
 
-    on('#approvalMode', 'change', () => {
-      on('#approvalCustomWrap')?.classList.toggle('hidden', $('#approvalMode').value !== 'custom');
-    });
-    on('#btnApprovalScan', 'click', scanApprovals);
-    on('#btnApprovalRevokeAll', 'click', revokeAllApprovals);
+    // Discord: ONE document-level delegated listener for everything the
+    // view repaints (innerHTML swaps replace nodes, never this binding).
+    bindDiscordPanel();
     on('#btn7702Check', 'click', runEip7702Check);
     // "Delete results" (live request: muncul setiap selesai scan) — wipes the
     // EIP-7702 check output from the panel, then hides itself until the next
@@ -2538,198 +2547,6 @@ function bindViews() {
   // A switch that boots showing "on" while the setting says "off" is a control
   // that will be flipped by someone who was told the opposite.
   syncTestnetSwitches();
-}
-
-// ── approval manager ──
-async function scanApprovals() {
-  // Read-only: allowances are public chain data and need no signature.
-  if (!get('address')) { showUnlockModal(); return; }
-  const mode = $('#approvalMode')?.value;
-  const net = getNetworkById(get('networkId'));
-  const list = $('#approvalList');
-  if (!list) return;
-  list.innerHTML = spinner(64, 'Scanning approvals...');
-  try {
-    const provider = get('provider');
-    const tokens = mode === 'popular'
-      ? (POPULAR_TOKENS[net.chainId] || [])
-      : [{ address: $('#approvalCustom').value.trim(), symbol: 'CUSTOM', decimals: 18 }];
-    if (!tokens.length) {
-      list.innerHTML = '<p class="small text-center">No popular tokens on this network. Use custom mode.</p>';
-      return;
-    }
-    const approvals = [];
-    let scannedFrom = null;
-    for (const t of tokens) {
-      if (!wallet.isValidAddress(t.address)) continue;
-      try {
-        const c = new ethers.Contract(t.address, ERC20_ABI, provider);
-        const block = await provider.getBlockNumber();
-        // Wide window (~2 weeks on mainnet). If the provider rejects the
-        // range, fall back to a smaller window so the scan still works.
-        // The actual window is reported in the UI — "Clean! 🐻" must never
-        // hide the fact that old approvals are out of scope.
-        let fromBlock = Math.max(0, block - 100000);
-        let events;
-        try {
-          events = await c.queryFilter(c.filters.Approval(get('address')), fromBlock, block);
-        } catch {
-          fromBlock = Math.max(0, block - 2000);
-          events = await c.queryFilter(c.filters.Approval(get('address')), fromBlock, block);
-        }
-        scannedFrom = scannedFrom === null ? fromBlock : Math.min(scannedFrom, fromBlock);
-        // Dedupe by spender across ALL events (no arbitrary 10-event cap)
-        const seen = new Set();
-        for (const ev of events) {
-          const spender = ev.args[1];
-          if (spender) seen.add(spender);
-        }
-        // Check the CURRENT allowance for each unique spender; skip
-        // spenders whose approval was already revoked (allowance = 0).
-        for (const spender of seen) {
-          const allowance = await c.allowance(get('address'), spender);
-          if (allowance <= 0n) continue;
-          approvals.push({
-            token: t, spender,
-            allowance: allowance.toString(),
-            unlimited: allowance >= (1n << 255n)
-          });
-        }
-      } catch {}
-    }
-    set('approvals', approvals);
-    renderApprovals(approvals, scannedFrom);
-  } catch (e) {
-    console.warn('[BearTool] list failed:', e);
-    list.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Reading the list'))}</p>`;
-  }
-}
-
-function renderApprovals(approvals, scannedFrom = null) {
-  const list = $('#approvalList');
-  if (!list) return;
-  // Revoke All earns its place only when there is more than one thing to
-  // revoke: one row already carries its own button, and a second way to do
-  // that same single thing is just a way to press the wrong one.
-  $('#btnApprovalRevokeAll')?.classList.toggle('hidden', approvals.length < 2);
-  if (!approvals.length) {
-    const note = scannedFrom !== null
-      ? `<p class="small text-center">No active approvals found in the scan window (from block ${scannedFrom.toLocaleString()}). Older approvals are not shown — use a block explorer to verify.</p>`
-      : '';
-    list.innerHTML = note + '<p class="small text-center">No active approvals found. Clean! 🐻</p>';
-    return;
-  }
-  const windowNote = scannedFrom !== null
-    ? `<p class="small text-center">Scan window: from block ${scannedFrom.toLocaleString()} — approvals older than this are not shown.</p>`
-    : '';
-  list.innerHTML = windowNote + approvals.map((a, i) => `
-    <div class="asset-row">
-      <div class="asset-icon">🔐</div>
-      <div class="asset-info">
-        <div class="asset-name">${escapeHtml(a.token.symbol)} ${a.unlimited ? '<span class="badge badge-warn">UNLIMITED</span>' : ''}</div>
-        <div class="mono">Spender: ${escapeHtml(a.spender)}</div>
-        <div class="asset-symbol">Allowance: ${escapeHtml(fmtAmount(a.allowance, a.token.decimals))}</div>
-      </div>
-      <button class="btn btn-danger" data-revoke="${i}">Revoke</button>
-    </div>`).join('');
-  $all('[data-revoke]').forEach(el => el.addEventListener('click', async () => {
-    const a = approvals[Number(el.dataset.revoke)];
-    const ok = await confirmTx({
-      title: 'Revoke approval?',
-      rows: [{ k: 'Token', v: a.token.symbol }, { k: 'Spender', v: wallet.shortAddress(a.spender) }],
-      confirmText: 'Revoke', danger: true,
-      // Money line: revoke moves no value, but the gas is real — estimate
-      // the exact approve(spender, 0) calldata, hand-encoded (selector
-      // 0x095ea7b3) so the dialog prices the tx it is about to sign
-      // (user, 2026-10-06).
-      tx: {
-        to: a.token.address,
-        data: `0x095ea7b3${String(a.spender).toLowerCase().replace(/^0x/, '').padStart(64, '0')}${'0'.repeat(64)}`,
-      },
-    });
-    if (!ok) return;
-    const res = await revokeApproval(a);
-    if (res.ok) scanApprovals();
-  }));
-}
-
-/**
- * Set ONE approval back to zero. The wallet confirms every transaction this
- * sends — pulling the confirmation out of the loop below would make Revoke All
- * a button that spends your gas on whatever it finds without asking.
- *
- * Always resolves, never throws: a failed revoke is a reported revoke.
- * @returns {Promise<{ok: boolean, timedOut?: boolean, aborted?: boolean}>}
- */
-async function revokeApproval(a) {
-  if (!get('unlocked')) { requireUnlock(); return { ok: false, aborted: true }; }
-  try {
-    const signer = get('signer').connect(get('provider'));
-    const c = new ethers.Contract(a.token.address, ERC20_ABI, signer);
-    const tx = await withTimeout(c.approve(a.spender, 0), 15000, 'revoke broadcast');
-    toast('Revoke tx sent!', 'info');
-    const { timedOut } = await waitForReceipt(tx);
-    if (timedOut) {
-      toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
-      return { ok: false, timedOut: true };
-    }
-    toast('Approval revoked! 🎉', 'success');
-    return { ok: true };
-  } catch (e) {
-    toast('Revoke failed: ' + e.message, 'error');
-    return { ok: false };
-  }
-}
-
-/**
- * Walk the whole list, one transaction at a time, in the order it was scanned.
- *
- * Sequenced, not batched: these are separate on-chain revokes on whatever
- * network is selected, so a failure at #3 leaves #1 and #2 done and visible
- * on rescan — where a batch that reverts would leave the earlier ones paid for
- * and none of them actually revoked. The wallet still confirms each one; the
- * dialog here is only the "yes, all of them" that lets the run start.
- */
-async function revokeAllApprovals() {
-  const approvals = get('approvals') || [];
-  if (approvals.length < 2) return;
-  const rows = approvals.map(a => ({
-    k: a.token.symbol,
-    v: `${a.unlimited ? 'UNLIMITED · ' : ''}${wallet.shortAddress(a.spender)}`
-  }));
-  const ok = await confirmTx({
-    title: `Revoke ${approvals.length} approvals?`,
-    rows, confirmText: 'Revoke all', danger: true
-  });
-  if (!ok) return;
-  if (!get('unlocked')) { requireUnlock(); return; }
-
-  const btn = $('#btnApprovalRevokeAll');
-  if (btn) { btn.disabled = true; btn.textContent = 'Revoking…'; }
-  let done = 0;
-  let stopped = false;
-  for (const a of approvals) {
-    const res = await revokeApproval(a);
-    if (res.aborted) { stopped = true; break; }   // wallet locked mid-run
-    if (res.ok) done += 1;
-  }
-  if (btn) { btn.disabled = false; btn.textContent = 'Revoke All'; }
-
-  if (done === approvals.length) toast(`All ${done} approvals revoked 🎉`, 'success');
-  else if (stopped) toast(`${done}/${approvals.length} revoked before the wallet locked`, 'info');
-  else toast(`${done}/${approvals.length} revoked`, 'info');
-  scanApprovals();
-}
-
-/**
- * The scan runs when the tab opens — that is the whole point of a tab whose
- * job is to show you what is left open. Without a wallet there is nothing to
- * scan, and throwing the unlock modal at someone who only navigated here would
- * punish them for clicking; Rescan is right there for when they are ready.
- */
-function autoScanApprovals() {
-  if (!get('address')) return;
-  scanApprovals();
 }
 
 // ── EIP-7702 capability check (Settings) ──

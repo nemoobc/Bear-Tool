@@ -32,10 +32,10 @@ function duplicateIds(ids) {
 }
 
 test.describe('Sidebar — static', () => {
-  test('order is Dashboard, Activity, Swap, NFT, DApps, then Tools, Approvals, then Settings', () => {
+  test('order is Dashboard, Activity, Swap, NFT, DApps, then Tools, Discord, then Settings', () => {
     expect(sidebarViews()).toEqual([
       'dashboard', 'activity', 'swap', 'nft', 'dapps',
-      'deploy', 'approval', 'settings',
+      'deploy', 'discord', 'settings',
     ]);
   });
 
@@ -132,7 +132,7 @@ test.describe('Sidebar — in the browser', () => {
   });
 
   test('every sidebar entry opens its view', async ({ page }) => {
-    for (const v of ['activity', 'nft', 'dapps', 'deploy', 'approval', 'settings']) {
+    for (const v of ['activity', 'nft', 'dapps', 'deploy', 'discord', 'settings']) {
       await appClick(page, `.nav-item[data-view="${v}"]`);
       await expect(page.locator('#view-' + v), `${v} must open`).toHaveClass(/active/, { timeout: 10_000 });
     }
@@ -146,7 +146,7 @@ test.describe('Sidebar — in the browser', () => {
     await page.waitForTimeout(400);
     // No sheet to inspect any more, so reachability is proved the only way that
     // means anything: actually open each one on a phone and check it activates.
-    for (const v of ['dapps', 'deploy', 'approval']) {
+    for (const v of ['dapps', 'deploy', 'discord']) {
       await openView(page, v);
       await expect(page.locator('#view-' + v), `${v} must open on a phone`).toHaveClass(/active/);
     }

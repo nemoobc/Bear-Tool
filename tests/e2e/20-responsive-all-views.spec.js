@@ -15,7 +15,7 @@ import { gotoApp, skipIntro, createWallet, appClick, openView } from './helpers.
 
 const VIEWS = [
   'dashboard', 'send', 'swap', 'bridge',
-  'approval', 'deploy', 'activity', 'nft', 'dapps', 'settings',
+  'discord', 'deploy', 'activity', 'nft', 'dapps', 'settings',
 ];
 
 // 320 is the narrowest phone still worth supporting and is where fixed-width

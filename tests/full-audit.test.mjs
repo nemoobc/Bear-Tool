@@ -77,7 +77,7 @@ describe('2. HTML STRUCTURE', () => {
   it('all 10 views present', () => {
     // eip7702 view was intentionally removed — its suite lives inside
     // view-deploy (index.html:505). dapps is the tenth view.
-    const views = ['dashboard', 'send', 'swap', 'bridge', 'nft', 'dapps', 'approval', 'deploy', 'activity', 'settings'];
+    const views = ['dashboard', 'send', 'swap', 'bridge', 'nft', 'dapps', 'discord', 'deploy', 'activity', 'settings'];
     const src = html + viewSources();
     for (const v of views) {
       assert.ok(src.includes(`id="view-${v}"`), `Missing view: ${v}`);
@@ -246,11 +246,11 @@ describe('4. JS NULL SAFETY AUDIT', () => {
     log('✓ loadBridgeChains has null guard');
   });
 
-  it('scanApprovals has null guard', () => {
-    const js = readFileSync(join(ROOT, 'js/app.js'), 'utf8');
-    assert.ok(js.includes("if (!list) return") || js.includes("if (!list) {"),
-      'scanApprovals missing null guard');
-    log('✓ scanApprovals has null guard');
+  it('renderDiscord has null guard', () => {
+    const js = readFileSync(join(ROOT, 'js/discord.js'), 'utf8');
+    assert.ok(js.includes('if (!root) return;'),
+      'renderDiscord missing null guard');
+    log('✓ renderDiscord has null guard');
   });
 
   it('renderActivity has null guard', () => {

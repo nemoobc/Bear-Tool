@@ -19,7 +19,7 @@ import path from 'node:path';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 // Urutan dokumen index.html HEAD = urutan view di src/App.jsx.
-const VIEW_ORDER = ['dashboard', 'send', 'swap', 'bridge', 'approval', 'deploy', 'activity', 'nft', 'dapps', 'settings'];
+const VIEW_ORDER = ['dashboard', 'send', 'swap', 'bridge', 'discord', 'deploy', 'activity', 'nft', 'dapps', 'settings'];
 
 export function jsxToHtmlSpelling(src) {
   return src
@@ -42,6 +42,10 @@ export function appSource() {
   const present = readdirSync(viewsDir).filter((f) => f.endsWith('.jsx'));
   const missing = VIEW_ORDER.filter((v) => !present.includes(`${v}.jsx`));
   if (missing.length) throw new Error(`src/views kehilangan view: ${missing.join(', ')}`);
+  // Arah sebaliknya: view yang ada tapi tak terdaftar = nav/dispatch yang tak
+  // pernah dibuat untuknya (pernah terjadi: view tanpa tombol sidebar).
+  const extra = present.map((f) => f.replace(/\.jsx$/, '')).filter((v) => !VIEW_ORDER.includes(v));
+  if (extra.length) throw new Error(`src/views punya view di luar VIEW_ORDER: ${extra.join(', ')}`);
   const views = VIEW_ORDER
     .map((v) => readFileSync(path.join(viewsDir, `${v}.jsx`), 'utf8'))
     .join('\n');

@@ -86,9 +86,13 @@ test('mobile nav: every sidebar view is reachable from the phone', () => {
   const unreachable = sidebarViews.filter((v) => !slots.includes(v) && !routes.has(v));
   assert.deepEqual(unreachable, [],
     `sidebar views with no route on a phone: ${unreachable.join(', ')} — a view that exists on desktop and not on mobile is the bug this map exists to prevent`);
-  for (const v of ['approval', 'deploy', 'dapps', 'settings']) {
+  for (const v of ['discord', 'deploy', 'dapps', 'settings']) {
     assert.ok(sidebarViews.includes(v), `${v} must be a sidebar view`);
   }
+  // The removal itself (M3): no approval item, quick action, or view anywhere
+  // in the page — and Discord holds the slot it vacated on every surface.
+  assert.ok(!sidebarViews.includes('approval'), 'Approvals is deleted, not hidden');
+  assert.ok(html.includes('data-view="discord"'), 'Discord takes the sidebar slot');
   // The EIP-7702 suite must live inside Tools, not be a view of its own.
   assert.ok(!sidebarViews.includes('eip7702'), 'EIP-7702 must not be a separate nav entry');
   const toolsStart = html.indexOf('id="view-deploy"');

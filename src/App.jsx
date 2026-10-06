@@ -4,7 +4,7 @@ import DashboardView from './views/dashboard.jsx';
 import SendView from './views/send.jsx';
 import SwapView from './views/swap.jsx';
 import BridgeView from './views/bridge.jsx';
-import ApprovalView from './views/approval.jsx';
+import DiscordView from './views/discord.jsx';
 import DeployView from './views/deploy.jsx';
 import ActivityView from './views/activity.jsx';
 import NftView from './views/nft.jsx';
@@ -18,7 +18,7 @@ export default function App() {
       <SendView />
       <SwapView />
       <BridgeView />
-      <ApprovalView />
+      <DiscordView />
       <DeployView />
       <ActivityView />
       <NftView />

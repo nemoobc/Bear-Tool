@@ -37,8 +37,8 @@ test.describe('Mobile', () => {
     await appClick(page, '#mobileNav .mobile-nav-item[data-view="settings"]');
     await expect(page.locator('#view-settings')).toHaveClass(/active/);
     await expect(page.locator('#mobileNav .mobile-nav-item[data-view="settings"]')).toHaveClass(/active/);
-    await openView(page, 'approval');
-    await expect(page.locator('#view-approval')).toHaveClass(/active/);
+    await openView(page, 'discord');
+    await expect(page.locator('#view-discord')).toHaveClass(/active/);
     await expect(page.locator('#mobileNav .mobile-nav-item.active')).toHaveCount(0);
   });
 

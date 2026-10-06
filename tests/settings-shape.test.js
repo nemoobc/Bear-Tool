@@ -4,19 +4,25 @@
 // the delete buried in the middle of six sections of Security Center and a
 // second copy of the same delete button at the very bottom.
 //
-// It is now six sections, not five, and the sixth was added on request: an
-// EIP-7702 capability check. Two things about it keep the original rule alive
-// anyway. The count is no longer the rule — the rule is that everything here
-// is something a person opens Settings to FIND OUT or change, and the check
-// is exactly that (a question about the chains, answerable in place). And the
-// group sits BEFORE the delete, so the irreversible button is still the last
-// thing on the page, which is what the count was protecting all along.
+// It is now six groups, and the history of the count is the point: the
+// Security Center LEFT Settings because it made the page 2500px, moved into
+// Approvals (M2 era), and came BACK in M3 — because Approvals was removed on
+// request ("fitur approvals hapus ganti fitur discord") and Settings was its
+// documented original home. What makes the return safe is the <details> it
+// rides in: collapsed by default, one row, so the page keeps its length and
+// the delete keeps its place. The count was never the rule — the rule is that
+// everything here is something a person opens Settings to FIND OUT or change,
+// and every group sits BEFORE the delete, so the irreversible button is still
+// the last thing on the page.
 //
 // The second half of this file is the part that matters more. Moving the
 // Security Center out of Settings silently destroyed the ONLY route a phone had
 // to the Approvals view: the link that lived inside it. Nothing broke. No test
 // failed. No console error. A feature simply stopped existing on the device
-// most people would use it on, and nothing said so.
+// most people would use it on, and nothing said so. When Approvals was deleted
+// the same class of bug was waiting: the route (a Dashboard quick action) had
+// to move with the view, not die with it — which is what the reachability test
+// below measures.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -35,22 +41,22 @@ function view(id) {
   return html.slice(at, end);
 }
 
-test('Settings holds the five things it always had, plus the check, in five groups', () => {
+test('Settings holds the things it always had, plus the check and the Security Center, in six groups', () => {
   const v = view('settings');
-  for (const id of ['setLang', 'setCurrency', 'setAutoLock', 'setTestnet', 'btnClearAllData', 'btn7702Check']) {
+  for (const id of ['setLang', 'setCurrency', 'setAutoLock', 'setTestnet', 'btnClearAllData', 'btn7702Check', 'securityCenter']) {
     assert.ok(v.includes(`id="${id}"`), `#${id} must be in Settings`);
   }
   // Theme is a button group rather than a select, so it has no id of its own.
   assert.match(v, /Theme/, 'Theme must be in Settings');
-  // Five groups: Appearance (language, currency, theme), Safety (auto-lock,
-  // testnet mode), NFT auto-detect (the two BYO index keys — added with M3,
-  // because an empty gallery is exactly what someone opens Settings to fix),
-  // EIP-7702 support (asked for by name), and the delete alone in its own
-  // group. The delete is separated rather than stacked because it is the one
+  // Six groups: Appearance (language, currency, theme), Safety (auto-lock,
+  // testnet mode), NFT auto-detect (the two BYO index keys), EIP-7702 support
+  // (asked for by name), the Security Center (back from the deleted Approvals
+  // view — collapsed in <details>), and the delete alone in its own group.
+  // The delete is separated rather than stacked because it is the one
   // irreversible thing on the page and it should read as a conclusion, not as
   // another preference.
-  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 5);
-  assert.equal((v.match(/set-group-h/g) || []).length, 5);
+  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 6);
+  assert.equal((v.match(/set-group-h/g) || []).length, 6);
   // And the check sits before the delete, not after it — the ordering rule
   // below is the one the "five things" count was standing in for.
   assert.ok(v.indexOf('id="btn7702Check"') < v.indexOf('id="btnClearAllData"'),
@@ -64,10 +70,14 @@ test('there is no Save button, and no dead control standing in for one', () => {
   // The pattern that actually bit: a control that still binds to something.
   // btn7702Check and eip7702Results belong here because they are the opposite
   // of the thing this test hunts: the button is bound to runEip7702Check and
-  // the div is filled by it (both pinned in eip7702-approval-ui.test.js), so
+  // the div is filled by it (both pinned in eip7702-settings-ui.test.js), so
   // neither is a Save button wearing a working button's clothes.
   const ALLOWED = ['setLang', 'setCurrency', 'setAutoLock', 'setTestnet', 'btnClearAllData',
     'btn7702Check', 'eip7702Results',
+    // The Security Center ride-along: the details wrapper is native (open on
+    // click, no JS control) and the div inside it is filled by
+    // renderSecurityCenter when the view opens — pinned below.
+    'securityCenterDetails', 'securityCenter',
     // The two BYO key fields are inputs (self-closing): the hunt's
     // "text after the tag" walk skips past them into the NEXT field's
     // label copy, which is content, not a dead control.
@@ -162,24 +172,38 @@ test('the delete is the last element of the Settings page, with nothing under it
   assert.equal(groups[groups.length - 1], v.lastIndexOf('class="set-group'),
     'the delete sits in the last group — a group added after it would bury it again');
   assert.ok(deleteAt > groups[groups.length - 1], 'and the button is inside that last group');
-  assert.ok(v.indexOf('id="securityCenter"') === -1,
-    'the Security Center must not be part of Settings; it is what made this page 2500px');
+  // The Security Center IS part of Settings again (M3, Approvals deleted) —
+  // but the reason it left is measured here, not assumed away: it must sit
+  // BEFORE the delete and inside <details>, so the default page keeps its
+  // length and the delete never moves.
+  const secAt = v.indexOf('id="securityCenter"');
+  assert.ok(secAt > -1, 'the Security Center must live in Settings — Approvals, its old home, is gone');
+  assert.ok(secAt < deleteAt, 'and above the delete, never below it');
+  const detailsAt = v.lastIndexOf('<details', secAt);
+  assert.ok(detailsAt > -1 && detailsAt < secAt, 'wrapped in <details> — collapsed by default is what fixes the 2500px page');
+  assert.ok(!/<details[^>]*open/.test(v.slice(detailsAt, secAt)),
+    'closed by default; opening is the reader\u2019s choice, not the page\u2019s');
   assert.equal((v.match(/btn-danger/g) || []).length, 1, 'one delete, not two');
 });
 
-test('the Security Center renders in the Approvals view, not in Settings', () => {
-  assert.ok(view('approval').includes('id="securityCenter"'),
-    'the Center belongs beside the approval scanner — both answer "what can a dApp take from me"');
-  // The switch to a block was deliberate: opening the view now runs the
-  // approval scan as well, so the single-line form is gone. What must survive
-  // is the binding itself — a Center whose div never gets painted is the same
-  // silent death as a route nobody can reach.
-  assert.match(app, /if \(view === 'approval'\) \{[\s\S]{0,260}renderSecurityCenter\(\$\('#securityCenter'\)\)/,
-    'and it must be rendered when THAT view opens, or the div stays empty');
-  // The link it used to hold pointed at the view it now lives inside, so it was
-  // removed. A button that navigates to the page you are already on is a dead
-  // control wearing a working one's clothes.
+test('the Security Center renders in Settings (collapsed), and Approvals is really gone', () => {
+  const v = view('settings');
+  assert.ok(v.includes('id="securityCenter"'),
+    'its documented original home — the header of security-center.js still says so');
+  // The binding must fire when Settings opens: a Center whose div never gets
+  // painted is the same silent death as a route nobody can reach.
+  assert.match(app, /if \(view === 'settings'\)\s*\n?\s*renderSecurityCenter\(\$\('#securityCenter'\)\)/,
+    'and it must be rendered when Settings opens, or the div stays empty');
+  // No self-referential link, ever: a button that navigates to the page you
+  // are already on is a dead control wearing a working one's clothes.
   assert.ok(!sec.includes('secGoApprovals'), 'the self-referential Approvals link must be gone');
+  // The deletion itself, pinned: no view, no nav item, no dispatcher arm,
+  // no scanner. Half-removing a feature is how half-features ship.
+  assert.ok(!html.includes('id="view-approval"'), 'the Approvals view must not exist');
+  assert.ok(!html.includes('data-view="approval"'), 'and no nav item or quick action may point at it');
+  assert.doesNotMatch(app, /view === 'approval'/, 'no dispatch arm may still open it');
+  assert.doesNotMatch(app, /function scanApprovals/, 'the scanner is deleted, not orphaned');
+  assert.match(html, /id="view-discord"/, 'the slot the user ordered: discord in its place');
 });
 
 test('every view a phone cannot see in the bar still has a way in', () => {
@@ -229,8 +253,8 @@ test('EIP-7702 scan: tombol delete results muncul setelah scan (markup + wiring)
   assert.ok(!v.includes('Delete logs'), 'label must not claim to delete debug logs — it does not');
   assert.ok(v.indexOf('id="btnClearEipResults"') < v.indexOf('id="btnClearAllData"'),
     'the results button must not push the irreversible delete out of last place');
-  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 5,
-    'the button joins the EIP-7702 group (five groups now: Appearance, Safety, NFT keys, EIP-7702, delete)');
+  assert.equal((v.match(/class="set-group[ "]/g) || []).length, 6,
+    'the button joins the EIP-7702 group (six groups now: Appearance, Safety, NFT keys, EIP-7702, Security Center, delete)');
   assert.ok(app.includes('btnClearEipResults'), 'app.js must reveal the button after the scan');
   // Kontrak perilaku: klik = KOSONGKAN output cek (#eip7702Results), bukan
   // clearLogs() — permintaan live: "itu bukan delete debug tapi delete output

@@ -374,7 +374,7 @@ test.describe('Mobile navigation parity', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    for (const v of ['approval', 'deploy', 'dapps', 'settings']) {
+    for (const v of ['discord', 'deploy', 'dapps', 'settings']) {
       await openView(page, v);
       await expect(page.locator('#view-' + v), `${v} must become the active view`).toHaveClass(/active/);
         // A slot highlights only for its own view, and no slot lights for a view it

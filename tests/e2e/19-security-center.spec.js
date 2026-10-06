@@ -12,7 +12,11 @@ test.describe('Security Center', () => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
-    await appClick(page, '.nav-item[data-view="approval"]');
+    // M3: the Center moved back to Settings (Approvals was removed) inside a
+    // collapsed <details> — closed by default is what keeps the delete last,
+    // so the spec opens it before asserting anything inside.
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await page.click('#securityCenterDetails summary');
     await page.waitForSelector('#securityCenter .sec-block', { timeout: 10_000 });
   });
 
@@ -82,7 +86,8 @@ test.describe('Security Center', () => {
     await page.evaluate(() => localStorage.setItem('bear.openseaKey', 'test-key-123'));
     await page.reload({ waitUntil: 'domcontentloaded' });
     await skipIntro(page);
-    await appClick(page, '.nav-item[data-view="approval"]');
+    await appClick(page, '.nav-item[data-view="settings"]');
+    await page.click('#securityCenterDetails summary');
     await page.waitForSelector('#secClearKey', { timeout: 10_000 });
     await expect(page.locator('#secKeyRow')).toContainText(/saved/i);
 

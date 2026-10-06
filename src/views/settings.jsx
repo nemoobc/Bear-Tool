@@ -8,7 +8,9 @@ export default function SettingsView() {
                  things were added after this comment was written and both were
                  asked for by name: the EIP-7702 capability check (an answer
                  about the chains, not a preference) sits with the rest of the
-                 network material, and the Security Center stays in Approvals.
+                 network material, and the Security Center — back from Approvals
+                 (M3 removed that view), collapsed inside <details> so an open
+                 Center can never bury the delete again.
 
                  The old line here claimed "five settings, and five is what this
                  page is for." It is now six. A count in a comment rots the moment
@@ -132,6 +134,19 @@ export default function SettingsView() {
                      output" that was never produced. */}
                 <button type="button" className="btn btn-ghost btn-block mt-8" id="btnClearEipResults" hidden>🗑 Delete results</button>
               </div>
+            </div>
+
+            {/* Security Center: home again, collapsed. Closed it is one row —
+                the page keeps its length and the delete below stays where the
+                order test puts it. Opened, it is the same six sections Approvals
+                carried (renderSecurityCenter paints #securityCenter when this
+                view opens — app.js refreshView). */}
+            <div className="set-group">
+              <h4 className="set-group-h" data-i18n="set.group.security">Security Center</h4>
+              <details className="sec-details" id="securityCenterDetails">
+                <summary data-i18n="sec.open">Show what sites and tokens can reach</summary>
+                <div id="securityCenter" className="mt-8"></div>
+              </details>
             </div>
 
             <div className="set-group set-group-danger">

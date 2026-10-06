@@ -113,10 +113,12 @@ test('bridge → tx quote-bound (estimasi gas) + spendUsd amount × harga token'
   assert.match(src, /spendUsd: bridgeSpendUsd/);
 });
 
-test('revoke approval → calldata approve(spender,0) yang akan dikirim diestimasi', () => {
+test('prompt tx dari dapp menaksir tx objek milik request (bukan string)', () => {
   const src = read('app.js');
-  assert.match(src, /0x095ea7b3\$\{String\(a\.spender\)/,
-    'selector 0x095ea7b3 = approve(address,uint256), spender di-pad 32 byte');
+  // The revoke path that used to be pinned here (calldata approve(spender,0)
+  // estimated before the modal) left with the Approval Manager (M3). What
+  // stays is the estimation contract for anything a dapp asks the wallet to
+  // send — the shape the price row depends on.
   assert.match(src, /method === 'eth_sendTransaction' && Array\.isArray\(params\) && params\[0\]/,
     'prompt tx dari dapp menaksir tx objek milik request');
 });

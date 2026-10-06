@@ -1,15 +1,21 @@
-// Bear Tool — tests/eip7702-approval-ui.test.js
+// Bear Tool — tests/eip7702-settings-ui.test.js
 //
-// These two screens changed shape, and neither change can be caught by the
-// module tests next door: eip7702-support.test.js proves the probe classifies
-// correctly, but says nothing about whether Settings ever CALLS it; the
-// approval module tests prove allowances are read, not that the scan starts
-// by itself or that Revoke All exists at all.
+// The Settings screen changed shape, and the module tests next door cannot
+// catch it: eip7702-support.test.js proves the probe classifies correctly,
+// but says nothing about whether Settings ever CALLS it.
 //
 // So these are source gates — the same device dapp-chrome.test.js uses for
 // ids that only appear after React renders. They read the real files and pin
 // the wiring: a handler that exists but is never bound is exactly the class
 // of bug that ships as "the button does nothing".
+//
+// History: this file used to carry the Approval Manager's wiring pins too
+// (auto-scan on view open, Revoke All sequencing, per-row revoke reusing the
+// shared helper). Those tests were deleted WITH the feature in M3 — the user
+// ordered "fitur approvals hapus ganti fitur discord". A gate for a feature
+// that no longer exists would pin nothing but its own ghosts; the removal
+// itself is pinned in settings-shape.test.js (view gone, nav gone, scanner
+// gone) and in ui-nav.test.js (Discord takes the slot on every surface).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -28,7 +34,6 @@ const code = (p) => raw(p)
 const app = code('../js/app.js');
 const probe = code('../js/eip7702-support.js');
 const settings = raw('../src/views/settings.jsx');
-const approval = raw('../src/views/approval.jsx');
 const css = raw('../css/cartoon.css');
 
 // ── Settings: the check exists, and someone actually triggers it ────────────
@@ -101,59 +106,6 @@ test('the rendered verdicts use pills that exist in the stylesheet', () => {
     assert.ok(css.includes(cls), `css carries .${cls}`);
   }
   assert.ok(app.includes('eip7702-${cls}'), 'app builds the same class names it styles');
-});
-
-// ── Approvals: the scan starts itself, Revoke All sequences ─────────────────
-test('the approval view offers Rescan and a Revoke All that starts hidden', () => {
-  assert.ok(approval.includes('id="btnApprovalScan"'), 'manual rescan survives');
-  assert.ok(approval.includes('id="btnApprovalRevokeAll"'), 'bulk action rendered');
-  assert.match(approval, /btn-danger hidden/, 'hidden until there is more than one to revoke');
-  assert.match(approval, /auto|by itself/i, 'the copy tells you the scan is automatic');
-});
-
-test('opening the tab starts the scan, but never ambushes a locked wallet', () => {
-  assert.match(app, /if \(view === 'approval'\) \{[\s\S]{0,200}autoScanApprovals\(\)/,
-    'view switch triggers it');
-  // Firing the unlock modal at someone who merely navigated here is the
-  // difference between "it scanned" and "it demanded a password on arrival".
-  assert.match(app, /function autoScanApprovals\(\) \{\s*\n\s*if \(!get\('address'\)\) return;/,
-    'no wallet → no scan, no modal');
-});
-
-test('Revoke All is bound, and is bound to the sequenced runner', () => {
-  assert.ok(app.includes(`on('#btnApprovalRevokeAll', 'click', revokeAllApprovals)`), 'bound');
-  assert.match(app, /async function revokeAllApprovals\(/, 'runner defined');
-  // The button must reflect whether it can honestly run: one row already has
-  // its own Revoke, and a second path to the same single action is a second
-  // way to press the wrong thing.
-  assert.match(app, /classList\.toggle\('hidden', approvals\.length < 2\)/, 'shown only for 2+');
-});
-
-test('each revoke in a bulk run is its own transaction the wallet confirms', () => {
-  const bulk = app.slice(app.indexOf('async function revokeAllApprovals('),
-    app.indexOf('function autoScanApprovals('));
-  // Sequencing lives in the loop; signing must not be duplicated there — a
-  // copy of the approve call beside the shared helper is how a bulk path
-  // drifts into sending something the single path never would.
-  assert.ok(!bulk.includes('c.approve('), 'bulk runner holds no approve call of its own');
-  assert.match(bulk, /await revokeApproval\(a\)/, 'it calls the one helper');
-  assert.ok(bulk.includes('confirmTx'), 'one dialog covers the run before any gas is spent');
-  assert.match(bulk, /for \(const a of approvals\)/, 'one at a time, in scanned order');
-
-  const helper = app.slice(app.indexOf('async function revokeApproval('),
-    app.indexOf('/**\n * Walk the whole list'));
-  assert.match(helper, /return \{ ok: true \}/, 'resolves a shape instead of throwing');
-  assert.match(helper, /return \{ ok: false, timedOut: true \}/, 'a timeout is reported, not raised');
-  assert.ok(!helper.includes('throw '), 'a failed revoke is a reported revoke');
-});
-
-test('the per-item button reuses the same helper as the bulk run', () => {
-  // Two code paths to one on-chain action means the second one is where a
-  // forgotten check goes to hide.
-  const single = app.slice(app.indexOf('function renderApprovals('),
-    app.indexOf('async function revokeApproval('));
-  assert.match(single, /await revokeApproval\(a\)/, 'single revoke delegates too');
-  assert.ok(!single.includes('c.approve('), 'and carries no broadcast of its own');
 });
 
 // ── The probe module keeps its hard-won boundaries ──────────────────────────

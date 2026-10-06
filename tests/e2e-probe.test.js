@@ -395,20 +395,14 @@ test('E2E-probe: EIP-7702 flows save + reuse deployed contracts via registry', a
   assert.ok(tools.includes('removeDeployed(type, found.address, chainId)'), 'stale entries must be dropped');
 });
 
-test('E2E-probe: approval scan is honest about its window and has no 10-event cap', async () => {
-  const fs = await import('node:fs');
-  const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  // no arbitrary cap on events per token
-  assert.ok(!app.includes('events.slice(-10)'), 'approval scan must not cap events');
-  // wide window with provider-limit fallback
-  assert.ok(app.includes('block - 100000'), 'approval scan must use a wide window');
-  assert.ok(app.includes('block - 2000'), 'approval scan must keep a fallback window');
-  // revoked approvals (allowance 0) are filtered out
-  assert.ok(app.includes('allowance <= 0n'), 'zero allowances must be skipped');
-  // the UI reports the actual scan window so "Clean! 🐻" is never misleading
-  assert.ok(app.includes('Scan window'), 'UI must disclose the scan window');
-  assert.ok(app.includes('scannedFrom'), 'scan window must be tracked and shown');
-});
+// The approval-window gate (wide window, no 10-event cap, disclosed
+// scan window) lived here and died with the Approval Manager in M3 — the
+// feature was removed on request ("fitur approvals hapus ganti fitur
+// discord"). Nothing replaces it: there is no other scan in app.js with a
+// truncation window to disclose. What remains is the deletion itself,
+// pinned in settings-shape.test.js (view gone, nav gone, scanner gone) —
+// a resurrection would have to invent a #approvalMode the gates would
+// catch at the next run.
 
 // IDs created dynamically by wallet.js modals/forms — not static HTML.
 // Keep this list honest: an entry for an id nothing creates (or nothing
@@ -457,7 +451,13 @@ const dynamicSkip = new Set([
   'cnCustomBtn','cnNameField','cnName','cnDetect',
   // Activity detail sheet (showActivityDetail) — the on-chain block fills in
   // after the modal is already open, so it cannot live in index.html
-  'actChain'
+  'actChain',
+  // Discord view (M3, js/discord.js): everything except #discordRoot is
+  // PAINTED by renderDiscord (connect form, profile card, leave-confirm
+  // modal), because the view's contents depend on the auth state — a static
+  // card in discord.jsx would flash the wrong shape on every reconnect.
+  // Audited below: each id has id="…" in discord.js.
+  'discordStatus','discordClientId','discordToken','btnDiscordLeaveConfirm'
 ]);
 
 test('E2E-probe: every $(\'#id\') reference across ALL js files exists in the page markup', async () => {
