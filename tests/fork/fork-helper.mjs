@@ -602,8 +602,17 @@ export function retryingProvider(p) {
  *
  * A stalled wait therefore gets the same treatment as a stalled call: a bounded
  * promise that rejects, so the failure names the transaction and the wait.
+ *
+ * 150s, not the original 60: the wait runs under withRpcRetry (3 attempts ×
+ * 45s + backoff ≈ 140s), so a 60s deadline cut the ladder after attempt 1 and
+ * every retry log you have ever seen post-dated its own test failure — CI
+ * 37490251865 optimism-sepolia died at "no receipt after 60000ms" with the tx
+ * already mined and receipt reads blocked by upstream transport errors, the
+ * exact shape CI 37005258456 recorded for a forwarded 429. Healthy receipts
+ * still land in <5s; this only decides how long a STALL argues with the
+ * upstream before it is allowed to fail.
  */
-export async function waitForTx(tx, label = 'transaction', timeoutMs = 60000) {
+export async function waitForTx(tx, label = 'transaction', timeoutMs = 150000) {
   if (!tx || typeof tx.wait !== 'function') throw new Error(`${label}: not a transaction`);
   let timer;
   const deadline = new Promise((_, reject) => {
