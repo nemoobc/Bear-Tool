@@ -42,11 +42,21 @@ test.describe('Tools merge — static', () => {
     for (const id of ['deployStandard', 'btnDeploy']) {
       expect(view, `${id} must live in Tools`).toMatch(new RegExp(`id="${id}"`));
     }
-    // EIP-7702 side
-    for (const id of ['helperStatusList', 'delegateAddr', 'btnDelegate', 'btnRevoke',
-      'batchList', 'btnBatchAdd', 'btnRescue', 'claimContract', 'btnClaim',
-      'revokeTarget', 'btnCheckDelegation', 'deployedRegistryList']) {
+    // EIP-7702 side — the four flows the reference tool ships, plus the
+    // deployed-registry card. helperStatusList (the removed Helper Contracts
+    // card, pinned as gone by tests/deploy-contracts.test.js:313) and the
+    // manual delegate form (owner confirmation 2026-10-05) are asserted gone
+    // instead: the old list demanded ids that no longer exist anywhere.
+    for (const id of ['batchList', 'btnBatchAdd', 'btnBatchExecute',
+      'btnRescue', 'claimContract', 'btnClaim',
+      'revokeTarget', 'btnCheckDelegation', 'btnRevokeDelegation',
+      'deployedRegistryList']) {
       expect(view, `${id} must live in Tools`).toMatch(new RegExp(`id="${id}"`));
+    }
+    for (const gone of ['helperStatusList', 'delegateAddr', 'delegateChainId',
+      'delegateAnyChain', 'btnDelegate', 'btnRevoke']) {
+      expect(view, `${gone} was removed with the Smart EOA / Helper Contracts cards`)
+        .not.toMatch(new RegExp(`id="${gone}"`));
     }
     // The OpenSea market actions are contract calls against the wallet, so they
     // belong with the Tools view.
@@ -110,8 +120,11 @@ test.describe('Tools merge — in the browser', () => {
 
   test('Tools shows both the wizard and the EIP-7702 panel', async ({ page }) => {
     await expect(page.locator('#view-deploy')).toHaveClass(/active/);
-    for (const id of ['deployStandard', 'btnDeploy', 'delegateAddr', 'btnDelegate',
-      'btnBatchAdd', 'btnRescue', 'btnClaim', 'btnCheckDelegation']) {
+    // batch / rescue / claim / revoke + the deployed registry — the flows that
+    // replaced the removed manual delegate form (#delegateAddr / #btnDelegate).
+    for (const id of ['deployStandard', 'btnDeploy', 'batchList', 'btnBatchAdd',
+      'btnRescue', 'btnClaim', 'btnCheckDelegation', 'btnRevokeDelegation',
+      'deployedRegistryList']) {
       await expect(page.locator('#' + id), `#${id} must be present in Tools`).toHaveCount(1);
     }
   });
@@ -135,12 +148,24 @@ test.describe('Tools merge — in the browser', () => {
 
   test('every EIP-7702 control in Tools is actually wired to JS', async ({ page }) => {
     // The whole point of the merge: the forms that used to be dead are now the
-    // live ones. Assert they respond rather than sit there inert.
-    await page.fill('#delegateAddr', '0x1234567890123456789012345678901234567890');
-    await expect(page.locator('#delegateAddr')).toHaveValue('0x1234567890123456789012345678901234567890');
-    await page.click('#btnBatchAdd');
-    await expect(page.locator('#batchList .batch-row, #batchList li, #batchList > *'))
-      .toHaveCount(1, { timeout: 5000 });
+    // live ones. Assert they respond rather than sit there inert. A button that
+    // is NOT bound times out here, because an address the app refuses must
+    // raise its error toast synchronously — before any RPC round-trip.
+    await page.fill('#revokeTarget', '0x123');
+    await expect(page.locator('#revokeTarget')).toHaveValue('0x123');
+    await appClick(page, '#btnCheckDelegation');
+    await expect(page.locator('#toast-wrap')).toContainText(/Invalid address/i, { timeout: 5000 });
+    // Same guard on the Revoke button itself (checkDelegation and
+    // revokeDelegation are separate bindings). Clear the first toast so the
+    // second assertion proves THIS click fired, not the previous one.
+    await page.evaluate(() => { document.querySelector('#toast-wrap').innerHTML = ''; });
+    await appClick(page, '#btnRevokeDelegation');
+    await expect(page.locator('#toast-wrap')).toContainText(/Invalid address/i, { timeout: 5000 });
+    // Batch: one click, one row. `.batch-item`, not `#batchList > *` — an EMPTY
+    // queue also renders exactly one child (the "No calls yet." placeholder),
+    // so `> *` passed whether or not the button did anything.
+    await appClick(page, '#btnBatchAdd');
+    await expect(page.locator('#batchList .batch-item')).toHaveCount(1, { timeout: 5000 });
   });
 
   test('the sidebar has exactly one Tools entry and no EIP-7702 entry', async ({ page }) => {

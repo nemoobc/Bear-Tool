@@ -80,7 +80,11 @@ test.describe('Account switcher', () => {
         rows: [...document.querySelectorAll('.asset-bear')].map(read),
         pillLabelCentres: (() => {
           const p = document.getElementById('accountPill');
-          const i = p.querySelector('.pill-bear').getBoundingClientRect();
+          // Since the bear moved INSIDE a wallet pocket (2026-10-05 lockup) the
+          // image itself sits high by design — the pocket must cover its lower
+          // edge. The lockup box is the mark the label centres against; the
+          // bear is a detail inside it.
+          const i = p.querySelector('.pill-wallet').getBoundingClientRect();
           const l = p.querySelector('.label').getBoundingClientRect();
           return Math.abs((i.top + i.height / 2) - (l.top + l.height / 2));
         })(),

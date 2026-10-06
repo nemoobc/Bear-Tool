@@ -313,10 +313,18 @@ test.describe('dApp browser', () => {
     expect(await page.evaluate(() => document.querySelector('.dbr-top > *')?.id),
       '✕ is the first control in the top bar').toBe('dbrClose');
 
-    // The chain badge ends it — the corner OKX puts the network logo in.
+    // The chain badge ends the icon row — the corner OKX puts the network
+    // logo in. The tabs counter (#dbrTabsBtn, the tab batch of 2026-10-05)
+    // is newer and closes the bar after it, so the badge is the LAST control
+    // before that counter, not the DOM-absolute last child.
+    expect(await page.evaluate(() => {
+      const ids = [...document.querySelectorAll('.dbr-top > *')].map((e) => e.id);
+      return ids[ids.length - 2];
+    }),
+    'the chain badge sits at the right end, ahead of the tabs counter').toBe('dbrNet');
     expect(await page.evaluate(() =>
       [...document.querySelectorAll('.dbr-top > *')].pop()?.id),
-    'the chain badge closes the top bar').toBe('dbrNet');
+    'the tabs counter closes the top bar').toBe('dbrTabsBtn');
     await expect(page.locator('#dbrNet')).toBeVisible();
 
     // …and it says which network it is showing.

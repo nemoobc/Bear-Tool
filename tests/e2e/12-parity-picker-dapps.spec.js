@@ -8,12 +8,18 @@
 //   #6  pasting a contract address detects name/symbol/decimals
 //   #7  DApps filter by text and category, cards are keyboard operable
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, createWallet, appClick , openView} from './helpers.js';
+import { gotoApp, skipIntro, createWallet, appClick, openView, proxyRpc, FORKS } from './helpers.js';
 
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // Ethereum mainnet
 
 test.describe('Asset list', () => {
   test.beforeEach(async ({ page }) => {
+    // The list renders from RPC answers. The LambdaTest cloud's IPs are
+    // rate-limited by the public endpoints (proved twice: the sheet test
+    // came up with an EMPTY list while the GitHub runner was fine), so the
+    // app's ethereum hosts are proxied to the local fork — deterministic
+    // everywhere, same as the onchain suite already does.
+    await proxyRpc(page, FORKS.ethereum);
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
@@ -91,7 +97,11 @@ test.describe('Add network picker', () => {
     await page.waitForSelector('#cnSearch', { timeout: 10_000 });
 
     const presets = page.locator('.chain-preset');
-    expect(await presets.count()).toBeGreaterThanOrEqual(15);
+    // 7 presets ship today: 8 graduated into NETWORKS on 2026-10-05 (a chain
+    // listed both as shipped and as an addable preset is the same network in
+    // two places). The floor guards the invariant — a catalogue, not one or
+    // two lonely rows — without pinning an exact count that graduation moves.
+    expect(await presets.count()).toBeGreaterThanOrEqual(5);
     // The old form asked for these by hand; a typo in chainId silently produced
     // a network talking to the wrong chain.
       for (const gone of ['#cnChainId', '#cnSymbol', '#cnExplorer', '#cnType']) {
@@ -116,11 +126,14 @@ test.describe('Add network picker', () => {
     await appClick(page, '#addNetBtn');
     await page.waitForSelector('#cnSearch', { timeout: 10_000 });
 
-    await page.locator('.chain-preset', { hasText: 'Gnosis' }).first().click();
+    // Gnosis graduated into NETWORKS (2026-10-05) and left the preset
+    // catalogue; Cronos is still a preset, so it carries the same invariant —
+    // picking a row fills name, chain and RPC without a keystroke.
+    await page.locator('.chain-preset', { hasText: 'Cronos' }).first().click();
     await expect(page.locator('#cnForm')).toBeVisible();
-    await expect(page.locator('#cnNameLabel')).toHaveText('Gnosis');
-    await expect(page.locator('#cnChainLabel')).toContainText('Chain 100');
-    await expect(page.locator('#cnRpc')).toHaveValue('https://gnosis-rpc.publicnode.com');
+    await expect(page.locator('#cnNameLabel')).toHaveText('Cronos');
+    await expect(page.locator('#cnChainLabel')).toContainText('Chain 25');
+    await expect(page.locator('#cnRpc')).toHaveValue('https://evm.cronos.org');
   });
 
   test('#5 the picker search narrows the list', async ({ page }) => {
@@ -129,11 +142,13 @@ test.describe('Add network picker', () => {
     await appClick(page, '#addNetBtn');
     await page.waitForSelector('#cnSearch', { timeout: 10_000 });
 
-    await page.fill('#cnSearch', 'celo');
+    // 'celo' left the catalogue when Celo graduated into NETWORKS; Moonbeam
+    // is still a preset, and the search only ever narrows the preset list.
+    await page.fill('#cnSearch', 'moon');
     await page.waitForTimeout(400);
     const shown = await page.locator('.chain-preset:visible').evaluateAll((els) => els.map((e) => e.dataset.name));
     expect(shown.length).toBeGreaterThan(0);
-    expect(shown.every((n) => /celo/i.test(n))).toBe(true);
+    expect(shown.every((n) => /moon/i.test(n))).toBe(true);
   });
 });
 
@@ -346,9 +361,11 @@ test.describe('Mobile navigation parity', () => {
       await openView(page, v);
       await expect(page.locator('#view-' + v), `${v} must not be desktop-only`).toHaveClass(/active/);
     }
-    // Tools (which carries the EIP-7702 suite) must work on mobile too.
+    // Tools (which carries the EIP-7702 suite) must work on mobile too. The
+    // manual delegate form was removed (owner confirmation 2026-10-05); the
+    // Revoke card is its surviving control and carries the same proof.
     await openView(page, 'deploy');
-    await expect(page.locator('#btnDelegate')).toHaveCount(1);
+    await expect(page.locator('#btnRevokeDelegation')).toHaveCount(1);
     await expect(page.locator('#deployStandard')).toHaveCount(1);
     expect(slots).toEqual(['dashboard', 'activity', 'swap', 'dapps', 'settings']);
   });

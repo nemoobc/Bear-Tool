@@ -24,6 +24,9 @@ const tp    = readFileSync(new URL('../../js/token-picker.js', import.meta.url),
 const dapps = readFileSync(new URL('../../js/dapps.js', import.meta.url), 'utf8');
 const swap  = readFileSync(new URL('../../js/swap.js', import.meta.url), 'utf8');
 const bridge= readFileSync(new URL('../../js/bridge.js', import.meta.url), 'utf8');
+// The preset catalogue (CHAIN_PRESETS + NETWORKS) lives in network.js since
+// 2026-10-05 — the type-casing invariant below is about THOSE declarations.
+const net   = readFileSync(new URL('../../js/network.js', import.meta.url), 'utf8');
 // M2: picker forms (swapFrom/Btn/Panel, bridge*) live in src/views/*.jsx —
 // staticHtml = shell + views (CI 36930970112: indexOf -1 on shell alone).
 const html  = staticHtml;
@@ -78,14 +81,16 @@ test.describe('Casing — static', () => {
     // No such attribute exists anywhere — the rows are built in JS — so it
     // asserted something that was never implemented rather than the invariant
     // it meant to protect. The real invariant is that every preset stores a
-    // LOWER-CASE type, because the filters compare against 'mainnet'.
-    const types = [...app.matchAll(/type:\s*'([a-z]+)'/g)].map((m) => m[1]);
+    // LOWER-CASE type, because the filters compare against 'mainnet'. The
+    // declarations moved to network.js when the catalogue graduated out of
+    // app.js (2026-10-05), so the scan covers both files.
+    const types = [...(app + net).matchAll(/type:\s*'([a-z]+)'/g)].map((m) => m[1]);
     expect(types.length, 'presets must declare a type').toBeGreaterThan(0);
     for (const t of new Set(types)) {
       expect(['mainnet', 'testnet'], `preset type "${t}" must be lower-case`).toContain(t);
     }
     // And nothing may write the title-cased form back into state.
-    expect(app).not.toMatch(/\.type\s*=\s*titleCase\(/);
+    expect(app + net).not.toMatch(/\.type\s*=\s*titleCase\(/);
   });
 });
 
@@ -234,7 +239,13 @@ test.describe('Pickers — in the browser', () => {
         inside: p.left >= -0.5 && p.right <= window.innerWidth + 0.5
              && p.top >= -0.5 && p.bottom <= window.innerHeight + 0.5,
         rows: document.querySelectorAll('#bridgeFromChainPanel .token-row').length,
-        withArt: document.querySelectorAll('#bridgeFromChainPanel .token-row-logo img, #bridgeFromChainPanel .token-row-logo .token-mark, #bridgeFromChainPanel .token-row-logo .net-logo').length,
+        // getNetworkLogo() (js/token-logo.js) renders inline <svg> since
+        // 2026-10-05 — one renderer for every picker — so the art check is
+        // "some mark inside the logo slot", whatever element carries it.
+        withArt: [...document.querySelectorAll('#bridgeFromChainPanel .token-row')].filter((r) => {
+          const slot = r.querySelector('.token-row-logo');
+          return !!slot && slot.querySelector('img, svg, .token-mark, .net-logo') !== null;
+        }).length,
       };
     });
     expect(m.inside, 'the chain list must stay inside the app').toBe(true);

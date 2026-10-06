@@ -102,9 +102,11 @@ test.describe('Settings & i18n', () => {
     await appClick(page, '#networkPill');
     await expect(page.locator('#netListTestnet [data-net]')).toHaveCount(0);
     await page.keyboard.press('Escape');
-    // One toggle, in Settings — flipping it back on refills the list.
+    // One toggle, in Settings — flipping it back on refills the list. The
+    // switch must still SHOW the OFF we set (it syncs from stored state, never
+    // its own last-known value), the same invariant the reload test pins.
     await appClick(page, '.nav-item[data-view="settings"]');
-    await expect(page.locator('#setTestnet')).toBeChecked();
+    await expect(page.locator('#setTestnet')).not.toBeChecked();
     await appClick(page, '#setTestnet');              // back ON
     await appClick(page, '#networkPill');
     await expect(page.locator('#netListTestnet [data-net="sepolia"]')).toHaveCount(1);

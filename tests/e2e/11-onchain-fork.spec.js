@@ -140,11 +140,34 @@ async function switchNetwork(page, netId) {
   const row = page.locator(`.asset-row[data-net="${netId}"]`);
   await row.waitFor({ timeout: 10_000 });
   await row.scrollIntoViewIfNeeded().catch(() => {});
+  // Re-selecting the row you already stand on is a deliberate no-op since
+  // 342962c (no re-run of the switch, no localStorage write) — decide which
+  // case we are in BEFORE clicking, from the current-row marker.
+  const already = await page.locator(`.asset-row[data-net="${netId}"][data-net-current]`).count();
   await appClick(page, `.asset-row[data-net="${netId}"]`);
-  await page.waitForFunction(
-    (id) => localStorage.getItem('bear.networkId') === id,
-    netId, { timeout: 10_000 }
-  );
+  if (already) {
+    await expect(page.locator('#toast-wrap')).toContainText(/Already on this network/i);
+  } else {
+    await page.waitForFunction(
+      (id) => localStorage.getItem('bear.networkId') === id,
+      netId, { timeout: 10_000 }
+    );
+  }
+  // Whichever path ran, the wallet must end up standing on netId — the modal
+  // names the active network and it must be the one we asked for.
+  await expect(page.locator('#networkName')).toContainText(
+    netId === 'ethereum' ? /Ethereum/i : /./);
+  // The no-op path (re-select current) fires the toast and LEAVES the Networks
+  // modal open — 11:320 deploy then timed out waiting for the overlay to lose
+  // its 'open' class. Close it explicitly so every caller inherits a shut modal.
+  if (await page.locator('#modalOverlay.open').count()) {
+    await page.locator('#modalOverlay.open .modal-close')
+      .first().click({ timeout: 3000 }).catch(() => {});
+    await page.waitForFunction(
+      () => !document.querySelector('#modalOverlay')?.classList.contains('open'),
+      null, { timeout: 5000 }
+    );
+  }
 }
 
 for (const [netId, fork] of Object.entries(FORKS)) {

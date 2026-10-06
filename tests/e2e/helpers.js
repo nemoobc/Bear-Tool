@@ -359,9 +359,16 @@ export async function unlock(page, password = 'password123') {
 }
 
 export async function expectUnlocked(page) {
-  await page.waitForSelector('#accountShort', { timeout: 10_000 });
-  const label = await page.locator('#accountShort').textContent();
-  expect(label).not.toBe('Not connected');
+  // app.js renders #accountShort as `label || 'Not connected'` BEFORE the
+  // restored wallet label arrives — a single textContent read raced that
+  // window and lost under LambdaTest's tunnel latency (01:76 failed while the
+  // very next snapshot already said "Test Wallet"). Wait for the resolved
+  // state instead of sampling it once; a wallet that never restores still
+  // fails the same 10s timeout as before.
+  await page.waitForFunction(() => {
+    const el = document.querySelector('#accountShort');
+    return !!el && el.textContent !== 'Not connected';
+  }, null, { timeout: 10_000 });
 }
 
 // Attach console/page error collectors BEFORE goto. Returns an array.
