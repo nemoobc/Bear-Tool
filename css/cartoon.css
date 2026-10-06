@@ -945,14 +945,19 @@ select.input option, select.select option, .input option {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: none;
-  border: none;
-  border-radius: 12px;
-  font-size: 1.5rem;
+  /* A visible box with the X inside it (user, 2026-10-06: "tombol x nya
+     ganti jadi kotak terus dalam ada x nya"). Float + 44px stay exactly as
+     they were — the QR centering fix above leans on both. */
+  background: var(--cream);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1;
   cursor: pointer;
   color: var(--ink);
 }
-.modal-close:hover { background: var(--cream); }
+.modal-close:hover { background: var(--ink); color: var(--cream); }
 
 /* ═══════════ TOAST ═══════════ */
 #toast-wrap {

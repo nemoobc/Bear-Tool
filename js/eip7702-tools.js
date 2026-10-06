@@ -551,6 +551,21 @@ async function fillMaxRescueAmount() {
   }
 }
 
+// ── target key: mandatory for every rescue deploy & execute ──────────
+// (user, 2026-10-06: "fitur rescue kalau mau deploy harus masukin Target
+// private key"). The empty-field fallback derived the ACTIVE wallet as the
+// target: a deploy recorded a "Rescue target" that was not the target, and
+// an execute signed the 7702 authorization with whatever wallet happened
+// to be unlocked — the wrong authority for the tuple. Local check FIRST,
+// before the sponsor picker: no password prompt over a dead end. Returns
+// the key, or null after a toast already said why.
+function requireTargetKey() {
+  const key = $('#rescueTargetKey')?.value.trim() || '';
+  if (!key) { toast('Target private key is required for rescue', 'error'); return null; }
+  if (!addressFromKey(key)) { toast('Invalid target private key', 'error'); return null; }
+  return key;
+}
+
 async function executeRescue() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const safe = $('#rescueSafe').value.trim();
@@ -563,6 +578,8 @@ async function executeRescue() {
   // a toast) — none of that may hide a plainly invalid address behind it.
   if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
   if (!wallet.isValidAddress(tokenAddr)) return toast('Invalid token contract address', 'error');
+  // Target key first — a missing key must not hide behind a password prompt.
+  if (requireTargetKey() === null) return;
 
   const sponsorKey = await sponsorKeyFromPicker('#rescueSponsorFrom');
   if (sponsorKey === null) return;            // password prompt cancelled
@@ -573,11 +590,12 @@ async function executeRescue() {
   const target = derived.address;
 
   // The 7702 authorization MUST be signed by the target itself — it is the
-  // authority of the tuple; the sponsor can only pay gas. Two ways to hold
-  // that signature: paste the target's private key, or have the target be the
-  // unlocked wallet. Never sign with some other account: refuse rather than
-  // guess. The address itself comes from deriveTargetAddress above, so the
-  // key and the address it claims can no longer disagree.
+  // authority of the tuple; the sponsor can only pay gas. The target's key
+  // is REQUIRED at entry now (requireTargetKey, user 2026-10-06: "kalau mau
+  // deploy harus masukin Target private key"): the old active-wallet
+  // fallback signed with whatever wallet happened to be unlocked. The
+  // address itself comes from deriveTargetAddress above, so the key and
+  // the address it claims can no longer disagree.
   const targetKey = $('#rescueTargetKey')?.value.trim() || '';
   const sponsorAddress = sponsorAddressOf(sponsorKey);
   if (!sponsorAddress) return toast('No usable sponsor — choose a sponsor wallet', 'error');
@@ -1107,6 +1125,9 @@ export async function deployRescueHelper() {
   // Local checks before the sponsor picker: a bad SAFE address is answered
   // with a toast, not with a password prompt over a dead end.
   if (!wallet.isValidAddress(safe)) return toast('Fill a valid SAFE address first', 'error');
+  // Deploying records a Rescue target (user, 2026-10-06): the key that
+  // defines it is mandatory, checked before any password prompt.
+  if (requireTargetKey() === null) return;
   const sponsorKey = await sponsorKeyFromPicker('#rescueSponsorFrom');
   if (sponsorKey === null) return;            // password prompt cancelled
   const derived = deriveTargetAddress();

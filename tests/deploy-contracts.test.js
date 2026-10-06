@@ -370,23 +370,41 @@ test('sponsor key field → wallet-only picker, no auto-detect (rescue + claim +
     'an empty pick stops the flow with a toast instead of assuming the active wallet');
 });
 
-//   "ganti Private Key (Drainner)" (2026-10-06): the label describes the
-//   field's REAL behaviour — pasting is optional, an empty field means the
-//   unlocked wallet signs (eip7702-tools.js derives `targetSigner` from
-//   `targetKey || get('signer')`), and the wording must say so.
-test('target key label → optional wording, field + active-wallet fallback stay', () => {
+//   "kalau mau deploy harus masukin Target private key" (2026-10-06): the
+//   field is REQUIRED — the old "active wallet if empty" fallback derived
+//   whatever wallet happened to be unlocked as the rescue target, so a
+//   deploy recorded a Rescue target that was not the target and an execute
+//   could sign the 7702 authorization with the wrong authority.
+test('target key label → required wording; kosong menghentikan deploy & execute', () => {
   const view = fs.readFileSync(new URL('../src/views/deploy.jsx', import.meta.url), 'utf8');
-  assert.match(view, /Target private key \(optional — active wallet if empty\)/,
-    'label states the optionality it actually has');
+  // Scope: the RESCUE field. Claim's own target key (claimTargetKey) keeps
+  // its wording — the user asked for rescue, and scope does not creep.
+  const rescueAt = view.indexOf('htmlFor="rescueTargetKey"');
+  assert.ok(rescueAt > -1, 'field rescue ada');
+  const rescueLabel = view.slice(rescueAt, rescueAt + 140);
+  assert.match(rescueLabel, /Target private key \(required — rescue deploys against this key\)/,
+    'label states the requirement it actually enforces');
+  assert.doesNotMatch(rescueLabel, /optional/,
+    'the old optional wording on the rescue field is gone');
   assert.doesNotMatch(view, /Private Key \(Drainner\)/, 'the old label text is gone');
   assert.doesNotMatch(view, /Target private key \(if the wallet is not unlocked\)/,
     'the older label text is gone too');
   assert.match(view, /id="rescueTargetKey"/, 'the target key input itself stays');
-  // The label promises "active wallet if empty" — pin the behaviour behind it,
-  // otherwise a future change to the fallback silently makes the label a lie.
+  // The behaviour BEHIND the label: an empty key stops BOTH entry points
+  // before any password prompt (cheap-first), instead of falling back.
   const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
-  assert.match(tools, /targetKey \? new ethers\.Wallet\(targetKey, provider\) : get\('signer'\)/,
-    'an empty target key really falls back to the active wallet');
+  assert.match(tools, /function requireTargetKey\(\)/, 'the gate exists once');
+  assert.match(tools, /if \(!key\) \{ toast\('Target private key is required for rescue', 'error'\); return null; \}/,
+    'empty field → toast + stop — no silent active-wallet fallback');
+  for (const name of ['async function executeRescue', 'async function deployRescueHelper']) {
+    const at = tools.indexOf(name);
+    assert.ok(at > -1, `${name} ada`);
+    const body = tools.slice(at, at + 1600);
+    const gate = body.indexOf('requireTargetKey() === null');
+    const picker = body.indexOf('sponsorKeyFromPicker(');
+    assert.ok(gate > -1, `${name}: gate dipanggil`);
+    assert.ok(picker > -1 && gate < picker, `${name}: gate SEBELUM sponsor picker (validasi lokal dulu)`);
+  }
 });
 
 // ── live request (2026-10-03): "kalau udah bandingin sama bear tool batch,
