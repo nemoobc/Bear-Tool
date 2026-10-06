@@ -11,6 +11,11 @@ jobs:
   unit-tests:
     name: Unit & Regression Tests
     runs-on: ubuntu-latest
+    # A job that hangs must become a red X, not a runner held hostage: two
+    # runs died silently inside `npm test` (4h14m and 31m until manually
+    # cancelled). The in-test timeout fires first and names the test; this is
+    # the backstop for anything else that stops answering.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +52,11 @@ jobs:
           # Fail loudly: a gate that does not run is decoration.
           grep -q "fail 0" /tmp/npm-test.log || {
             echo "::error::npm test reported failures"; exit 1; }
+          # A timed-out test lands in `cancelled`, not `fail` — the summary
+          # still says "fail 0", so without this the M9 stall below would be
+          # the ONLY thing that could ever catch a hang.
+          grep -q "^ℹ cancelled 0" /tmp/npm-test.log || {
+            echo "::error::npm test reported cancelled tests (timeout or interrupt)"; exit 1; }
           # And fail loudly if the M9 proxy runtime proof was SKIPPED — "fail 0"
           # is unchanged by a skipped test, so a runner without anvil on PATH
           # would stay green while proving nothing about the deployed proxy pair.

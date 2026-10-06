@@ -64,7 +64,10 @@ async function injectRealSolc() {
   const local = solcCandidates.find((f) => existsSync(f));
   let code = local ? readFileSync(local, 'utf8') : null;
   if (!code) {
-    const res = await fetch(solcJs.SOLC_URL);
+    // 60s abort, not a silent forever: this download has no retry and no
+    // progress bar, and a stalled connection once held the whole CI unit job
+    // inside npm test for 4 hours with nothing on screen (run 37446987299).
+    const res = await fetch(solcJs.SOLC_URL, { signal: AbortSignal.timeout(60_000) });
     if (res.status !== 200) throw new Error(`compiler download HTTP ${res.status}`);
     code = await res.text();
   }
@@ -133,7 +136,12 @@ async function build(overrides) {
  *  warns about the duplicate, and neither is called through a proxy. */
 const both = (a, b) => [...a, ...b].filter((f) => f.type !== 'constructor');
 
-test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skipReason }, async (t) => {
+// 300s: every await inside is unbounded by design (waitForDeployment, .wait(),
+// receipt polls — ethers retries forever against a node that stopped
+// answering). Locally the test takes tens of seconds; a runner stall then
+// becomes a FAILING test naming itself instead of a job silent for 4 hours
+// (runs 37446987299, 37487059130, both cancelled mid-`npm test`).
+test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skipReason, timeout: 300_000 }, async (t) => {
   if (skipReason) return;
   // A missing compiler is an unavailable tool (skip, and say so). Anvil that
   // is INSTALLED but refuses to start is a broken test, not a missing tool —
