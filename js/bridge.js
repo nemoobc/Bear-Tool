@@ -771,6 +771,14 @@ async function doBridgeExecInner() {
     if (!ok) return;
   }
 
+  // Money line: amount spent in $ + gas estimated from the quote-bound tx
+  // (user, 2026-10-06). If the provider sits on the wrong chain the estimate
+  // fails — the row degrades to '(excl. gas)' rather than inventing a fee.
+  const bTok = context.tokenAddress
+    ? get('tokens').find(x => x.address && x.address.toLowerCase() === context.tokenAddress.toLowerCase())
+    : get('tokens').find(x => !x.address);
+  const bridgeSpendUsd = Number(bTok?.usd) > 0 ? parseFloat(context.amount) * Number(bTok.usd) : null;
+
   // sign confirmation — show full bridge details before signing
   const signOk = await confirmTx({
     title: '✍️ SIGN BRIDGE',
@@ -783,7 +791,9 @@ async function doBridgeExecInner() {
     ],
     confirmText: 'Confirm',
     cancelText: 'Cancel',
-    danger: false
+    danger: false,
+    tx: { to: boundTx.to, data: boundTx.data, value: boundTx.value },
+    spendUsd: bridgeSpendUsd,
   });
   if (!signOk) return toast('Bridge cancelled', 'info');
 

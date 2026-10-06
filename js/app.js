@@ -694,6 +694,12 @@ function installBridge() {
           ],
           confirmText: worst && worst.level === 'fail' ? 'Send anyway' : 'Confirm',
           cancelText: 'Cancel',
+          // Money line for spending calls: the request's own tx object
+          // carries value + calldata, so the dialog can price what the site
+          // is asking for (user, 2026-10-06). Read-only signs add no row.
+          ...(method === 'eth_sendTransaction' && Array.isArray(params) && params[0]
+            ? { tx: { to: params[0].to, data: params[0].data, value: params[0].value } }
+            : {}),
         });
         if (!okToSign) return null;
       }
@@ -2586,7 +2592,15 @@ function renderApprovals(approvals, scannedFrom = null) {
     const ok = await confirmTx({
       title: 'Revoke approval?',
       rows: [{ k: 'Token', v: a.token.symbol }, { k: 'Spender', v: wallet.shortAddress(a.spender) }],
-      confirmText: 'Revoke', danger: true
+      confirmText: 'Revoke', danger: true,
+      // Money line: revoke moves no value, but the gas is real — estimate
+      // the exact approve(spender, 0) calldata, hand-encoded (selector
+      // 0x095ea7b3) so the dialog prices the tx it is about to sign
+      // (user, 2026-10-06).
+      tx: {
+        to: a.token.address,
+        data: `0x095ea7b3${String(a.spender).toLowerCase().replace(/^0x/, '').padStart(64, '0')}${'0'.repeat(64)}`,
+      },
     });
     if (!ok) return;
     const res = await revokeApproval(a);

@@ -320,6 +320,22 @@ export async function doSend() {
     if (!ok) return;
   }
 
+  // Money line for the dialog: spend + worst-case gas in $ (user,
+  // 2026-10-06: total price $ missing). Same 21000/65000 × buildFeeParams
+  // numbers the preview shows, so the dialog cannot disagree with the
+  // "Est. gas" row above it. Bounded — a dead node leaves the row at
+  // '(excl. gas)' instead of hanging the confirm.
+  let signGasWei = null;
+  try {
+    const provider = get('provider');
+    if (provider) {
+      const feeData = await withTimeout(provider.getFeeData(), RPC_TIMEOUT_MS, 'confirm fee');
+      const worst = buildFeeParams(feeData, gasSpeed);
+      signGasWei = (t.address ? 65000n : 21000n) * (worst.maxFeePerGas ?? worst.baseFee);
+    }
+  } catch { signGasWei = null; }
+  const signSpendUsd = Number(t.usd) > 0 ? parseFloat(amt) * Number(t.usd) : null;
+
   // sign confirmation — show full tx details before signing
   const signOk = await confirmTx({
     title: '✍️ SIGN TRANSACTION',
@@ -332,7 +348,9 @@ export async function doSend() {
     ],
     confirmText: 'Confirm & Send',
     cancelText: 'Cancel',
-    danger: false
+    danger: false,
+    spendUsd: signSpendUsd,
+    gasWei: signGasWei,
   });
   if (!signOk) return toast('Transaction cancelled', 'info');
 

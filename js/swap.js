@@ -619,6 +619,13 @@ export async function doSwap() {
     if (!ok) return;
   }
 
+  // Money line: the amount being spent in $ (user, 2026-10-06). Native or
+  // ERC-20 — both live in the token list with a usd price. Gas has no tx
+  // object this early (calldata is built after the dialog), so the row
+  // says '(excl. gas)' instead of pretending.
+  const fromTok = get('tokens').find(x => (x.address || 'native') === from);
+  const swapSpendUsd = Number(fromTok?.usd) > 0 ? parseFloat(amt) * Number(fromTok.usd) : null;
+
   // sign confirmation — show full swap details before signing
   const signOk = await confirmTx({
     title: '✍️ SIGN SWAP',
@@ -631,7 +638,8 @@ export async function doSwap() {
     ],
     confirmText: 'Confirm',
     cancelText: 'Cancel',
-    danger: false
+    danger: false,
+    spendUsd: swapSpendUsd,
   });
   if (!signOk) return toast('Swap cancelled', 'info');
 

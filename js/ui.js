@@ -7,6 +7,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { explainError } from './errors.js';
+import { get } from './state.js';
 
 export function $(sel) { return document.querySelector(sel); }
 export function $all(sel) { return document.querySelectorAll(sel); }
@@ -261,6 +262,77 @@ export function animateValue(el, target, { duration = 800, formatter = v => v } 
   requestAnimationFrame(tick);
 }
 
+// ── total price (USD) ───────────────────────────────────────────────────
+// Every signing dialog answers "how much is this in money?" in one row
+// (user, 2026-10-06: "setiap deploy kontrak itu ga ada total price $ bikin
+// user bingung"). Total = spend (caller amount or tx value) + gas at the
+// worst-case fee, converted with the native token's cached USD price.
+// Unreadable pieces stay honest — '(excl. gas)' when gas could not be read,
+// '(USD ?)' when there is no rate: a made-up $0 is worse than a dash.
+// Best effort: a confirm must never fail to open because an estimate did
+// not come back.
+function fmtEth(wei) {
+  const n = Number(wei) / 1e18;
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return `${(n >= 1 ? n.toFixed(4) : n.toFixed(7)).replace(/\.?0+$/, '')} ETH`;
+}
+export async function totalPriceRow({ tx, valueWei, gasWei, spendUsd, totalNote } = {}) {
+  // Gas: the caller's exact number first (many already estimated it once
+  // for a preview row — do not pay for a second estimate); otherwise
+  // estimate the tx here, bounded at 8s so a dead node cannot hold the
+  // dialog hostage.
+  let gas = null;
+  if (gasWei != null && gasWei !== '') {
+    try { gas = BigInt(gasWei); } catch { gas = null; }
+  } else if (tx) {
+    try {
+      const provider = get('provider');
+      if (provider) {
+        const from = get('address') || undefined;
+        const est = Promise.all([
+          provider.estimateGas({ ...tx, from }),
+          provider.getFeeData(),
+        ]).then(([limit, fee]) => BigInt(limit) * BigInt(fee.maxFeePerGas ?? fee.gasPrice ?? 0n));
+        gas = await Promise.race([est, new Promise((r) => setTimeout(() => r(null), 8000))]);
+      }
+    } catch { gas = null; }
+  }
+  let value = 0n;
+  try { value = BigInt(valueWei ?? tx?.value ?? 0); } catch { value = 0n; }
+
+  const nativeUsd = Number((get('tokens') || []).find((t) => !t.address)?.usd);
+  const rate = Number.isFinite(nativeUsd) && nativeUsd > 0 ? nativeUsd : null;
+  const spendNum = spendUsd != null && Number.isFinite(Number(spendUsd)) ? Number(spendUsd) : null;
+
+  const knownSpend = spendNum != null || value > 0n;
+  // 0 gas is not real gas (an unknown price multiplies out to 0n) — treat
+  // it as unreadable rather than printing a confident $0.00.
+  const knownGas = gas != null && gas > 0n;
+  if (!knownSpend && !knownGas) return null;
+
+  const notes = totalNote ? [String(totalNote)] : [];
+  let usd = null;
+  if (rate != null) {
+    const spend = spendNum != null ? spendNum : (Number(value) / 1e18) * rate;
+    usd = spend + (knownGas ? (Number(gas) / 1e18) * rate : 0);
+    if (!knownGas) notes.push('excl. gas');
+  } else if (spendNum != null) {
+    // Dollars were given but there is no native rate → gas cannot join.
+    usd = spendNum;
+    notes.push('excl. gas');
+  }
+  const noteStr = notes.length ? ` (${notes.join(' · ')})` : '';
+  if (usd != null) return { k: 'Total price', v: `≈ $${usd.toFixed(2)}${noteStr}` };
+
+  // No rate, no spendUsd: the native parts are still worth showing.
+  const parts = [];
+  const vPart = fmtEth(value);
+  if (vPart) parts.push(vPart);
+  if (knownGas) { const g = fmtEth(gas); if (g) parts.push(`gas ${g}`); }
+  if (!parts.length) return null;
+  return { k: 'Total price', v: `${parts.join(' + ')} (USD ?)` };
+}
+
 // ── confirm dialog with bear ──
 // Cancel, and a button that says what it does. That is the whole dialog.
 //
@@ -275,9 +347,18 @@ export function animateValue(el, target, { duration = 800, formatter = v => v } 
 //
 // Danger is still expressed - the bear's question is prefixed, the button turns
 // red, and the rows say what is about to happen. What is gone is the puzzle.
-export function confirmTx({ title, rows, confirmText = 'Confirm', cancelText = 'Cancel', danger = false }) {
+export async function confirmTx({ title, rows, confirmText = 'Confirm', cancelText = 'Cancel', danger = false, ...money }) {
+  // The money row is built BEFORE the modal opens — a row appearing later
+  // would push the buttons out from under the cursor. Extra keys (tx,
+  // valueWei, gasWei, spendUsd, totalNote) go to totalPriceRow; a confirm
+  // with no money keys adds no row.
+  let list = rows || [];
+  try {
+    const total = await totalPriceRow(money);
+    if (total) list = [...list, total];
+  } catch { /* total is informational — never block the confirm */ }
   return new Promise((resolve) => {
-    const rowsHtml = rows.map(r =>
+    const rowsHtml = list.map(r =>
       `<div class="row"><span class="k">${escapeHtml(r.k)}</span><span class="v">${escapeHtml(r.v)}</span></div>`
     ).join('');
     openModal(`

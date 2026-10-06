@@ -258,6 +258,11 @@ export async function doDeploy() {
         { k: upg ? 'Est. cost (implementation)' : 'Est. cost', v: costLabel }],
       confirmText: 'Confirm',
       danger: net.type === 'mainnet',
+      // Money line: gas already estimated above, spend is 0 (contract
+      // creation moves no value) — the $ figure is gas × native USD price.
+      gasWei: cost,
+      valueWei: 0,
+      totalNote: upg ? 'tx 1 only' : null,
     });
     if (!ok) { setDeployStatus('Deploy cancelled.'); return; }
 
