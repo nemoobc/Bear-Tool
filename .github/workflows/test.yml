@@ -54,8 +54,10 @@ jobs:
             echo "::error::npm test reported failures"; exit 1; }
           # A timed-out test lands in `cancelled`, not `fail` — the summary
           # still says "fail 0", so without this the M9 stall below would be
-          # the ONLY thing that could ever catch a hang.
-          grep -q "^ℹ cancelled 0" /tmp/npm-test.log || {
+          # the ONLY thing that could ever catch a hang. The summary marker is
+          # `ℹ` on a TTY and `#` in CI's TAP output — match both (the first
+          # version matched only `ℹ` and failed a fully green run).
+          grep -qE "^(ℹ|#) cancelled 0" /tmp/npm-test.log || {
             echo "::error::npm test reported cancelled tests (timeout or interrupt)"; exit 1; }
           # And fail loudly if the M9 proxy runtime proof was SKIPPED — "fail 0"
           # is unchanged by a skipped test, so a runner without anvil on PATH
