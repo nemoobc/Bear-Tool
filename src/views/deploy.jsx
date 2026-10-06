@@ -134,7 +134,7 @@ export default function DeployView() {
             </div>
             <button type="button" className="btn btn-secondary btn-block mb-8" id="btnDeployRescueHelper">Deploy contract</button>
             <div className="field">
-              <label htmlFor="rescueTargetKey">Private Key (Drainner)</label>
+              <label htmlFor="rescueTargetKey">Target private key (optional — active wallet if empty)</label>
               <div className="input-group">
                 <input className="input" type="password" id="rescueTargetKey" placeholder="0x..." autoComplete="off" />
                 <button type="button" className="btn btn-ghost btn-sm" id="btnRescueTargetKeyToggle" aria-label="Show target key" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>

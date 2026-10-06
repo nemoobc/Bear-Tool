@@ -370,12 +370,23 @@ test('sponsor key field → wallet-only picker, no auto-detect (rescue + claim +
     'an empty pick stops the flow with a toast instead of assuming the active wallet');
 });
 
-test('target key label → Private Key (Drainner), field stays', () => {
+//   "ganti Private Key (Drainner)" (2026-10-06): the label describes the
+//   field's REAL behaviour — pasting is optional, an empty field means the
+//   unlocked wallet signs (eip7702-tools.js derives `targetSigner` from
+//   `targetKey || get('signer')`), and the wording must say so.
+test('target key label → optional wording, field + active-wallet fallback stay', () => {
   const view = fs.readFileSync(new URL('../src/views/deploy.jsx', import.meta.url), 'utf8');
-  assert.match(view, /Private Key \(Drainner\)/, 'new label text');
+  assert.match(view, /Target private key \(optional — active wallet if empty\)/,
+    'label states the optionality it actually has');
+  assert.doesNotMatch(view, /Private Key \(Drainner\)/, 'the old label text is gone');
   assert.doesNotMatch(view, /Target private key \(if the wallet is not unlocked\)/,
-    'old label text is gone');
+    'the older label text is gone too');
   assert.match(view, /id="rescueTargetKey"/, 'the target key input itself stays');
+  // The label promises "active wallet if empty" — pin the behaviour behind it,
+  // otherwise a future change to the fallback silently makes the label a lie.
+  const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
+  assert.match(tools, /targetKey \? new ethers\.Wallet\(targetKey, provider\) : get\('signer'\)/,
+    'an empty target key really falls back to the active wallet');
 });
 
 // ── live request (2026-10-03): "kalau udah bandingin sama bear tool batch,
