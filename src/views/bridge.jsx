@@ -17,9 +17,24 @@ export default function BridgeView() {
                   <div className="token-picker" data-picker="bridgeToChain"><select className="select bridge-chain-select token-picker-native" id="bridgeToChain" aria-label="destination chain"></select><button type="button" className="token-picker-trigger" id="bridgeToChainBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose destination chain"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeToChainPanel" role="listbox" hidden></div></div>
                 </div>
               </div>
-              <div className="field">
-                <label htmlFor="bridgeToken">Token</label>
-                <div className="token-picker" data-picker="bridgeToken"><select className="select token-picker-native" id="bridgeToken" aria-label="token"></select><button type="button" className="token-picker-trigger" id="bridgeTokenBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose token"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeTokenPanel" role="listbox" hidden></div></div>
+              {/* Two token columns like swap (live report 2026-10-06:
+                  "kolom token ... jaringan eth token = jaringan bnb token").
+                  Left = what leaves the source chain, right = the curated
+                  twin that lands on the destination chain; js/bridge.js keeps
+                  the two painted from ONE option list so they can never
+                  disagree. Same .bridge-chains grid as the chain row, which
+                  already carries the min-width:0 that stops a long label
+                  pushing the row past the phone's edge. */}
+              <div className="bridge-chains bridge-token-row">
+                <div className="bridge-chain-field">
+                  <label htmlFor="bridgeToken">From token</label>
+                  <div className="token-picker" data-picker="bridgeToken"><select className="select token-picker-native" id="bridgeToken" aria-label="from token"></select><button type="button" className="token-picker-trigger" id="bridgeTokenBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose source token"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeTokenPanel" role="listbox" hidden></div></div>
+                </div>
+                <div className="bridge-chain-arrow">→</div>
+                <div className="bridge-chain-field">
+                  <label htmlFor="bridgeToToken">To token</label>
+                  <div className="token-picker" data-picker="bridgeToToken"><select className="select token-picker-native" id="bridgeToToken" aria-label="to token"></select><button type="button" className="token-picker-trigger" id="bridgeToTokenBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose destination token"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeToTokenPanel" role="listbox" hidden></div></div>
+                </div>
               </div>
               <div className="field">
                 <label htmlFor="bridgeAmount">Amount</label>

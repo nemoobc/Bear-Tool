@@ -41,6 +41,7 @@ const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 import { getAllNetworks, getNetworkById, POPULAR_TOKENS } from './network.js';
 import { t } from './i18n.js';
 import { BRIDGE_ROUTERS, getBridgeRoutersForChain, CHAIN_NAMES } from './routers.js';
+import { BRIDGE_ROUTE_FETCHERS } from './bridge-routes.js';
 import { initTokenPicker, initNetworkPicker, initOptionPicker } from './token-picker.js';
 import { explainError } from './errors.js';
 
@@ -204,7 +205,13 @@ export function bindBridgeEvents() {
     if (btn) applyPct(Number(btn.dataset.bridgePct));
   });
 
-  ['#bridgeFromChain', '#bridgeToChain', '#bridgeToken', '#bridgeAmount'].forEach(sel => {
+  // Sync BEFORE the debounced quote so the 600ms timer reads a settled pair.
+  $('#bridgeToken')?.addEventListener('change', () => syncBridgeTokenSide(true));
+  $('#bridgeToToken')?.addEventListener('change', () => syncBridgeTokenSide(false));
+  // A different provider is a different quote — re-run it.
+  $('#bridgeRouterSelect')?.addEventListener('change', debouncedQuote);
+
+  ['#bridgeFromChain', '#bridgeToChain', '#bridgeToken', '#bridgeToToken', '#bridgeAmount'].forEach(sel => {
     const node = el(sel);
     if (node) {
       node.addEventListener('change', debouncedQuote);
@@ -279,14 +286,26 @@ function updateBridgeRouterOptions() {
   sel.innerHTML = '<option value="auto">Auto (Best Route)</option>' +
     common.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
   if ([...sel.options].some(o => o.value === currentVal)) sel.value = currentVal;
+  // The in-app picker snapshots the labels at init — refresh them here or it
+  // keeps offering the previous provider list after the options are rebuilt.
+  initOptionPicker('bridgeRouterSelect', [...sel.options].map(o => o.textContent));
 }
 
-// Repaint #bridgeToken for the CURRENT chain pair. Keeps the selection when
-// it is still a valid option, otherwise falls back to native (never keeps a
-// token the new source chain does not curate). Called by loadBridgeChains and
-// on every from/to change.
+// The destination-side value of one option: native stays "native", an ERC-20
+// carries the TWIN address (what the quote asks the router to deliver). Both
+// columns are painted from this, so the pair can never drift apart.
+function toValueOf(o) {
+  return o.value === 'native' ? 'native' : o.toAddress;
+}
+
+// Repaint BOTH token columns for the CURRENT chain pair. Keeps the selection
+// when it is still a valid option, otherwise falls back to native (never keeps
+// a token the new source chain does not curate). The destination column is
+// painted from the SAME option list, so "eth token = bnb token" holds by
+// construction instead of two lists happening to agree.
 function renderBridgeTokenOptions() {
   const tok = $('#bridgeToken');
+  const toTok = $('#bridgeToToken');
   if (!tok) return null;
   const fromNet = getNetworkById($('#bridgeFromChain')?.value) || getNetworkById(get('networkId'));
   const toNet = getNetworkById($('#bridgeToChain')?.value);
@@ -297,6 +316,13 @@ function renderBridgeTokenOptions() {
   // switch and land as an invalid value. Any drop falls back to the first
   // option of the new list (native normally, the ERC-20 on deny-listed pairs).
   const keep = opts.some(o => o.value === tok.value) ? tok.value : (opts[0]?.value ?? 'native');
+  // The destination chain may spell the twin differently (USDC vs USDbC) —
+  // the right column shows the token as IT exists there.
+  const destMeta = (o) => {
+    if (o.value === 'native') return null;
+    return (POPULAR_TOKENS[toNet.chainId] || []).find(x => sameAddr(x.address, o.toAddress)) || null;
+  };
+  const destSymbol = (o) => destMeta(o)?.symbol || o.symbol;
   tok.innerHTML = opts.map(o => {
     const label = o.value === 'native'
       ? `${o.symbol} — ${t('bridge.native')}`
@@ -308,7 +334,38 @@ function renderBridgeTokenOptions() {
     address: o.value === 'native' ? null : o.value,
     symbol: o.symbol, decimals: o.decimals, balance: '0', usd: null,
   })));
+  if (toTok) {
+    const cur = opts.find(o => o.value === keep) || opts[0];
+    toTok.innerHTML = opts.map(o => {
+      const label = o.value === 'native'
+        ? `${destSymbol(o)} — ${t('bridge.native')}`
+        : `${destSymbol(o)} (ERC-20)`;
+      return `<option value="${escapeHtml(toValueOf(o))}">${escapeHtml(label)}</option>`;
+    }).join('');
+    toTok.value = cur ? toValueOf(cur) : 'native';
+    initTokenPicker('bridgeToToken', opts.map(o => ({
+      address: o.value === 'native' ? null : o.toAddress,
+      symbol: destSymbol(o), decimals: destMeta(o)?.decimals ?? o.decimals, balance: '0', usd: null,
+    })));
+  }
   return opts;
+}
+
+// One choice, two views: editing either column moves the other to the option
+// that matches it (same family, opposite chain). Called on `change` of each
+// column — both directions, so the user can start from either side like swap.
+function syncBridgeTokenSide(fromSide) {
+  const fromNet = getNetworkById($('#bridgeFromChain')?.value) || getNetworkById(get('networkId'));
+  const toNet = getNetworkById($('#bridgeToChain')?.value);
+  const tok = $('#bridgeToken'), toTok = $('#bridgeToToken');
+  if (!fromNet || !toNet || !tok || !toTok) return;
+  const opts = bridgeTokenOptions(fromNet, toNet);
+  const o = fromSide
+    ? (opts.find(x => x.value === tok.value) || opts[0])
+    : (opts.find(x => toValueOf(x) === toTok.value) || opts[0]);
+  if (!o) return;
+  if (fromSide) toTok.value = toValueOf(o);
+  else tok.value = o.value;
 }
 
 // The immutable URL builder — quote time and the post-approval re-quote build
@@ -380,7 +437,50 @@ function validateQuote(q, context) {
     fee: est?.feeCosts?.[0]?.amountUSD ?? '?',
     dur: est?.executionDuration ?? '?',
     route,
+    // Destination output for the Auto best-route comparison (see
+    // bridgeRouterCandidates). Missing/odd field → 0n, which ranks last.
+    toAmount: bigOrZero(est?.toAmountMin ?? est?.toAmount),
   };
+}
+
+function bigOrZero(v) {
+  try { return BigInt(v ?? 0); } catch { return 0n; }
+}
+
+// ── router dispatch ──
+// ONE entry that turns (router id + context) into a validated snapshot.
+// Quote time and the post-approval re-quote both call it, so the two paths
+// cannot drift apart — the same reason validateQuote is shared.
+const routerName = (id) => BRIDGE_ROUTERS.find(r => r.id === id)?.name || id;
+
+/**
+ * Which routers may answer for this chain pair: the registry entries
+ * covering BOTH chains, minus the native-only ones when an ERC-20 is being
+ * bridged, narrowed to what the picker says (Auto = all of them).
+ */
+function bridgeRouterCandidates(fromNet, toNet, isNative) {
+  const wanted = $('#bridgeRouterSelect')?.value || 'auto';
+  // An EXPLICIT pick means exactly that router — the select is rebuilt from
+  // the pair∩registry on every chain change (updateBridgeRouterOptions), so
+  // an option the pair does not cover cannot be chosen through the UI; if the
+  // value got there some other way, the adapter fails honestly before any tx.
+  if (wanted !== 'auto') return [wanted];
+  const fromIds = new Set(getBridgeRoutersForChain(fromNet.chainId).map(r => r.id));
+  const pair = getBridgeRoutersForChain(toNet.chainId).filter(r => fromIds.has(r.id));
+  return pair.filter(r => isNative || !r.nativeOnly).map(r => r.id);
+}
+
+async function fetchBoundQuote(routerId, context) {
+  if (routerId === 'lifi') {
+    const res = await fetchWithTimeout(quoteUrl(context));
+    if (!res.ok) throw new Error(`LI.FI HTTP ${res.status}`);
+    // Field-by-field validation against the captured context — a mismatching
+    // or malicious response must never reach execution.
+    return validateQuote(await res.json(), context);
+  }
+  const fn = BRIDGE_ROUTE_FETCHERS[routerId];
+  if (!fn) throw new Error(`Unknown bridge router: ${routerId}`);
+  return fn(context, (url, opts) => fetchWithTimeout(url, opts));
 }
 
 /**
@@ -445,6 +545,14 @@ export async function doBridge() {
     tokenMeta = meta;
     toTokenAddress = twin.address;
   }
+  // The destination column is DERIVED display, not an independent choice:
+  // repaint it from the pair being quoted here (it is painted from this same
+  // list, so the value matches an option exactly). The PAIR itself is still
+  // fail-closed above — a token without a curated twin never reaches fetch;
+  // and if the user drives the destination column instead, syncBridgeTokenSide
+  // moves the source column, which is what every drift guard checks.
+  const toTokEl = $('#bridgeToToken');
+  if (toTokEl) toTokEl.value = toTokenAddress || 'native';
 
   // Quote must match the ACTIVE network — a quote for a chain the
   // wallet is not on would be unsigned context, refuse before fetch.
@@ -534,44 +642,59 @@ export async function doBridge() {
     // LI.FI quote (real API) — honest error on failure, never simulated.
     // fromToken/toToken: the curated addresses (or 0x0 native on both sides);
     // toAddress pinned explicitly so the response destination is exact.
-    const url = quoteUrl(context);
-    const res = await fetchWithTimeout(url);
-    // this request was superseded while awaiting — ignore entirely
-    if (seq !== quoteSeq) return;
-    if (res.ok) {
-      const q = await res.json();
-      if (seq !== quoteSeq) return;
-      // Field-by-field validation against the captured context —
-      // a mismatching/malicious response must never reach execution.
-      // Shared with the post-approval re-quote in doBridgeExec.
-      const bound = validateQuote(q, context);
-      // Quote-bound immutable snapshot — execution uses ONLY this.
-      set('bridgeQuote', {
-        simulated: false,
-        context,
-        approvalAddress: bound.approvalAddress,
-        skipApproval: bound.skipApproval,
-        tx: bound.tx
-      });
-      const fee = bound.fee;
-      const dur = bound.dur;
-      const route = bound.route;
-      box.innerHTML = '';
-      box.classList.add('hidden');
-      routeBox.innerHTML = `
+    // Candidate routers for this chain pair: the picker's explicit choice,
+    // or every registry entry covering BOTH chains when it says Auto. The
+    // native-only adapters drop out before a single request goes out when an
+    // ERC-20 is selected.
+    const candidates = bridgeRouterCandidates(fromNet, toNet, tok === 'native');
+    if (!candidates.length) throw new Error('No bridge router covers this chain pair');
+    const settled = await Promise.allSettled(candidates.map(id => fetchBoundQuote(id, context)));
+    if (seq !== quoteSeq) return;                 // superseded while awaiting
+    const ok = [], errs = [];
+    settled.forEach((r, i) => {
+      if (r.status === 'fulfilled') ok.push({ id: candidates[i], bound: r.value });
+      else errs.push(`${routerName(candidates[i])}: ${r.reason?.message || r.reason}`);
+    });
+    if (!ok.length) {
+      // Every candidate refused — say WHICH and why. No silent fallback and
+      // no invented route: an empty picker helps nobody, a fake one loses money.
+      set('bridgeQuote', null);
+      box.innerHTML = `<div class="quote-error">⚠️ No route available — no bridge will happen.</div>
+        <div class="quote-error-detail">${escapeHtml(errs.join(' · '))}</div>
+        <div class="quote-error-detail">${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)} (${escapeHtml(amt)} ${escapeHtml(fromNet.symbol || '')})</div>`;
+      return;
+    }
+    // "Auto (Best Route)" means what it says: the response carrying the most
+    // of the destination token wins — toAmount is that token's smallest unit,
+    // so all candidates are directly comparable.
+    ok.sort((a, b) => (b.bound.toAmount > a.bound.toAmount ? 1 : -1));
+    const win = ok[0];
+    const bound = win.bound;
+    // Quote-bound immutable snapshot — execution uses ONLY this.
+    set('bridgeQuote', {
+      simulated: false,
+      context,
+      approvalAddress: bound.approvalAddress,
+      skipApproval: bound.skipApproval,
+      tx: bound.tx,
+      router: win.id,
+      routerName: routerName(win.id),
+      toAmount: bound.toAmount,
+    });
+    const fee = bound.fee;
+    const dur = bound.dur;
+    const route = bound.route;
+    box.innerHTML = '';
+    box.classList.add('hidden');
+    routeBox.innerHTML = `
+      <div class="route-row"><span class="route-label">Provider</span><span class="route-val">${escapeHtml(routerName(win.id))}</span></div>
         <div class="route-row"><span class="route-label">Route</span><span class="route-val">${escapeHtml(route)}</span></div>
         <div class="route-row"><span class="route-label">Est. time</span><span class="route-val">${escapeHtml(String(dur))}s</span></div>
         <div class="route-row"><span class="route-label">Fees</span><span class="route-val">≈ ${escapeHtml(String(fee))} USD</span></div>
         <div class="route-row"><span class="route-label">From</span><span class="route-val">${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)}</span></div>
       `;
-      routeBox.classList.remove('hidden');
-      execBtn.disabled = false;
-    } else {
-      if (seq !== quoteSeq) return;
-      set('bridgeQuote', null);
-      box.innerHTML = `<div class="quote-error">⚠️ No route available — no bridge will happen. (LI.FI HTTP ${res.status})</div>
-        <div class="quote-error-detail">${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)} (${escapeHtml(amt)} ${escapeHtml(fromNet.symbol || '')})</div>`;
-    }
+    routeBox.classList.remove('hidden');
+    execBtn.disabled = false;
   } catch (e) {
     if (seq !== quoteSeq) return;
     set('bridgeQuote', null);
@@ -655,7 +778,7 @@ async function doBridgeExecInner() {
       { k: 'From chain', v: `${fromNet.name} (${fromNet.chainId})` },
       { k: 'To chain', v: `${toNet.name} (${toNet.chainId})` },
       { k: 'Amount', v: `${context.amount} ${context.tokenSymbol || ''}` },
-      { k: 'Router', v: context.router || 'Auto' },
+      { k: 'Router', v: q.routerName || 'Auto' },
       { k: 'Est. time', v: '~2-10 min' }
     ],
     confirmText: 'Confirm',
@@ -747,9 +870,9 @@ async function doBridgeExecInner() {
         if (get('bridgeQuote') !== q) return toast('Bridge context changed. Get a new route.', 'error');
         let fresh;
         try {
-          const res = await fetchWithTimeout(quoteUrl(context));
-          if (!res.ok) throw new Error(`LI.FI HTTP ${res.status}`);
-          fresh = validateQuote(await res.json(), context);
+          // Same router that won the quote (its name is in the sign dialog);
+          // fetchBoundQuote re-validates field-by-field like quote time did.
+          fresh = await fetchBoundQuote(q.router || 'lifi', context);
         } catch (e) {
           return toast(`Approval done, but no fresh route (${explainError(e, 're-quote')}) — try again`, 'error');
         }

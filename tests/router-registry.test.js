@@ -111,12 +111,21 @@ test('no venue that needs an API key is carried as a route', () => {
   }
 });
 
-test('the bridge registry holds only a route the wallet can sign', () => {
-  // bridge.js executes whatever transactionRequest the service returns, so a
+test('the bridge registry holds only routes the wallet can actually call', () => {
+  // bridge.js executes whatever transactionRequest a service returns, so a
   // protocol that only appears in a list of supported chains is not a route.
-  // LI.FI is the one that returns a transactionRequest with no credential.
-  assert.deepEqual(BRIDGE_ROUTERS.map((r) => r.id), ['lifi']);
+  // Measured unauthenticated 2026-10-06: LI.FI /v1/quote → 200, Gas.zip
+  // /v2/quotes → 200 (contractDepositTxn), Relay POST /quote/v2 → 200.
+  // Superbridge stays OUT: api.superbridge.app → 401 and access is granted
+  // case by case — 401 without a credential is the same rule that removed
+  // 1inch and Bungee from the swap registry.
+  assert.deepEqual(BRIDGE_ROUTERS.map((r) => r.id), ['lifi', 'gaszip', 'relay']);
+  const bridgeRoutes = readFileSync(new URL('../js/bridge-routes.js', import.meta.url), 'utf8');
   assert.match(bridgeSrc, /li\.quest/, 'bridge.js must still call the route that is actually live');
+  assert.match(bridgeRoutes, /backend\.gas\.zip/, 'gas.zip adapter must call its measured endpoint');
+  assert.match(bridgeRoutes, /api\.relay\.link/, 'relay adapter must call its measured endpoint');
+  assert.doesNotMatch(bridgeRoutes, /https?:\/\/[^\s'"`]*superbridge/i,
+    'superbridge answers 401 without a key — a route the app cannot call has no place here');
   // …and it must not quietly invent a fallback when that call fails.
   assert.doesNotMatch(bridgeSrc, /simulated:\s*true/,
     'a simulated bridge quote is exactly the lie this registry rewrite removed');

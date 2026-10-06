@@ -148,6 +148,40 @@ export const BRIDGE_ROUTERS = [
     ],
     api: 'https://li.quest/v1',
   },
+  // ── Gas.zip — measured keyless 2026-10-06 ─────────────────────────────
+  // GET backend.gas.zip/v2/chains → 200 unauthenticated; GET
+  // /v2/quotes/<from>/<wei>/<to>?from=&to= → 200 with a ready-to-send
+  // contractDepositTxn (to + data + value). Their screening rejects a
+  // flagged address with HTTP 400 "Address has been flagged as high risk"
+  // — a real, honest failure surfaced by the adapter, not a key problem.
+  // nativeOnly: the quote route takes deposit_wei, so an ERC-20 never has
+  // a Gas.zip quote to give; the adapter refuses before any fetch.
+  {
+    id: 'gaszip', name: 'Gas.zip', type: 'aggregator', nativeOnly: true,
+    // Every chain in Gas.zip's /v2/chains (186) ∩ NETWORKS — all 23 shipped
+    // networks were present in the probe response.
+    chains: [
+      1, 10, 56, 97, 100, 130, 137, 146, 324, 480, 5000, 8453, 42161, 42220,
+      43114, 59144, 81457, 534352, 84532, 11155111, 11155420, 421614, 80002,
+    ],
+    api: 'https://backend.gas.zip/v2',
+  },
+  // ── Relay — measured keyless 2026-10-06 ───────────────────────────────
+  // POST api.relay.link/quote/v2 → 200 with no credential (the OpenAPI marks
+  // x-api-key optional "for higher rate limits"). Response carries ordered
+  // steps: an `approve` step for ERC-20 (spender read from the calldata) and
+  // a `deposit` step that is the transaction to sign.
+  {
+    id: 'relay', name: 'Relay', type: 'aggregator',
+    // api.relay.link/chains → 60 chains ∩ NETWORKS = the 17 shipped
+    // mainnets. None of the six testnets is in Relay's list (their testnet
+    // API is a separate host), so no testnet claim is made here.
+    chains: [
+      1, 10, 56, 100, 130, 137, 146, 324, 480, 5000, 8453, 42161, 42220,
+      43114, 59144, 81457, 534352,
+    ],
+    api: 'https://api.relay.link',
+  },
 ];
 
 // ── Lookup helpers ──────────────────────────────────────────────────────

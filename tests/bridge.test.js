@@ -291,6 +291,11 @@ function setupQuote(t, { amount = '0.5', fromChain = 'sepolia', toChain = 'bsc-t
   el('#bridgeToChain').value = toChain;
   el('#bridgeToken').value = 'native';
   el('#bridgeAmount').value = amount;
+  // These tests pin the LI.FI contract (li.quest URL, validated response), so
+  // they pick that router explicitly. Auto = all candidates in parallel is
+  // covered by tests/bridge-routes.test.js; a mock meant for one provider
+  // must not be read by the other adapters.
+  el('#bridgeRouterSelect').value = 'lifi';
   state.set('unlocked', true);
   state.set('networkId', fromChain);
   state.set('address', account);

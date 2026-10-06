@@ -328,7 +328,15 @@ test('E2E-probe: bridge = native + curated ERC-20, context-bound, fail-closed (s
   // Context captured before any await; stale quote state cleared
   assert.ok(body.includes('Object.freeze({'), 'quote context must be immutable');
   assert.ok(body.includes("set('bridgeQuote', null)"), 'old quote state must be cleared before await');
-  assert.ok((body.match(/seq !== quoteSeq/g) || []).length >= 4, 'out-of-order responses must be ignored via seq id');
+  // Out-of-order responses die on the seq id. The quote path awaits ONE
+  // Promise.allSettled (every candidate quoted in parallel), so a single check
+  // immediately after it covers all of them — pin the STRUCTURE, not the old
+  // per-response count from when the fetch was serial.
+  const settle = body.indexOf('Promise.allSettled(');
+  assert.ok(settle > -1, 'candidates must be quoted in parallel');
+  const seqCheck = body.indexOf('seq !== quoteSeq', settle);
+  assert.ok(seqCheck > settle && seqCheck - settle < 500, 'seq id must be re-checked right after the await');
+  assert.ok((body.match(/seq !== quoteSeq/g) || []).length >= 1, 'out-of-order responses must be ignored via seq id');
   // Response validated field-by-field against context (validateQuote, shared
   // by quote time and the post-approval re-quote)
   assert.ok(bridgeJs.includes('function validateQuote('), 'validation lives in one shared function');
