@@ -6,18 +6,21 @@
 //
 //   gaszipQuote(context, fetchFn) / relayQuote(context, fetchFn)
 //     → frozen { tx, approvalAddress, skipApproval, fee, dur, route, toAmount }
+//   opstackQuote(context) — no fetchFn: the deposit is one wallet tx, the
+//     adapter builds the calldata itself (nothing to ask a server).
 //
 // `tx` is the ONLY thing execution may sign, and every field is checked
 // against the captured context first — the same field-by-field rule
 // validateQuote applies to a LI.FI response. A mismatching response must
 // never reach a signature: it throws instead.
 //
-// All three services were measured unauthenticated on 2026-10-06:
+// Gas.zip and Relay were measured unauthenticated on 2026-10-06:
 //   Gas.zip GET backend.gas.zip/v2/quotes/… → 200 (contractDepositTxn)
 //   Relay   POST api.relay.link/quote/v2    → 200 (steps[])
-// Superbridge is NOT here: api.superbridge.app/v1/chains → 401 without
-// an API key, and access is granted case by case — a route the app cannot
-// call has no business being in the picker.
+// Superbridge's API answers 401 without an API key — but its deposit PATH
+// needs no API at all: the canonical OptimismPortal on the L1 chain takes
+// the deposit directly from the wallet (opstackQuote below), which is the
+// free, keyless route.
 //
 // The address/checksum helpers are deliberately re-declared here rather
 // than imported from bridge.js: bridge.js imports THIS module, and a cycle
@@ -231,4 +234,101 @@ export async function relayQuote(context, fetchFn) {
   });
 }
 
-export const BRIDGE_ROUTE_FETCHERS = { gaszip: gaszipQuote, relay: relayQuote };
+/**
+ * OP Stack canonical deposit (L1 → L2) — free, keyless, no API call.
+ *
+ * The wallet sends ONE transaction to the destination chain's OptimismPortal
+ * contract, sitting on the L1 chain: depositTransaction(_to, _value,
+ * _gasLimit, _isCreation, _data) payable — the exact call Superbridge and
+ * viem make in production (viem op-stack portalAbi; signature carries a
+ * uint64 gasLimit, selector 0xe9e05c42).
+ *
+ * Address evidence (all verified ON-CHAIN 2026-10-06 — EIP-1967
+ * implementation of each portal below contains 0xe9e05c42 in its runtime
+ * bytecode on L1, fetched from ethereum/sepolia public RPC):
+ *   bundle of app.superbridge.app (assets/index-*.js, viem chain defs —
+ *   the same source viem/chains ships) lists portal per chain; the
+ *   superchain-registry toml confirms the matching bridge pair for OP/
+ *   Unichain/World Chain/OP Sepolia.
+ *
+ * Direction is enforced: canonical deposits run L1 → L2 only (withdrawals
+ * take the proof round-trip, ERC-20 deposits need the L2 twin — neither is
+ * this adapter's job; it throws honestly instead).
+ */
+export const OP_STACK_PORTALS = {
+  10:      '0xbEb5Fc579115071764c7423A4f12eDde41f106Ed', // OP Mainnet
+  130:     '0x0bd48f6B86a26D3a217d0Fa6FfE2B491B956A7a2', // Unichain
+  480:     '0xd5ec14a83B7d95BE1E2Ac12523e2dEE12Cbeea6C', // World Chain
+  8453:    '0x49048044D57e1C92A77f79988d21Fa8fAF74E97e', // Base
+  81457:   '0x0Ec68c5B10F21EFFb74f2A5C61DFe6b08C0Db6Cb', // Blast
+  11155420: '0x16Fc5058F25648194471939df75CF27A2fdC48BC', // OP Sepolia
+  84532:   '0x49f53e41452C74589E85cA1677426Ba426459e85', // Base Sepolia
+};
+const L1_OF_L2 = {
+  10: 1, 130: 1, 480: 1, 8453: 1, 81457: 1,
+  11155420: 11155111, 84532: 11155111,
+};
+// L2 execution budget for the deposit. Unused gas costs nothing (EVM charges
+// gas USED, not the limit), so this errs high: a smart-wallet recipient that
+// needs more than 21k must still fit, or the deposit would mint-and-revert.
+const DEPOSIT_L2_GAS = 400000;
+// Built LAZILY: bridge-routes.js must stay importable before globalThis.ethers
+// exists (dapps-view-render.test.js imports it without the browser global) —
+// the module has always only used ethers inside function bodies.
+let portalIface = null;
+const PORTAL_SIG =
+  'function depositTransaction(address _to, uint256 _value, uint64 _gasLimit, bool _isCreation, bytes _data) payable';
+function portalInterface() {
+  return (portalIface ??= new ethers.Interface([PORTAL_SIG]));
+}
+
+export function opstackQuote(context) {
+  if (context.tokenAddress) {
+    throw new Error('OP Stack bridge: canonical deposits carry native ETH only');
+  }
+  const from = Number(context.fromChainId);
+  const to = Number(context.toChainId);
+  const toIsL2 = to in L1_OF_L2;
+  if (!toIsL2) {
+    // The reverse pair (an L2 depositing back to its L1) gets the honest
+    // direction answer; anything else has no canonical portal at all.
+    if (from in L1_OF_L2 && L1_OF_L2[from] === to) {
+      throw new Error('OP Stack bridge: canonical deposits run L1 → L2 only');
+    }
+    throw new Error('OP Stack bridge: no canonical portal for destination chain');
+  }
+  if (L1_OF_L2[to] !== from) {
+    throw new Error('OP Stack bridge: canonical deposits run L1 → L2 only');
+  }
+  const portal = OP_STACK_PORTALS[to];
+  if (!portal) throw new Error('OP Stack bridge: no canonical portal for destination chain');
+  if (!isAddress(context.address)) throw new Error('OP Stack bridge: recipient address invalid');
+  const want = bigOrThrow(context.amountSmallest, 'requested amount');
+  if (want <= 0n) throw new Error('OP Stack bridge: amount must be positive');
+  if (want > 2n ** 255n) throw new Error('OP Stack bridge: amount out of range');
+
+  const toAddr = ethers.getAddress(context.address);
+  const portalAddr = ethers.getAddress(portal);
+  // Deposit lands at the SAME address on L2 (OP-stack addressing is
+  // 1:1) — recipient = the quoted wallet, never a field from outside.
+  const data = portalInterface().encodeFunctionData('depositTransaction',
+    [toAddr, want, DEPOSIT_L2_GAS, false, '0x']);
+  if (!saneExecAddress(portalAddr) || !saneTxData(data)) {
+    throw new Error('OP Stack bridge: built transaction failed sanity checks');
+  }
+  return Object.freeze({
+    tx: { to: portalAddr, data, value: want, chainId: from },
+    approvalAddress: null,        // native: no allowance, ever
+    skipApproval: true,
+    fee: '0',                     // bridge fee: none — only this tx's L1 gas
+    dur: 60,                      // seconds; derivation is ~1 L1 block + pickup
+    route: 'OP Stack canonical (OptimismPortal)',
+    toAmount: want,               // 1:1 mint on the L2
+  });
+}
+
+export const BRIDGE_ROUTE_FETCHERS = {
+  gaszip: gaszipQuote,
+  relay: relayQuote,
+  opstack: opstackQuote,
+};

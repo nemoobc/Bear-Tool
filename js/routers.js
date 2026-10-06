@@ -182,6 +182,22 @@ export const BRIDGE_ROUTERS = [
     ],
     api: 'https://api.relay.link',
   },
+  // ── OP Stack canonical — no API, no key, no bridge fee ────────────────
+  // One wallet transaction to the destination chain's OptimismPortal ON THE
+  // L1 chain (viem portalAbi depositTransaction, selector 0xe9e05c42 —
+  // verified in each portal's EIP-1967 implementation bytecode on-chain
+  // 2026-10-06). nativeOnly: the portal mints ETH; an ERC-20 deposit needs
+  // its L2 twin address and is not quoted here. The adapter enforces
+  // L1 → L2 direction — this list is the set of chains the pair matcher
+  // may see, not a claim of direction.
+  {
+    id: 'opstack', name: 'OP Stack bridge', type: 'canonical', nativeOnly: true,
+    // L1 + every shipped OP-stack L2 the canonical portal covers:
+    // Ethereum↔(OP, Unichain, World Chain, Base, Blast),
+    // Sepolia↔(OP Sepolia, Base Sepolia).
+    chains: [1, 10, 130, 480, 8453, 81457, 11155111, 11155420, 84532],
+    api: null,                    // nothing to call — the chain IS the API
+  },
 ];
 
 // ── Lookup helpers ──────────────────────────────────────────────────────

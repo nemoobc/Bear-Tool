@@ -17,7 +17,7 @@ import { ethers } from 'ethers';
 globalThis.ethers = ethers;
 
 const routes = await import('../js/bridge-routes.js');
-const { gaszipQuote, relayQuote, BRIDGE_ROUTE_FETCHERS } = routes;
+const { gaszipQuote, relayQuote, opstackQuote, BRIDGE_ROUTE_FETCHERS } = routes;
 
 const USER = '0x1111111111111111111111111111111111111111';
 const DEPOSIT_CONTRACT = '0x2a37D63EAdFe4b4682a3c28C1c2cD4F109Cc2762';
@@ -246,14 +246,84 @@ test('relay: HTTP error carries the status, no silent empty quote', async () => 
   await assert.rejects(() => relayQuote(nativeCtx(), async () => fail(503, 'unavailable')), /Relay HTTP 503.*unavailable/s);
 });
 
+// ── OP Stack canonical ────────────────────────────────────────
+const PORTALS = {
+  10: '0xbEb5Fc579115071764c7423A4f12eDde41f106Ed',
+  130: '0x0bd48f6B86a26D3a217d0Fa6FfE2B491B956A7a2',
+  480: '0xd5ec14a83B7d95BE1E2Ac12523e2dEE12Cbeea6C',
+  8453: '0x49048044D57e1C92A77f79988d21Fa8fAF74E97e',
+  81457: '0x0Ec68c5B10F21EFFb74f2A5C61DFe6b08C0Db6Cb',
+  11155420: '0x16Fc5058F25648194471939df75CF27A2fdC48BC',
+  84532: '0x49f53e41452C74589E85cA1677426Ba426459e85',
+};
+
+test('opstack: portal table matches the on-chain verified addresses (2026-10-06)', () => {
+  // Every address below was verified on L1: EIP-1967 implementation holds
+  // selector 0xe9e05c42 (viem portalAbi depositTransaction) in runtime code.
+  // A typo here would send a deposit to a contract that cannot mint.
+  assert.deepEqual({ ...routes.OP_STACK_PORTALS }, PORTALS);
+});
+
+test('opstack: builds the canonical portal deposit — no fetch, frozen tx', () => {
+  const bound = opstackQuote(nativeCtx());          // 1 → 8453 (Base)
+  assert.ok(Object.isFrozen(bound), 'quotes are immutable snapshots');
+  assert.equal(bound.tx.to, PORTALS[8453], 'tx targets the Base portal on L1');
+  assert.equal(bound.tx.chainId, 1, 'the tx is sent on the source (L1) chain');
+  assert.equal(bound.tx.value, 10000000000000000n, 'value = the quoted amount');
+  assert.equal(bound.approvalAddress, null);
+  assert.equal(bound.skipApproval, true, 'native deposit, no allowance');
+  assert.equal(bound.fee, '0', 'canonical bridge charges no fee');
+  assert.equal(bound.toAmount, 10000000000000000n, '1:1 mint on the L2');
+  assert.equal(bound.route, 'OP Stack canonical (OptimismPortal)');
+
+  // Calldata decodes back to EXACTLY the viem/superbridge call.
+  const iface = new ethers.Interface(
+    ['function depositTransaction(address,uint256,uint64,bool,bytes)']);
+  const parsed = iface.parseTransaction({ data: bound.tx.data });
+  assert.equal(parsed.selector, '0xe9e05c42',
+    'selector must match viem portalAbi (uint64 gasLimit — NOT uint256)');
+  const [to, value, gas, isCreation, l2data] = parsed.args;
+  assert.equal(ethers.getAddress(to), ethers.getAddress(USER),
+    'deposit lands at the same wallet address on the L2');
+  assert.equal(value, 10000000000000000n, 'inner _value must equal tx value');
+  assert.equal(Number(gas), 400000, 'L2 execution budget');
+  assert.equal(isCreation, false, 'a plain transfer creates no contract');
+  assert.equal(l2data, '0x', 'no L2 calldata for a native transfer');
+});
+
+test('opstack: covers every shipped OP-stack pair on both L1s', () => {
+  const mainnetL2s = [10, 130, 480, 8453, 81457];
+  for (const l2 of mainnetL2s) {
+    const bound = opstackQuote(nativeCtx({ toChainId: l2 }));
+    assert.equal(bound.tx.to, PORTALS[l2]);
+    assert.equal(bound.tx.chainId, 1);
+  }
+  assert.equal(opstackQuote(nativeCtx({ fromChainId: 11155111, toChainId: 11155420 })).tx.to,
+    PORTALS[11155420]);
+  assert.equal(opstackQuote(nativeCtx({ fromChainId: 11155111, toChainId: 84532 })).tx.to,
+    PORTALS[84532]);
+});
+
+test('opstack: refuses everything outside a native L1 → L2 deposit', () => {
+  assert.throws(() => opstackQuote(erc20Ctx()), /native ETH only/,
+    'an ERC-20 has no canonical path here');
+  assert.throws(() => opstackQuote(nativeCtx({ fromChainId: 10, toChainId: 1 })),
+    /L1 → L2 only/, 'a withdrawal needs the proof round-trip — not this adapter');
+  assert.throws(() => opstackQuote(nativeCtx({ fromChainId: 11155111, toChainId: 10 })),
+    /L1 → L2 only/, "Sepolia cannot deposit to a mainnet portal");
+  assert.throws(() => opstackQuote(nativeCtx({ toChainId: 56 })), /no canonical portal/);
+  assert.throws(() => opstackQuote(nativeCtx({ amountSmallest: '0' })), /positive/);
+});
+
 // ── dispatch + registry ────────────────────────────────────────
-test('both adapters are registered under their registry ids', () => {
+test('all three adapters are registered under their registry ids', () => {
   assert.equal(BRIDGE_ROUTE_FETCHERS.gaszip, gaszipQuote);
   assert.equal(BRIDGE_ROUTE_FETCHERS.relay, relayQuote);
+  assert.equal(BRIDGE_ROUTE_FETCHERS.opstack, opstackQuote);
   assert.equal(BRIDGE_ROUTE_FETCHERS.lifi, undefined, 'LI.FI keeps its own path in bridge.js (quoteUrl/validateQuote)');
 });
 
-test('registry: gas.zip + relay chains ⊆ NETWORKS and gas.zip stays native-only', async () => {
+test('registry: all bridge chains ⊆ NETWORKS, gas.zip + opstack stay native-only', async () => {
   const { BRIDGE_ROUTERS } = await import('../js/routers.js');
   const { NETWORKS } = await import('../js/network.js');
   const shipped = new Set(NETWORKS.map(n => n.chainId));
@@ -262,6 +332,9 @@ test('registry: gas.zip + relay chains ⊆ NETWORKS and gas.zip stays native-onl
   }
   const gz = BRIDGE_ROUTERS.find(r => r.id === 'gaszip');
   assert.equal(gz.nativeOnly, true, 'the deposit_wei route cannot quote an ERC-20');
+  const os = BRIDGE_ROUTERS.find(r => r.id === 'opstack');
+  assert.equal(os.nativeOnly, true, 'the portal mints ETH only');
+  assert.equal(os.api, null, 'the canonical deposit calls no API at all');
   const relay = BRIDGE_ROUTERS.find(r => r.id === 'relay');
   assert.ok(relay.chains.every(c => NETWORKS.find(n => n.chainId === c)?.type === 'mainnet'),
     'relay has no testnet API on this host — no testnet claim');

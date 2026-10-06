@@ -119,7 +119,8 @@ test('the bridge registry holds only routes the wallet can actually call', () =>
   // Superbridge stays OUT: api.superbridge.app → 401 and access is granted
   // case by case — 401 without a credential is the same rule that removed
   // 1inch and Bungee from the swap registry.
-  assert.deepEqual(BRIDGE_ROUTERS.map((r) => r.id), ['lifi', 'gaszip', 'relay']);
+  // opstack: canonical OP-stack deposit, built client-side — no endpoint.
+  assert.deepEqual(BRIDGE_ROUTERS.map((r) => r.id), ['lifi', 'gaszip', 'relay', 'opstack']);
   const bridgeRoutes = readFileSync(new URL('../js/bridge-routes.js', import.meta.url), 'utf8');
   assert.match(bridgeSrc, /li\.quest/, 'bridge.js must still call the route that is actually live');
   assert.match(bridgeRoutes, /backend\.gas\.zip/, 'gas.zip adapter must call its measured endpoint');

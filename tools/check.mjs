@@ -9,7 +9,7 @@
 //
 // Exits non-zero and names every bad file, so the failure says which file.
 
-import { readdirSync } from 'node:fs';
+import { readdirSync, writeSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -43,8 +43,16 @@ for (const dir of TARGETS) walk(dir);
 // inside a unit test spawns one node per file, and measuring that cost 142 seconds
 // to learn a number that takes milliseconds to obtain. Checking coverage by
 // re-running the check is the slow way to ask a question about the file list.
+//
+// writeSync, NOT console.log: stdout behind a PIPE (exactly what the coverage
+// test's spawnSync creates) is written ASYNCHRONOUSLY, and process.exit(0)
+// drops whatever has not flushed — under full-suite load the gate reported
+// 175 of 204 files (one partial pipe write) and the coverage test went red
+// on a correct gate. A synchronous fd write cannot be cut off by the exit.
 if (process.argv.includes('--list')) {
-  for (const rel of files) console.log(rel);
+  const buf = Buffer.from(files.map((rel) => rel + '\n').join(''), 'utf8');
+  let off = 0;
+  while (off < buf.length) off += writeSync(1, buf, off, buf.length - off);
   process.exit(0);
 }
 
