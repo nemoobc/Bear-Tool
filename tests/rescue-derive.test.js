@@ -89,10 +89,11 @@ test('with no key and no unlocked wallet it says which one it needs', () => {
     { error: 'Unlock the target wallet or paste its private key' });
 });
 
-test('the sponsor is the pasted key, or else the unlocked wallet', () => {
+test('the sponsor is the picked key — never a silent fallback', () => {
   state.set('address', UNLOCKED);
   assert.equal(tools.sponsorAddressOf(GOOD), new ethers.Wallet(GOOD).address);
-  assert.equal(tools.sponsorAddressOf(''), UNLOCKED, 'empty key falls back to the wallet');
+  assert.equal(tools.sponsorAddressOf(''), null,
+    'empty pick falls back to nothing — auto-detect removed (2026-10-06)');
   assert.equal(tools.sponsorAddressOf(ZERO), null, 'unusable key must not throw');
   assert.equal(tools.sponsorAddressOf(ONES), null, 'unusable key must not throw');
 

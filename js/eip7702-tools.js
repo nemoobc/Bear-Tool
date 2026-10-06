@@ -576,7 +576,7 @@ async function executeRescue() {
   // key and the address it claims can no longer disagree.
   const targetKey = $('#rescueTargetKey')?.value.trim() || '';
   const sponsorAddress = sponsorAddressOf(sponsorKey);
-  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
+  if (!sponsorAddress) return toast('No usable sponsor — choose a sponsor wallet', 'error');
   // Validated: out of the document; the local strings hold them from here.
   wipeKeyField('#rescueTargetKey');
 
@@ -775,7 +775,7 @@ async function executeClaim() {
   if (!wallet.isValidAddress(safe) || safe.toLowerCase() === ethers.ZeroAddress.toLowerCase()) return toast('Invalid SAFE address', 'error');
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   const sponsorAddress = sponsorAddressOf(sponsorKey);
-  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
+  if (!sponsorAddress) return toast('No usable sponsor — choose a sponsor wallet', 'error');
 
   // The TARGET signs the authorization — same rule as rescue: pasted key
   // wins, the active wallet is the fallback. Validated before use.
@@ -967,32 +967,32 @@ export function deriveTargetAddress(keySel = '#rescueTargetKey') {
   return { address: String(unlocked) };
 }
 
-/** Who pays for gas. A key picked from the wallet list wins; with no pick
- *  the active wallet sponsors. Both already live in memory, so demanding a
- *  copy-paste of a key the app is holding only pushed users to paste it into
- *  a second field. */
+/** Who pays for gas — the wallet picked in the sponsor picker. The
+ *  active-wallet fallback left with the auto-detect entry (2026-10-06);
+ *  '' cannot reach this anymore: sponsorKeyFromPicker stops the flow first. */
 export function sponsorAddressOf(sponsorKey) {
-  if (sponsorKey) return addressFromKey(sponsorKey);
-  const unlocked = get('address');
-  return unlocked ? String(unlocked) : null;
+  return sponsorKey ? addressFromKey(sponsorKey) : null;
 }
 
 /** Same rule as sponsorAddressOf, as a signing object. Must stay in lockstep:
  *  deploy records this address, execute matches on it — resolving them
- *  differently on the two sides would strand a perfectly good helper. */
+ *  differently on the two sides would strand a perfectly good helper. Both
+ *  sides now resolve ONLY the picked wallet (auto-detect removed 10-06). */
 function sponsorSignerOf(sponsorKey, provider) {
   if (sponsorKey) return new ethers.Wallet(sponsorKey, provider);
-  const signer = get('signer');
-  if (!signer) throw new Error('Unlock a wallet or paste a sponsor private key');
-  return signer.connect(provider);
+  // Defensive: every caller stops on null first — '' must never silently
+  // pick the active wallet now that the auto entry is gone.
+  throw new Error('Choose a sponsor wallet');
 }
 
 // ── sponsor = a wallet picker, not a key box ────────────────────────────────
 // Live request (user, 2026-10-03): "Sponsor private key ganti jadi auto
 // detect yang udah kepasang di appnya dan bisa pilih wallet". The app already
 // holds these keys in the keystore — pasting one into a second field only
-// put a copy of the secret in the DOM. Options fill from the saved wallets;
-// '' means "the active wallet", exactly what the old empty box meant.
+// put a copy of the secret in the DOM. Options fill from the saved wallets.
+// Reversal (user, 2026-10-06): "sponsor wallet auto detect hapus aja, fitur
+// bisa milih wallet aja" — the auto entry is gone; the picker lists wallets
+// only and an empty pick stops the flow instead of assuming the active one.
 function sponsorOptionsHtml() {
   const accounts = wallet.getAccounts() || [];
   return accounts.map((a, i) =>
@@ -1005,23 +1005,25 @@ export function renderSponsorPickers() {
     const sel = $('#' + id);
     if (!sel) continue;
     const keep = sel.value;
-    sel.innerHTML = `<option value="">Auto-detect — active wallet</option>` + sponsorOptionsHtml();
+    sel.innerHTML = sponsorOptionsHtml();   // wallets only — no auto entry (2026-10-06)
     if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
   }
 }
 
 /**
  * Resolve the chosen picker to a sponsor private key.
- * Returns '' for auto-detect (the active unlocked wallet — sponsorSignerOf
- * already handles that), the chosen account's key otherwise, or null when the
- * user cancels the password prompt (callers must stop). The key is derived
- * straight from the keystore and never written to the DOM.
+ * Returns the chosen account's key, or null when nothing is picked (the
+ * auto entry was removed 2026-10-06 — the flow stops with a toast) or when
+ * the user cancels the password prompt (callers must stop). The key is
+ * derived straight from the keystore and never written to the DOM.
  */
 export async function sponsorKeyFromPicker(selId) {
   const sel = $(selId);
-  if (!sel) return '';
-  const choice = String(sel.value || '');
-  if (!choice) return '';                     // auto-detect: active wallet
+  const choice = sel ? String(sel.value || '') : '';
+  if (!choice) {                              // no auto pick anymore: stop with a toast
+    toast('Choose a sponsor wallet', 'error');
+    return null;
+  }
   let secret = wallet.getSession();
   if (!secret) {
     const pw = await promptPassword('Enter password to use the chosen sponsor wallet');
@@ -1104,7 +1106,7 @@ export async function deployRescueHelper() {
   if (!wallet.isValidAddress(safe)) return toast('Fill a valid SAFE address first', 'error');
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   const sponsorAddress = sponsorAddressOf(sponsorKey);
-  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
+  if (!sponsorAddress) return toast('No usable sponsor — choose a sponsor wallet', 'error');
 
   const net = getNetworkById(get('networkId'));
   const btn = $('#btnDeployRescueHelper');
@@ -1151,7 +1153,7 @@ export async function deployAirdropClaimer() {
   if (sponsorKey === null) return;            // password prompt cancelled
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   const sponsorAddress = sponsorAddressOf(sponsorKey);
-  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
+  if (!sponsorAddress) return toast('No usable sponsor — choose a sponsor wallet', 'error');
 
   const net = getNetworkById(get('networkId'));
   const btn = $('#btnDeployAirdropClaimer');
@@ -1279,7 +1281,7 @@ export async function revokeDelegation() {
   if (sponsorKey === null) return;            // password prompt cancelled
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   const sponsorAddress = sponsorAddressOf(sponsorKey);
-  if (!sponsorAddress) return toast('No usable sponsor — paste a private key or unlock a wallet', 'error');
+  if (!sponsorAddress) return toast('No usable sponsor — choose a sponsor wallet', 'error');
 
   // Item 12: locked wallet + the target IS the active wallet (no pasted key)
   // → the signing key only exists after unlock, so raise the password prompt

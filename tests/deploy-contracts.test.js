@@ -351,10 +351,12 @@ test('Deployed Contracts: baris registry membawa tombol copy alamat penuh', () =
 //    dan bisa pilih wallet"
 //   "Target private key (if the wallet is not unlocked) ganti jadi
 //    Private Key (Drainner)"
-test('sponsor key field → auto-detect wallet picker (rescue + claim + revoke)', () => {
+test('sponsor key field → wallet-only picker, no auto-detect (rescue + claim + revoke)', () => {
   const view = fs.readFileSync(new URL('../src/views/deploy.jsx', import.meta.url), 'utf8');
-  assert.equal((view.match(/Sponsor wallet \(auto-detect\)/g) || []).length, 3,
+  assert.equal((view.match(/<label htmlFor="\w+SponsorFrom">Sponsor wallet<\/label>/g) || []).length, 3,
     'all three forms (rescue + claim + revoke) offer the picker');
+  assert.doesNotMatch(view, /auto-detect/i,
+    'the auto entry and label are gone — sponsor is picked, never assumed (2026-10-06)');
   assert.doesNotMatch(view, /id="rescueSponsorKey"|id="claimSponsorKey"|id="revokeSponsorKey"/,
     'the paste-a-key input is gone — sponsor keys must never enter the DOM');
   const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
@@ -362,6 +364,10 @@ test('sponsor key field → auto-detect wallet picker (rescue + claim + revoke)'
     'helper defined once + used by all five sponsor entry points');
   assert.match(tools, /renderSponsorPickers\(\)/,
     'picker options are filled from the wallets saved in the app');
+  assert.doesNotMatch(tools, /Auto-detect — active wallet/,
+    'renderSponsorPickers lists wallets only');
+  assert.match(tools, /toast\('Choose a sponsor wallet', 'error'\)/,
+    'an empty pick stops the flow with a toast instead of assuming the active wallet');
 });
 
 test('target key label → Private Key (Drainner), field stays', () => {

@@ -629,7 +629,7 @@ export async function doSwap() {
       { k: 'Router', v: quote.source || 'Auto' },
       { k: 'Slippage', v: `${slipPct}%` }
     ],
-    confirmText: 'Confirm & Swap',
+    confirmText: 'Confirm',
     cancelText: 'Cancel',
     danger: false
   });

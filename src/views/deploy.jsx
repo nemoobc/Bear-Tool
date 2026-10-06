@@ -115,9 +115,8 @@ export default function DeployView() {
               <div className="small">Manual amount, or MAX to fill the wallet's full balance.</div>
             </div>
             <div className="field">
-              <label htmlFor="rescueSponsorFrom">Sponsor wallet (auto-detect)</label>
+              <label htmlFor="rescueSponsorFrom">Sponsor wallet</label>
               <select className="input" id="rescueSponsorFrom">
-                <option value="">Auto-detect — active wallet</option>
               </select>
               <div className="small">Options fill from your saved wallets — pick any to sponsor from it.</div>
             </div>
@@ -178,9 +177,8 @@ export default function DeployView() {
               <input className="input" type="password" id="claimTargetKey" placeholder="0x..." autoComplete="off" />
             </div>
             <div className="field">
-              <label htmlFor="claimSponsorFrom">Sponsor wallet (auto-detect)</label>
+              <label htmlFor="claimSponsorFrom">Sponsor wallet</label>
               <select className="input" id="claimSponsorFrom">
-                <option value="">Auto-detect — active wallet</option>
               </select>
               <div className="small">Options fill from your saved wallets — pick any to sponsor from it.</div>
             </div>
@@ -204,9 +202,8 @@ export default function DeployView() {
               <input className="input" id="revokeKey" type="password" placeholder="0x..." />
             </div>
             <div className="field">
-              <label htmlFor="revokeSponsorFrom">Sponsor wallet (auto-detect)</label>
+              <label htmlFor="revokeSponsorFrom">Sponsor wallet</label>
               <select className="input" id="revokeSponsorFrom">
-                <option value="">Auto-detect — active wallet</option>
               </select>
               <div className="small">The sponsor pays gas and broadcasts; the target signs the authorization.</div>
             </div>
