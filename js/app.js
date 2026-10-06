@@ -22,7 +22,7 @@ import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPasswo
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity,
          reconcileActivity, activityMatchesSymbol, getCustomTokens, persistCustomToken } from './state.js';
-import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate, isRateLimit } from './price.js';
+import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate, isRateLimit, fitCandles } from './price.js';
 import { waitForReceipt, withTimeout } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
@@ -1422,13 +1422,32 @@ function showNetworkModal() {
       toast('Already on this network', 'info');
       return;
     }
-    set('networkId', el.dataset.net);
-    localStorage.setItem('bear.networkId', el.dataset.net);
-    closeModal();
-    toast('Network switched', 'success');
-    updateTopbar();
-    if (get('address')) loadDashboard();
+    activateNetwork(el.dataset.net);
   }));
+  // Bridge source chain decides WHERE the tx runs, so picking one switches
+  // the wallet with it (user, 2026-10-06: "aku ganti jaringan di bridge, ga
+  // auto ganti jaringan, jadi harus ganti manual"). The select node itself
+  // survives loadBridgeChains' option rewrites — binding once is enough.
+  // close: false — the bridge modal stays open on the new chain.
+  $('#bridgeFromChain')?.addEventListener('change', (e) =>
+    activateNetwork(e.target.value, { close: false }));
+}
+
+// Switch the wallet's active network — ONE chokepoint for every entry
+// point (modal rows, bridge source chain). Same id → no-op: a picker that
+// re-selects the current network must not toast "switched" or reload the
+// dashboard. `close: false` keeps the caller's modal open (the bridge
+// source picker must not close the bridge).
+export function activateNetwork(id, { close = true } = {}) {
+  if (id == null || id === '') return false;
+  if (String(id) === String(get('networkId'))) return false;
+  set('networkId', id);
+  localStorage.setItem('bear.networkId', id);
+  if (close) closeModal();
+  toast('Network switched', 'success');
+  updateTopbar();
+  if (get('address')) loadDashboard();
+  return true;
 }
 
 function netRow(n) {
@@ -2150,10 +2169,14 @@ function showTokenActions(el) {
     <div class="token-modal-addr">${contractBlock}</div>
     <div class="token-modal-chart" id="tokenChart">
       <div class="chart-timeframes" id="chartTimeframes">
-        <button class="chart-tf-btn active" data-tf="5m">5m</button>
-        <button class="chart-tf-btn" data-tf="1h">1h</button>
-        <button class="chart-tf-btn" data-tf="24h">24h</button>
+        <!-- Ranges CoinGecko keyless can actually DISTINGUISH (measured
+             2026-10-06: 1d→30min, 7d→4h, 30d→4h, 365d→4d). The old 5m/1h
+             buttons all fetched days=1 → identical candles every time
+             (user: "candle nya sama semua"). -->
+        <button class="chart-tf-btn active" data-tf="24h">24h</button>
         <button class="chart-tf-btn" data-tf="7d">7d</button>
+        <button class="chart-tf-btn" data-tf="30d">30d</button>
+        <button class="chart-tf-btn" data-tf="1y">1y</button>
       </div>
       <canvas id="tokenPriceChart" width="340" height="160"></canvas>
       <div class="chart-price-label" id="chartPriceLabel"></div>
@@ -2206,8 +2229,9 @@ function showTokenActions(el) {
     b.addEventListener('click', () => showActivityDetail(tokenActs[Number(b.dataset.txIdx)]));
   });
 
-  // Draw mini chart from real 24h history
-  drawMiniChart({ symbol, address, timeframe: '24h' });
+  // Draw the chart for whichever range button is active (24h at open) —
+  // the initial draw and the highlighted button could disagree before.
+  drawMiniChart({ symbol, address, timeframe: document.querySelector('.chart-tf-btn.active')?.dataset.tf || '24h' });
 
   // Timeframe buttons
   document.querySelectorAll('.chart-tf-btn').forEach(btn => {
@@ -2247,10 +2271,11 @@ function showReceiveModal(address, symbol) {
   `);
 }
 
-// ── Candlestick chart with timeframe support ────────────────
-// Draws OHLC candles (5m, 1h, 24h, 7d) on canvas.
-// Uses CoinGecko OHLC endpoint, falls back to pseudo-candles from price history.
-const CHART_TF_DAYS = { '5m': 1, '1h': 1, '24h': 1, '7d': 7 };
+// ── Candlestick chart with range support ──────────────────────
+// Draws OHLC candles for the range the API can distinguish: 24h/7d/30d/1y
+// (CoinGecko keyless granularity measured 2026-10-06 — see fetchOHLC).
+// Falls back to pseudo-candles from price history, range passed through.
+const CHART_TF_DAYS = { '24h': 1, '7d': 7, '30d': 30, '1y': 365 };
 
 async function drawMiniChart({ symbol, address, timeframe = '24h' }) {
   const canvas = document.getElementById('tokenPriceChart');
@@ -2306,10 +2331,10 @@ async function drawMiniChart({ symbol, address, timeframe = '24h' }) {
     return;
   }
 
-  // Limit candles for readability (max ~60)
-  const maxCandles = 60;
-  const step2 = Math.max(1, Math.floor(candles.length / maxCandles));
-  const display = candles.filter((_, i) => i % step2 === 0 || i === candles.length - 1);
+  // Merge down to ~60 candles WITHOUT dropping data: the old stride filter
+  // (i % step === 0) threw away every skipped candle's open/high/low, so the
+  // picture lied about the range it claimed to show.
+  const display = fitCandles(candles, 60);
 
   const allHigh = Math.max(...display.map(c => c.high));
   const allLow = Math.min(...display.map(c => c.low));
@@ -2328,6 +2353,26 @@ async function drawMiniChart({ symbol, address, timeframe = '24h' }) {
   ctx.fillText(fmtPrice(allHigh), w - 2, pad.top + 8);
   ctx.fillText(fmtPrice(allLow), w - 2, h - pad.bottom - 2);
   ctx.fillText(fmtPrice((allHigh + allLow) / 2), w - 2, pad.top + chartH / 2 + 4);
+
+  // Time axis: start / middle / end of the drawn range, so "24h" vs "1y"
+  // is readable off the picture instead of guessed (user: "chart time itu
+  // ga akurat"). Range-aware format: clock for 24h, day for 7d/30d, month
+  // + year for 1y.
+  const fmtChartTime = (t) => {
+    const d = new Date(t);
+    if (days <= 1) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (days >= 365) return d.toLocaleDateString([], { month: 'short', year: '2-digit' });
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+  ctx.fillStyle = '#8A8178';
+  ctx.font = '9px monospace';
+  const timeY = h - 6;
+  ctx.textAlign = 'left';
+  ctx.fillText(fmtChartTime(display[0].time), pad.left + 1, timeY);
+  ctx.textAlign = 'center';
+  ctx.fillText(fmtChartTime(display[Math.floor(display.length / 2)].time), w / 2, timeY);
+  ctx.textAlign = 'right';
+  ctx.fillText(fmtChartTime(display[display.length - 1].time), w - pad.right - 1, timeY);
 
   // Draw candles
   display.forEach((c, i) => {

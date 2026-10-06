@@ -112,15 +112,35 @@ test('switcher: jaringan aktif ditandai non-destinasi dan kliknya di-guard sebel
   assert.match(nrBody, /aria-disabled="true"/, 'baris aktif diberi aria-disabled');
   assert.match(nrBody, /✓ Current/, 'baris aktif menjawab kenapa tap tak berbuat apa-apa');
 
-  // handler: guard datang SEBELUM set('networkId'):
+  // handler: guard datang SEBELUM pemanggilan switch (ekstraksi
+  // activateNetwork, M-A 2026-10-06 — set() pindah ke chokepoint):
   const at = app.indexOf("$all('[data-net]').forEach(el => el.addEventListener('click'");
   assert.ok(at > -1, 'handler klik [data-net] harus ada');
   const handler = app.slice(at, at + 700);
   const guard = handler.indexOf('dataset.netCurrent');
-  const setter = handler.indexOf("set('networkId', el.dataset.net)");
+  const call = handler.indexOf('activateNetwork(el.dataset.net)');
   assert.ok(guard > -1, 'guard netCurrent harus ada');
-  assert.ok(setter > -1, 'set networkId tetap ada untuk jaringan lain');
-  assert.ok(guard < setter, 'guard harus mendahului set — jaringan sama tidak boleh terswitch');
+  assert.ok(call > -1, 'klik baris lain memanggil activateNetwork');
+  assert.ok(guard < call, 'guard harus mendahului panggilan — jaringan sama tidak boleh terswitch');
+
+  // activateNetwork: no-op utk id sama, persist, tutup modal hanya bila
+  // diminta (bridge tak boleh ketutup), lalu toast + topbar + dashboard.
+  const fnAt = app.indexOf('export function activateNetwork(');
+  assert.ok(fnAt > -1, 'activateNetwork diekspor sebagai satu chokepoint');
+  const fn = app.slice(fnAt, fnAt + 900);
+  assert.match(fn, /String\(id\) === String\(get\('networkId'\)\)/, 'id sama → no-op, tanpa toast/dashboard');
+  assert.match(fn, /localStorage\.setItem\('bear\.networkId', id\)/, 'id tersimpan ke localStorage');
+  assert.match(fn, /if \(close\) closeModal\(\)/, 'tutup modal dijaga opsi close');
+  assert.match(fn, /updateTopbar\(\)/, 'topbar ikut diperbarui');
+  assert.match(fn, /if \(get\('address'\)\) loadDashboard\(\)/, 'dashboard reload hanya bila ada wallet');
+
+  // bridge: pilih dari-chain → auto-switch TANPA menutup modal bridge
+  // (user, 2026-10-06: "aku ganti jaringan di bridge, ga auto ganti").
+  const brAt = app.indexOf("$('#bridgeFromChain')?.addEventListener('change'");
+  assert.ok(brAt > -1, 'listener change pada select dari-chain bridge ada');
+  const br = app.slice(brAt, brAt + 220);
+  assert.match(br, /activateNetwork\(e\.target\.value, \{ close: false \}\)/,
+    'from-chain change memanggil activateNetwork tanpa menutup bridge');
 });
 
 // ── 3. per-wallet (user 2026-10-06: "pake 2 wallet tx nya nyatu") ─────────

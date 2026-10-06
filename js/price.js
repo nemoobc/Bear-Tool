@@ -383,8 +383,40 @@ export async function fetchAllPrices(tokens, chainId) {
   return result;
 }
 
+// Merge OHLC candles down to ≤max WITHOUT throwing data away. The chart's
+// old stride filter (keep every step-th index) silently dropped each
+// skipped candle's open/high/low — a "24h" picture drawn from every other
+// 30-min bar. Pairwise merge: open of the first, close of the last,
+// max/min across both — same range, fewer candles, zero data loss
+// (user, 2026-10-06: "candle nya sama semua" era fix).
+export function fitCandles(candles, max = 60) {
+  let list = Array.isArray(candles) ? candles : [];
+  while (list.length > max) {
+    const out = [];
+    for (let i = 0; i < list.length; i += 2) {
+      const a = list[i];
+      const b = list[i + 1];
+      if (!b) { out.push(a); break; }   // odd tail rides along untouched
+      out.push({
+        time: a.time,
+        open: a.open,
+        close: b.close,
+        high: Math.max(a.high, b.high),
+        low: Math.min(a.low, b.low),
+      });
+    }
+    list = out;
+  }
+  return list;
+}
+
 // ── OHLC candlestick data for token chart ───────────────────
-// CoinGecko OHLC: days=1 → 5min candles, days=7 → 1h candles.
+// CoinGecko keyless granularity — MEASURED 2026-10-06 (ETH/BTC/DOGE):
+// days=1 → 30min (n=48), 7 → 4h (n=42), 30 → 4h (n=180), 90/365 → 4d
+// (n=23/92). There is no keyless 5m/1h series: the old 5m/1h buttons all
+// fetched days=1 and showed identical candles (user, 2026-10-06: "chart
+// time itu ga akurat candle nya sama semua"). The wizard now offers the
+// ranges the API can actually distinguish.
 // Returns [{ time, open, high, low, close }] or [] when unavailable.
 export async function fetchOHLC({ address, chainId, days = 1 }) {
   await ensureUsdRate();
@@ -425,13 +457,16 @@ export async function fetchOHLC({ address, chainId, days = 1 }) {
     if (isRateLimit(e)) throw rateLimitError();
     // Fallback: convert price history to pseudo-candles
     try {
-      const prices = await fetchPriceHistory({ address, chainId });
+      const prices = await fetchPriceHistory({ address, chainId, days });
       if (prices.length < 2) return [];
       // prices is already in display currency (fetchPriceHistory converts), so
-      // these pseudo-candles must not be scaled a second time.
+      // these pseudo-candles must not be scaled a second time. Spacing follows
+      // the REQUESTED range — a hardcoded 5-min step drew every 7d/1y series
+      // as a wall of tiny steps on a wrong timeline.
+      const stepMs = (days * 86400000) / prices.length;
       const candles = prices.map((p, i) => {
         const next = prices[i + 1] || p;
-        return { time: Date.now() - (prices.length - i) * 300000, open: p, high: Math.max(p, next), low: Math.min(p, next), close: next };
+        return { time: Date.now() - (prices.length - i) * stepMs, open: p, high: Math.max(p, next), low: Math.min(p, next), close: next };
       });
       return candles.slice(0, -1);
     } catch (e2) {
@@ -447,20 +482,22 @@ export async function fetchOHLC({ address, chainId, days = 1 }) {
 // Replaces the old random-walk chart, which looked different on every open.
 const HISTORY_TTL = 5 * 60_000;
 
-export async function fetchPriceHistory({ address, chainId }) {
+export async function fetchPriceHistory({ address, chainId, days = 1 }) {
   await ensureUsdRate();
   const platform = COINGECKO_PLATFORMS[chainId];
   const nativeId = NATIVE_COIN_IDS[chainId];
-  const key = address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`;
+  // Range in the cache key: a 24h hit must never answer a 1y request (the
+  // old key had no range, so the first fill poisoned every other button).
+  const key = `hist:${address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`}:${days}`;
 
   const hit = historyCache.get(key);
   if (hit && Date.now() - hit.ts < HISTORY_TTL) return hit.data;
 
   let url = null;
   if (address && platform) {
-    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/market_chart`, { vs_currency: 'usd', days: 1 });
+    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/market_chart`, { vs_currency: 'usd', days });
   } else if (!address && nativeId) {
-    url = cgUrl(`coins/${nativeId}/market_chart`, { vs_currency: 'usd', days: 1 });
+    url = cgUrl(`coins/${nativeId}/market_chart`, { vs_currency: 'usd', days });
   }
   if (!url) return [];
 
