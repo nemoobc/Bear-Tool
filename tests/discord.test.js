@@ -381,6 +381,21 @@ test('leaveAllGuilds: empty list is a no-op success (0 left, no requests)', asyn
   assert.equal(await D.leaveAllGuilds([], null, fetchFn), 0);
 });
 
+test('renderDiscord: a session the refresh cannot save explains itself, not just blanks', async () => {
+  // The silence this replaces: activeAuth throws → catch(() => null) → the
+  // connect form appears and the user is told NOTHING about why they are
+  // suddenly logged out. The reason must be IN the painted HTML.
+  D.writeAuth({ mode: 'oauth', access: 'STALE', refresh: 'RT', expires: Date.now() - 1 });
+  const fetchFn = async () => jsonResponse({ error: 'invalid_grant' }, 400);
+  const root = { innerHTML: '' };
+  await D.renderDiscord(root, fetchFn);
+  assert.match(root.innerHTML, /Connect Discord/, 'the connect form is what paints');
+  assert.match(root.innerHTML, /⚠️/,
+    'and the failed refresh\u2019s message rides along — never an empty explanation');
+  assert.match(root.innerHTML, /invalid_grant|failed/i,
+    'the actual reason, not a generic "something went wrong"');
+});
+
 // ── source pins: the removal and the slot it left ───────────────────────────
 test('the Approvals feature is gone on every surface, Discord holds its slot', () => {
   const html = raw('index.html');

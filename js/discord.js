@@ -82,8 +82,10 @@ export function oauthAuthorizeUrl({ clientId, challenge, redirectUri, state }) {
 }
 
 // The exact string Discord requires in the portal's Redirects list.
-// `loc` is injectable so tests can assert the form without a browser.
-export function redirectUri(loc = location) {
+// `loc` is injectable so tests can assert the form without a browser;
+// the typeof fallback keeps the paint path alive on a non-browser host
+// (a crash inside connectHtml would hide the real error it carries).
+export function redirectUri(loc = (typeof location !== 'undefined' ? location : { origin: '', pathname: '' })) {
   return loc.origin + loc.pathname;
 }
 
@@ -289,7 +291,7 @@ const modeBadge = (mode) => mode === 'oauth'
   ? '<span class="badge">OAuth (login)</span>'
   : '<span class="badge">User token (pasted)</span>';
 
-function connectHtml() {
+function connectHtml(note = '') {
   const cid = getClientId();
   return `
     <div class="card">
@@ -312,7 +314,7 @@ function connectHtml() {
         <input class="input mono" id="discordToken" type="password" autocomplete="off" placeholder="token (keeps this device only)">
       </div>
       <button type="button" class="btn" id="btnDiscordConnect">Connect with token</button>
-      <div id="discordStatus" class="small dim mt-16"></div>
+      <div id="discordStatus" class="small dim mt-16">${escapeHtml(note)}</div>
     </div>`;
 }
 
@@ -360,8 +362,23 @@ function guildHtml(g, mode) {
 export async function renderDiscord(root, fetchFn = fetch) {
   discordRoot = root;
   if (!root) return;
-  const auth = await activeAuth(fetchFn).catch(() => null);
-  if (!auth) { root.innerHTML = connectHtml(); return; }
+  // A refresh that fails is a REASON, not a null: swallowing it would show
+  // the connect form with no explanation — the exact silence every other
+  // view in this app refuses to ship.
+  let auth = null;
+  let sessionError = null;
+  try {
+    auth = await activeAuth(fetchFn);
+  } catch (e) {
+    sessionError = e;      // stale OAuth the refresh could not save
+  }
+  if (!auth) {
+    // The reason is painted INTO the form — a swallowed refresh error that
+    // only updates an element the caller may not have is the same silence
+    // as no error at all.
+    root.innerHTML = connectHtml(sessionError ? `⚠️ ${sessionError.message}` : '');
+    return;
+  }
   let me = null;
   let guilds = [];
   try {
@@ -387,9 +404,15 @@ export async function renderDiscord(root, fetchFn = fetch) {
 }
 
 function say(msg, type = 'info') {
-  const st = $('#discordStatus');
+  // Defensive on purpose: renderDiscord's error path runs this, and a
+  // reason that crashes before it can be shown is no reason at all
+  // (also what lets the paint path be unit-tested outside a browser).
+  let st = null;
+  try { st = $('#discordStatus'); } catch { /* no DOM (test host) */ }
   if (st) st.textContent = msg;
-  if (type === 'error') toast(msg, 'error');
+  if (type === 'error') {
+    try { toast(msg, 'error'); } catch { /* no DOM — text still stands */ }
+  }
 }
 
 function confirmLeave(ids, label) {
@@ -412,8 +435,10 @@ function confirmLeave(ids, label) {
     try {
       if (many) {
         const list = await fetchGuilds();
-        await leaveAllGuilds(list, (done, total) => say(`Left ${done}/${total}…`));
-        say(`Left ${ids.length} servers.`);
+        const left = await leaveAllGuilds(list, (done, total) => say(`Left ${done}/${total}…`));
+        // The count comes from the RUN, not from what was on screen when the
+        // dialog opened — a list that changed mid-run must not be reported.
+        say(`Left ${left} servers.`);
       } else {
         await leaveGuild(ids[0]);
         say(`Left ${label}.`);
