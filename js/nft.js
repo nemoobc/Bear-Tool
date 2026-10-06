@@ -265,22 +265,21 @@ function nftCardHtml(nft) {
         </div>`;
 }
 
-// Both empty states share one shell and one wiring step: a second copy
-// is how "Switch network" quietly stops working in one of them.
+// Both empty states share one shell and one wiring step. No "Switch network"
+// button anymore: the gallery auto-detects owner-wide (Settings → NFT
+// auto-detect), so an honest empty needs no nag to change chains — the top
+// network picker is one tap away when the user actually wants that
+// (user, 2026-10-06: "autodetect kalau ga ada harusnya ga perlu switch network").
 function nftEmptyHtml(title, hintHtml) {
   return '<div class="nft-empty" role="status">' +
     '<div class="nft-empty-title">' + escapeHtml(title) + '</div>' +
     '<div class="nft-empty-hint">' + hintHtml + '</div>' +
-    '<button class="btn btn-sm btn-secondary" id="nftSwitchNetwork">Switch network</button>' +
     '</div>';
 }
 
 function wireNftEmpty(netLabel) {
   const name = document.getElementById('nftEmptyNet');
   if (name) name.textContent = netLabel;
-  document.getElementById('nftSwitchNetwork')?.addEventListener('click', () => {
-    document.getElementById('networkPill')?.click();
-  });
 }
 
 export async function loadNfts() {

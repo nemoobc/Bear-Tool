@@ -643,7 +643,7 @@ async function doBridgeExecInner() {
     const ok = await confirmTx({
       title: 'EXECUTE BRIDGE ON MAINNET!',
       rows: [{ k: 'From', v: `${fromNet.name} (${fromNet.chainId})` }, { k: 'To', v: `${toNet.name} (${toNet.chainId})` }, { k: 'Amount', v: `${context.amount} ${context.tokenSymbol || ''}` }],
-      confirmText: 'Execute Bridge', danger: true
+      confirmText: 'Bridge', danger: true
     });
     if (!ok) return;
   }
@@ -658,7 +658,7 @@ async function doBridgeExecInner() {
       { k: 'Router', v: context.router || 'Auto' },
       { k: 'Est. time', v: '~2-10 min' }
     ],
-    confirmText: 'Confirm & Bridge',
+    confirmText: 'Confirm',
     cancelText: 'Cancel',
     danger: false
   });

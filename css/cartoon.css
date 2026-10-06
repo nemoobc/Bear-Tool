@@ -1646,18 +1646,22 @@ select.input option, select.select option, .input option {
    split rule meant a source-level check read the first half and saw no colour
    at all, which is a fine way to ship a regression nobody can see. */
 .pct-btn.active { background: var(--honey); box-shadow: var(--shadow-sm); color: #2D2A32; }
-/* MAX is the one that spends the account down, so it gets its own weight
-   rather than sitting in a row of equal-looking quarters. */
+/* MAX is the one that spends the account down, so it keeps its own weight
+   rather than sitting in a row of equal-looking quarters — but the honey
+   fill (the "warna") only lands while it is pressed or chosen: a permanent
+   fill read as always-on state (user, 2026-10-06: "kotak max ... pas di
+   pencet aja ada warna"). A fixed bright fill needs fixed dark text —
+   measured 1.6:1 with var(--ink) in dark theme, 9.7:1 with #2D2A32. */
 .pct-max {
   font-weight: 800;
   letter-spacing: 0.02em;
   border-color: var(--ink);
-  background: var(--honey);
-  /* Same reason as .pct-btn.active: a fixed bright fill needs a fixed dark text.
-     Measured 1.6:1 with var(--ink) in dark theme, 9.7:1 with this. */
-  color: #2D2A32;
 }
-.pct-max.active { background: var(--ink); color: var(--white); }
+.pct-max:active, .pct-max.active {
+  background: var(--honey);
+  color: #2D2A32;
+  box-shadow: var(--shadow-sm);
+}
 .gas-btns { display: flex; gap: var(--sp-4); }
 .gas-btn {
   flex: 1;

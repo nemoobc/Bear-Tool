@@ -2101,11 +2101,14 @@ function showTokenActions(el) {
   try { holding = Number(ethers.formatUnits(balance || '0', decimals)) * (usd ?? 0); } catch { holding = 0; }
   if (!Number.isFinite(holding)) holding = 0;
 
-  // The transactions of THIS token, newest first. Rows written before the
-  // symbol field existed match through their detail string (see
-  // activityMatchesSymbol), so old history is not lost from this list.
+  // The transactions of THIS token on THIS network, newest first. Rows written
+  // before the symbol field existed match through their detail string (see
+  // activityMatchesSymbol), so old history is not lost from this list — and
+  // the network rule is the Activity view's own (currentNetworkActivity), so
+  // the coin modal and the Activity feature can no longer disagree
+  // (user, 2026-10-06).
   loadActivity();
-  const tokenActs = get('activity').filter((a) => activityMatchesSymbol(a, symbol));
+  const tokenActs = currentNetworkActivity().filter((a) => activityMatchesSymbol(a, symbol));
   // Native ETH rows record symbol "ETH"; a native-coin send on another chain
   // still carries the chain symbol in detail, so no special case is needed.
   const contractBlock = address
@@ -2745,18 +2748,23 @@ async function runEip7702Check() {
 }
 
 // ── activity ──
+// The rows this view is allowed to show: recorded on the network you are
+// standing on — one filter for EVERY activity surface, so renderActivity and
+// the per-coin modal can no longer disagree (user, 2026-10-06: "activity di
+// list coin sama fitur activity ga sama"). Rows written before netId existed
+// have no network to attribute to; showing them everywhere is exactly the
+// "mainnet and testnet history in one list" report (same day). They stay in
+// storage untouched — only the views stopped showing them.
+function currentNetworkActivity() {
+  const activeId = get('networkId');
+  return (get('activity') || []).filter((a) => a && a.netId === activeId);
+}
+
 function renderActivity() {
   loadActivity();
   const list = $('#activityList');
   if (!list) return;
-  // Two networks in one undivided list was the reported bug: rows recorded on
-  // another network no longer sit beside these ones. Rows written before
-  // netId existed (history from older builds) stay visible under their own
-  // heading — an honest "not recorded" beats silently losing history.
-  const activeId = get('networkId');
-  const mine = get('activity').filter((a) => a && a.netId === activeId);
-  const older = get('activity').filter((a) => a && !a.netId);
-  const visible = [...mine, ...older];
+  const visible = currentNetworkActivity();
   if (!visible.length) {
     list.innerHTML = `<div class="empty-state">
       <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -2798,12 +2806,8 @@ function renderActivity() {
         <div class="activity-meta">${escapeHtml(a.detail)} · ${escapeHtml(fmtTimeShort(a.ts))}</div>
       </div>
     </div>`;
-  const olderHead = older.length
-    ? `<div class="activity-netsep"><span class="small dim">· Network not recorded (older entries) ·</span></div>`
-    : '';
-  // mine first, then older — the order `visible` was built in, so
   // data-act-index maps straight to visible[i].
-  list.innerHTML = mine.map(rowHTML).join('') + olderHead + older.map(rowHTML).join('');
+  list.innerHTML = visible.map(rowHTML).join('');
   // Tapping a row opens the full record. There is deliberately no explorer link
   // inside the row: role="button" makes the whole subtree presentational, so a
   // nested <a> loses its role while staying in the tab order (a link announced

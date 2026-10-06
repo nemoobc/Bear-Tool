@@ -65,18 +65,27 @@ test('baris lama tanpa netId tetap ada di storage (bukan dihapus)', () => {
 
 // ── 2. view layer (textual app.js) ─────────────────────────────────────
 
-test('renderActivity: pisahkan jaringan aktif vs baris lama, jaringan lain disembunyikan', () => {
+test('renderActivity & modal koin pakai SATU filter jaringan; baris lama tanpa netId tak ditampilkan', () => {
   const start = app.indexOf('function renderActivity(');
   const end = app.indexOf('function showActivityDetail(', start);
   assert.ok(start > -1 && end > start, 'renderActivity harus ditemukan');
   const body = app.slice(start, end);
 
-  assert.match(body, /const mine = get\('activity'\)\.filter\(\(a\) => a && a\.netId === activeId\)/,
-    'baris jaringan aktif = netId cocok');
-  assert.match(body, /const older = get\('activity'\)\.filter\(\(a\) => a && !a\.netId\)/,
-    'baris lama tanpa netId tetap tampil di bawah heading sendiri');
-  assert.match(body, /Network not recorded/,
-    'baris tanpa jaringan dilabeli jujur, bukan dicampur diam-diam');
+  assert.match(body, /const visible = currentNetworkActivity\(\)/,
+    'view activity tinggal pakai helper bersama');
+  assert.doesNotMatch(body, /Network not recorded/,
+    'baris tanpa jaringan tak lagi dicampur ke tampilan (user 2026-10-06: nyatu)');
+
+  // Satu helper untuk SEMUA permukaan activity — modal koin dulu pakai filter
+  // sendiri (tanpa netId) sehingga isinya beda dengan fitur Activity.
+  const helper = app.indexOf('function currentNetworkActivity(');
+  assert.ok(helper > -1, 'helper currentNetworkActivity ada');
+  assert.match(app.slice(helper, helper + 300), /a && a\.netId === activeId/,
+    'helper = netId cocok dengan jaringan aktif');
+  assert.match(app.slice(app.indexOf('const tokenActs ='), app.indexOf('const tokenActs =') + 200),
+    /currentNetworkActivity\(\)\.filter\(\(a\) => activityMatchesSymbol/,
+    'modal koin membaca activity lewat helper yang sama');
+
   assert.match(body, /showActivityDetail\(visible\[Number\(row\.dataset\.actIndex\)\]\)/,
     'indeks baris harus menunjuk ke visible, bukan ke seluruh activity');
   assert.doesNotMatch(body, /list\.innerHTML = get\('activity'\)\.map/,

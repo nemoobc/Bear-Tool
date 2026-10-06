@@ -190,3 +190,21 @@ test('bridge: tombol Execute selalu ada — disabled saat belum ada rute', () =>
   assert.ok(!/execBtn\.classList\.add\('hidden'\)/.test(bridgeJs),
     'jangan sembunyikan tombol lagi');
 });
+
+test('NFT empty state tanpa tombol Switch network (user 2026-10-06)', () => {
+  assert.doesNotMatch(nft, /id="nftSwitchNetwork"/,
+    'gallery auto-detect → kosong cukup dengan teks, jangan nag pindah jaringan');
+  assert.doesNotMatch(nft, />Switch network</,
+    'label tombolnya ikut dibuang, bukan cuma listener');
+  assert.match(nft, /function nftEmptyHtml\(title, hintHtml\)/,
+    'shell empty-state tetap dipakai dua-duanya');
+});
+
+test('MAX baru berwarna saat ditekan/dipilih, bukan selalu (user 2026-10-06)', () => {
+  const css = fs.readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
+  const base = css.match(/\.pct-max\s*\{([\s\S]*?)\n\}/);
+  assert.ok(base, '.pct-max base block ada');
+  assert.doesNotMatch(base[1], /background/, 'fill tak lagi menempel di keadaan diam');
+  assert.match(css, /\.pct-max:active, \.pct-max\.active\s*\{[^}]*--honey/s,
+    'honey fill pindah ke :active/.active');
+});

@@ -49,7 +49,7 @@ export default function BridgeView() {
                   left the screen with no bridge button at all when the quote
                   failed (live report, 2026-10-03). doBridgeExec still refuses
                   a missing/stale quote on its own. */}
-              <button type="button" className="btn btn-success btn-block btn-lg" id="btnBridgeExec" disabled>Execute Bridge</button>
+              <button type="button" className="btn btn-success btn-block btn-lg" id="btnBridgeExec" disabled>Bridge</button>
               <div id="bridgeQuote" className="quote-box hidden"></div>
               <div id="bridgeStatus" className="bridge-status hidden">
                 <div className="bridge-progress"><div className="bridge-progress-fill" id="bridgeProgressFill"></div></div>
