@@ -125,3 +125,39 @@ test('forkSkipReason is the only thing allowed to skip a fork test wholesale', (
   assert.match(helperSrc, /FORK_PORT/,
     'tanpa FORK_PORT, seluruh file ter-skip dengan pesan soal CI');
 });
+
+test('every fork network has an upstream, and optimism carries a measured fallback', async () => {
+  // Endpoint = keputusan yang bisa diukur ulang, bukan ingatan. 2026-10-06:
+  // burst 25 eth_blockNumber serentak — mainnet.optimism.io 25/25 ok vs
+  // optimism.drpc.org 21/25 + HTTP 429; tiga run CI beruntun optimism kalah di
+  // drpc dengan "Public endpoint rate limit". Riwayat sebaliknya (drpc menang
+  // di run 37338189440) tetap terlayani lewat `alts` — karenanya keduanya
+  // wajib tercantum, dan kandidat cadangan wajib beda dengan kandidat utama.
+  const { FORK_NETWORKS } = await import('./fork/fork-helper.mjs');
+  for (const [name, def] of Object.entries(FORK_NETWORKS)) {
+    assert.match(def.rpc ?? '', /^https?:\/\//, `${name} tanpa rpc utama`);
+    for (const alt of def.alts ?? []) {
+      assert.match(alt, /^https?:\/\//, `${name}: alt bukan URL`);
+      assert.notEqual(alt, def.rpc, `${name}: alt sama dengan rpc utama — failover percuma`);
+    }
+  }
+  const opt = FORK_NETWORKS.optimism;
+  assert.equal(opt.rpc, 'https://mainnet.optimism.io', 'optimism harus memakai endpoint resmi (burst 25/25)');
+  assert.ok((opt.alts || []).includes('https://optimism.drpc.org'),
+    'optimism harus menyimpan drpc sebagai cadangan (riwayat CI 37338189440)');
+});
+
+test('the failover exists in BOTH paths: pin query and anvil boot', () => {
+  // Failover yang hanya ada di query pin tidak menolong bila endpoint yang
+  // dijawab lalu menggantung saat anvil menarik state (run 36921954638);
+  // failover yang hanya ada di boot membiarkan query pin gagal senyap dan
+  // menghasilkan fork live-following — mode yang sama pernah gagal di CI.
+  assert.match(helperSrc, /const candidates = \[network\.rpc, \.\.\.\(network\.alts \|\| \[\]\)\]/,
+    'loop pin query harus mencoba seluruh kandidat');
+  assert.match(helperSrc, /const bootCandidates = \[network\.rpc, \.\.\.\(network\.alts \|\| \[\]\)\]/,
+    'loop boot anvil harus mencoba seluruh kandidat');
+  assert.match(helperSrc, /network\.rpc = cand/, 'kandidat pemenang pin query harus menjadi upstream run');
+  assert.match(helperSrc, /network\.rpc = chosenRpc/, 'kandidat pemenang boot harus menjadi upstream run');
+  assert.match(helperSrc, /upstream switch at boot/,
+    'switch harus tercatat di log — keputusan senyap = bug yang dikubur');
+});

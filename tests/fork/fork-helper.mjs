@@ -40,12 +40,21 @@ export const FORK_NETWORKS = {
   // drpc: serve N-50000 + 3/3 stabil (1rpc: 1/3; lainnya mati).
   ethereum:          { chainId: 1,      rpc: 'https://eth.drpc.org',                        type: 'mainnet' },
   bsc:               { chainId: 56,     rpc: 'https://bsc-dataseed.binance.org',             type: 'mainnet' },
-  // drpc.org juga utk optimism (bukan mainnet.optimism.io): run 37338189440's
-// fork-send optimism instance mem-pin block lalu KEHILANGAN tx sendiri
-// (send#13 receipt=null, balance 0 setelah 75s) sementara instance lain di
-// chain yang sama LULUS — rate-limit upstream saat ~14 fork start paralel.
-// Drpc sama dipercaya utk eth/polygon (comment di atas).
-// drpc.org, bukan publicnode: anvil mem-pinning block lalu suite menggiling
+  // optimism: endpoint resmi dulu, drpc cadangan. Keduanya pernah biru maupun
+  // merah di CI dan dengan mode gagal yang BERBEDA, jadi pilihan di bawah ini
+  // berbasis pengukuran ulang 2026-10-06, bukan ingatan:
+  //   - burst 25 eth_blockNumber serentak (1 IP): mainnet.optimism.io 25/25 ok
+  //     (1.4s) vs optimism.drpc.org 21/25 + HTTP 429 — dan tiga run CI
+  //     beruntun (37434161631 + 2x rerun) optimism kalah di drpc dengan
+  //     "Public endpoint rate limit" / balance check 8s timeout.
+  //   - drpc sempat menang atas resmi pada run 37338189440 (fork-send optimism
+  //     kehilangan tx sendiri saat ~14 fork start paralel) — itulah alasan
+  //     `alts` ada: kandidat pertama yang menjawab query pin menjadi upstream
+  //     fork ini, jadi kedua riwayat buruk punya jalan keluar tanpa edit kode.
+  //   - probe retensi (probe-optimism-rpc.mjs) kini lolos dua-duanya (6h+1d+3/3),
+  //     publicnode tetap tersingkir (eth_getCode historis HTTP 403).
+  optimism:          { chainId: 10,     rpc: 'https://mainnet.optimism.io',                  alts: ['https://optimism.drpc.org'], type: 'mainnet' },
+  // drpc.org, bukan publicnode: anvil mem-pinning block lalu suite menggiling
   // beberapa menit, dan publicnode polygon BUKAN arsip — retention singkat +
   // backend broker 5xx/529 → `historical state ... is not available` muncul
   // SETELAH pin menua (fork-poly4 lolos 20s → fork-poly5 mati pada run yang
@@ -53,7 +62,6 @@ export const FORK_NETWORKS = {
   // hanya drpc.org serve state N-50000 dan 3/3 eth_call stabil.
   polygon:           { chainId: 137,    rpc: 'https://polygon.drpc.org',                     type: 'mainnet' },
   arbitrum:          { chainId: 42161,  rpc: 'https://arb1.arbitrum.io/rpc',                 type: 'mainnet' },
-  optimism:          { chainId: 10,     rpc: 'https://optimism.drpc.org',                   type: 'mainnet' },
   base:              { chainId: 8453,   rpc: 'https://mainnet.base.org',                     type: 'mainnet' },
   sepolia:           { chainId: 11155111, rpc: 'https://ethereum-sepolia-rpc.publicnode.com', type: 'testnet' },
   amoy:              { chainId: 80002,  rpc: 'https://polygon-amoy-bor-rpc.publicnode.com',  type: 'testnet' },
@@ -92,7 +100,11 @@ function resolveNetwork() {
   const name = process.env.FORK_NETWORK || 'ethereum';
   const def = FORK_NETWORKS[name];
   if (!def) throw new Error(`Unknown FORK_NETWORK "${name}". Valid: ${NETWORK_NAMES.join(', ')}`);
-  return { name, ...def, rpc: process.env.FORK_RPC_URL || def.rpc };
+  // FORK_RPC_URL pins a single endpoint deliberately (no fallback), otherwise
+  // the table's `rpc` leads and `alts` follow: the pin query picks the first
+  // candidate that ANSWERS, and that candidate serves the whole run.
+  if (process.env.FORK_RPC_URL) return { name, ...def, rpc: process.env.FORK_RPC_URL, alts: [] };
+  return { name, ...def, alts: def.alts || [] };
 }
 
 function hasAnvil() {
@@ -251,21 +263,32 @@ async function startForkLocked(port) {
       // The pin query is the load-bearing line above, and a single rate-limited
       // HTTP 429/529 (publicnode, drpc) used to silently drop it — leaving a
       // live-following fork, the exact mode CI failed in. Retry like every
-      // other RPC call in this helper; only after 3 attempts give up, loudly.
-      for (let a = 1; a <= 3 && !forkBlock; a++) {
-        try {
-          const rq = await fetch(network.rpc, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
-            signal: AbortSignal.timeout(15000),
-          });
-          const rj = await rq.json();
-          if (rj?.result) forkBlock = String(parseInt(rj.result, 16));
-          else if (a === 3) process.stderr.write(`[fork] eth_blockNumber empty after ${a} tries: ${JSON.stringify(rj).slice(0, 160)}\n`);
-        } catch (e) {
-          process.stderr.write(`[fork] eth_blockNumber attempt ${a}/3 failed: ${String(e.message).slice(0, 120)}\n`);
-          if (a < 3) await new Promise((r) => setTimeout(r, 1000 * a));
+      // other RPC call in this helper; only after 3 attempts per CANDIDATE
+      // give up, loudly. Candidates: the table's `rpc` first, then `alts` —
+      // the first endpoint that answers becomes this run's upstream, so one
+      // throttled provider costs a switch instead of the whole leg.
+      const candidates = [network.rpc, ...(network.alts || [])];
+      for (const cand of candidates) {
+        if (forkBlock) break;
+        for (let a = 1; a <= 3 && !forkBlock; a++) {
+          try {
+            const rq = await fetch(cand, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+              signal: AbortSignal.timeout(15000),
+            });
+            const rj = await rq.json();
+            if (rj?.result) forkBlock = String(parseInt(rj.result, 16));
+            else if (a === 3) process.stderr.write(`[fork] eth_blockNumber empty after ${a} tries on ${cand}: ${JSON.stringify(rj).slice(0, 160)}\n`);
+          } catch (e) {
+            process.stderr.write(`[fork] eth_blockNumber attempt ${a}/3 failed on ${cand}: ${String(e.message).slice(0, 120)}\n`);
+            if (a < 3) await new Promise((r) => setTimeout(r, 1000 * a));
+          }
+        }
+        if (forkBlock && cand !== network.rpc) {
+          process.stderr.write(`[fork] upstream switch: ${network.rpc} did not answer the pin query — using ${cand}\n`);
+          network.rpc = cand; // the whole run forks from the endpoint that worked
         }
       }
     }
@@ -278,9 +301,20 @@ async function startForkLocked(port) {
       (forkBlock ? `pinning to block ${forkBlock}` :
         'NO --fork-block-number pin (eth_blockNumber query failed/empty) — live-following fork') + '\n');
     let started = false;
-    for (let attempt = 1; attempt <= 3 && !started; attempt++) {
+    // Boot over the candidate chain as well: the pin query can be answered by
+    // an endpoint that then stalls under anvil's state-fetch burst (the
+    // official node did exactly that — CI 36921954638's optimism receipt
+    // timeouts), and an endpoint that boots can still be the one anvil's
+    // transport hammers later. Two attempts per candidate, in order, so a
+    // stall costs a switch instead of the whole leg.
+    const bootCandidates = [network.rpc, ...(network.alts || [])];
+    let chosenRpc = network.rpc;
+    for (const cand of bootCandidates) {
+      if (started) break;
+      chosenRpc = cand;
+      for (let attempt = 1; attempt <= 2 && !started; attempt++) {
       const args = [
-        '--fork-url', network.rpc,
+        '--fork-url', cand,
         '--port', String(port),
         '--silent',
         '--chain-id', String(network.chainId),
@@ -323,9 +357,15 @@ async function startForkLocked(port) {
       if (!started) {
         try { anvilProcess.kill('SIGKILL'); } catch {}
         anvilProcess = null;
+        process.stderr.write(`[fork] anvil boot failed on ${cand} (attempt ${attempt}/2)\n`);
+      }
       }
     }
-    if (!started) throw new Error('anvil did not start in time');
+    if (!started) throw new Error(`anvil did not start in time (candidates: ${bootCandidates.join(', ')})`);
+    if (chosenRpc !== network.rpc) {
+      process.stderr.write(`[fork] upstream switch at boot: ${network.rpc} would not boot — serving the fork from ${chosenRpc}\n`);
+      network.rpc = chosenRpc;
+    }
   }
 
   const { ethers } = await import('ethers');
