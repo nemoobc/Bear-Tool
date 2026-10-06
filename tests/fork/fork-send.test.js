@@ -38,20 +38,48 @@ test('fork: send native ETH — balances move on-chain', { skip }, async (t) => 
   // 75s, not 30s: the optimism legs were observed taking >30s to reflect a
   // local transfer (92s test runtime vs ~10-20s elsewhere) while every other
   // leg lands in <5s — the poll deadline, not the chain, was failing first.
-  const deadline = Date.now() + 75000;
+  // 120s, not 75s: the optimism legs on the official endpoint were observed
+  // never reflecting the credit within 75s (CI 37446987317, 78s run) while the
+  // same test lands in <5s elsewhere — the deadline was still the first thing
+  // to expire. The fallback below, not the clock, is the real fix.
+  const deadline = Date.now() + 120000;
   let afterBal = await provider.getBalance(to);
   while (afterBal !== beforeBal + amount && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 500));
     afterBal = await provider.getBalance(to);
   }
   if (afterBal !== beforeBal + amount) {
-    // The recipient never got the ETH even after the deadline: say where the
-    // transaction actually is — mined or still pending, and at which block —
-    // before the assertion turns that into a bare number line. (Optimism-sepolia
-    // read 0n twice in a row while every other leg landed in <5s.)
-    const rcpt = await provider.getTransactionReceipt(tx.hash).catch((e) => 'ERR ' + (e?.message || e));
-    const bn = await provider.getBlockNumber().catch(() => -1);
-    t.diagnostic(`send#13: recipient=${afterBal} bn=${bn} receipt=${rcpt == null ? 'null' : (typeof rcpt === 'string' ? rcpt : 'status=' + rcpt.status + ' block=' + rcpt.blockNumber)}`);
+    // Evidence bundle before the assertion, then the authoritative re-read:
+    // WHERE is the tx, and what does the balance say AT ITS OWN BLOCK? A block
+    // above the pin exists only on this anvil — a 'latest'/block read that fell
+    // through to the upstream node answers with the upstream's own chain
+    // (fresh address → 0, unknown tx → receipt null; anvil's receipt lookup
+    // for a local tx is documented falling through in mem/mod.rs). CI
+    // 37446987317: recipient=0, receipt=null, bn=pin+1 for the whole deadline.
+    let info = await provider.getTransaction(tx.hash).catch((e) => 'ERR ' + (e?.message || e));
+    let minedAt = (info && info.blockNumber != null) ? info.blockNumber : null;
+    const bnNow = await provider.getBlockNumber().catch(() => -1);
+    if (minedAt == null) {
+      // getTransaction can fall through too — the local block scan cannot lie
+      // about a hash that only this node ever saw.
+      for (let b = bnNow; b > Math.max(0, bnNow - 8) && minedAt == null; b--) {
+        const blk = await provider.getBlock(b).catch(() => null);
+        const txs = blk?.transactions;
+        if (Array.isArray(txs) && txs.some(h => (typeof h === 'string' ? h : h.hash) === tx.hash)) minedAt = b;
+      }
+    }
+    const senderBal = await provider.getBalance(ANVIL_ACCOUNT).catch(() => 'ERR');
+    if (minedAt != null) {
+      const atBlock = await provider.getBalance(to, minedAt).catch((e) => 'ERR ' + (e?.message || e));
+      t.diagnostic(`send: latest=${afterBal} atBlock(${minedAt})=${atBlock} sender=${senderBal} bn=${bnNow}`);
+      if (atBlock === beforeBal + amount) afterBal = atBlock;
+    } else {
+      // No retry: the observed failure (bn=pin+1) proves the tx mined, so a
+      // blind resend would risk double-crediting the exact-amount assertion.
+      // The sender debit in the diagnostic separates "tx applied, read lied"
+      // from "tx never applied" for the next iteration.
+      t.diagnostic(`send: tx tidak ditemukan (getTransaction=${info == null ? 'null' : typeof info === 'string' ? info : 'blockNumber=' + info.blockNumber}, bn=${bnNow}, sender=${senderBal}, recipient=${afterBal})`);
+    }
   }
   assert.equal(afterBal, beforeBal + amount, 'recipient balance must increase by the exact amount');
 });
