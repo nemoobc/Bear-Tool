@@ -106,10 +106,14 @@ test('compileContract: compiler-config knobs reach the solc standard-JSON input'
   assert.equal(seen[1].settings.optimizer.enabled, false, 'optimizer toggle must be passed through');
   assert.equal(seen[1].settings.optimizer.runs, 9999, 'runs must be passed through');
 
-  // all 14 wizard EVM options are solc-accepted identifiers (each was probed
-  // against the real 0.8.37 wasm: 14/14 pass, 2026-10-04)
+  // M-G matrix (2026-10-06, real 0.8.37 wasm, all 6 wizard paths):
+  // 11/14 EVM options compile. The 3 failing ones (spuriousDragon,
+  // tangerineWhistle, homestead) were removed from the wizard — keep this
+  // list in sync with js/contracts.js EVM_VERSIONS.
   const evms = ['osaka', 'prague', 'cancun', 'shanghai', 'paris', 'london', 'berlin', 'istanbul',
-    'petersburg', 'constantinople', 'byzantium', 'spuriousDragon', 'tangerineWhistle', 'homestead'];
+    'petersburg', 'constantinople', 'byzantium'];
+  assert.deepEqual(contracts.EVM_VERSIONS.map(e => e.v), evms,
+    'EVM_VERSIONS must be the 11 probed-passing options');
   for (const evm of evms) {
     await solcJs.compileContract('contract C {}', 'C', { evmVersion: evm });
     assert.equal(seen.at(-1).settings.evmVersion, evm, `${evm} must reach solc`);

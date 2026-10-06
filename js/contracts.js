@@ -1543,9 +1543,15 @@ const ACCESS_OPTIONS = [
   { v: 'accesscontrol', label: 'Roles — MINTER/PAUSER roles, admin role' },
   { v: 'managed', label: 'Managed — roles + defaultAdmin two-step transfer' },
 ];
-// solc 0.8.37 accepted EVM versions (M6 matrix: all 14 compile, default =
-// osaka). First option is the wizard default and passes 'osaka' explicitly —
-// M6 proved explicit osaka ≡ compiler default (bitwise identical).
+// solc 0.8.37 EVM versions that actually COMPILE the wizard templates
+// (M-G matrix 2026-10-06: all 6 wizard paths — erc20 default/upg/roles,
+// erc721 upg, erc1155 — probed per version against the real 0.8.37 wasm).
+// 11/14 pass. spuriousDragon, tangerineWhistle and homestead were DROPPED:
+// they fail the upgradeable paths with "Type inaccessible dynamic type is not
+// implicitly convertible to expected type bytes memory" (BearERC20.sol:110 /
+// BearERC721.sol:157) — see $PREFIX/tmp/evm-w{1,2,3}.log. First option is the
+// wizard default and passes 'osaka' explicitly — M6 proved explicit osaka ≡
+// compiler default (bitwise identical).
 export const EVM_VERSIONS = [
   { v: 'osaka', label: 'Default (osaka)' },
   { v: 'prague', label: 'Prague' },
@@ -1557,10 +1563,7 @@ export const EVM_VERSIONS = [
   { v: 'istanbul', label: 'Istanbul' },
   { v: 'petersburg', label: 'Petersburg' },
   { v: 'constantinople', label: 'Constantinople' },
-  { v: 'byzantium', label: 'Byzantium' },
-  { v: 'spuriousDragon', label: 'Spurious Dragon' },
-  { v: 'tangerineWhistle', label: 'Tangerine Whistle' },
-  { v: 'homestead', label: 'Homestead' }
+  { v: 'byzantium', label: 'Byzantium' }
 ];
 const EVM_ALLOW = new Set(EVM_VERSIONS.map((o) => o.v));
 
