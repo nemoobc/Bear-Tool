@@ -100,6 +100,10 @@ export function addActivity(item) {
         // pending→receipt update must not inherit whatever network the user
         // was standing on when the receipt arrived.
         netId: prev.netId || item.netId || state.networkId || '',
+        // The WALLET that created the row, kept the same way as netId: a
+        // receipt landing under another wallet must not steal ownership.
+        // Legacy rows (no addr) stay ownerless — never claimed at update.
+        addr: prev.addr || item.addr || '',
       };
       // A pending row that turns out to be final moves back to the top, which is
       // where the newest thing belongs.
@@ -111,9 +115,12 @@ export function addActivity(item) {
   }
   // Stamp at birth: the activity view is filtered per network, so a row
   // without a netId would surface under every network — the bug where testnet
-  // and mainnet history sat in one undivided list.
-  const stamped = (item && typeof item === 'object' && !item.netId)
-    ? { ...item, netId: state.networkId || '' }
+  // and mainnet history sat in one undivided list. The same stamp, same
+  // doctrine, for the WALLET: two wallets sharing a network must not share a
+  // list (user, 2026-10-06: "pake 2 wallet tx nya nyatu"). An explicit addr
+  // from a caller wins; otherwise the wallet that is sending now created it.
+  const stamped = (item && typeof item === 'object')
+    ? { ...item, netId: item.netId || state.networkId || '', addr: item.addr || state.address || '' }
     : item;
   state.activity.unshift(stamped);
   persistActivity();
@@ -135,6 +142,40 @@ export function removeActivity(hash) {
 /** True when this hash is already recorded, whatever its status. */
 export function hasActivity(hash) {
   return state.activity.some((a) => a.hash === hash);
+}
+
+// ── custom tokens (persisted across refresh) ─────────────────────────
+// state.tokens is memory: the dashboard rebuilds it from native +
+// POPULAR_TOKENS on every load, so an "Add Token" that only pushed into
+// state vanished on refresh (user, 2026-10-06: "token yang ku add tiba-tiba
+// hilang"). The typed facts — chain, address, symbol, decimals — persist
+// here; the balance still comes from the chain at load, never from storage.
+const CUSTOM_TOKENS_KEY = 'bear.customTokens';
+
+/** Custom tokens the user added, optionally filtered to one chain. */
+export function getCustomTokens(chainId) {
+  try {
+    const list = JSON.parse(localStorage.getItem(CUSTOM_TOKENS_KEY) || '[]');
+    return (Array.isArray(list) ? list : [])
+      .filter((t) => t && typeof t.address === 'string' && typeof t.chainId === 'number'
+        && (!chainId || Number(t.chainId) === Number(chainId)));
+  } catch { return []; }
+}
+
+/** Persist one custom token. Idempotent per (chain, address). */
+export function persistCustomToken(tok) {
+  if (!tok || typeof tok.address !== 'string' || !tok.chainId) return;
+  try {
+    const arr = getCustomTokens();
+    if (arr.some((t) => t.address.toLowerCase() === tok.address.toLowerCase()
+      && Number(t.chainId) === Number(tok.chainId))) return;
+    arr.push({
+      address: tok.address, symbol: tok.symbol,
+      decimals: Number.isFinite(Number(tok.decimals)) ? Number(tok.decimals) : 18,
+      chainId: Number(tok.chainId),
+    });
+    localStorage.setItem(CUSTOM_TOKENS_KEY, JSON.stringify(arr));
+  } catch { /* storage full — the token lives this session only */ }
 }
 
 /**

@@ -21,7 +21,7 @@ import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPasswo
          fmtAmount, fmtUsd, fmtTime, fmtTimeShort, escapeHtml, animateValue, titleCase } from './ui.js';
 import { runIntro, initTheme } from './theme.js';
 import { get, set, on, setUnlockHandler, addActivity, loadActivity,
-         reconcileActivity, activityMatchesSymbol } from './state.js';
+         reconcileActivity, activityMatchesSymbol, getCustomTokens, persistCustomToken } from './state.js';
 import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate, isRateLimit } from './price.js';
 import { waitForReceipt, withTimeout } from './safetx.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
@@ -315,6 +315,8 @@ window.addEventListener('DOMContentLoaded', () => {
         if (tokens.some(t => t.address?.toLowerCase() === addr.toLowerCase())) return toast('Token already added', 'info');
         tokens.push({ address: addr, symbol: sym, decimals: Number(dec), balance: bal.toString(), chainId, usd: null });
         set('tokens', tokens);
+        // Persist the typed facts — state.tokens alone dies on refresh.
+        persistCustomToken({ address: addr, symbol: sym, decimals: Number(dec), chainId });
         closeModal();
         toast(`✅ ${sym} added!`, 'success');
         if (window._assetTokens) renderAssets(tokens);
@@ -1914,7 +1916,14 @@ async function loadDashboard(opts = {}) {
     // 0 of — so the dashboard is a usable coin list, not an empty screen for
     // a fresh wallet. Balance is filled from the chain; failures fall back to 0.
     const popular = POPULAR_TOKENS[net.chainId] || [];
-    const results = await Promise.allSettled(popular.map(async (t) => {
+    // Custom tokens the user added (persisted by state.js) join the SAME
+    // balance pipeline: the list used to be rebuilt from native +
+    // POPULAR_TOKENS alone, so an added token vanished on every refresh
+    // (user, 2026-10-06: "token yang ku add tiba-tiba hilang").
+    const custom = getCustomTokens(net.chainId).filter(
+      (c) => !popular.some((p) => p.address.toLowerCase() === c.address.toLowerCase()));
+    const list = [...popular, ...custom];
+    const results = await Promise.allSettled(list.map(async (t) => {
       const c = new ethers.Contract(t.address, ERC20_ABI, provider);
       const bal = await c.balanceOf(get('address'));
       return { address: t.address, symbol: t.symbol, decimals: t.decimals, balance: bal.toString(), usd: null };
@@ -1922,8 +1931,8 @@ async function loadDashboard(opts = {}) {
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') tokens.push(r.value);
       else tokens.push({
-        address: popular[i].address, symbol: popular[i].symbol,
-        decimals: popular[i].decimals, balance: '0', usd: null
+        address: list[i].address, symbol: list[i].symbol,
+        decimals: list[i].decimals, balance: '0', usd: null
       });
     });
     // Same staleness guard as the provider above: the balanceOf batch can take
@@ -2757,7 +2766,13 @@ async function runEip7702Check() {
 // storage untouched — only the views stopped showing them.
 function currentNetworkActivity() {
   const activeId = get('networkId');
-  return (get('activity') || []).filter((a) => a && a.netId === activeId);
+  // …and per WALLET, same doctrine: two wallets sharing a network must not
+  // share one list (user, 2026-10-06: "pake 2 wallet tx nya nyatu"). Rows
+  // carry their sending wallet from birth (state.js addActivity); a row
+  // without an addr has no wallet to claim and stays in storage, out of
+  // view — the exact treatment netId-less rows already get above.
+  const me = get('address');
+  return (get('activity') || []).filter((a) => a && a.netId === activeId && a.addr === me);
 }
 
 function renderActivity() {

@@ -80,7 +80,7 @@ test('renderActivity & modal koin pakai SATU filter jaringan; baris lama tanpa n
   // sendiri (tanpa netId) sehingga isinya beda dengan fitur Activity.
   const helper = app.indexOf('function currentNetworkActivity(');
   assert.ok(helper > -1, 'helper currentNetworkActivity ada');
-  assert.match(app.slice(helper, helper + 300), /a && a\.netId === activeId/,
+  assert.match(app.slice(helper, helper + 900), /a && a\.netId === activeId/,
     'helper = netId cocok dengan jaringan aktif');
   assert.match(app.slice(app.indexOf('const tokenActs ='), app.indexOf('const tokenActs =') + 200),
     /currentNetworkActivity\(\)\.filter\(\(a\) => activityMatchesSymbol/,
@@ -121,4 +121,41 @@ test('switcher: jaringan aktif ditandai non-destinasi dan kliknya di-guard sebel
   assert.ok(guard > -1, 'guard netCurrent harus ada');
   assert.ok(setter > -1, 'set networkId tetap ada untuk jaringan lain');
   assert.ok(guard < setter, 'guard harus mendahului set — jaringan sama tidak boleh terswitch');
+});
+
+// ── 3. per-wallet (user 2026-10-06: "pake 2 wallet tx nya nyatu") ─────────
+
+test('addActivity men-stempel addr wallet pencipta; receipt tidak boleh mencuri', () => {
+  st.get('activity').length = 0;
+  st.set('address', '0xAAA');
+  st.set('networkId', 'ethereum');
+  const row = st.addActivity({ hash: '0xwallet', type: 'send', status: 'pending', ts: 1, detail: 'x' });
+  assert.equal(row.addr, '0xAAA', 'baris baru harus bawa wallet yang mengirim');
+  st.set('address', '0xBBB'); // user ganti wallet sebelum receipt tiba
+  const merged = st.addActivity({ hash: '0xwallet', status: 'success', ts: 2 });
+  assert.equal(merged.addr, '0xAAA', 'wallet lain yang sedang aktif tidak boleh mengklaim baris');
+  st.set('address', null);
+});
+
+test('baris lama tanpa addr: tetap di storage & tak pernah diklaim wallet yang lewat', () => {
+  store['bear.activity'] = JSON.stringify([
+    { hash: '0xlegacy2', type: 'send', status: 'success', ts: 9 },
+  ]);
+  st.loadActivity();
+  st.set('address', '0xWHO');
+  st.addActivity({ hash: '0xlegacy2', status: 'success', ts: 10 }); // heal/merge path
+  const row = st.get('activity').find((a) => a.hash === '0xlegacy2');
+  assert.ok(row, 'baris lama selamat');
+  assert.ok(!row.addr, 'wallet yang kebetulan lewat tidak boleh mengatribusi baris lama');
+  st.set('address', null);
+  delete store['bear.activity'];
+});
+
+test('view: filter SATU helper kini netId + addr — dua wallet satu jaringan terpisah', () => {
+  const helper = app.indexOf('function currentNetworkActivity(');
+  assert.ok(helper > -1);
+  const body = app.slice(helper, helper + 900);
+  assert.match(body, /a && a\.netId === activeId && a\.addr === me/,
+    'helper wajib menyaring jaringan DAN wallet (user 2026-10-06: nyatu)');
+  assert.match(body, /const me = get\('address'\)/, 'wallet aktif dibaca dari state');
 });
