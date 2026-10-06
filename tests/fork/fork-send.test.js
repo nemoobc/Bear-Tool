@@ -73,11 +73,42 @@ test('fork: send native ETH — balances move on-chain', { skip }, async (t) => 
       const atBlock = await provider.getBalance(to, minedAt).catch((e) => 'ERR ' + (e?.message || e));
       t.diagnostic(`send: latest=${afterBal} atBlock(${minedAt})=${atBlock} sender=${senderBal} bn=${bnNow}`);
       if (atBlock === beforeBal + amount) afterBal = atBlock;
+    } else if (info && typeof info === 'object' && info.blockNumber == null) {
+      // PENDING: anvil took the tx and never mined it — sender still holds the
+      // full 10000 ETH, recipient 0 (CI 37493234901 optimism-sepolia, upstream
+      // transport incident: "balance check timed out after 8s"). The fee
+      // numbers come first because "pending" alone cannot say WHY: a baseFee
+      // that outran maxFeePerGas is the classic strand, and the next run of
+      // this diagnostic is the only place that number will ever appear.
+      const blk = await provider.getBlock('latest').catch(() => null);
+      t.diagnostic(`send: pending maxFee=${info.maxFeePerGas} tip=${info.maxPriorityFeePerGas} base=${blk?.baseFeePerGas ?? '?'} nonce=${info.nonce} bn=${bnNow} sender=${senderBal}`);
+      // Same-nonce replacement: at most ONE of the pair can ever execute, so
+      // the exact-amount assertion cannot double-credit. The raw Wallet signs
+      // it — NonceManager would look up its own nonce, and the stuck tx is
+      // already holding this one.
+      try {
+        const base = blk?.baseFeePerGas ?? 0n;
+        const tip = info.maxPriorityFeePerGas ?? 1000000000n;
+        const raw = signer.signer || signer;
+        const bump = await raw.sendTransaction({
+          to, value: amount, nonce: info.nonce, gasLimit: info.gasLimit,
+          maxFeePerGas: base * 2n + tip * 2n, maxPriorityFeePerGas: tip * 2n,
+        });
+        t.diagnostic(`send: same-nonce bump ${String(bump.hash).slice(0, 18)}`);
+      } catch (e) {
+        t.diagnostic(`send: bump refused: ${String(e?.message || e).slice(0, 140)}`);
+      }
+      const end2 = Date.now() + 120000;
+      while (afterBal !== beforeBal + amount && Date.now() < end2) {
+        await new Promise(r => setTimeout(r, 500));
+        afterBal = await provider.getBalance(to);
+      }
+      if (afterBal !== beforeBal + amount) t.diagnostic(`send: after bump recipient=${afterBal} still short`);
     } else {
-      // No retry: the observed failure (bn=pin+1) proves the tx mined, so a
-      // blind resend would risk double-crediting the exact-amount assertion.
-      // The sender debit in the diagnostic separates "tx applied, read lied"
-      // from "tx never applied" for the next iteration.
+      // Not mined, not pending, not in the last 8 blocks: the broadcast is
+      // simply gone. The sender debit in the diagnostic separates "tx applied,
+      // read lied" from "tx never applied" for the next iteration. No resend
+      // here: with no nonce to pin, a replacement cannot be made safe.
       t.diagnostic(`send: tx tidak ditemukan (getTransaction=${info == null ? 'null' : typeof info === 'string' ? info : 'blockNumber=' + info.blockNumber}, bn=${bnNow}, sender=${senderBal}, recipient=${afterBal})`);
     }
   }
