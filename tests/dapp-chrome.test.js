@@ -187,3 +187,49 @@ test('home categories wear OKX-style icon tiles; bookmark chips keep the pill fa
   assert.ok(at > -1 && !darkList.includes('.dapp-chip.active'),
     'the active chip label no longer sits on a fill — drop it from the forced-dark list');
 });
+
+// ── the sheets that say "no" and the pill that says "where you are" ──────
+
+test('the refusal sheet always states the reason for THIS attempt', () => {
+  // Regression pin: the blocked panel once kept whatever the PREVIOUS attempt
+  // left on screen — refusing javascript:alert() could show a homograph
+  // warning about some other site. The sheet is rewritten whole, from the
+  // reason passed to THIS call.
+  const fn = src.slice(src.indexOf('function schemeSheet('), src.indexOf('/** The pre-load sheet'));
+  assert.ok(fn.length > 0, 'schemeSheet must exist');
+  assert.ok(fn.includes('el.blocked.innerHTML = `'), 'the panel is fully rewritten, never patched');
+  assert.match(fn, /escapeHtml\(reason\)/, "the current attempt's reason is what shows");
+  assert.ok(fn.includes('el.blocked.hidden = false'), 'the panel is shown');
+  assert.ok(fn.includes('el.frame.hidden = true'), 'the frame stays behind it');
+});
+
+test('reportSheet: a DANGER verdict removes the proceed button even if a caller lied', () => {
+  // Defence in depth: navigate() already refuses canProceed for DANGER, but
+  // the button must be physically absent here too — one caller mistake away
+  // from "Open anyway" on a homograph must not be survivable.
+  const at = src.indexOf('function reportSheet(');
+  const fn = src.slice(at, src.indexOf('// ═══', at));
+  assert.ok(fn.length > 0, 'reportSheet must exist');
+  assert.match(fn, /\$\{canProceed \? '<button[^>]*data-act="proceed"/,
+    'the proceed button only exists behind canProceed');
+  assert.match(fn, /if \(v\.verdict === VERDICT\.DANGER\) el\.blocked\.querySelector\('\[data-act="proceed"\]'\)\?\.remove\(\)/,
+    'DANGER strips the button downstream regardless of what the caller passed');
+});
+
+test('the secure pill knows every verdict and shows what it saw', () => {
+  const fn = src.slice(src.indexOf('function paintSecure('), src.indexOf('function paint('));
+  assert.ok(fn.length > 0, 'paintSecure must exist');
+  for (const v of ['KNOWN', 'CAUTION', 'DANGER', 'BLOCKED']) {
+    assert.ok(fn.includes(`[VERDICT.${v}]`), `the pill must map VERDICT.${v} — an unmapped verdict paints an empty pill`);
+  }
+  assert.match(fn, /verdict\.signals\.map/, 'the tooltip lists every signal, not just the worst one');
+  assert.match(fn, /el\.secure\.textContent/, 'the verdict is painted where the user looks');
+});
+
+test('back and forward stay inside the stack and persist the move', () => {
+  const fn = src.slice(src.indexOf('function back()'), src.indexOf('function isBookmarked('));
+  assert.match(fn, /t\.i <= 0\) return/, 'back at the first entry is a no-op');
+  assert.match(fn, /t\.i >= t\.hist\.length - 1\) return/, 'forward at the last entry is a no-op');
+  assert.equal((fn.match(/saveSession\(\)/g) || []).length, 2, 'both directions persist the pointer');
+  assert.equal((fn.match(/loadedUrl = ''/g) || []).length, 2, 'both forget what the frame was showing');
+});

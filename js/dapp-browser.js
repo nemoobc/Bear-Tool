@@ -111,7 +111,10 @@ function pushHistory(tab, url, name) {
 const active = () => tabs.find((x) => x.id === activeId) || null;
 const persistable = () => tabs.filter((x) => !x.incognito);
 
-function saveSession() {
+// Exported for the behavioural session test (tests/dapp-session.test.js) —
+// same precedent as matchCatalog in dapp-safety.js: logic that decides what
+// leaves the device must be executable by a test, not grepped.
+export function saveSession() {
   // Only non-incognito tabs are ever written to disk. An incognito tab that
   // outlives the overlay is discarded rather than quietly persisted.
   const rows = persistable()
@@ -124,7 +127,7 @@ function saveSession() {
   }
 }
 
-function restoreSession() {
+export function restoreSession() {
   const rows = read(LS.tabs, []).filter((r) => r && typeof r.url === 'string');
   if (!rows.length) return false;
   tabs = rows.map((r) => {
