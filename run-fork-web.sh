@@ -10,6 +10,17 @@ LOG="$ROOT/logs/web-fork"
 PIDFILE="$LOG/pids"
 mkdir -p "$LOG"
 
+# Network-family feature probe. Some anvil builds gate OP-stack forks behind a
+# compiled-in family (Termux 1.8.3-dev: only [ethereum, tempo] → every
+# optimism/base fork dies at boot with "network family `optimism` is not
+# enabled in this build", while CI's foundry boots them fine). When this build
+# never mentions optimism in its help, the OP-stack names are pinned to
+# `--network ethereum` — a plain ethereum-family fork still answers the eth_*
+# calls the send suite uses (forced boot of :18549 answered eth_blockNumber =
+# 0x9682d25). Builds that list optimism (or predate the gate) never inject.
+ANVIL_HAS_OP_FAMILY=0
+if anvil --help 2>&1 | grep -qi optimism; then ANVIL_HAS_OP_FAMILY=1; fi
+
 stop_all() {
   [ -f "$PIDFILE" ] || { echo "no pids file"; return 0; }
   while read -r pid; do kill "$pid" 2>/dev/null || true; done < "$PIDFILE"
@@ -106,7 +117,13 @@ start_one() {
   # every request from the page fails as "Failed to fetch" — while curl and any
   # node test keep working, because neither performs a preflight. That asymmetry
   # is what made this look like a flaky app rather than a missing flag.
-  anvil --port "$port" --chain-id "$chain" "${fork_args[@]}" \
+  # OP-stack names on a family-gated build get pinned to the ethereum family
+  # (see the ANVIL_HAS_OP_FAMILY probe at the top); everyone else boots as before.
+  local fam_args=()
+  if [ "$ANVIL_HAS_OP_FAMILY" = 0 ]; then
+    case "$n" in optimism|base|op-sepolia|base-sepolia) fam_args=(--network ethereum);; esac
+  fi
+  anvil --port "$port" --chain-id "$chain" "${fam_args[@]}" "${fork_args[@]}" \
         --fork-retry-backoff 2000 \
         --allow-origin '*' --silent > "$LOG/$n.log" 2>&1 &
   echo $! >> "$PIDFILE"
