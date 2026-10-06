@@ -557,11 +557,15 @@ async function executeRescue() {
   const type = $('#rescueType').value;
   const tokenAddr = $('#rescueTokenAddr').value.trim();
   const tokenIds = $('#rescueTokenId').value.trim();
-  const sponsorKey = await sponsorKeyFromPicker('#rescueSponsorFrom');
-  if (sponsorKey === null) return;            // password prompt cancelled
 
+  // Cheap local validation FIRST, secrets after: resolving the sponsor picker
+  // can open a password prompt (and, since auto-detect was removed, stops with
+  // a toast) — none of that may hide a plainly invalid address behind it.
   if (!wallet.isValidAddress(safe)) return toast('Invalid SAFE address', 'error');
   if (!wallet.isValidAddress(tokenAddr)) return toast('Invalid token contract address', 'error');
+
+  const sponsorKey = await sponsorKeyFromPicker('#rescueSponsorFrom');
+  if (sponsorKey === null) return;            // password prompt cancelled
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
 
   const derived = deriveTargetAddress();
@@ -760,8 +764,6 @@ async function executeClaim() {
   const amountRaw = $('#claimAmount')?.value.trim() || '';
   const safe = $('#claimSafe').value.trim();
   const targetKeyField = $('#claimTargetKey')?.value.trim() || '';
-  const sponsorKey = await sponsorKeyFromPicker('#claimSponsorFrom');
-  if (sponsorKey === null) return;            // password prompt cancelled
 
   if (!wallet.isValidAddress(contractAddr)) return toast('Invalid airdrop contract address', 'error');
   if (!claimData || !/^0x[0-9a-fA-F]*$/.test(claimData)) return toast('Invalid claim calldata (must be 0x-hex)', 'error');
@@ -773,6 +775,10 @@ async function executeClaim() {
   }
   if (!amountRaw) return toast('Claim amount is required (it is granted on-chain as the minimum)', 'error');
   if (!wallet.isValidAddress(safe) || safe.toLowerCase() === ethers.ZeroAddress.toLowerCase()) return toast('Invalid SAFE address', 'error');
+  // Inputs all valid → now (and only now) resolve the sponsor, which may ask
+  // for the keystore password. A missing sponsor must not mask a bad address.
+  const sponsorKey = await sponsorKeyFromPicker('#claimSponsorFrom');
+  if (sponsorKey === null) return;            // password prompt cancelled
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   const sponsorAddress = sponsorAddressOf(sponsorKey);
   if (!sponsorAddress) return toast('No usable sponsor — choose a sponsor wallet', 'error');
@@ -1098,12 +1104,14 @@ export async function deployBatchHelper() {
 export async function deployRescueHelper() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const safe = $('#rescueSafe').value.trim();
+  // Local checks before the sponsor picker: a bad SAFE address is answered
+  // with a toast, not with a password prompt over a dead end.
+  if (!wallet.isValidAddress(safe)) return toast('Fill a valid SAFE address first', 'error');
   const sponsorKey = await sponsorKeyFromPicker('#rescueSponsorFrom');
   if (sponsorKey === null) return;            // password prompt cancelled
   const derived = deriveTargetAddress();
   if (derived.error) return toast(derived.error, 'error');
   const target = derived.address;
-  if (!wallet.isValidAddress(safe)) return toast('Fill a valid SAFE address first', 'error');
   if (sponsorKey && !addressFromKey(sponsorKey)) return toast('Invalid sponsor private key', 'error');
   const sponsorAddress = sponsorAddressOf(sponsorKey);
   if (!sponsorAddress) return toast('No usable sponsor — choose a sponsor wallet', 'error');

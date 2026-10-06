@@ -148,3 +148,23 @@ test('T14: batch card no longer claims a single atomic transaction', () => {
   assert.ok(!/\(atomic\)/.test(jsx), 'the (atomic) label is gone');
   assert.match(jsx, /delegate/i, 'the card explains the delegate step');
 });
+
+// ── validation order (CI 37424041918, 2026-10-06) ─────────────
+// sponsorKeyFromPicker opens the password prompt and — since auto-detect was
+// removed — stops with "Choose a sponsor wallet". Running it FIRST hid every
+// address guard behind it, and the E2E rescue/claim test went red. Cheap
+// local input is validated before any secret is resolved.
+test('T15: rescue/claim/deploy validate local input BEFORE the sponsor picker', () => {
+  for (const [name, guard] of [
+    ['executeRescue', "isValidAddress(safe)"],
+    ['executeClaim', "isValidAddress(contractAddr)"],
+    ['deployRescueHelper', "isValidAddress(safe)"],
+  ]) {
+    const body = fn(name);
+    const guardAt = body.indexOf(guard);
+    const pickerAt = body.indexOf('sponsorKeyFromPicker(');
+    assert.ok(guardAt > -1, `${name}() keeps its address guard`);
+    assert.ok(pickerAt > -1, `${name}() still resolves a sponsor`);
+    assert.ok(guardAt < pickerAt, `${name}(): validation must come before the sponsor picker`);
+  }
+});
