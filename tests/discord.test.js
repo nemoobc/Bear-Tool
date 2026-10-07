@@ -427,3 +427,24 @@ test('the Discord view renders before the wallet guard — no address, no dead p
   assert.ok(discordAt < nextGuard,
     'render BEFORE the address guard — connecting to Discord is not a chain operation');
 });
+
+test('Discord refuses some origins BEFORE the user clicks Login', () => {
+  // 2026-10-07, user report: "invalid oauth2:redirect_uri" straight from
+  // discord.com — the portal only accepts loopback or a full domain over
+  // http(s), and the app was happily showing a Login button that could
+  // never come back.
+  const loc = (origin, hostname) => ({ origin, pathname: '/', hostname });
+  assert.equal(D.oauthRejectsOrigin(loc('http://localhost:5173', 'localhost')), '');
+  assert.equal(D.oauthRejectsOrigin(loc('http://127.0.0.1:8081', '127.0.0.1')), '');
+  assert.equal(D.oauthRejectsOrigin(loc('https://nemoobc.github.io', 'nemoobc.github.io')), '');
+  assert.match(D.oauthRejectsOrigin(loc('http://192.168.1.9:5173', '192.168.1.9')), /IP address/);
+  assert.match(D.oauthRejectsOrigin(loc('http://termux-box:5173', 'termux-box')), /full domain/);
+  assert.match(D.oauthRejectsOrigin(loc('capacitor://localhost', 'localhost')), /http\(s\)/);
+
+  // The connect sheet wires the verdict to the button that would fail.
+  const src = raw('js/discord.js');
+  assert.match(src, /const originProblem = oauthRejectsOrigin\(\)/, 'the sheet asks');
+  assert.match(src, /id="btnDiscordLogin"\$\{loginDisabled\}/, 'and disables Login when refused');
+  assert.match(src, /discordOriginWarn.*role="alert"/s, 'with a visible warning, not a silent dead button');
+  assert.match(src, /including the trailing slash/, 'the portal instruction names the usual mismatch');
+});

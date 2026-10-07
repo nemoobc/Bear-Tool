@@ -89,6 +89,29 @@ export function redirectUri(loc = (typeof location !== 'undefined' ? location : 
   return loc.origin + loc.pathname;
 }
 
+// Discord's portal only accepts redirect hosts it can place globally (a
+// full domain name) or loopback (localhost / 127.0.0.1 / ::1), over
+// http(s). Serving the app from a LAN IP (http://192.168.1.9:5173/) or
+// a non-web scheme makes EVERY authorize attempt die on Discord's own
+// page with "invalid oauth2:redirect_uri" — it never reaches this app,
+// so the fix has to happen before the user clicks Login.
+// Returns a human-readable reason, or '' when the origin can work.
+export function oauthRejectsOrigin(loc = (typeof location !== 'undefined' ? location : null)) {
+  if (!loc || !loc.origin) return '';
+  if (!/^https?:\/\//.test(loc.origin)) {
+    return `${loc.origin} is not an http(s) origin — Discord can only redirect to http(s) URLs.`;
+  }
+  const host = (loc.hostname || '').replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return '';
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    return `You are on an IP address (${host}) — Discord redirects only accept localhost or a full domain. Open this app via http://localhost:<port>/ instead.`;
+  }
+  if (!host.includes('.')) {
+    return `\"${host}\" is not a full domain name — Discord redirects only accept localhost or a full domain.`;
+  }
+  return '';
+}
+
 async function tokenRequest(payload, fetchFn = fetch) {
   const res = await fetchFn(`${DISCORD_API}/oauth2/token`, {
     method: 'POST',
@@ -293,19 +316,28 @@ const modeBadge = (mode) => mode === 'oauth'
 
 function connectHtml(note = '') {
   const cid = getClientId();
+  // Discord rejects some origins on ITS side before this app ever sees an
+  // error — surface that here, next to the button that would fail.
+  const originProblem = oauthRejectsOrigin();
+  const loginDisabled = originProblem ? ' disabled' : '';
+  const originWarn = originProblem
+    ? `<div class="warn-box small mb-8" id="discordOriginWarn" role="alert">⚠️ ${escapeHtml(originProblem)}</div>`
+    : '';
   return `
     <div class="card">
       <div class="card-title">Connect Discord</div>
       <p class="small mb-8">Two ways in. <b>Login with Discord</b> is the official flow — create an
       application at <span class="mono">discord.com/developers</span>, copy its <b>Client ID</b>
-      (public, never a secret), and register this exact Redirect URI:</p>
+      (public, never a secret), and register this exact Redirect URI
+      (OAuth2 → Redirects — must match <b>character for character, including the trailing slash</b>):</p>
       <p class="small mono mb-8" id="discordRedirect">${escapeHtml(redirectUri())}</p>
+      ${originWarn}
       <div class="field">
         <label for="discordClientId">Client ID</label>
         <input class="input mono" id="discordClientId" inputmode="numeric" placeholder="123456789012345678" value="${escapeHtml(cid)}">
       </div>
       <div class="discord-connect-actions">
-        <button type="button" class="btn btn-primary" id="btnDiscordLogin">Login with Discord</button>
+        <button type="button" class="btn btn-primary" id="btnDiscordLogin"${loginDisabled}>Login with Discord</button>
         <button type="button" class="btn btn-ghost" id="btnDiscordCopyRedirect">Copy redirect URI</button>
       </div>
       <hr class="discord-hr">
