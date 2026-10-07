@@ -349,7 +349,7 @@ test.describe('dApp browser', () => {
       .toBeLessThanOrEqual(barBox.y + 1);
     expect(menuBox.y, 'the bubble overlays the stage, not the top bar').toBeGreaterThan(topBox.height + 1);
     await expect(page.locator('#dbrMenuPop [data-mi="bm"]'), 'bookmark row lives in the menu')
-      .toContainText('bookmark');
+      .toContainText(/bookmark/i);
     await page.keyboard.press('Escape');
     await expect(page.locator('#dbrMenuPop')).toBeHidden();
 
