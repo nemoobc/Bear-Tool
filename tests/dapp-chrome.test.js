@@ -67,9 +67,12 @@ test('top bar leads with ✕, centers the pill, ends with the load bar', () => {
   // The chain badge still closes the BUTTONS; after it come the tab-count
   // button (OKX's switcher opener) and the load bar's track — neither is a
   // navigation control, both were added on purpose. The ★ is gone (2026-10-07).
+  // #dbrExt (↗, 2026-10-07) is the permanent escape hatch: a frame that renders
+  // nothing cannot be detected (the error page fires "load"), so the way out of
+  // an embedding refusal lives in the toolbar, one press away, never behind a menu.
   assert.deepEqual(topIds,
-    ['dbrClose', 'dbrConnect', 'dbrNet', 'dbrTabsBtn', 'dbrLoadbar'],
-    '✕ first, then 🔗, chain badge, tab count, load bar — no star');
+    ['dbrClose', 'dbrExt', 'dbrConnect', 'dbrNet', 'dbrTabsBtn', 'dbrLoadbar'],
+    '✕ first, then ↗, 🔗, chain badge, tab count, load bar — no star');
   assert.ok(!topIds.includes('dbrBm'), 'the bookmark star was removed from the toolbar');
   assert.ok(!topIds.includes('dbrBack'), 'navigation no longer crowds the top');
   // The verdict and the address share one pill, verdict first.
@@ -99,8 +102,8 @@ test('the bottom bar is exactly five controls, in order', () => {
   assert.deepEqual(bottomIds,
     ['dbrBack', 'dbrFwd', 'dbrReload', 'dbrHome', 'dbrMenu'],
     'back, forward, reload, home, menu — five slots, one per action');
-  assert.equal(topIds.length + bottomIds.length, 10,
-    'the chrome did not sprout unaccounted controls (5 top ids incl. tab count + load bar, 5 bottom)');
+  assert.equal(topIds.length + bottomIds.length, 11,
+    'the chrome did not sprout unaccounted controls (6 top ids incl. ↗, tab count, load bar + 5 bottom)');
 });
 
 test('every control the e2e suite clicks by id is still in the shell', () => {
@@ -108,7 +111,7 @@ test('every control the e2e suite clicks by id is still in the shell', () => {
   // control DELIBERATELY dropped (the toolbar star, 2026-10-07) — bookmarking
   // moved into the ⋯ menu, so its absence is asserted, not overlooked.
   for (const id of ['dbrBack', 'dbrFwd', 'dbrReload', 'dbrHome', 'dbrMenu',
-    'dbrUrl', 'dbrSecure', 'dbrConnect', 'dbrTabs', 'dbrStage',
+    'dbrUrl', 'dbrSecure', 'dbrExt', 'dbrConnect', 'dbrTabs', 'dbrStage',
     'dbrFrame', 'dbrBlocked', 'dbrHomePage', 'dbrLoading', 'dbrLoadingTxt',
     'dbrMenuPop', 'dbrBar']) {
     assert.match(shell, new RegExp(`id="${id}"`), `${id} was dropped by the redesign`);
@@ -308,4 +311,30 @@ test('the frame delegates clipboard-write so a dApp can copy its wc: URI', () =>
   assert.ok(iframe.length > 0, 'the SHELL carries the dApp frame');
   assert.match(iframe, /allow="clipboard-write"/, 'the iframe grants clipboard-write');
   assert.doesNotMatch(iframe, /allow=""/, 'the allow attribute is never left empty');
+});
+
+test('↗ #dbrExt: the permanent escape hatch from a frame that renders nothing', () => {
+  // Measured 2026-10-07: Chromium fires a normal "load" for its X-Frame-Options
+  // error page (google.com: LOAD at 5.6s), so no watchdog can catch the refusal
+  // — the frame just sits there showing a sad-page icon. The way out therefore
+  // cannot depend on detection: it is a toolbar button that is always there.
+  assert.match(shell, /id="dbrExt"[^>]*hidden/,
+    'the ↗ exists and starts hidden — the home stage has no URL to open');
+  assert.match(src,
+    /el\.ext\?\.addEventListener\('click', \(\) => \{ const t = active\(\); if \(t\?\.url\) openExternal\(t\.url\); \}\)/,
+    'the ↗ opens the active tab through openExternal (target=_blank anchor, not window.open)');
+  assert.match(src, /if \(el\.ext\) el\.ext\.hidden = true;/, 'paint(): home hides the ↗');
+  assert.match(src, /if \(el\.ext\) el\.ext\.hidden = false;/, 'paint(): a real page shows the ↗');
+
+  // The CAUTION sheet carries the same door, so a non-catalogue URL never
+  // forces the user through the frame first: both exits sit side by side.
+  const at = src.indexOf('function reportSheet(');
+  assert.ok(at > -1, 'reportSheet exists');
+  const fn = src.slice(at, src.indexOf('function openExternal', at));
+  assert.match(fn, /data-act="ext">↗ Open in a new tab</,
+    'the pre-load sheet offers ↗ next to "Open anyway"');
+  assert.match(fn, /querySelector\('\[data-act="ext"\]'\)\?\.addEventListener\('click'/,
+    'the sheet ↗ button is wired');
+  assert.match(fn, /querySelector\('\[data-act="ext"\]'\)\?\.remove\(\)|data-act="ext"/,
+    'the door exists in the template');
 });

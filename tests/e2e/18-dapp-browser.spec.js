@@ -441,4 +441,41 @@ test.describe('dApp browser', () => {
     // Which escape hatch is wired is proved at source level in
     // tests/dapp-chrome.test.js — no live window.open, one openExternal.
   });
+
+  test('the ↗ escape hatch opens a real browser tab from both doors', async ({ page }) => {
+    // Two real popups and a real example.com load on top of the shared
+    // create-wallet beforeEach — generous budget so the assertions, not the
+    // device's speed, decide the outcome.
+    test.setTimeout(120_000);
+    // Measured 2026-10-07: Chromium fires a normal "load" for its X-Frame-Options
+    // error page, so a frame that refuses to render cannot be detected from in
+    // here — the way out has to be a button that is simply always available.
+    await openBrowser(page);
+    // Home stage, no URL yet — the ↗ stays out of the way.
+    await expect(page.locator('#dbrExt')).toBeHidden();
+
+    // Door one: the caution sheet for a URL outside the catalogue offers ↗
+    // NEXT TO "Open anyway", so nobody is forced through the frame first.
+    await page.fill('#dbrUrl', 'https://example.com/');
+    await page.press('#dbrUrl', 'Enter');
+    const sheet = page.locator('#dbrBlocked');
+    await expect(sheet.locator('[data-act="ext"]')).toContainText(/open in a new tab/i);
+    const [popup1] = await Promise.all([
+      page.waitForEvent('popup', { timeout: 10_000 }),
+      sheet.locator('[data-act="ext"]').click(),
+    ]);
+    expect(popup1.url()).toContain('example.com');
+    await popup1.close();
+
+    // Door two: after "Open anyway" the frame takes the stage and the toolbar
+    // ↗ appears — the exit that does not depend on any detection.
+    await sheet.locator('[data-act="proceed"]').click();
+    await expect(page.locator('#dbrExt')).toBeVisible({ timeout: 10_000 });
+    const [popup2] = await Promise.all([
+      page.waitForEvent('popup', { timeout: 10_000 }),
+      page.locator('#dbrExt').click(),
+    ]);
+    expect(popup2.url()).toContain('example.com');
+    await popup2.close();
+  });
 });

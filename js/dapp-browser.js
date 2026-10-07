@@ -171,6 +171,7 @@ const SHELL = `
       <input type="text" id="dbrUrl" class="dbr-url" spellcheck="false" autocomplete="off"
              placeholder="Search DApps or type an address" aria-label="Address and search">
     </div>
+    <button class="dbr-btn dbr-ic dbr-ext" id="dbrExt" title="Open this page in a new tab" aria-label="Open this page in a new tab" hidden>↗</button>
     <button class="dbr-btn dbr-ic dbr-conn" id="dbrConnect" title="Connect this site to the wallet" aria-label="Connect this site to the wallet" hidden>🔗</button>
     <button class="dbr-btn dbr-ic dbr-net" id="dbrNet" title="Switch network" aria-label="Current network — switch network">
       <span class="dbr-net-ic" id="dbrNetIc" aria-hidden="true"></span>
@@ -228,6 +229,7 @@ function build() {
     home: overlay.querySelector('#dbrHome'),
     secure: overlay.querySelector('#dbrSecure'),
     url: overlay.querySelector('#dbrUrl'),
+    ext: overlay.querySelector('#dbrExt'),
     connect: overlay.querySelector('#dbrConnect'),
     net: overlay.querySelector('#dbrNet'),
     netIc: overlay.querySelector('#dbrNetIc'),
@@ -396,6 +398,7 @@ function paint() {
     el.back.disabled = t.i <= 0;
     el.fwd.disabled = t.i >= t.hist.length - 1;
     el.connect.hidden = true;
+    if (el.ext) el.ext.hidden = true;
     return;
   }
 
@@ -414,6 +417,7 @@ function paint() {
     armLoadTimeout();
   }
   if (document.activeElement !== el.url) el.url.value = t.url;
+  if (el.ext) el.ext.hidden = false; // a real page is on stage — ↗ applies to it
 
   const v = inspectUrl(t.url, catalog, securityOpts());
   paintSecure(v);
@@ -655,6 +659,7 @@ function reportSheet(v, { canProceed }) {
       shapes phishing actually uses; they cannot certify a site as honest.</p>
       <div class="dbr-rep-btns">
         ${canProceed ? '<button class="btn btn-sm btn-primary" data-act="proceed">Open anyway</button>' : ''}
+        ${canProceed ? '<button class="btn btn-sm btn-secondary" data-act="ext">↗ Open in a new tab</button>' : ''}
         <button class="btn btn-sm btn-secondary" data-act="back">${previous ? 'Back' : 'Close'}</button>
         ${canProceed ? '<button class="btn btn-sm btn-secondary" data-act="trust">Trust this site</button>' : ''}
         <button class="btn btn-sm btn-danger" data-act="block">Block this site</button>
@@ -671,6 +676,12 @@ function reportSheet(v, { canProceed }) {
     if (dontAsk) sessionVerdicts.set(v.host, 'proceed');
     el.blocked.hidden = true;
     load(v.url);
+  });
+  // The other way past the sheet: the site may refuse embedding outright, and
+  // the frame cannot report that (a Chromium error page fires a normal "load" —
+  // measured, 2026-10-07). Offering the real browser here is the honest door.
+  box.querySelector('[data-act="ext"]')?.addEventListener('click', () => {
+    openExternal(v.url);
   });
   box.querySelector('[data-act="back"]')?.addEventListener('click', () => {
     if (previous) { el.blocked.innerHTML = previous; el.blocked.hidden = true; paint(); }
@@ -1009,6 +1020,11 @@ function paintNetwork() {
 function wire() {
   el.close.addEventListener('click', () => close());
   el.net.addEventListener('click', switchNetworkFromBrowser);
+  // The permanent escape hatch: a frame that shows nothing (the site refuses
+  // embedding — X-Frame-Options fires a fake "load" on Chromium's error page,
+  // measured, so no watchdog can catch it) still needs a one-press way out.
+  // The ↗ sits in the toolbar instead of hiding behind the ⋯ menu for that reason.
+  el.ext?.addEventListener('click', () => { const t = active(); if (t?.url) openExternal(t.url); });
 
   // The tab-count button opens the switcher grid; a click anywhere on the
   // stage (the grid is inside it, but not on a card) closes it.
