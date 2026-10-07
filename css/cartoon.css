@@ -507,7 +507,7 @@ body::before {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 6px 12px;
   min-height: var(--touch-min);
   border: var(--border);
   border-radius: 999px;
@@ -522,10 +522,12 @@ body::before {
    The wallet is an inline SVG painted AFTER the <img> in DOM order, so the
    pocket covers the bear's lower edge — that overlap is what reads as "in the
    wallet" rather than "floating above it". The bear file is unchanged; only
-   its box moved from a bare pill child to this positioning context. */
+   its box moved from a bare pill child to this positioning context.
+   2026-10-07 (user): 30 → 26, padding 8/14 → 6/12 — the pill sat visibly
+   taller than the network pill beside it; both now measure the same height. */
 .pill-wallet {
   position: relative;
-  width: 30px; height: 30px;
+  width: 26px; height: 26px;
   flex: 0 0 auto;
 }
 .wallet-glyph {
