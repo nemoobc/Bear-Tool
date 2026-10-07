@@ -3309,14 +3309,18 @@ select.input option, select.select option, .input option {
   display: none; flex-direction: column;
 }
 .dapp-browser-overlay.open { display: flex; }
-/* ─── top bar: [ ✕ ] [ 🔒 pill: url … ] [ ★ ] [ 🔗 ] [ ⛓ ] — never wraps ─── */
-.dbr-top { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--border); background: var(--card, #fff); flex: 0 0 auto; }
+/* ─── top bar: [ ✕ ][ 🔒 pill: url, dead-center ][ 🔗 ][ ⛓ ][ ▢n ] — never wraps.
+   The pill is absolutely centered so the left ✕ and the right icon cluster can
+   be any width without shifting it; #dbrClose's margin-right:auto pins the
+   icons to the right edge. (2026-10-07: ★ removed, tab counter kept right.) ─── */
+.dbr-top { position: relative; display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--border); background: var(--card, #fff); flex: 0 0 auto; }
+.dbr-top > #dbrClose { margin-right: auto; }
 .dbr-btn { border: 1px solid var(--border); background: transparent; border-radius: 9px; min-width: 34px; height: 34px; cursor: pointer; font-size: 1rem; flex: 0 0 auto; }
 .dbr-btn:disabled { opacity: .35; cursor: default; }
 .dbr-ic { width: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 /* Verdict and address share one pill, status first — where you are, and whether
    it is safe: the OKX shape, kept honest by the safety gate underneath it. */
-.dbr-urlwrap { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 3px 12px; border: 1px solid var(--border); border-radius: 999px; background: rgba(127,127,127,.08); }
+.dbr-urlwrap { position: absolute; left: 50%; transform: translateX(-50%); width: min(calc(100% - 170px), 520px); min-width: 0; display: flex; align-items: center; gap: 6px; padding: 3px 12px; border: 1px solid var(--border); border-radius: 999px; background: rgba(127,127,127,.08); }
 .dbr-urlwrap:focus-within { border-color: var(--ink); }
 .dbr-secure { font-size: .66rem; padding: 0; border-radius: 999px; white-space: nowrap; flex: 0 0 auto; max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
 .dbr-secure.ok { color: #0f7a52; }
@@ -3372,8 +3376,25 @@ select.input option, select.select option, .input option {
 .dbr-tab-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbr-tab-x { border: 0; background: none; cursor: pointer; font-size: .95rem; line-height: 1; }
 .dbr-tab-new { flex: 0 0 auto; border: 1px dashed var(--border); background: none; border-radius: 9px; height: 28px; width: 32px; cursor: pointer; }
-.dbr-menu { position: absolute; right: 8px; top: 50px; z-index: 20; background: var(--card, #fff); border: 1px solid var(--border); border-radius: 11px; box-shadow: 0 8px 26px rgba(0,0,0,.18); padding: 4px; min-width: 210px; }
-.dbr-menu-item { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: .82rem; }
+/* The ⋯ menu as an OKX-style floating bubble (2026-10-07 rombak): anchored
+   bottom-right above the control bar, big radius, blurred glass, deep shadow,
+   and a scale-in from the corner it belongs to. It floats OVER the stage —
+   the page below stays visible but unreachable while it is open. */
+.dbr-menu {
+  position: absolute; right: 10px; bottom: calc(64px + env(safe-area-inset-bottom, 0px)); top: auto;
+  z-index: 40;
+  background: var(--card, #fff);
+  background: color-mix(in srgb, var(--card, #fff) 92%, transparent);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  border: 1px solid var(--border); border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0,0,0,.28);
+  padding: 6px; min-width: 250px;
+  transform-origin: bottom right;
+  animation: dbr-menu-in .16s ease-out;
+}
+@keyframes dbr-menu-in { from { opacity: 0; transform: translateY(10px) scale(.92); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .dbr-menu { animation: none; } }
+.dbr-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: none; padding: 9px 12px; border-radius: 11px; cursor: pointer; font-size: .85rem; }
 .dbr-menu-item:hover { background: rgba(127,127,127,.14); }
 .dbr-menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 .dbr-stage { position: relative; flex: 1 1 auto; min-height: 0; }
@@ -3471,10 +3492,6 @@ select.input option, select.select option, .input option {
 }
 .dsig-k { font-weight: 700; color: var(--ink); }
 .dsig-v { min-width: 0; overflow-wrap: anywhere; }
-@media (max-width: 560px) {
-  .dbr-secure { order: 9; }
-  .dbr-urlwrap { order: 10; flex-basis: 100%; }
-}
 
 /* ═══════════ Touch targets ═══════════
    Measured in a real browser at 320px: the MAX buttons were 26px tall and the

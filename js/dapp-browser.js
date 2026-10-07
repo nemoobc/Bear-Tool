@@ -148,13 +148,18 @@ export function restoreSession() {
 // CHROME
 // ═══════════════════════════════════════════════════════════════
 
-// Chrome, in the order OKX Wallet lays it out:
+// Chrome, in the order OKX Wallet lays it out (2026-10-07 rombak: no star,
+// address centered, tab counter on the right):
 //
-//   TOP    [ ✕ ] [ 🔒 pill: url ................ ] [ ★ ] [ 🔗 ] [ ⛓ logo ]
+//   TOP    [ ✕ ] [ 🔒 pill: url, dead-center ...... ] [ 🔗 ] [ ⛓ ] [ ▢n ]
 //   TABS   the existing strip (kept verbatim — its ids are asserted by e2e)
 //   STAGE  home page | frame | blocked
 //   BOTTOM [ ‹ ] [ › ] [ ⟳ ] [ ⌂ ] [ ⋯ ]        ← five slots, one per thumb
 //
+// The address pill is absolutely centered (left:50% + translateX(-50%)), so
+// the ✕ on the left and the icon row on the right may be any width without
+// pushing it off-center; #dbrClose's margin-right:auto pins the icons right.
+// The ★ bookmark button is gone — bookmarking lives in the ⋯ menu.
 // Every id below is pre-existing except #dbrClose / #dbrNet / #dbrNetIc / #dbrBar.
 // The five navigation buttons MOVED rather than changed identity, so the back /
 // forward / home / reload / menu tests keep passing against the same selectors.
@@ -166,7 +171,6 @@ const SHELL = `
       <input type="text" id="dbrUrl" class="dbr-url" spellcheck="false" autocomplete="off"
              placeholder="Search DApps or type an address" aria-label="Address and search">
     </div>
-    <button class="dbr-btn dbr-ic" id="dbrBm" title="Bookmark this page" aria-label="Bookmark this page" aria-pressed="false">★</button>
     <button class="dbr-btn dbr-ic dbr-conn" id="dbrConnect" title="Connect this site to the wallet" aria-label="Connect this site to the wallet" hidden>🔗</button>
     <button class="dbr-btn dbr-ic dbr-net" id="dbrNet" title="Switch network" aria-label="Current network — switch network">
       <span class="dbr-net-ic" id="dbrNetIc" aria-hidden="true"></span>
@@ -223,7 +227,6 @@ function build() {
     home: overlay.querySelector('#dbrHome'),
     secure: overlay.querySelector('#dbrSecure'),
     url: overlay.querySelector('#dbrUrl'),
-    bm: overlay.querySelector('#dbrBm'),
     connect: overlay.querySelector('#dbrConnect'),
     net: overlay.querySelector('#dbrNet'),
     netIc: overlay.querySelector('#dbrNetIc'),
@@ -391,7 +394,6 @@ function paint() {
     el.secure.textContent = '';
     el.back.disabled = t.i <= 0;
     el.fwd.disabled = t.i >= t.hist.length - 1;
-    el.bm.setAttribute('aria-pressed', 'false');
     el.connect.hidden = true;
     return;
   }
@@ -416,8 +418,6 @@ function paint() {
   paintSecure(v);
   el.back.disabled = t.i <= 0;
   el.fwd.disabled = t.i >= t.hist.length - 1;
-  el.bm.setAttribute('aria-pressed', String(isBookmarked(t.url)));
-  el.bm.title = isBookmarked(t.url) ? 'Remove bookmark' : 'Bookmark this page';
   const connected = window.__bearSites?.some((s) => s.origin === originOf(t.url));
   el.connect.hidden = !connected;
   el.connect.textContent = connected ? '🔗 Connected' : '';
@@ -444,7 +444,7 @@ function paintHome() {
       <p class="small dim">Every address is checked before it loads. Nothing here can reach your keys:
       the page runs in its own origin with no cookies, no referrer and no clipboard.</p>
     </div>
-    ${bms.length ? `<div class="dbr-sec-h">★ Bookmarks</div>
+    ${bms.length ? `<div class="dbr-sec-h">🔖 Bookmarks</div>
       <div class="dbr-mini">${bms.map((b) => `<button class="dbr-chip" data-open="${escapeHtml(b.url)}" data-name="${escapeHtml(b.name || baseHost(b.url))}">${escapeHtml(b.name || baseHost(b.url))}</button>`).join('')}</div>` : ''}
     ${recent.length ? `<div class="dbr-sec-h">🕘 Recent</div>
       <div class="dbr-mini">${recent.map((h) => `<button class="dbr-chip" data-open="${escapeHtml(h.url)}" data-name="${escapeHtml(h.name || baseHost(h.url))}">${escapeHtml(h.name || baseHost(h.url))}</button>`).join('')}</div>` : ''}
@@ -848,7 +848,7 @@ function toggleMenu(force) {
     ['share', '🔗 Copy address', async () => { try { await navigator.clipboard.writeText(t?.url || ''); toast('Address copied', 'info'); } catch { toast('Clipboard refused by the browser', 'error'); } }],
     ['wc', '🔗 Pair via WalletConnect', () => openPairWalletConnect()],
     ['sep'],
-    ['bm', isBookmarked(t?.url) ? '★ Remove bookmark' : '☆ Bookmark this page', () => toggleBookmark()],
+    ['bm', isBookmarked(t?.url) ? '🔖 Remove bookmark' : '🔖 Bookmark this page', () => toggleBookmark()],
     ['hist', '🕘 Clear history', () => { write(LS.history, []); toast('History cleared', 'info'); paint(); }],
     ['data', '🧹 Clear all browsing data', () => { clearBrowsingData(); tabs = []; const nt = newTab(); tabs.push(nt); activeId = nt.id; toast('Tabs, history and bookmarks cleared', 'info'); paint(); }],
     ['sep'],
@@ -1038,7 +1038,6 @@ function wire() {
     saveSession();
     paint();
   });
-  el.bm.addEventListener('click', toggleBookmark);
   el.menu.addEventListener('click', () => toggleMenu());
   el.connect.addEventListener('click', () => {
     const t = active();

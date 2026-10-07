@@ -1,9 +1,11 @@
 // Bear Tool — dapp-chrome.test.js
 //
 // The browser chrome was re-laid-out to the shape OKX Wallet uses, taken from
-// three screenshots of the real app rather than from a blog post:
+// three screenshots of the real app rather than from a blog post; refreshed
+// 2026-10-07 (rombak): the ★ button is gone, the address pill is dead-center,
+// the tab counter stays right, and the ⋯ menu is a floating bubble.
 //
-//   TOP    [ ✕ ] [ 🔒 pill: url .... ] [ ★ ] [ 🔗 ] [ ⛓ chain badge ]
+//   TOP    [ ✕ ] [ 🔒 pill: url, centered .... ] [ 🔗 ] [ ⛓ chain badge ] [ ▢n ]
 //   BOTTOM [ ‹ ] [ › ] [ ⟳ ] [ ⌂ ] [ ⋯ ]          ← five slots
 //
 // Two things must not regress while it looks like that.
@@ -59,21 +61,35 @@ const bottomBar = shell.slice(shell.indexOf('class="dbr-bar"'));
 const topIds = topLevelIds(topBar);
 const bottomIds = topLevelIds(bottomBar);
 
-test('top bar leads with ✕ and ends with the chain badge', () => {
+test('top bar leads with ✕, centers the pill, ends with the load bar', () => {
   // Direct children with an id: the address pill is an un-id'd wrapper, so
   // #dbrSecure / #dbrUrl are asserted against it separately below.
   // The chain badge still closes the BUTTONS; after it come the tab-count
   // button (OKX's switcher opener) and the load bar's track — neither is a
-  // navigation control, both were added on purpose.
+  // navigation control, both were added on purpose. The ★ is gone (2026-10-07).
   assert.deepEqual(topIds,
-    ['dbrClose', 'dbrBm', 'dbrConnect', 'dbrNet', 'dbrTabsBtn', 'dbrLoadbar'],
-    '✕ first, then ★, 🔗, chain badge, tab count, load bar');
+    ['dbrClose', 'dbrConnect', 'dbrNet', 'dbrTabsBtn', 'dbrLoadbar'],
+    '✕ first, then 🔗, chain badge, tab count, load bar — no star');
+  assert.ok(!topIds.includes('dbrBm'), 'the bookmark star was removed from the toolbar');
   assert.ok(!topIds.includes('dbrBack'), 'navigation no longer crowds the top');
   // The verdict and the address share one pill, verdict first.
   assert.match(topBar, /<div class="dbr-urlwrap">\s*<span class="dbr-secure" id="dbrSecure"[\s\S]*?<input[^>]*id="dbrUrl"/,
     'status then address, inside the same pill');
   // The icon is inside the badge, not beside it.
   assert.match(topBar, /id="dbrNet"[^>]*>[\s\S]*?id="dbrNetIc"/, 'the icon is nested in the badge');
+});
+
+test('css: the pill is centered and the icons are pinned right', () => {
+  // The address must sit at the visual center REGARDLESS of how wide the left
+  // ✕ and the right icon cluster are — absolute centering, not flex luck.
+  assert.match(css, /\.dbr-urlwrap\s*\{[^}]*position: absolute/, 'the pill is taken out of the flow');
+  assert.match(css, /\.dbr-urlwrap\s*\{[^}]*left: 50%[^}]*transform: translateX\(-50%\)/,
+    'dead center: left:50% then pull back half its own width');
+  // margin-right:auto on the FIRST button only — one auto margin pulls the
+  // whole icon cluster (🔗 ⛓ tab count) to the right edge.
+  assert.match(css, /\.dbr-top\s*\{[^}]*position: relative/, 'the bar is the pill\'s positioning box');
+  assert.match(css, /\.dbr-top > #dbrClose\s*\{[^}]*margin-right: auto/,
+    'the ✕ pins the icons right without wrapping them in a group');
 });
 
 test('the bottom bar is exactly five controls, in order', () => {
@@ -83,18 +99,23 @@ test('the bottom bar is exactly five controls, in order', () => {
   assert.deepEqual(bottomIds,
     ['dbrBack', 'dbrFwd', 'dbrReload', 'dbrHome', 'dbrMenu'],
     'back, forward, reload, home, menu — five slots, one per action');
-  assert.equal(topIds.length + bottomIds.length, 11,
-    'the chrome did not sprout unaccounted controls (6 top ids incl. tab count + load bar, 5 bottom)');
+  assert.equal(topIds.length + bottomIds.length, 10,
+    'the chrome did not sprout unaccounted controls (5 top ids incl. tab count + load bar, 5 bottom)');
 });
 
 test('every control the e2e suite clicks by id is still in the shell', () => {
-  // The redesign moves these; it must never rename them.
+  // The redesign moves these; it must never rename them. #dbrBm is the one
+  // control DELIBERATELY dropped (the toolbar star, 2026-10-07) — bookmarking
+  // moved into the ⋯ menu, so its absence is asserted, not overlooked.
   for (const id of ['dbrBack', 'dbrFwd', 'dbrReload', 'dbrHome', 'dbrMenu',
-    'dbrBm', 'dbrUrl', 'dbrSecure', 'dbrConnect', 'dbrTabs', 'dbrStage',
+    'dbrUrl', 'dbrSecure', 'dbrConnect', 'dbrTabs', 'dbrStage',
     'dbrFrame', 'dbrBlocked', 'dbrHomePage', 'dbrLoading', 'dbrLoadingTxt',
     'dbrMenuPop', 'dbrBar']) {
     assert.match(shell, new RegExp(`id="${id}"`), `${id} was dropped by the redesign`);
   }
+  assert.ok(!shell.includes('dbrBm'), 'the star button is gone — bookmarking lives in the ⋯ menu');
+  assert.ok(!/id="dbrBm"/.test(src), 'no leftover #dbrBm wiring in the module');
+  assert.match(src, /\['bm', isBookmarked\(t\?\.url\)/, 'the ⋯ menu still offers bookmark toggle');
 });
 
 // Hidden means hidden — for the whole sheet, not per component. The tab grid
@@ -160,6 +181,27 @@ test('the bottom bar is drawn and thumb-sized', () => {
   assert.match(css, /\.dbr-net-ic\s*\{/, 'chain badge is styled');
   assert.match(css, /--net-color/, 'badge takes the chain colour as a custom property');
   assert.ok(!/\.dbr-top[^}]*flex-wrap: wrap/.test(css), 'the top bar must not wrap');
+});
+
+// The ⋯ menu was re-laid-out as an OKX-style floating bubble (2026-10-07):
+// anchored bottom-right above the control bar, large radius, blurred glass,
+// deep shadow, and a corner scale-in. What must never regress is that it is
+// STILL a popup floating over the stage with its rows intact.
+test('the ⋯ menu is a floating bubble anchored above the control bar', () => {
+  const at = css.indexOf('.dbr-menu {');
+  assert.ok(at > -1, '.dbr-menu rule exists');
+  const rule = css.slice(at, css.indexOf('}', at));
+  assert.match(rule, /position: absolute/, 'it floats');
+  assert.match(rule, /bottom: calc\(64px/, 'anchored above the bottom bar, not the top');
+  assert.ok(!/top: 50px/.test(rule), 'the old top-anchored dropdown is gone');
+  assert.match(rule, /border-radius: 18px/, 'a bubble, not a card');
+  assert.match(rule, /backdrop-filter: blur/, 'glass blur');
+  assert.match(rule, /box-shadow: 0 18px 50px/, 'deep shadow — it reads as floating');
+  assert.match(css, /@keyframes dbr-menu-in/, 'it animates in from its corner');
+  assert.match(css, /prefers-reduced-motion[\s\S]*?\.dbr-menu\s*\{\s*animation: none/,
+    'and respects reduced motion');
+  // Rows keep their menu semantics.
+  assert.match(src, /role="menuitem" data-mi=/, 'rows are menu items');
 });
 
 // The timeout sheet was walled off over a page that was actually ALIVE: Aave

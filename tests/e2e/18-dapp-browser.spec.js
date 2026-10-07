@@ -163,12 +163,15 @@ test.describe('dApp browser', () => {
     await page.press('#dbrUrl', 'Enter');
     await page.waitForTimeout(900);
     // Aave is in the catalogue over https, so this loads without a prompt.
-    await appClick(page, '#dbrBm');
+    // The toolbar star is gone (2026-10-07): the toggle lives in the ⋯ menu.
+    await appClick(page, '#dbrMenu');
+    await appClick(page, '#dbrMenuPop [data-mi="bm"]');
     await page.waitForTimeout(300);
     const bms = await page.evaluate(() => JSON.parse(localStorage.getItem('bear.dappBookmarks') || '[]'));
     expect(bms.some((b) => b.url.includes('aave.com'))).toBe(true);
 
-    await appClick(page, '#dbrBm');
+    await appClick(page, '#dbrMenu');
+    await appClick(page, '#dbrMenuPop [data-mi="bm"]');
     await page.waitForTimeout(300);
     const after = await page.evaluate(() => JSON.parse(localStorage.getItem('bear.dappBookmarks') || '[]'));
     expect(after.some((b) => b.url.includes('aave.com'))).toBe(false);
@@ -318,6 +321,37 @@ test.describe('dApp browser', () => {
     await expect(page.locator('#dbrClose')).toBeVisible();
     expect(await page.evaluate(() => document.querySelector('.dbr-top > *')?.id),
       '✕ is the first control in the top bar').toBe('dbrClose');
+
+    // ── 2026-10-07 rombak: no star, address dead-center, tab counter right ──
+    // The toolbar star is gone for good — bookmarking lives in the ⋯ menu.
+    expect(await page.locator('#dbrBm').count(), 'no bookmark star in the toolbar').toBe(0);
+    // The address pill sits at the visual center of the bar ±3px, measured
+    // against real boxes — a claim about pixels must be checked in pixels.
+    const topBox = await page.locator('.dbr-top').boundingBox();
+    const urlBox = await page.locator('.dbr-urlwrap').boundingBox();
+    expect(Math.abs((urlBox.x + urlBox.width / 2) - (topBox.x + topBox.width / 2)),
+      'the address pill is dead-center').toBeLessThanOrEqual(3);
+    // The tab counter closes the RIGHT edge, past the pill; the ✕ is left of it.
+    const tabsBox = await page.locator('#dbrTabsBtn').boundingBox();
+    expect(tabsBox.x, 'the tab counter sits right of the address pill')
+      .toBeGreaterThan(urlBox.x + urlBox.width - 1);
+    const closeBox = await page.locator('#dbrClose').boundingBox();
+    expect(closeBox.x + closeBox.width, '✕ sits left of the address pill')
+      .toBeLessThan(urlBox.x + 1);
+
+    // The ⋯ menu is an OKX-style floating bubble: above the control bar,
+    // overlapping the stage, not a dropdown pinned under the top bar.
+    await appClick(page, '#dbrMenu');
+    await expect(page.locator('#dbrMenuPop')).toBeVisible();
+    const menuBox = await page.locator('#dbrMenuPop').boundingBox();
+    const barBox = await page.locator('#dbrBar').boundingBox();
+    expect(menuBox.y + menuBox.height, 'the bubble floats clear above the control bar')
+      .toBeLessThanOrEqual(barBox.y + 1);
+    expect(menuBox.y, 'the bubble overlays the stage, not the top bar').toBeGreaterThan(topBox.height + 1);
+    await expect(page.locator('#dbrMenuPop [data-mi="bm"]'), 'bookmark row lives in the menu')
+      .toContainText('bookmark');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#dbrMenuPop')).toBeHidden();
 
     // The chain badge ends the icon row — the corner OKX puts the network
     // logo in. The tabs counter (#dbrTabsBtn, the tab batch of 2026-10-05)

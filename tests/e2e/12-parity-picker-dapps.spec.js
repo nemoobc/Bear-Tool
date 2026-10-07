@@ -292,16 +292,19 @@ test.describe('DApps', () => {
   test('#7 the bookmark toggle persists and reports its state', async ({ page }) => {
     await openBrowser(page);
     await go(page, FRAMABLE);
-    const btn = page.locator('#dbrBm');
-    await expect(btn).toHaveAttribute('aria-pressed', 'false');
-    await btn.click();
+    // The toolbar star was removed (2026-10-07 rombak): bookmarking now lives
+    // in the ⋯ menu, and the menu row's own label is the state report.
+    await expect(page.locator('#dbrBm')).toHaveCount(0, 'no star in the toolbar');
+    await appClick(page, '#dbrMenu');
+    await appClick(page, '#dbrMenuPop [data-mi="bm"]');
     await page.waitForTimeout(250);
-    await expect(btn).toHaveAttribute('aria-pressed', 'true');
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('bear.dappBookmarks') || '[]'));
     expect(stored.length, 'the bookmark must be stored').toBeGreaterThan(0);
-    await btn.click();
+    // Re-opening the menu reports the CURRENT state: it offers Remove now.
+    await appClick(page, '#dbrMenu');
+    await expect(page.locator('#dbrMenuPop [data-mi="bm"]')).toContainText('Remove bookmark');
+    await appClick(page, '#dbrMenuPop [data-mi="bm"]');
     await page.waitForTimeout(250);
-    await expect(btn).toHaveAttribute('aria-pressed', 'false');
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('bear.dappBookmarks') || '[]').length)).toBe(0);
   });
 

@@ -45,7 +45,7 @@ test.describe('Accessibility', () => {
     await expect(page.locator('#modalOverlay')).not.toHaveClass(/open/);
   });
 
-  // TODO:23 — the topbar pills were plain divs: no role, tabindex -1, and no
+  // Isu #23 — the topbar pills were plain divs: no role, tabindex -1, and no
   // keydown wiring, so they were mouse-only while every .nav-item was keyboard
   // operable. Guard both pills with the same contract.
   for (const [id, name] of [['#networkPill', 'network'], ['#accountPill', 'account']]) {
