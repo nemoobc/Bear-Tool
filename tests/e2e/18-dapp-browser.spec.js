@@ -58,7 +58,12 @@ test.describe('dApp browser', () => {
     // The two that would matter: our origin, and escaping the sandbox.
     expect(attrs.sandbox).not.toContain('allow-same-origin');
     expect(attrs.sandbox).not.toContain('escape-sandbox');
-    expect(attrs.allow).toBe('');
+    // 2026-10-07 (G1): exactly ONE permission is delegated — clipboard-write,
+    // so a cross-origin dApp can copy its wc: pairing URI (W3C Permissions
+    // Policy §4.8 default 'self'; Chromium #40128045). Microphone, camera,
+    // geolocation and payment are never granted; their default excludes
+    // cross-origin frames already.
+    expect(attrs.allow).toBe('clipboard-write');
   });
 
   test('a second tab opens and switching keeps both', async ({ page }) => {
