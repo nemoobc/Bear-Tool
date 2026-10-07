@@ -292,3 +292,20 @@ test('back and forward stay inside the stack and persist the move', () => {
   assert.equal((fn.match(/saveSession\(\)/g) || []).length, 2, 'both directions persist the pointer');
   assert.equal((fn.match(/loadedUrl = ''/g) || []).length, 2, 'both forget what the frame was showing');
 });
+
+// G1 (riset dApps 2026-10-07): clipboard-write is a DELEGATED permission —
+// the default allowlist is 'self', so a cross-origin dApp inside this frame
+// cannot copy the wc: pairing URI out of a WalletConnect modal unless THIS
+// parent grants it. Without the grant the in-app connect path
+// (Connect -> WalletConnect -> copy the wc: link -> pair here) dead-ends at
+// the copy step and the dApp is unusable. Sources: W3C Permissions Policy
+// §4.8 default allowlists; Chromium issue 40128045 ("the Clipboard API is
+// therefore currently not accessible to cross-origin iframes"); MDN
+// Clipboard API. A silently emptied allow="" is exactly the regression this
+// pins.
+test('the frame delegates clipboard-write so a dApp can copy its wc: URI', () => {
+  const iframe = shell.slice(shell.indexOf('<iframe'), shell.indexOf('</iframe>'));
+  assert.ok(iframe.length > 0, 'the SHELL carries the dApp frame');
+  assert.match(iframe, /allow="clipboard-write"/, 'the iframe grants clipboard-write');
+  assert.doesNotMatch(iframe, /allow=""/, 'the allow attribute is never left empty');
+});

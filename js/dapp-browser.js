@@ -194,7 +194,8 @@ const SHELL = `
     </div>
     <iframe id="dbrFrame" class="dbr-frame" title="dApp page"
       sandbox="allow-scripts allow-forms allow-popups allow-modals"
-      referrerpolicy="no-referrer" credentialless allow="" hidden></iframe>
+      referrerpolicy="no-referrer" credentialless
+      allow="clipboard-write" hidden></iframe>
     <div class="dbr-blocked" id="dbrBlocked" hidden></div>
     <button class="dbr-peak" id="dbrPeak" hidden title="The page may still be loading — open the report again"
             aria-label="Open the page report">⚠</button>

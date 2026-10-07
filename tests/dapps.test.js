@@ -71,7 +71,16 @@ test('dapps: the in-app frame is hardened', () => {
   assert.ok(!/sandbox="[^"]*allow-same-origin/.test(browserSrc),
     'allow-same-origin must never be in the static markup — only behind the sandboxFor guard');
   assert.ok(!/sandbox="[^"]*escape-sandbox/.test(browserSrc), 'escaping the sandbox would defeat the sandbox');
-  assert.match(browserSrc, /allow=""/, 'no clipboard, microphone or camera for a dApp');
+  // 2026-10-07 (riset dApps / G1): the empty allow="" is gone. clipboard-write
+  // is a DELEGATED permission (default allowlist 'self' — W3C Permissions
+  // Policy §4.8; Chromium #40128045), so without the grant a cross-origin dApp
+  // cannot copy its wc: pairing URI and the in-app connect path dead-ends.
+  // Microphone, camera, geolocation and payment stay closed: they are never
+  // granted here, and their default allowlist already excludes cross-origin.
+  assert.match(browserSrc, /allow="clipboard-write"/,
+    'the frame delegates clipboard-write — the wc: copy step needs it');
+  assert.ok(!/allow="[^"]*(microphone|camera|geolocation|payment|fullscreen)/.test(browserSrc),
+    'nothing but clipboard-write is ever granted to the frame');
   // The guard must actually be applied on every navigation, before the src.
   const navAt = browserSrc.indexOf('setAttribute(\'sandbox\', sandboxFor(');
   const srcAt = browserSrc.indexOf('el.frame.src = t.url');
