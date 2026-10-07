@@ -2119,8 +2119,14 @@ function renderAssets(tokens) {
   // the rest of the file renders perfectly well. It also attached a second error
   // handler to the same element, both trying to replace it.
   guardTokenLogos(assetList);
-  // Click handlers
-  $all('.asset-clickable').forEach(el => {
+  // Click handlers — scoped to #assetList on purpose. A document-wide
+  // $all('.asset-clickable') also caught the Add-Network modal's
+  // `.asset-row asset-clickable chain-preset` rows (M6+CI 37595984548:
+  // tapping Cronos opened the CRO *token* sheet over the form, because
+  // showTokenActions read data-symbol="CRO" off the preset). renderAssets
+  // re-runs async (balance refresh, token search) while that modal is open,
+  // so the leak is a race — scope it to the list it belongs to.
+  assetList.querySelectorAll('.asset-clickable').forEach(el => {
     el.addEventListener('click', () => showTokenActions(el));
   });
 }

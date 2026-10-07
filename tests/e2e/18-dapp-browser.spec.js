@@ -16,7 +16,13 @@ test.describe('dApp browser', () => {
   });
 
   async function openBrowser(page) {
-    await page.locator('.dapp-card').first().click();
+    // The first NON-frameable card: it opens the browser without navigating
+    // (it refuses framing), so the frame is still the hardened markup — the
+    // exact state 'the frame is hardened, not a bare iframe' asserts. M6's
+    // section order puts a frameable card first now, and clicking that one
+    // navigates, which correctly grants allow-same-origin to the dApp's OWN
+    // origin (sandboxFor; unit-tested in dapp-browser-imports.test.js).
+    await page.locator('.dapp-card[data-frameable="0"]').first().click();
     await page.waitForSelector('#dappBrowserOverlay.open', { timeout: 10_000 });
   }
 

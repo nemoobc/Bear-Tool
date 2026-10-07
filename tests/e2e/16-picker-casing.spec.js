@@ -70,7 +70,10 @@ test.describe('Casing — static', () => {
   test('the DApps frameability labels are capitalised', () => {
     expect(dapps).toContain("'In-app'");
     expect(dapps).toContain('↗ New tab');
-    expect(dapps).toMatch(/<strong>In-app<\/strong>/);
+    // The 💡 tip that carried <strong>In-app</strong> was replaced by the two
+    // sections in M6 — the same split, now the section headings.
+    expect(dapps).toContain('Ready in-app');
+    expect(dapps).toContain('Opens in a new tab');
   });
 
   test('the stored value stays lower-case (display-only change)', () => {

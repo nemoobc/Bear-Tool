@@ -204,7 +204,12 @@ test.describe('DApps', () => {
   const FRAMABLE_2 = 'https://app.balancer.fi/';
 
   const openBrowser = async (page) => {
-    await page.locator('#dappGrid .dapp-card').first().click();
+    // First NON-frameable card: opens the browser WITHOUT a navigation, so
+    // every history assertion below starts from an empty stack (0 entries →
+    // Back disabled until the first go()). M6's section order puts a
+    // frameable card first, whose click would land a history entry before
+    // the test's own first go().
+    await page.locator('#dappGrid .dapp-card[data-frameable="0"]').first().click();
     await page.waitForSelector('#dappBrowserOverlay.open', { timeout: 10_000 });
     await page.waitForSelector('#dbrUrl', { timeout: 10_000 });
   };

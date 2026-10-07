@@ -86,6 +86,15 @@ test.describe('Account switcher', () => {
       };
       return {
         topbar: readImg(document.querySelector('.topbar-logo img')),
+        // Vite inlines assets <4 kB into dist as data URIs (bear.svg is
+        // 2533 b), so the built app's src is a data:image/svg+xml URI. The
+        // SVG carries its own header comment — decode and check it really
+        // is the mascot, not just any inline graphic.
+        topbarIsMascot: (() => {
+          const s = document.querySelector('.topbar-logo img')?.getAttribute('src') || '';
+          if (!s.startsWith('data:image/svg+xml')) return false;
+          try { return atob(s.split(',')[1] || '').includes('Bear Tool mascot'); } catch { return false; }
+        })(),
         pill: readBox(document.querySelector('.pill-wallet .wallet-glyph')),
         bearImgsInHeader: document.querySelectorAll('.topbar-right img').length,
         rows: [...document.querySelectorAll('.asset-wallet')].map(readBox),
@@ -99,7 +108,10 @@ test.describe('Account switcher', () => {
       };
     });
 
-    expect(marks.topbar.src, 'the topbar is the one place the brand file lives').toContain('bear.svg');
+    expect(
+      /bear(-[\w]+)?\.svg/.test(marks.topbar.src) || marks.topbarIsMascot,
+      'the topbar is the one place the brand file lives',
+    ).toBe(true);
     expect(marks.bearImgsInHeader, 'no bear image may survive beside the wallet glyph').toBe(0);
     expect(marks.topbar.complete, 'the brand image did not load').toBe(true);
     expect(marks.topbar.natural, 'the brand image has no pixels').toBeGreaterThan(0);
