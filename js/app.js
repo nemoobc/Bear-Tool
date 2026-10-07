@@ -95,6 +95,7 @@ window.addEventListener('DOMContentLoaded', () => {
   try { bindNav(); } catch (e) { console.error('[BearTool] nav binding failed:', e); }
   try { bindTopbar(); } catch (e) { console.error('[BearTool] topbar binding failed:', e); }
   try { bindViews(); } catch (e) { console.error('[BearTool] view binding failed:', e); }
+  try { initScrollTopFab(); } catch (e) { console.error('[BearTool] scroll-top binding failed:', e); }
 
   // M4 activity: boot-only reconcile left a stuck row pending until the next
   // reload/network switch — settle pending rows while the app stays open.
@@ -501,6 +502,34 @@ function syncMobileNav() {
     .join('');
   // Re-apply translations so the generated labels follow the active language.
   applyTranslations?.();
+}
+
+// Round arrow that surfaces after real scrolling and smooth-scrolls home.
+// Threshold 400px = past the fold on every layout we ship; toggling is
+// rAF-throttled so a trackpad spin fires one style write per frame, not
+// one per scroll event. The hidden state also leaves the tab order
+// (tabindex -1 + aria-hidden) so keyboard users never land on an invisible
+// button — the a11y gate, not a nicety.
+function initScrollTopFab() {
+  const fab = $('#scrollTopFab');
+  if (!fab) return;
+  let queued = false;
+  const sync = () => {
+    queued = false;
+    const show = window.scrollY > 400;
+    fab.classList.toggle('show', show);
+    fab.setAttribute('aria-hidden', show ? 'false' : 'true');
+    fab.tabIndex = show ? 0 : -1;
+  };
+  window.addEventListener('scroll', () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(sync);
+  }, { passive: true });
+  fab.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  sync();
 }
 
 function switchView(view) {

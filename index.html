@@ -145,6 +145,17 @@
     <!-- Built by syncMobileNav() in app.js from the desktop sidebar, so the two
          can never drift again. Do not hand-write items here. -->
     <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation"></nav>
+
+    <!-- ═══════════ SCROLL-TO-TOP FAB ═══════════ -->
+    <!-- Round arrow button, appears once the page has been scrolled down;
+         wired in initScrollTopFab() (app.js). Hidden state keeps it out of
+         the tab order until it is actually on screen. -->
+    <button type="button" class="scroll-top-fab" id="scrollTopFab" aria-label="Back to top" aria-hidden="true" tabindex="-1">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 19V5"></path>
+        <path d="M5 12l7-7 7 7"></path>
+      </svg>
+    </button>
   </div>
 
   <!-- ═══════════ MODAL (generic) ═══════════ -->
