@@ -136,7 +136,18 @@ if (typeof document !== 'undefined' && document.addEventListener) {
   document.addEventListener('keydown', (e) => {
     const overlay = document.getElementById('modalOverlay');
     if (!overlay || !overlay.classList.contains('open')) return;
-    if (e.key === 'Escape') { closeModal(); return; }
+    if (e.key === 'Escape') {
+      // The modal consumed this press. The browser's own Escape handler is
+      // ANOTHER document-level listener: without this it ran right after
+      // closeModal() dropped the 'open' class — so its "is a modal open?"
+      // guard saw false and closed the whole browser underneath the sheet
+      // (measured 2026-10-07: WC pair sheet → Escape → overlayOpen:false).
+      // Stop the press here; dapp-browser.js keeps its guard for the case
+      // where its listener registered first.
+      e.stopImmediatePropagation();
+      closeModal();
+      return;
+    }
     if (e.key === 'Tab') {
       const box = document.getElementById('modalBox');
       const items = getFocusable(box);

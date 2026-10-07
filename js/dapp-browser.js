@@ -1116,6 +1116,12 @@ function wire() {
     if (!overlay || overlay.hidden) return;
 
     if (e.key === 'Escape') {
+      // An open app modal owns this press — ui.js closes it. Without this
+      // guard Escape also ran here and closed the BROWSER underneath the
+      // sheet (measured 2026-10-07: pair sheet open → Escape → the whole
+      // overlay went display:none and the next click waited forever), which
+      // rips the sheet away mid-flow.
+      if (document.getElementById('modalOverlay')?.classList.contains('open')) return;
       // A menu is the one thing that eats the first press: it is a popup sitting on
       // top of everything.
       if (!el.menuPop.hidden) { el.menuPop.hidden = true; return; }

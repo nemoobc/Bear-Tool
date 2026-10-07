@@ -411,3 +411,18 @@ test('no local binding shadows a module-level function of the same name', () => 
   assert.deepEqual([...new Set(shadowed)], [],
     `a local binding shadows a module-level function: ${[...new Set(shadowed)].join(', ')}`);
 });
+
+test('Escape in a modal never leaks to the browser underneath it', () => {
+  // Defect shipped 2026-10-07: two DOCUMENT-level Escape listeners. ui.js
+  // closed the modal first, dropped the 'open' class, and THEN dapp-browser's
+  // guard asked "is a modal open?" — false — and closed the whole browser
+  // too. Measured: WC pair sheet → Escape → overlayOpen:false, next click
+  // hung for 120s. The consume must stop the press, not just answer it.
+  const ui = read('js/ui.js');
+  assert.match(ui, /e\.key === 'Escape'\)\s*{[\s\S]{0,900}?stopImmediatePropagation\(\);[\s\S]{0,120}?closeModal\(\)/,
+    'ui.js stops the press BEFORE closing, while the class is still there');
+
+  const db = read('js/dapp-browser.js');
+  assert.match(db, /modalOverlay'\)\?\.classList\.contains\('open'\)\) return;/,
+    'dapp-browser still guards — it wins the race when IT registered first');
+});

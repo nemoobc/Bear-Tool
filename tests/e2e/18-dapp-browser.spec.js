@@ -8,6 +8,11 @@ import { gotoApp, skipIntro, createWallet, appClick } from './helpers.js';
 
 test.describe('dApp browser', () => {
   test.beforeEach(async ({ page }) => {
+    // The shared onboarding (intro → createWallet) is the slow part on this
+    // device — a body-level setTimeout never reaches the hook, so the hook
+    // died at the 45s default while the app was still mid-wizard. Give it
+    // its own budget here; CI's runner finishes well inside it.
+    test.setTimeout(120_000);
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
@@ -519,5 +524,29 @@ test.describe('dApp browser', () => {
     await page.locator('#dbrBlocked [data-act="proceed"]').click({ timeout: 5_000 }).catch(() => {});
     await expect(page.locator('#dbrFrame')).toBeVisible({ timeout: 30_000 });
     await expect(hint).toBeHidden();
+  });
+
+  test('the pair sheet picks a copied wc: link straight out of the clipboard', async ({ page }) => {
+    test.setTimeout(120_000);
+    // Clipboard read is permission-gated; grant it for this origin only.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'],
+      { origin: 'http://localhost:8080' });
+    const WC_URI = 'wc:pair-topic-123@1?relay-protocol=irn&symKey=deadbeef';
+    await page.evaluate((uri) => navigator.clipboard.writeText(uri), WC_URI);
+
+    await openBrowser(page);
+    await page.fill('#dbrUrl', 'https://example.com/');
+    await page.press('#dbrUrl', 'Enter');
+    await page.locator('#dbrBlocked [data-act="proceed"]').click({ timeout: 5_000 }).catch(() => {});
+    await expect(page.locator('#dbrWcHint')).toBeVisible({ timeout: 30_000 });
+    await page.locator('#dbrWcPair').click();
+    // The copied link lands in the field — no manual Paste step.
+    await expect(page.locator('#wcPairUri')).toHaveValue(WC_URI, { timeout: 5_000 });
+
+    // And a non-wc: clipboard is ignored, not pasted into the pairing field.
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => navigator.clipboard.writeText('just some text'));
+    await page.locator('#dbrWcPair').click();
+    await expect(page.locator('#wcPairUri')).toHaveValue('');
   });
 });

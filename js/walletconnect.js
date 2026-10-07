@@ -459,6 +459,15 @@ export function openPairWalletConnect(prefill = '') {
   const sessionsRoot = document.getElementById('wcSessions');
   const fill = (uri) => { if (uri) { input.value = uri; input.focus(); input.select(); } };
   fill(prefill);
+  // Auto-pick a wc: link the user already copied (the usual flow is: browse
+  // the site in an external tab → Connect → WalletConnect → copy). Reading is
+  // permission-gated, so every refusal/empty clipboard just falls through —
+  // the manual Paste path below is never blocked by this.
+  if (!prefill) {
+    navigator.clipboard?.readText()
+      .then((t) => { const s = (t || '').trim(); if (s.startsWith('wc:')) fill(s); })
+      .catch(() => { /* denied or empty — the Paste button stays the answer */ });
+  }
   // Clipboard read is permission-gated on mobile Chrome: a refusal shows a
   // message instead of throwing — the manual paste path stays open.
   paste.onclick = async () => {

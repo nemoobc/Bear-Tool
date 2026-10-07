@@ -161,6 +161,15 @@ test('the network picker is not hidden behind the browser', () => {
     'no per-call z-index dance — the stack order lives in one place, the CSS');
 });
 
+test('Escape lets an open app modal keep the browser alive', () => {
+  // Regression 2026-10-07: Escape in the WC pair sheet closed the pair AND
+  // the whole browser underneath it — this handler never asked whether a
+  // modal owned the press.
+  const keydown = src.slice(src.indexOf("document.addEventListener('keydown'"));
+  assert.match(keydown, /modalOverlay.*classList\.contains\('open'\)/,
+    'the Escape branch bails while #modalOverlay is open');
+});
+
 test('no executable window.open remains', () => {
   // Every occurrence must be prose. A live one is a button that does nothing
   // inside the APK, which is the bug this whole file guards.

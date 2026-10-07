@@ -41,6 +41,18 @@ test('the projectId is a public config constant, build-overridable', () => {
     'node (no import.meta.env) lands on the bundled fallback');
   assert.ok(wc.WC_PROJECT_ID.length >= 32, 'and the fallback is a real 32-char id');
 });
+
+test('the pair sheet auto-picks a copied wc: link, never blocking on the clipboard', () => {
+  // The real flow is copy-then-paste; auto-fill removes the paste. It must
+  // (a) only fire when no URI was passed in, (b) only accept something that
+  // actually looks like a pairing URI, and (c) swallow every refusal —
+  // clipboard-read is permission-gated and a denial must not break the sheet.
+  const openFn = src.slice(src.indexOf('export function openPairWalletConnect'));
+  assert.match(openFn, /if \(!prefill\)/, 'skipped when a URI was handed in');
+  assert.match(openFn, /readText\(\)/, 'reads the clipboard');
+  assert.match(openFn, /startsWith\('wc:'\)/, 'only a wc: link is trusted');
+  assert.match(openFn, /\.catch\(\(\) => \{/, 'a refused clipboard falls through silently');
+});
 const browserSrc = readFileSync(new URL('../js/dapp-browser.js', import.meta.url), 'utf8');
 
 test('normalizeWcTx maps the WC `gas` spelling onto ethers gasLimit', () => {
