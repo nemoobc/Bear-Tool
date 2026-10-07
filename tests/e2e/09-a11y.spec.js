@@ -6,6 +6,18 @@ test.describe('Accessibility', () => {
   test('skip link is present and first focusable', async ({ page }) => {
     await gotoApp(page);
     await expect(page.locator('#skipLink')).toBeVisible();
+    // Race-free by design: the boot flow opens the fullscreen welcome modal
+    // after the intro, and a fullscreen modal OWNS the tab order (WCAG 2.4.3
+    // focus trap — pressing Tab there lands on #wCreate, which is correct).
+    // So first wait for that modal deterministically, Escape out of it (the
+    // overlay closes and focus returns to <body>), and only then assert the
+    // skip link is the first stop. Measured on Termux: pressing Tab right
+    // after the visible check raced the intro's auto-hide — the modal won
+    // the race locally while CI's faster boot won it, i.e. the old order was
+    // flaky by construction.
+    await page.waitForSelector('#modalOverlay.open', { timeout: 20_000 });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#modalOverlay')).not.toHaveClass(/open/);
     await page.keyboard.press('Tab');
     await expect(page.locator('#skipLink')).toBeFocused();
   });
