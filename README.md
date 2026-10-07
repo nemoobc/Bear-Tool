@@ -354,6 +354,24 @@ you with a blank frame and a console violation, those cards are labelled
 in a `sandbox` with **no** `allow-same-origin`, so a DApp page never shares an
 origin with the wallet holding your keys.
 
+### WalletConnect projectId
+
+The relay leg (paste a `wc:` URI → the connection comes back here) needs one
+project id from [dashboard.reown.com](https://dashboard.reown.com) — free, one
+id for the whole app. **No per-DApp registration**: Reown's own FAQ states
+*"dApps do not need approval in order to use your projectId"* (checked
+2026-10-07). The repo ships a working fallback, so nothing breaks out of the
+box; to use your own:
+
+```bash
+cp .env.example .env
+echo "VITE_WC_PROJECT_ID=your_id_here" >> .env
+npm run build   # env is baked at build time
+```
+
+Optional, from the same dashboard: an origin **allowlist** (who may use the
+id) and **Verify** (shows your domain as verified during pairing).
+
 ## 🛡 dApp browser security
 
 Every navigation goes through `dapp-safety.js` before the frame is pointed at

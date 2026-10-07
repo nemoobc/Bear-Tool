@@ -29,6 +29,18 @@ if (!globalThis.localStorage) {
 
 const wc = await import('../js/walletconnect.js');
 const src = readFileSync(new URL('../js/walletconnect.js', import.meta.url), 'utf8');
+
+test('the projectId is a public config constant, build-overridable', () => {
+  // Reown FAQ (2026-10-07): "dApps do not need approval in order to use your
+  // projectId" — so this is configuration, not a registration flow. The value
+  // is public BY DESIGN (client-side relay + origin allowlist), but a build
+  // must be able to swap in its own id without touching source.
+  assert.match(src, /import\.meta\.env\s*&&\s*import\.meta\.env\.VITE_WC_PROJECT_ID/,
+    'a VITE_WC_PROJECT_ID build env can override it');
+  assert.equal(wc.WC_PROJECT_ID, '99909bde486039e2102663b92be74974',
+    'node (no import.meta.env) lands on the bundled fallback');
+  assert.ok(wc.WC_PROJECT_ID.length >= 32, 'and the fallback is a real 32-char id');
+});
 const browserSrc = readFileSync(new URL('../js/dapp-browser.js', import.meta.url), 'utf8');
 
 test('normalizeWcTx maps the WC `gas` spelling onto ethers gasLimit', () => {

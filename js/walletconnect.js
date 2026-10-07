@@ -12,6 +12,11 @@
 // and protected by an origin allowlist, so it is a config constant, not a
 // secret.
 //
+// Override per build with VITE_WC_PROJECT_ID (your own id from
+// dashboard.reown.com — free, no per-dApp approval needed, per Reown FAQ
+// 2026-10-07); the bundled constant is the fallback so a stock build keeps
+// working out of the box.
+//
 // The heavy dependency is imported dynamically inside ensureKit(): importing
 // this module costs nothing at boot and opens no socket until the user
 // actually pastes a wc: URI.
@@ -19,7 +24,8 @@ import { openModal, closeModal, confirmTx, escapeHtml, toast } from './ui.js';
 import { get, set, requireUnlock } from './state.js';
 import { getNetworkById, getNetwork } from './network.js';
 
-export const WC_PROJECT_ID = '99909bde486039e2102663b92be74974';
+export const WC_PROJECT_ID =
+  (import.meta.env && import.meta.env.VITE_WC_PROJECT_ID) || '99909bde486039e2102663b92be74974';
 
 // Exactly the methods this wallet will answer — what the session grants is
 // what the confirm dialog can actually deliver. eth_sign is absent on
