@@ -116,7 +116,7 @@ test.describe('Sidebar — in the browser', () => {
       const s = e.querySelector('[data-i18n]');
       return s ? s.textContent.trim() : e.textContent.trim();
     }));
-    expect(labels).toEqual(['Dashboard', 'Activity', 'Swap', 'NFT', 'DApps', 'Tools', 'Approvals', 'Settings']);
+    expect(labels).toEqual(['Dashboard', 'Activity', 'Swap', 'NFT', 'DApps', 'Tools', 'Discord', 'Settings']);
   });
 
   test('DApps opens from the sidebar', async ({ page }) => {

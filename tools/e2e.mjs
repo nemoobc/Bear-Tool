@@ -295,10 +295,16 @@ try {
   const args = bs ? [bs, 'playwright', 'test'] : [cli, 'test'];
   if (browser) args.push(`--browser=${browser}`);
   if (flag('--headed')) args.push('--headed');
-  for (const a of argv) {
-    if (a.startsWith('--') && a !== '--headed' && a !== '--list' && a !== '--browser' && a !== browser) {
-      args.push(a);
-    }
+  // Flags whose VALUE is the next argv element must carry it along — a bare
+  // `--grep` reaching Playwright is "--grep argument missing". Measured by
+  // `--grep "…"` failing here while the suite itself was fine (2026-10-07).
+  const takesValue = new Set(['--grep', '--reporter', '--project', '--workers', '--retries', '--timeout', '--output']);
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--') || a === '--headed' || a === '--list' || a === '--browser') continue;
+    args.push(a);
+    const v = argv[i + 1];
+    if (takesValue.has(a) && v && !v.startsWith('--')) { args.push(v); i++; }
   }
   for (const g of terms) args.push(g);
 

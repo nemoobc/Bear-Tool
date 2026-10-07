@@ -162,6 +162,23 @@ test('the bottom bar is drawn and thumb-sized', () => {
   assert.ok(!/\.dbr-top[^}]*flex-wrap: wrap/.test(css), 'the top bar must not wrap');
 });
 
+// The timeout sheet was walled off over a page that was actually ALIVE: Aave
+// renders while its load event still takes ~38s, and at the 20s timeout the
+// report covered the middle of a working dApp. The panel stays; everything
+// outside it clicks through to the page behind it.
+test('the did-not-load sheet does not wall off a page rendering behind it', () => {
+  assert.match(css, /\.dbr-blocked\s*\{[^}]*pointer-events:\s*none/,
+    'the sheet layer lets clicks through to the frame');
+  assert.match(css, /\.dbr-report\s*\{[^}]*pointer-events:\s*auto/,
+    'the panel itself keeps every one of its buttons');
+  // The wording must admit the slow case instead of accusing the site — the
+  // old "never rendered here" was false the moment the page WAS rendering.
+  assert.match(src, /did not finish loading in time/,
+    'the report admits a slow load as a first-class outcome');
+  assert.match(src, /if you can see\s+the page behind this sheet/,
+    'the report points at the visible page instead of denying it');
+});
+
 test('home categories wear OKX-style icon tiles; bookmark chips keep the pill face', () => {
   // Same face-lift on the overlay home ("rombak UI/UX dApps, ikon OKX"). The
   // base .dbr-chip class is shared by the category row AND the bookmark/recent

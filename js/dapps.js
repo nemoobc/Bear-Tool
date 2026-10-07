@@ -101,6 +101,17 @@ export function openDappBrowser(url, name) {
 
 export { openDappHome, openInBrowser, openExternalNotice };
 
+/**
+ * True when the omnibox holds something to OPEN (a host or URL) rather than a
+ * filter query. Exported so the unit tests pin the boundary: "aave" filters,
+ * "app.aave.com" and "https://app.aave.com" open, spaces always mean search.
+ */
+export function looksLikeUrl(v) {
+  const s = (v || '').trim();
+  if (!s || /\s/.test(s)) return false;
+  return /^https?:\/\//i.test(s) || /^[\w-]+(\.[\w-]+)+([/?#].*)?$/.test(s);
+}
+
 export function renderDapps(container) {
   if (!container) return;
   const cats = [...new Set(POPULAR_DAPPS.map((d) => d.category))];
@@ -115,24 +126,31 @@ export function renderDapps(container) {
       <div class="dapp-frame-note">${d.frameable ? 'In-app' : '↗ New tab'}</div>
     </div>`;
 
+  // One grid, two sections — what opens HERE first, what needs a real tab.
+  // Both stay inside #dappGrid because every existing test counts cards
+  // through it; the section headers are the only new markup it ever sees.
+  const inApp = POPULAR_DAPPS.filter((d) => d.frameable);
+  const inTab = POPULAR_DAPPS.filter((d) => !d.frameable);
+  const section = (key, label, list) => `
+    <div class="dapp-sec" data-sec="${key}">
+      <h4 class="dapp-sec-h">${label} <span class="dapp-sec-n">${list.length}</span></h4>
+      ${list.map(card).join('')}
+    </div>`;
+
   container.innerHTML = `
     <div class="dapps-browser">
-      <div class="dapps-bar">
-        <input type="text" id="dappUrl" placeholder="Paste a DApp URL to open it in-app..." class="dapp-url-input" autocomplete="off" spellcheck="false" />
-        <button id="dappGo" class="btn btn-primary btn-sm">Open</button>
+      <div class="dapps-omni">
+        <input type="text" id="dappSearch" placeholder="Search ${POPULAR_DAPPS.length} DApps or paste a URL…" class="dapps-omni-input" autocomplete="off" spellcheck="false" aria-label="Search DApps or paste a URL" />
+        <button id="dappGo" class="btn btn-primary btn-sm" hidden>Open</button>
       </div>
-      <div class="dapps-filters">
-        <input type="text" id="dappSearch" class="input input-sm" placeholder="🔍 Filter ${POPULAR_DAPPS.length} DApps by name or category..." autocomplete="off" aria-label="Filter DApps" />
-        <div class="dapp-chips" role="group" aria-label="Filter by category">
-          <button class="dapp-chip active" data-cat="" aria-pressed="true" style="--cat:${catStyle('All').color}"><span class="dapp-chip-ic" aria-hidden="true">${catStyle('All').glyph}</span><span class="dapp-chip-lb">All</span></button>
-          ${cats.map((c) => `<button class="dapp-chip" data-cat="${escapeHtml(c)}" aria-pressed="false" style="--cat:${catStyle(c).color}"><span class="dapp-chip-ic" aria-hidden="true">${catStyle(c).glyph}</span><span class="dapp-chip-lb">${escapeHtml(c)}</span></button>`).join('')}
-        </div>
+      <div class="dapp-chips" role="group" aria-label="Filter by category">
+        <button class="dapp-chip active" data-cat="" aria-pressed="true" style="--cat:${catStyle('All').color}"><span class="dapp-chip-ic" aria-hidden="true">${catStyle('All').glyph}</span><span class="dapp-chip-lb">All</span></button>
+        ${cats.map((c) => `<button class="dapp-chip" data-cat="${escapeHtml(c)}" aria-pressed="false" style="--cat:${catStyle(c).color}"><span class="dapp-chip-ic" aria-hidden="true">${catStyle(c).glyph}</span><span class="dapp-chip-lb">${escapeHtml(c)}</span></button>`).join('')}
       </div>
-      <div class="dapp-note">
-        💡 DApps marked <strong>In-app</strong> load inside Bear Tool. The rest send
-        <code>X-Frame-Options</code>, so no wallet can embed them — open those in a new tab.
+      <div id="dappGrid" class="dapp-grid">
+        ${section('inapp', 'Ready in-app', inApp)}
+        ${section('tab', 'Opens in a new tab', inTab)}
       </div>
-      <div id="dappGrid" class="dapp-grid">${POPULAR_DAPPS.map(card).join('')}</div>
       <p id="dappNoMatch" class="small text-center" style="display:none;padding:24px 0">No DApp matches that filter.</p>
     </div>`;
 
@@ -145,7 +163,9 @@ export function renderDapps(container) {
     });
   });
 
-  // Filter: free text + category chip, both narrowing the same list.
+  // Filter: free text + category chip, both narrowing the same list. A section
+  // whose cards are all filtered out hides its header too, so the view never
+  // shows a lone heading over an empty grid.
   const grid = container.querySelector('#dappGrid');
   const noMatch = container.querySelector('#dappNoMatch');
   const search = container.querySelector('#dappSearch');
@@ -158,6 +178,10 @@ export function renderDapps(container) {
       const hit = (!q || hay.includes(q)) && (!cat || el.dataset.category === cat);
       el.style.display = hit ? '' : 'none';
       if (hit) shown++;
+    });
+    grid.querySelectorAll('.dapp-sec').forEach((sec) => {
+      const left = [...sec.querySelectorAll('.dapp-card')].some((c) => c.style.display !== 'none');
+      sec.hidden = !left;
     });
     noMatch.style.display = shown ? 'none' : '';
   };
@@ -174,16 +198,23 @@ export function renderDapps(container) {
     });
   });
 
+  // One omnibox: typing filters, and the Open button only shows up when what is
+  // in the field is actually an address (OKX's single search/URL field).
   const goBtn = container.querySelector('#dappGo');
-  const urlInput = container.querySelector('#dappUrl');
+  const syncGo = () => { if (goBtn) goBtn.hidden = !looksLikeUrl(search?.value || ''); };
+  search?.addEventListener('input', syncGo);
   const go = () => {
-    const url = urlInput.value.trim();
-    if (!url) return;
-    openDappBrowser(url);
+    const url = (search?.value || '').trim();
+    if (looksLikeUrl(url)) openDappBrowser(url);
   };
   goBtn?.addEventListener('click', go);
-  urlInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); go(); }
+  search?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // An address opens; anything else stays where it is — the filter already
+      // ran on every keystroke, so there is nothing left to submit.
+      if (looksLikeUrl((search.value || '').trim())) go();
+    }
   });
 }
 

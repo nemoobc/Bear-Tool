@@ -878,10 +878,11 @@ function showDidNotLoad() {
   loadbarFail();
   el.blocked.innerHTML = `<div class="dbr-report" data-kind="didnotload" role="alertdialog" aria-label="Page did not load">
     <div class="dbr-rep-h">⚠ This page did not load</div>
-    <p class="small dim">${escapeHtml(el.frame.src || '')} never rendered here. Either the site refuses
-    to be embedded (X-Frame-Options / frame-ancestors — no web page can bypass that, only a native
-    app can) or it never finished loading. Roughly half of all dApps block embedding; the honest way
-    out is a real browser tab:</p>
+    <p class="small dim">${escapeHtml(el.frame.src || '')} did not finish loading in time. Either the site
+    refuses to be embedded (X-Frame-Options / frame-ancestors — no web page can bypass that, only a
+    native app can) or it is simply slow: heavy dApps can take 30s+ to fire "load", and if you can see
+    the page behind this sheet, that is what is happening — wait or press Show the page. Roughly half
+    of all dApps block embedding; the honest way out is a real browser tab:</p>
     <div class="dbr-rep-btns"><button class="btn btn-sm btn-primary" data-act="popup">↗ Open in a new tab</button>
     <button class="btn btn-sm btn-secondary" data-act="peek">👁 Show the page</button>
     <button class="btn btn-sm btn-secondary" data-act="copy"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy URL</button>

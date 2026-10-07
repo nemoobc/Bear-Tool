@@ -370,7 +370,7 @@ test.describe('Mobile navigation parity', () => {
     expect(slots).toEqual(['dashboard', 'activity', 'swap', 'dapps', 'settings']);
   });
 
-  test('#1 Approvals, Tools, DApps and Settings all open on a phone', async ({ page }) => {
+  test('#1 Discord, Tools, DApps and Settings all open on a phone', async ({ page }) => {
     await gotoApp(page);
     await skipIntro(page);
     await createWallet(page);
@@ -378,7 +378,7 @@ test.describe('Mobile navigation parity', () => {
       await openView(page, v);
       await expect(page.locator('#view-' + v), `${v} must become the active view`).toHaveClass(/active/);
         // A slot highlights only for its own view, and no slot lights for a view it
-        // does not own. Approvals and Tools have no bottom-bar slot at all — they are
+        // does not own. Discord and Tools have no bottom-bar slot at all — they are
         // reached from the Dashboard — so nothing lights, which is honest rather than
         // a bar pretending to be somewhere else.
         //

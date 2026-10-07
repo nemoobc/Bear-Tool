@@ -101,11 +101,18 @@
         </div>
         <div class="account-pill" id="accountPill" role="button" tabindex="0" title="Accounts">
           <span class="pill-wallet">
-            <img class="pill-bear" src="assets/bear.svg" alt="" aria-hidden="true">
+            <!-- 2026-10-06 (user): the pill is the WALLET mark alone — the
+                 bear peeking out of the pocket is gone; one brand bear
+                 (the topbar's) is the whole identity now. -->
             <svg class="wallet-glyph" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-              <rect x="3" y="12" width="26" height="17" rx="4.5" fill="#E8963C" stroke="#2D2A32" stroke-width="2"/>
-              <rect x="21.5" y="18" width="7.5" height="7" rx="2.5" fill="#FFD97A" stroke="#2D2A32" stroke-width="2"/>
-              <circle cx="25.25" cy="21.5" r="1.3" fill="#2D2A32"/>
+              <!-- translate(0,-4.5): the drawing's bbox centres on y=20.5 in a
+                   32-unit box; -4.5 puts it dead centre (16,16), matching x.
+                   Measured, not eyeballed. -->
+              <g transform="translate(0,-4.5)">
+                <rect x="3" y="12" width="26" height="17" rx="4.5" fill="#E8963C" stroke="#2D2A32" stroke-width="2"/>
+                <rect x="21.5" y="18" width="7.5" height="7" rx="2.5" fill="#FFD97A" stroke="#2D2A32" stroke-width="2"/>
+                <circle cx="25.25" cy="21.5" r="1.3" fill="#2D2A32"/>
+              </g>
             </svg>
           </span>
           <span class="label" id="accountShort">Not connected</span>

@@ -5,12 +5,6 @@
 // send.js / swap.js / bridge.js / eip7702.js / deploy.js / nft.js.
 // ═══════════════════════════════════════════════════════════════
 
-// Impor PALING AWAL disengaja: collector memasang hook error +
-// pembungkus fetch sebelum modul lain dieksekusi, sehingga kegagalan
-// boot pun ikut tertangkap (auto-report → tools/debug-relay.mjs,
-// senyap bila relay tak ada).
-import './debug-collector.js';
-
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider, getDelegation,
          addCustomNetwork, removeCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
@@ -1723,7 +1717,7 @@ function showAccountModal() {
     <h2>🐻 Accounts</h2>
     ${accounts.map((a, i) => `
       <div class="asset-row ${i === idx ? 'active' : ''}" data-acc="${i}">
-        <div class="asset-icon"><img class="asset-bear" src="assets/bear.svg" alt="" aria-hidden="true"></div>
+        <div class="asset-icon"><svg class="asset-wallet" viewBox="0 0 32 32" width="26" height="26" aria-hidden="true" focusable="false"><g transform="translate(0,-4.5)"><rect x="3" y="12" width="26" height="17" rx="4.5" fill="#E8963C" stroke="#2D2A32" stroke-width="2"/><rect x="21.5" y="18" width="7.5" height="7" rx="2.5" fill="#FFD97A" stroke="#2D2A32" stroke-width="2"/><circle cx="25.25" cy="21.5" r="1.3" fill="#2D2A32"/></g></svg></div>
         <div class="asset-info">
           <div class="asset-name">${escapeHtml(a.name || `Account ${i + 1}`)}</div>
           <div class="mono">${escapeHtml(a.address)}</div>
@@ -2463,8 +2457,7 @@ function bindViews() {
     on('#btn7702Check', 'click', runEip7702Check);
     // "Delete results" (live request: muncul setiap selesai scan) — wipes the
     // EIP-7702 check output from the panel, then hides itself until the next
-    // scan produces output again. It does NOT touch the debug log; that ring
-    // is dev tooling (js/debug-collector.js) and is not this button's job.
+    // scan produces output again.
     on('#btnClearEipResults', 'click', () => {
       const out = $('#eip7702Results');
       if (out) out.innerHTML = '';

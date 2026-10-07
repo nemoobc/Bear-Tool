@@ -410,8 +410,9 @@ body::before {
   display: flex;
   justify-content: center;
   align-items: center;
-  /* The modal's .modal-close is `float: right` and 44px wide, so it eats into
-     the inline space of the content that follows it. Without `clear` the flex
+  /* The modal's .modal-close is `float: right` (36px wide as of the 2026-10-06
+     second pass), so it eats into the inline space of the content that follows
+     it. Without `clear` the flex
      box is narrowed by the float and the QR renders ~22px LEFT of the modal's
      centre — measured identically on desktop (1440→1024) and mobile (430→280).
      `clear` takes the QR out of the float's way so it centres on the full
@@ -524,7 +525,7 @@ body::before {
    its box moved from a bare pill child to this positioning context. */
 .pill-wallet {
   position: relative;
-  width: 26px; height: 26px;
+  width: 30px; height: 30px;
   flex: 0 0 auto;
 }
 .wallet-glyph {
@@ -534,21 +535,16 @@ body::before {
   display: block;
 }
 
-/* The brand mark is an <img>, not a text glyph: an explicit box keeps it the
-   same size everywhere and, with display:block, removes the inline baseline
-   gap underneath it. absolute + centered so the pocket overlaps its base. */
-.pill-bear {
-  position: absolute;
-  left: 50%; top: 1px;
-  transform: translateX(-50%);
-  width: 16px; height: 16px;
-  display: block;
-}
+/* 2026-10-06 (user): the .pill-bear (a bear peeking out of this pocket) is
+   removed — the pill is the wallet mark alone. The bare .wallet-glyph carries
+   the whole icon; .pill-wallet stays as the positioning context. */
 
-.asset-bear {
+/* The account row's identity slot is the SAME wallet glyph (inline SVG), not
+   a bear image: an explicit box keeps it circle-centred and, being the same
+   drawing as the topbar pill, one mark now means one mark everywhere. */
+.asset-wallet {
   width: 26px; height: 26px;
   flex: 0 0 auto;
-  aspect-ratio: 1;
   display: block;
 }
 
@@ -821,8 +817,8 @@ select.input option, select.select option, .input option {
   background: var(--white);
   cursor: pointer;
   transition: all 0.12s;
-  /* The modal ✕ is float:right / 44px wide: without clearance the FIRST card
-     is shortened by exactly that (264 → 220 on a 360px screen). */
+  /* The modal ✕ is float:right / 36px wide: without clearance the FIRST card
+     is shortened by exactly that. */
   clear: both;
 }
 /* Which wallet is active must be visible at a glance — live report: "putih
@@ -940,24 +936,26 @@ select.input option, select.select option, .input option {
 .modal h2 { font-size: 1.3rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .modal-close {
   float: right;
-  width: 44px;
-  height: 44px;
+  /* 2026-10-06 (user, second pass): "rapihin dong soalnya gedean + kasih
+     warna" — 44px cream box → 36px honey box. Float stays (the QR centreing
+     and .asset-row clearance below lean on it, not on the exact width). */
+  width: 36px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   /* A visible box with the X inside it (user, 2026-10-06: "tombol x nya
-     ganti jadi kotak terus dalam ada x nya"). Float + 44px stay exactly as
-     they were — the QR centering fix above leans on both. */
-  background: var(--cream);
+     ganti jadi kotak terus dalam ada x nya"). */
+  background: var(--honey);
   border: 2px solid var(--ink);
   border-radius: 10px;
-  font-size: 1.35rem;
+  font-size: 1.15rem;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
   color: var(--ink);
 }
-.modal-close:hover { background: var(--ink); color: var(--cream); }
+.modal-close:hover { background: var(--ink); color: var(--honey); }
 
 /* ═══════════ TOAST ═══════════ */
 #toast-wrap {
@@ -2999,13 +2997,21 @@ select.input option, select.select option, .input option {
 
 /* ── DApps Browser ── */
 .dapps-browser { padding: 8px 0; }
-.dapps-bar { display: flex; gap: 6px; margin-bottom: 12px; align-items: center; }
+/* One omnibox: filter-as-you-type, and the Open button only appears when the
+   field actually holds an address (js/dapps.js looksLikeUrl). */
+.dapps-omni { display: flex; gap: 6px; margin-bottom: 12px; align-items: center; }
 /* min-width:0 — a flex item refuses to shrink below its intrinsic width by
-   default, and this input's floor pushed .dapps-bar's Open button past a 320px
+   default, and this input's floor pushed its Open button past a 320px
    screen (button right=327, e2e 20-responsive phone-320). flex:1 may shrink it
    only if it is allowed to. */
-.dapp-url-input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: 8px; border: 2px solid var(--border, #ddd); font-size: 13px; background: var(--bg, #fff); color: var(--text, #333); }
+.dapps-omni-input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: 8px; border: 2px solid var(--border, #ddd); font-size: 13px; background: var(--bg, #fff); color: var(--text, #333); }
 .dapp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+/* Two sections inside the one grid: what opens here first, what needs a tab.
+   Each section restates the parent's column track so its cards land on the
+   same grid lines; the header spans all of it. */
+.dapp-sec { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+.dapp-sec-h { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin: 8px 0 -2px; font-size: 12.5px; font-weight: 800; color: var(--text-secondary); }
+.dapp-sec-n { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--bg-card, #f5f5f0); border: 1.5px solid var(--border, #ddd); font-size: 10.5px; font-weight: 700; }
 .dapp-card {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 12px 8px; border-radius: 12px; cursor: pointer;
@@ -3063,8 +3069,7 @@ select.input option, select.select option, .input option {
 .chain-preset:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 
 /* ═══════════ DAPPS: filters + frameable badge ═══════════ */
-.dapps-filters { display: flex; flex-direction: column; gap: var(--sp-8); margin: var(--sp-8) 0; }
-.dapp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dapp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: var(--sp-8) 0; }
 /* OKX-style category tiles: a coloured icon square with the label underneath.
    The old face was a text pill; the fill now lives on the tile, so .active
    paints the tile instead of the whole button (the label no longer sits on a
@@ -3092,8 +3097,9 @@ select.input option, select.select option, .input option {
 .dapp-chip:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .dapp-card:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .dapp-frame-note { font-size: 10px; opacity: .65; margin-top: 2px; }
-.dapp-note { text-align: center; padding: 8px 12px; color: var(--text-secondary); font-size: 12px; }
-.dapp-note code { font-size: 11px; }
+/* The one honest promise this view makes: these four actually open HERE.
+   The rest keep the quiet grey note — the card face does the promoting. */
+.dapp-card[data-frameable="1"] .dapp-frame-note { color: #16a34a; font-weight: 800; opacity: 1; }
 
 /* ═══════════════════════════════════════════════════════════════
    IN-APP TOKEN / NETWORK PICKER (Swap + Bridge)
@@ -3420,7 +3426,13 @@ select.input option, select.select option, .input option {
 .dbr-progress::after { content: ''; display: block; height: 100%; width: 40%; background: var(--primary, #FF6B35); animation: dbrprog 1.1s ease-in-out infinite; }
 @keyframes dbrprog { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
 .dbr-loading-txt { display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 999px; background: var(--card, #fff); border: 1px solid var(--border, #ddd); font-size: .78rem; }
-.dbr-blocked { overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 22px 12px; }
+/* pointer-events: none — at the timeout the sheet may be WRONG (Aave renders
+ * behind it while its load event still takes ~38s). The panel stays readable
+ * on top; everything OUTSIDE it clicks straight through to the page, so a
+ * live-looking dApp remains usable instead of being walled off by a verdict
+ * about the load. The pre-load gate hides the frame anyway, so pass-through
+ * there lands on the stage and does nothing — same rule, no side effect. */
+.dbr-blocked { overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 22px 12px; pointer-events: none; }
 /* The flex rules above outrank the UA sheet's [hidden]{display:none}, so the
  * panel with its hidden attribute SET stayed on screen after "Back" — the E2E
  * eternal-spinner test caught it red on CI (70c67de, toBeHidden 24x "visible").
@@ -3433,7 +3445,7 @@ select.input option, select.select option, .input option {
  * an author rule — any author rule, present or future — must not outrank it. */
 [hidden] { display: none !important; }
 .dbr-blocked[hidden] { display: none; }
-.dbr-report { max-width: 560px; border: 1px solid var(--border); border-radius: 14px; padding: 15px; background: var(--card, #fff); }
+.dbr-report { max-width: 560px; border: 1px solid var(--border); border-radius: 14px; padding: 15px; background: var(--card, #fff); pointer-events: auto; }
 .dbr-rep-h { font-weight: 800; margin-bottom: 4px; }
 .dbr-rep-host { font-family: monospace; font-size: .8rem; overflow-wrap: anywhere; margin-bottom: 8px; }
 .dbr-rep-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
@@ -3506,7 +3518,7 @@ select.input option, select.select option, .input option {
 
 /* Mouse-level floors. Declared here, above the query, so the coarse-pointer
    rule below overrides them instead of losing a same-specificity tie. */
-.dapp-url-input,
+.dapps-omni-input,
 .slippage-btn,
 .pct-btn { min-height: 32px; }
 /* A checkbox is only as good as the label you can hit. This label is the target,
@@ -3547,7 +3559,7 @@ select.input option, select.select option, .input option {
   .amount-row .btn,
   .dapp-chip,
   .dbr-chip,
-  .dapp-url-input,      /* 31px */
+  .dapps-omni-input,   /* 31px */
   .check-target,        /* 23px — "Allow ALL chains", the most dangerous toggle here */
   .slippage-btn,        /* 36px */
   .pct-btn,             /* 32px — 25/50/75/100% */

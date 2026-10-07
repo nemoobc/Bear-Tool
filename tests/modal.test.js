@@ -133,8 +133,8 @@ test('css: token chart box never shrinks in the fullscreen flex modal', () => {
 test('css: active account card is colored, first card clears the close float', () => {
   // Live report: "pemilihan wallet harusnya dikasih warna — putih semua, user
   // bingung pas switch" + "3 kotak presisi tapi 1 kotaknya ngga". The modal's
-  // ✕ is float:right / 44px (see .receive-qr comment), so the FIRST block row
-  // is shortened by exactly that — 264px → 220px on a 360px screen.
+  // ✕ is float:right / 36px (see .receive-qr comment), so the FIRST block row
+  // is shortened by exactly that — 264px → 228px on a 360px screen.
   const css = readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
   const aStart = css.indexOf('.asset-row.active');
   assert.ok(aStart !== -1, '.asset-row.active rule must exist (active wallet = colored)');

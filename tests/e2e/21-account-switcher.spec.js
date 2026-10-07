@@ -61,9 +61,15 @@ test.describe('Account switcher', () => {
     await expect(page.locator('[data-acc]')).toHaveCount(2);
     await expect(page.locator('[data-acc="1"]')).toBeVisible();
 
-    // The pill and the topbar must be the same file, at deliberate sizes.
+    // Identity slots as of 2026-10-06 (user): topbar = the brand FILE, the
+    // pill and the account rows = the same inline wallet glyph. The bear
+    // images are gone, so what gets measured is: the topbar image still
+    // loads, the three glyph boxes have deliberate sizes (a box with no
+    // pixels is indistinguishable from an unsized one in a hidden modal —
+    // hence reopening before measuring), and no bear image hides anywhere
+    // in the header.
     const marks = await page.evaluate(() => {
-      const read = (el) => {
+      const readImg = (el) => {
         const r = el.getBoundingClientRect();
         return {
           src: el.getAttribute('src'),
@@ -74,16 +80,18 @@ test.describe('Account switcher', () => {
           display: getComputedStyle(el).display,
         };
       };
+      const readBox = (el) => {
+        const r = el.getBoundingClientRect();
+        return { w: Math.round(r.width), h: Math.round(r.height), display: getComputedStyle(el).display };
+      };
       return {
-        topbar: read(document.querySelector('.topbar-logo img')),
-        pill: read(document.querySelector('.pill-bear')),
-        rows: [...document.querySelectorAll('.asset-bear')].map(read),
+        topbar: readImg(document.querySelector('.topbar-logo img')),
+        pill: readBox(document.querySelector('.pill-wallet .wallet-glyph')),
+        bearImgsInHeader: document.querySelectorAll('.topbar-right img').length,
+        rows: [...document.querySelectorAll('.asset-wallet')].map(readBox),
         pillLabelCentres: (() => {
           const p = document.getElementById('accountPill');
-          // Since the bear moved INSIDE a wallet pocket (2026-10-05 lockup) the
-          // image itself sits high by design — the pocket must cover its lower
-          // edge. The lockup box is the mark the label centres against; the
-          // bear is a detail inside it.
+          // The lockup box is the mark the label centres against.
           const i = p.querySelector('.pill-wallet').getBoundingClientRect();
           const l = p.querySelector('.label').getBoundingClientRect();
           return Math.abs((i.top + i.height / 2) - (l.top + l.height / 2));
@@ -91,13 +99,17 @@ test.describe('Account switcher', () => {
       };
     });
 
-    expect(marks.pill.src, 'the pill must use the brand asset').toBe(marks.topbar.src);
-    for (const [where, m] of [['pill', marks.pill], ['topbar', marks.topbar], ...marks.rows.map((m, i) => [`row ${i}`, m])]) {
-      expect(m.complete, `${where}: the brand image did not load`).toBe(true);
-      expect(m.natural, `${where}: the brand image has no pixels`).toBeGreaterThan(0);
-      expect(m.w, `${where}: no explicit width`).toBeGreaterThan(0);
-      expect(m.h, `${where}: no explicit height`).toBeGreaterThan(0);
-      expect(m.display, `${where}: inline images leave a baseline gap`).toBe('block');
+    expect(marks.topbar.src, 'the topbar is the one place the brand file lives').toContain('bear.svg');
+    expect(marks.bearImgsInHeader, 'no bear image may survive beside the wallet glyph').toBe(0);
+    expect(marks.topbar.complete, 'the brand image did not load').toBe(true);
+    expect(marks.topbar.natural, 'the brand image has no pixels').toBeGreaterThan(0);
+    expect(marks.topbar.w, 'no explicit width').toBeGreaterThan(0);
+    expect(marks.topbar.h, 'no explicit height').toBeGreaterThan(0);
+    expect(marks.topbar.display, 'inline images leave a baseline gap').toBe('block');
+    for (const [where, m] of [['pill glyph', marks.pill], ...marks.rows.map((m, i) => [`row ${i} glyph`, m])]) {
+      expect(m.w, `${where}: no explicit size`).toBeGreaterThan(0);
+      expect(m.h, `${where}: no explicit size`).toBeGreaterThan(0);
+      expect(m.display, `${where}: an inline mark leaves a baseline gap`).toBe('block');
     }
     // A text glyph sits on the baseline, so its centre drifts from the label's.
     // A whole pixel of slack is already visible in a pill this small.

@@ -78,7 +78,7 @@ globalThis.alert ??= noop;
 globalThis.confirm ??= () => false;
 
 const app = await import(APP);
-const { POPULAR_DAPPS } = await import(new URL('../js/dapps.js', import.meta.url).href);
+const { POPULAR_DAPPS, looksLikeUrl } = await import(new URL('../js/dapps.js', import.meta.url).href);
 const { get, set } = await import(new URL('../js/state.js', import.meta.url).href);
 
 /** A #dappsContainer that records whatever renderDapps writes into it. */
@@ -195,4 +195,56 @@ test('category chips are icon tiles and the filter contract survives the face-li
     'each chip announces its pressed state');
   assert.ok(/class="dapp-chip[^>]*--cat:/.test(html),
     'each chip declares its tile colour as a --cat custom property');
+});
+
+// ── the OKX pass: one omnibox, two sections, no tip line ────────────────────
+// live: "1 aja dulu" — fix the wrong overlay and make the discovery view stop
+// stacking four control rows. Measured before: URL bar + filter + tile row +
+// 💡 tip + grid, and 12 of 18 cards wearing the same grey "↗ New tab".
+
+test('the view is one omnibox feeding two sections, and the tip line is gone', () => {
+  set('address', null);
+  nodes.clear();
+  const box = container();
+  app.refreshView('dapps');
+  const html = box.innerHTML;
+
+  // One field does both jobs; the second input (and its stacked bar) is gone.
+  assert.ok(html.includes('id="dappSearch"'), 'the omnibox field must exist');
+  assert.ok(html.includes('id="dappGo"'), 'the Open button rides inside the omnibox');
+  assert.ok(!html.includes('id="dappUrl"'),
+    'the URL-bar twin input is gone — one field filters AND opens');
+
+  // Two sections inside the one #dappGrid every existing test counts through.
+  assert.equal((html.match(/class="dapp-sec"/g) || []).length, 2,
+    'exactly two sections: Ready in-app first, new tab second');
+  const at = html.indexOf('data-sec="inapp"');
+  const bt = html.indexOf('data-sec="tab"');
+  assert.ok(at !== -1 && bt !== -1 && at < bt, 'the in-app section must lead');
+  const frameables = POPULAR_DAPPS.filter((d) => d.frameable).length;
+  assert.ok(frameables > 0 && frameables < POPULAR_DAPPS.length,
+    'the split needs both sides to be a real split');
+  assert.equal((html.slice(at, bt).match(/class="dapp-card"/g) || []).length, frameables,
+    'the in-app section holds exactly the frameable sites');
+  assert.equal((html.slice(bt).match(/class="dapp-card"/g) || []).length,
+    POPULAR_DAPPS.length - frameables,
+    'every non-frameable site lands in the new-tab section');
+  assert.equal((html.match(/class="dapp-card"/g) || []).length, POPULAR_DAPPS.length,
+    'sections must not add or drop a single card');
+
+  // The 💡 tip row was the fourth control stacked above the grid; the badge on
+  // each card carries the same promise now.
+  assert.ok(!html.includes('dapp-note'),
+    'the tip line no longer exists — its message lives on the cards');
+});
+
+test('looksLikeUrl is the line between opening and filtering', () => {
+  // The omnibox shows its Open button only for an address; anything else is a
+  // filter query. These are the exact shapes a user pastes or types.
+  assert.equal(looksLikeUrl('https://app.aave.com'), true, 'a scheme is an address');
+  assert.equal(looksLikeUrl('app.aave.com/dashboard'), true, 'a host with a path is an address');
+  assert.equal(looksLikeUrl('  snapshot.org  '), true, 'padded paste still reads as an address');
+  assert.equal(looksLikeUrl('aave'), false, 'a bare name is a filter');
+  assert.equal(looksLikeUrl('nft marketplace'), false, 'a phrase with a space can never be a host');
+  assert.equal(looksLikeUrl(''), false, 'an empty box opens nothing');
 });
