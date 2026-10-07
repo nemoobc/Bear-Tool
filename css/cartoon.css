@@ -892,7 +892,12 @@ select.input option, select.select option, .input option {
   display: none;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  /* Above .dapp-browser-overlay (9000): every app modal — the WC pair sheet,
+     sign confirmations, the network picker — must be reachable while the
+     in-app browser is open. Below #intro (9999), which owns the first paint.
+     Measured 2026-10-07: at 1000 the pair sheet opened BEHIND the browser and
+     its Close button was unclickable (Playwright: iframe intercepts pointer). */
+  z-index: 9500;
   padding: 20px;
 }
 .modal-overlay.open { display: flex; }

@@ -65,7 +65,7 @@ test('browser shell carries a visible Pair (WalletConnect) hint strip', () => {
   assert.ok(elRefs.includes('dbrWcHint'), 'hint strip is bound in build()');
   assert.ok(elRefs.includes('dbrWcPair'), 'Pair button is bound in build()');
   assert.match(browserSrc, /wcPair[\s\S]{0,200}addEventListener/, 'Pair button has a click handler');
-  assert.match(browserSrc, /dappWcHint/, 'dismissing the strip persists (state key)');
+  assert.match(browserSrc, /write\(LS\.wcHint, 'dismissed'\)/, 'dismissing the strip persists (localStorage, not the runtime state singleton)');
   assert.match(shell, /WalletConnect/, 'the strip says the actual mechanism');
 });
 

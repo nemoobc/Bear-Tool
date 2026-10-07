@@ -478,4 +478,46 @@ test.describe('dApp browser', () => {
     expect(popup2.url()).toContain('example.com');
     await popup2.close();
   });
+
+  test('the WalletConnect hint shows once, pairs, and stays dismissed', async ({ page }) => {
+    // Shared create-wallet beforeEach plus two real page loads on a slow
+    // device — the assertions, not the clock, must decide the outcome.
+    test.setTimeout(120_000);
+    const hint = page.locator('#dbrWcHint');
+    // Fresh profile: nothing dismissed yet. The hint only belongs to a page
+    // that actually LOADED in the frame (a refused/blocked page has its own
+    // wc: door in the sheet), so take the browser through a real load first.
+    await openBrowser(page);
+    await page.fill('#dbrUrl', 'https://example.com/');
+    await page.press('#dbrUrl', 'Enter');
+    const sheet = page.locator('#dbrBlocked');
+    await sheet.locator('[data-act="proceed"]').click();
+    await expect(hint).toBeVisible({ timeout: 30_000 });
+    await expect(hint).toContainText('WalletConnect');
+
+    // The 🔗 really opens the pairing sheet (wc: paste route), not a dead end.
+    await page.locator('#dbrWcPair').click();
+    await expect(page.locator('#wcPairUri')).toBeVisible();
+    await page.locator('#modalOverlay .modal-close, #modalOverlay [data-close-modal]').first().click();
+    await expect(page.locator('#modalOverlay')).not.toHaveClass(/open/);
+
+    // ✕ dismisses it for good: hidden now AND persisted, so the next page
+    // load inside the browser does not nag again.
+    await page.locator('#dbrWcHintX').click();
+    await expect(hint).toBeHidden();
+    expect(await page.evaluate(() => localStorage.getItem('bear.dapp.wcHint'))).toBe('"dismissed"');
+
+    // Re-open the browser on the same card — a fresh session starts on the
+    // home stage, so send it through a real load again: the load handler is
+    // what re-reads the persisted flag, and the strip must stay down.
+    await page.locator('#dbrClose').click();
+    await expect(page.locator('#dappBrowserOverlay')).not.toHaveClass(/open/);
+    await openBrowser(page);
+    await page.fill('#dbrUrl', 'https://example.com/');
+    await page.press('#dbrUrl', 'Enter');
+    // The caution sheet is remembered per session; if it is still up, proceed.
+    await page.locator('#dbrBlocked [data-act="proceed"]').click({ timeout: 5_000 }).catch(() => {});
+    await expect(page.locator('#dbrFrame')).toBeVisible({ timeout: 30_000 });
+    await expect(hint).toBeHidden();
+  });
 });

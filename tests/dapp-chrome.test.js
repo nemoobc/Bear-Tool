@@ -147,10 +147,18 @@ test('the chain badge tracks the active network', () => {
 });
 
 test('the network picker is not hidden behind the browser', () => {
-  // .modal-overlay is z-index 1000, this overlay 9000 — a straight click would
-  // put the sheet behind the browser and read as a broken button.
-  assert.match(src, /overlay\.style\.zIndex = '999'/, 'browser steps under the modal');
-  assert.match(src, /overlay\.style\.zIndex = ''/, 'and is restored afterwards');
+  // Every app modal must stack above .dapp-browser-overlay: at the old 1000
+  // vs 9000 the picker (and the WC pair sheet) opened BEHIND the browser and
+  // read as a broken button — the iframe swallowed every click.
+  const zOf = (sel) => Number(
+    (css.match(new RegExp(sel.replace(/[.#]/g, '\\$&') + '\\s*\\{[^}]*z-index:\\s*(\\d+)', 's')) || [])[1]
+  );
+  const modalZ = zOf('.modal-overlay');
+  const browserZ = zOf('.dapp-browser-overlay');
+  assert.ok(modalZ > browserZ,
+    `modal (${modalZ}) stacks above the browser overlay (${browserZ})`);
+  assert.ok(!/style\.zIndex/.test(src),
+    'no per-call z-index dance — the stack order lives in one place, the CSS');
 });
 
 test('no executable window.open remains', () => {

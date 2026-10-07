@@ -42,6 +42,7 @@ const LS = {
   active: 'bear.dapp.active',
   bookmarks: 'bear.dappBookmarks',
   history: 'bear.dapp.history',
+  wcHint: 'bear.dapp.wcHint',
 };
 
 const SEARCH_URL = 'https://duckduckgo.com/?q=';
@@ -987,24 +988,14 @@ function loadbarFail() {
  * The chain badge in the top-right corner — the OKX position.
  *
  * It reuses the app's own picker rather than growing a second one. That picker
- * lives at z-index 1000 and this overlay at 9000, so a click straight through
- * would put the sheet BEHIND the browser and look like a dead button: the
- * browser is dropped under the modal for the duration and restored after.
+ * (like every app modal, .modal-overlay at 9500) now stacks ABOVE this 9000
+ * overlay, so a straight click reaches it — no more stepping the browser down
+ * underneath. This wrapper stays as the single door so future browser-side
+ * entries keep going through one place.
  */
 function switchNetworkFromBrowser() {
   const pill = document.getElementById('networkPill');
-  if (!pill || !overlay) return;
-  overlay.style.zIndex = '999';
-  let seen = false;
-  let ticks = 0;
-  const iv = setInterval(() => {
-    const open = !!document.querySelector('.modal-overlay.open');
-    if (open) { seen = true; ticks = 0; return; }
-    if (!seen && ++ticks < 8) return;   // picker not up yet — give it 2s
-    clearInterval(iv);
-    overlay.style.zIndex = '';
-  }, 250);
-  pill.click();
+  pill?.click();
 }
 
 function paintNetwork() {
@@ -1087,7 +1078,11 @@ function wire() {
   // wc: route remain for anyone who dismisses it.
   el.wcPair.addEventListener('click', () => openPairWalletConnect());
   el.wcHintX.addEventListener('click', () => {
-    set('dappWcHint', 'dismissed');
+    // Persisted, not in-memory: set() from state.js is a runtime singleton
+    // that forgets on reload — measured 2026-10-07, the strip came back on
+    // every reload while the comment promised "dismissed". localStorage,
+    // same helper the tabs/history use.
+    write(LS.wcHint, 'dismissed');
     el.wcHint.hidden = true;
   });
 
@@ -1098,7 +1093,7 @@ function wire() {
     loadbarDone();
     if (el.peak) el.peak.hidden = true;
     el.loading.hidden = true;
-    if (el.wcHint) el.wcHint.hidden = get('dappWcHint') === 'dismissed';
+    if (el.wcHint) el.wcHint.hidden = read(LS.wcHint, null) === 'dismissed';
     // A page that finally finishes AFTER the timeout sheet appeared replaces the
     // sheet with the real content — it is only about the load that just ended.
     if (el.blocked.querySelector('.dbr-report[data-kind="didnotload"]')) el.blocked.hidden = true;
