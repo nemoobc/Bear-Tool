@@ -210,6 +210,32 @@ test('finishOAuthRedirect: foreign/absent state is not ours to consume', async (
   assert.equal(sess.getItem('bear.discordState'), 'MINE', 'our own state is untouched');
 });
 
+
+test('finishOAuthRedirect: OUR state + error bounce → loud message, not silence', async () => {
+  const fetchFn = async () => assert.fail('an error bounce must never hit the token endpoint');
+  sess.setItem('bear.discordState', 'S1');
+  const replaces = [];
+  await assert.rejects(
+    D.finishOAuthRedirect('?error=access_denied&state=S1', fetchFn, {
+      session: sess,
+      history: { replaceState: (...a) => replaces.push(a) },
+      location: { origin: 'http://localhost:8081', pathname: '/' },
+    }),
+    /cancelled/,
+    'access_denied reads as a cancellation, not a raw code'
+  );
+  assert.equal(sess.getItem('bear.discordState'), null, 'our state is consumed exactly once');
+  assert.equal(replaces.length, 1, 'the error query is stripped from the address bar');
+
+  // An error wearing someone ELSE's state stays untouched — same rule as codes.
+  sess.setItem('bear.discordState', 'MINE');
+  assert.equal(
+    await D.finishOAuthRedirect('?error=access_denied&state=SOMEONE_ELSES', fetchFn, { session: sess }),
+    false, 'foreign errors are left alone'
+  );
+  assert.equal(sess.getItem('bear.discordState'), 'MINE', 'our state survives');
+});
+
 test('finishOAuthRedirect: matching state exchanges the code and strips it from the URL', async () => {
   local.setItem('bear.discordClientId', '123456789012345678');
   sess.setItem('bear.discordState', 'S1');
@@ -235,15 +261,25 @@ test('finishOAuthRedirect: matching state exchanges the code and strips it from 
   assert.equal(D.readAuth().access, 'AT', 'session is live after the return');
 });
 
-test('finishOAuthRedirect: return without a stored Client ID fails loudly', async () => {
+test('finishOAuthRedirect: a FRESH browser finishes with the SHIPPED Client ID', async () => {
+  // The old expectation ("no stored id → fail loudly") died when the user
+  // asked for the id to ship in the app (2026-10-07, "ga perlu aku input
+  // manual"): an empty field is no longer an error state, it is the default.
+  // What still holds: the exchange carries THAT id, never an empty one.
   sess.setItem('bear.discordState', 'S1');
-  sess.setItem('bear.discordVerifier', 'V');
-  const fetchFn = async () => assert.fail('no exchange without a Client ID');
-  await assert.rejects(
-    D.finishOAuthRedirect('?code=C1&state=S1', fetchFn, { session: sess }),
-    /Client ID is missing/,
-    'a redirect that cannot finish must say why, not half-log-in'
-  );
+  sess.setItem('bear.discordVerifier', 'V'.repeat(43));
+  const calls = [];
+  const fetchFn = async (url, init) => {
+    calls.push({ url, init });
+    return jsonResponse({ access_token: 'AT', refresh_token: 'RT', expires_in: 60 });
+  };
+  const done = await D.finishOAuthRedirect('?code=C1&state=S1', fetchFn, {
+    session: sess,
+    history: { replaceState: () => {} },
+    location: { origin: 'http://localhost:8081', pathname: '/' },
+  });
+  assert.equal(done, true, 'the redirect completes without any manual id entry');
+  assert.equal(new URLSearchParams(calls[0].init.body).get('client_id'), '1557488535903404154');
 });
 
 // ── session resolution ──────────────────────────────────────────────────────
@@ -286,12 +322,19 @@ test('discordFetch: OAuth sends Bearer, pasted token sends it raw', async () => 
     'one shared header shape would make one of the two methods fail every call');
 });
 
-test('discordFetch: unauthenticated → connect-first; 401 body message survives; 204 → null', async () => {
+test('discordFetch: unauthenticated → connect-first; 401 is human-mapped; other body messages survive; 204 → null', async () => {
   await assert.rejects(D.discordFetch('/users/@me'), /connect first/);
 
   D.writeAuth({ mode: 'token', access: 'RAW' });
-  const err = async () => jsonResponse({ message: '401: Unauthorized' }, 401);
-  await assert.rejects(D.discordFetch('/users/@me', { fetchFn: err }), /401: Unauthorized/);
+  // 401: Discord's machine word ("Unauthorized") matches errors.js's contract
+  // rule and used to surface as "This wallet is not allowed to do that."
+  // (user report 2026-10-07) — so discordFetch translates it at the source.
+  const err401 = async () => jsonResponse({ message: '401: Unauthorized' }, 401);
+  await assert.rejects(D.discordFetch('/users/@me', { fetchFn: err401 }), /refused this token \(401\)/);
+
+  // A status outside the map still passes Discord's own words through.
+  const err400 = async () => jsonResponse({ message: 'Invalid Form Body' }, 400);
+  await assert.rejects(D.discordFetch('/users/@me', { fetchFn: err400 }), /Invalid Form Body/);
 
   const noContent = async () => jsonResponse(null, 204);
   assert.equal(await D.discordFetch('/users/@me/guilds/1', { method: 'DELETE', fetchFn: noContent }), null);
@@ -447,4 +490,168 @@ test('Discord refuses some origins BEFORE the user clicks Login', () => {
   assert.match(src, /id="btnDiscordLogin"\$\{loginDisabled\}/, 'and disables Login when refused');
   assert.match(src, /discordOriginWarn.*role="alert"/s, 'with a visible warning, not a silent dead button');
   assert.match(src, /including the trailing slash/, 'the portal instruction names the usual mismatch');
+  assert.match(src, /Public Client/, 'the PKCE-only exchange is unusable until the portal toggle is on');
+});
+
+// ── in-app chat + invite join (2026-10-07: "full fitur tanpa buka aplikasi Discord") ──
+test('parseInviteCode takes every shape users paste, refuses the rest', () => {
+  assert.equal(D.parseInviteCode('discord.gg/abc-123'), 'abc-123');
+  assert.equal(D.parseInviteCode('https://discord.gg/abc-123'), 'abc-123');
+  assert.equal(D.parseInviteCode('http://www.discord.gg/abc-123'), 'abc-123');
+  assert.equal(D.parseInviteCode('https://discord.com/invite/abc-123'), 'abc-123');
+  assert.equal(D.parseInviteCode('https://discordapp.com/invite/abc-123'), 'abc-123');
+  assert.equal(D.parseInviteCode('  abc123  '), 'abc123');
+  assert.equal(D.parseInviteCode(''), '');
+  assert.equal(D.parseInviteCode('https://example.com/invite/x'), '', 'foreign host, no code');
+  assert.equal(D.parseInviteCode('not a link!'), '');
+});
+
+test('joinInvite POSTs as the signed-in user; junk never reaches the wire', async () => {
+  local.setItem('bear.discordAuth', JSON.stringify({ mode: 'token', access: 'TOK' }));
+  const calls = [];
+  const fetchFn = async (url, init) => { calls.push({ url, init }); return jsonResponse({ id: 'G1', name: 'New Server' }); };
+  const g = await D.joinInvite('https://discord.gg/my-serv', fetchFn);
+  assert.equal(g.name, 'New Server');
+  assert.equal(calls[0].url, `${D.DISCORD_API}/invites/my-serv`);
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers.Authorization, 'TOK', 'token connect authenticates raw');
+  calls.length = 0;
+  await assert.rejects(D.joinInvite('https://example.com/x', fetchFn), /discord\.gg/);
+  assert.equal(calls.length, 0, 'a bad paste must not fire a request');
+});
+
+test('fetchMessages clamps the limit Discord accepts (1..100)', async () => {
+  local.setItem('bear.discordAuth', JSON.stringify({ mode: 'token', access: 'TOK' }));
+  const calls = [];
+  const fetchFn = async (url) => { calls.push(url); return jsonResponse([]); };
+  await D.fetchMessages('C1', { limit: 999 }, fetchFn);
+  await D.fetchMessages('C1', { limit: 0 }, fetchFn);
+  await D.fetchMessages('C1', {}, fetchFn);
+  assert.equal(calls[0], `${D.DISCORD_API}/channels/C1/messages?limit=100`);
+  assert.equal(calls[1], `${D.DISCORD_API}/channels/C1/messages?limit=50`);
+  assert.equal(calls[2], `${D.DISCORD_API}/channels/C1/messages?limit=50`);
+});
+
+test('message bodies are escaped text — a stranger\'s markup never reaches the DOM', () => {
+  const evil = D.messagesHtml([{ content: '<img src=x onerror=alert(1)> hi', author: { username: 'evil' }, timestamp: '2026-10-07T00:00:00Z' }]);
+  assert.ok(!evil.includes('<img src=x'), 'raw tags stay inert');
+  assert.ok(evil.includes('&lt;img'), 'content arrives escaped');
+  // Discord returns NEWEST first; the pane must read top-down.
+  const two = D.messagesHtml([{ content: 'newer' }, { content: 'older' }]);
+  assert.ok(two.indexOf('older') < two.indexOf('newer'), 'oldest at the top, newest last');
+  assert.match(D.messagesHtml([{ content: '', embeds: [{}] }]), /\[embed\]/, 'embed-only rows say so');
+  assert.match(D.messagesHtml([]), /No messages yet/, 'an empty channel is honest');
+});
+
+test('the guild row never hands the user to the installed Discord app', () => {
+  const src = raw('js/discord.js');
+  const guild = src.slice(src.indexOf('function guildHtml'), src.indexOf('// ── chat: read'));
+  assert.ok(!guild.includes('discord.com/channels'), 'the external guild link is gone');
+  assert.match(guild, /data-guild-chat=/, 'Chat opens the in-app pane instead');
+  assert.match(src, /id="discordInvite"/, 'the invite field is on the Servers card');
+});
+
+test('the shipped Client ID is the default — no manual entry needed', () => {
+  assert.equal(D.getClientId(), '1557488535903404154', 'fresh browser falls back to the bundled id');
+  D.setClientId('999');
+  assert.equal(D.getClientId(), '999', 'a pasted custom id still wins');
+  D.setClientId('');
+  assert.equal(D.getClientId(), '1557488535903404154', 'clearing restores the default, not an empty field');
+});
+
+// ── the wallet sentence must never answer a Discord problem ────────────────
+// User report 2026-10-07: the Discord view showed "This wallet is not allowed
+// to do that." Root cause: Discord's own words ("401: Unauthorized",
+// "unauthorized_client") matched errors.js's bare `unauthorized` rule, which
+// exists for OWNABLE/contract reverts. Fix lives at the source (discordReason
+// / exchange) — these tests pin BOTH halves: the thrown text, and the
+// humanizer's verdict over it.
+test('a Discord 401 is human at the source — machine words never leave', async () => {
+  D.writeAuth({ mode: 'token', access: 'RAW1', refresh: null, expires: null });
+  const fetchFn = async () => ({ ok: false, status: 401, json: async () => ({ message: '401: Unauthorized' }) });
+  await assert.rejects(
+    D.discordFetch('/users/@me', { fetchFn }),
+    (e) => /refused this token \(401\)/.test(e.message) && !/unauthorized/i.test(e.message),
+    'the thrown text is words a person wrote'
+  );
+});
+
+test('explainError cannot dress a Discord failure as "This wallet is not allowed"', async () => {
+  const { explainError } = await import('../js/errors.js');
+  for (const fetchFn of [
+    async () => ({ ok: false, status: 401, json: async () => ({ message: '401: Unauthorized' }) }),
+    async () => ({ ok: false, status: 403, json: async () => ({ message: 'Missing Access' }) }),
+  ]) {
+    D.writeAuth({ mode: 'token', access: 'RAW1', refresh: null, expires: null });
+    let thrown = null;
+    try { await D.discordFetch('/users/@me', { fetchFn }); } catch (e) { thrown = e; }
+    assert.ok(thrown, 'the request failed');
+    const say = explainError(thrown, 'discord-regression');
+    assert.ok(!/wallet is not allowed/i.test(say), `humanizer leaked the wallet sentence: ${say}`);
+  }
+});
+
+test('an unauthorized_client exchange points at the portal fix, not at a wallet', async () => {
+  const fetchFn = async () => ({
+    ok: false, status: 400,
+    json: async () => ({ error: 'unauthorized_client', error_description: 'Invalid "client_id"' }),
+  });
+  await assert.rejects(
+    D.exchangeCode({ clientId: '1557488535903404154', code: 'C1', verifier: 'V'.repeat(43) }, fetchFn),
+    /Public Client/,
+    'the fix (portal toggle) is named in the error'
+  );
+});
+
+// ── pasted-token hygiene (user picked "check the token" path, 2026-10-07) ──
+test('normalizeToken: strips the shapes a human actually pastes', () => {
+  const RAW = 'x'.repeat(70);
+  assert.equal(D.normalizeToken(`Bearer ${RAW}`), RAW, 'DevTools prefix');
+  assert.equal(D.normalizeToken(`Bot ${RAW}`), RAW, 'bot prefix');
+  assert.equal(D.normalizeToken(`  "${RAW}"  `), RAW, 'quoted copy');
+  assert.equal(D.normalizeToken(RAW), RAW, 'already clean');
+  assert.equal(D.normalizeToken('   '), '', 'blank stays blank');
+});
+
+test('tokenLooksWrong: a URL fragment or label never reaches the API', () => {
+  assert.equal(D.tokenLooksWrong(''), 'Paste a token first');
+  assert.ok(D.tokenLooksWrong('x y').includes('spaces'), 'multi-word paste');
+  assert.match(D.tokenLooksWrong('short'), /50\+/, 'a clipped piece is called out');
+  assert.match(D.tokenLooksWrong('https://discord.com/channels/1/2'), /characters/, 'a URL is not a token');
+  assert.equal(D.tokenLooksWrong('x'.repeat(70)), '', 'a real token passes');
+});
+
+// ── OAuth access token pasted into the user-token field (report 2026-10-08) ─
+// The user's paste was an OAuth2 access token: it passes /users/@me and
+// /users/@me/guilds (identify + guilds scopes) and 401s on channels — the
+// connect looked healthy until the first click. Introspection separates the
+// two kinds in one request.
+test('looksLikeOAuthToken: introspection says which kind of token was pasted', async () => {
+  assert.equal(await D.looksLikeOAuthToken('t', async () => jsonResponse({ application: { id: 'A' } })),
+    true, 'an OAuth access token introspects as 200');
+  assert.equal(await D.looksLikeOAuthToken('t', async () => jsonResponse({ message: '401: Unauthorized' }, 401)),
+    false, 'a user session token is turned away');
+  assert.equal(await D.looksLikeOAuthToken('t', async () => { throw new Error('network down'); }),
+    false, 'network trouble accuses nobody');
+});
+
+test('a FAILED exchange still strips the one-shot code from the address bar', async () => {
+  // Live browser test 2026-10-08: state was consumed, but ?code= stayed
+  // pinned in the URL after the exchange 400'd — a dead credential riding
+  // every reload.
+  sess.setItem('bear.discordState', 'S-STRIP');
+  sess.setItem('bear.discordVerifier', 'V'.repeat(43));
+  let replaced = null;
+  const fetchFn = async () => ({ ok: false, status: 400, json: async () => ({ error: 'invalid_grant', error_description: 'Invalid "code" in request.' }) });
+  await assert.rejects(
+    D.finishOAuthRedirect('?code=deadbeef&state=S-STRIP', fetchFn, {
+      session: sess,
+      history: { replaceState: (_a, _b, p) => { replaced = p; } },
+      location: { origin: 'http://localhost:8081', pathname: '/' },
+    }),
+    /exchange failed/,
+    'the failure is still reported loudly'
+  );
+  assert.equal(replaced, '/', 'the query was stripped even though the exchange threw');
+  assert.equal(sess.getItem('bear.discordState'), null, 'state consumed');
 });

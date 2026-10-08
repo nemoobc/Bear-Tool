@@ -53,6 +53,10 @@ export function toast(msg, type = 'info') {
 
 // ── modal (a11y: aria-labelledby, focus trap, Escape, restore focus) ──
 let lastFocused = null;
+// Whether THIS open sheet may be dismissed by backdrop / Escape. One modal
+// at a time, so a single flag is the truth. The lock sheet flips it off —
+// closing that sheet with a stray click dropped a locked user onto the shell.
+let currentDismissible = true;
 // Set by the dialogs that are really a promise in disguise (confirmTx,
 // promptPassword). closeModal() invokes it so every exit path — buttons, ✕,
 // backdrop, Escape — resolves the awaiting caller instead of stranding it.
@@ -64,10 +68,11 @@ function getFocusable(box) {
     .filter(el => el.offsetParent !== null && !el.classList.contains('modal-close'));
 }
 
-export function openModal(html, { fullscreen = false, wide = false } = {}) {
+export function openModal(html, { fullscreen = false, wide = false, dismissible = true } = {}) {
   const overlay = $('#modalOverlay');
   const box = $('#modalBox');
   if (!overlay || !box) return null; // no modal shell in this DOM
+  currentDismissible = dismissible;
   box.classList.toggle('welcome-screen', fullscreen);
   box.classList.toggle('modal-wide', wide);
   overlay.classList.toggle('welcome-screen', fullscreen);
@@ -103,7 +108,10 @@ export function openModal(html, { fullscreen = false, wide = false } = {}) {
   // node in index.html, so a listener added here would stack on every open and
   // one ✕ click would run closeModal() N times.
   overlay.onclick = (e) => {
-    if (e.target === overlay || e.target?.closest?.('[data-close-modal]')) closeModal();
+    if (e.target?.closest?.('[data-close-modal]')) { closeModal(); return; }
+    // A non-dismissible sheet ignores backdrop clicks — the lock screen has
+    // no other way in than the password, and a stray tap is not a logout.
+    if (e.target === overlay && currentDismissible) closeModal();
   };
   return box;
 }
@@ -137,6 +145,10 @@ if (typeof document !== 'undefined' && document.addEventListener) {
     const overlay = document.getElementById('modalOverlay');
     if (!overlay || !overlay.classList.contains('open')) return;
     if (e.key === 'Escape') {
+      // The lock sheet does not answer Escape either (same rule as the
+      // backdrop); the press passes through and dapp-browser's own guard
+      // keeps the browser underneath alive.
+      if (!currentDismissible) return;
       // The modal consumed this press. The browser's own Escape handler is
       // ANOTHER document-level listener: without this it ran right after
       // closeModal() dropped the 'open' class — so its "is a modal open?"

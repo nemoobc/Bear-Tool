@@ -30,6 +30,8 @@ import { $, escapeHtml, toast, openModal, closeModal } from './ui.js';
 export const DISCORD_API = 'https://discord.com/api/v10';
 const AUTH_KEY = 'bear.discordAuth';
 const CLIENT_ID_KEY = 'bear.discordClientId';
+// Public client id shipped as the default — see getClientId().
+const DEFAULT_CLIENT_ID = '1557488535903404154';
 const STATE_KEY = 'bear.discordState';     // sessionStorage: OAuth CSRF
 const SCOPES = 'identify guilds';
 const LEAVE_ALL_DELAY_MS = 300;            // polite pacing on bulk leave
@@ -47,7 +49,11 @@ export function clearAuth() {
   try { localStorage.removeItem(AUTH_KEY); } catch { /* private mode */ }
 }
 export function getClientId() {
-  try { return localStorage.getItem(CLIENT_ID_KEY) || ''; } catch { return ''; }
+  // The user's own application, shipped as the default (request 2026-10-07:
+  // "setup pake id itu jadi ga perlu aku input manual"). It is a PUBLIC id —
+  // OAuth clients are identified, not secreted; the secret lives nowhere
+  // because the flow is PKCE. A custom id still wins when pasted.
+  try { return localStorage.getItem(CLIENT_ID_KEY) || DEFAULT_CLIENT_ID; } catch { return DEFAULT_CLIENT_ID; }
 }
 export function setClientId(id) {
   const v = String(id || '').trim();
@@ -60,6 +66,32 @@ function base64url(bytes) {
   let bin = '';
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Clean up what a human pasted: "Bearer …"/"Bot …" prefixes, quotes, stray
+ * whitespace. Discord accepts only the RAW token in the Authorization
+ * header, but DevTools copies temptingly come prefixed (user report
+ * 2026-10-07: a wrong-shaped paste passed the @me check yet died 401 on
+ * other routes).
+ */
+export function normalizeToken(raw) {
+  let t = String(raw ?? '').trim();
+  t = t.replace(/^(?:Bearer|Bot)\s+/i, '');
+  // Backtick written as \x60 on purpose: tests/undefined-symbols.test.js
+  // blanks template literals BEFORE regexes, so a raw ` inside this regex
+  // would open a fake template and shift every later pair (it did — the
+  // detector then "found" HTTP and PKCE inside plain strings).
+  t = t.replace(/^["'\x60]|["'\x60]$/g, '').trim();
+  return t;
+}
+
+/** '' when the string could be a Discord token, else the sentence to show. */
+export function tokenLooksWrong(t) {
+  if (!t) return 'Paste a token first';
+  if (/\s/.test(t)) return 'That has spaces in it — copy just the raw token value (no "Bearer", no label)';
+  if (t.length < 50 || t.length > 120) return `That is ${t.length} characters — a Discord token is 50+. You probably copied a piece of the URL or an error message, not the Authorization value`;
+  return '';
 }
 
 export async function pkcePair() {
@@ -121,7 +153,16 @@ async function tokenRequest(payload, fetchFn = fetch) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const why = body.error_description || body.error || `HTTP ${res.status}`;
-    throw new Error(`Discord token exchange failed: ${why}`);
+    // `unauthorized_client` / `access_denied` arrive here as machine words.
+    // errors.js reads bare "unauthorized" as a CONTRACT failure and answers
+    // "This wallet is not allowed to do that." — a sentence about a wallet,
+    // for a Discord login (user report 2026-10-07). Human words at the
+    // source: no later table ever scans the machine ones.
+    // Test `body.error` itself: error_description ("Invalid client_id") wins
+    // the || chain and would hide the machine word from a check on `why`.
+    throw new Error(`Discord token exchange failed: ${/unauthorized_client/i.test(String(body.error))
+      ? 'Discord rejected this Client ID — turn Public Client ON and save the exact redirect in the portal'
+      : why}`);
   }
   if (!body.access_token) throw new Error('Discord token exchange returned no access_token');
   return body;
@@ -171,12 +212,35 @@ export async function refreshOAuth(clientId, fetchFn = fetch) {
  */
 export async function finishOAuthRedirect(search, fetchFn = fetch, env = {}) {
   const q = new URLSearchParams(search ?? (typeof location !== 'undefined' ? location.search : ''));
-  if (!q.get('code') || !q.get('state')) return false;
   const store = env.session ?? (typeof sessionStorage !== 'undefined' ? sessionStorage : null);
+  // Discord bounced back with an ERROR instead of a code (login cancelled,
+  // invalid scope, …). Without this branch the query just sat there — no
+  // code, so every later check returned false and the user saw nothing at
+  // all: a silent dead end. Only consume errors carrying OUR state, same
+  // rule as the happy path, then report through the existing toast.
+  if (q.get('error')) {
+    let expected = null;
+    try { expected = store?.getItem(STATE_KEY) ?? null; } catch { /* private mode */ }
+    if (!expected || q.get('state') !== expected) return false;
+    try { store?.removeItem(STATE_KEY); } catch { /* private mode */ }
+    (env.history ?? history).replaceState(null, '', (env.location ?? location).pathname);
+    const detail = q.get('error_description') || '';
+    const why = q.get('error') === 'access_denied'
+      ? 'Discord login was cancelled — no access was granted.'
+      : `Discord login failed: ${q.get('error')}${detail ? ` (${detail})` : ''}`;
+    throw new Error(why);
+  }
+  if (!q.get('code') || !q.get('state')) return false;
   let expected = null;
   try { expected = store?.getItem(STATE_KEY) ?? null; } catch { /* private mode */ }
   if (!expected || q.get('state') !== expected) return false;
   try { store?.removeItem(STATE_KEY); } catch { /* private mode */ }
+  // Strip the one-shot code from the address bar NOW, before the exchange:
+  // the code is single use (a lingering credential in history is still a
+  // credential), and a FAILED exchange must not leave ?code=… pinned in the
+  // URL — live browser test 2026-10-08 saw state consumed, query never
+  // removed, so every reload kept carrying a dead code around.
+  (env.history ?? history).replaceState(null, '', (env.location ?? location).pathname);
   const clientId = getClientId();
   if (!clientId) throw new Error('Discord Client ID is missing — set it in the Discord view');
   await exchangeCode({
@@ -185,9 +249,6 @@ export async function finishOAuthRedirect(search, fetchFn = fetch, env = {}) {
     verifier: await storedOrFreshVerifier(store),
     redirectUri: redirectUri(env.location ?? location),
   }, fetchFn);
-  // Strip the one-shot code from the address bar (it is single use, but a
-  // lingering credential in history is still a credential).
-  (env.history ?? history).replaceState(null, '', (env.location ?? location).pathname);
   return true;
 }
 
@@ -240,6 +301,43 @@ export async function activeAuth(fetchFn = fetch) {
   return { mode: auth.mode, access: auth.access };
 }
 
+// Discord's word for a dead session is "401: Unauthorized". errors.js's table
+// matches bare `unauthorized` and rewrites it to "This wallet is not allowed
+// to do that." — a sentence about a wallet, shown for a Discord login (user
+// report 2026-10-07). Translate the status HERE, before any table sees it.
+function discordReason(status, msg) {
+  // 401 here is usually NOT an expired login: Discord turns user/OAuth tokens
+  // away from several routes BY DESIGN (guild channels, messages, leave —
+  // SO 69501363 / discord-api-docs discussion 7257: "only for bots"), while
+  // /users/@me and /users/@me/guilds happily accept the same token. Saying
+  // only "reconnect" sent users to reconnect a token that was never the
+  // problem (user report 2026-10-07). Both causes, honestly, in one line.
+  if (status === 401) return 'Discord refused this token (401) — reconnect if the login expired; channels/messages/leave may be bot-token-only routes';
+  if (status === 403) return `Discord says this account does not have access (${msg})`;
+  return msg;
+}
+
+/**
+ * Is the pasted string an OAuth2 ACCESS token instead of the user token the
+ * field asks for? `GET /oauth2/@me` is token introspection: an OAuth access
+ * token answers 200 with its application object; a user session token is
+ * turned away (401). The difference matters because Discord lets OAuth
+ * tokens onto /users/@me and /users/@me/guilds but 401s every deeper route
+ * — guild channels, messages, leave — so an OAuth paste "connects fine"
+ * and dies on the first click (user report 2026-10-08).
+ * Network trouble → false: never accuse a paste we could not check.
+ */
+export async function looksLikeOAuthToken(token, fetchFn = fetch) {
+  try {
+    const res = await fetchFn(`${DISCORD_API}/oauth2/@me`, {
+      headers: { Authorization: token },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function discordFetch(path, { method = 'GET', body, fetchFn = fetch } = {}) {
   const auth = await activeAuth(fetchFn);
   if (!auth) throw new Error('Not connected to Discord — connect first');
@@ -258,7 +356,7 @@ export async function discordFetch(path, { method = 'GET', body, fetchFn = fetch
       const j = await res.json();
       if (j?.message) msg = j.message + (j.retry_after ? ` (retry in ${j.retry_after}s)` : '');
     } catch { /* non-JSON body — keep the status */ }
-    throw new Error(`Discord ${method} ${path} failed: ${msg}`);
+    throw new Error(`Discord ${method} ${path} failed: ${discordReason(res.status, msg)}`);
   }
   if (res.status === 204) return null;
   return res.json().catch(() => null);
@@ -270,6 +368,36 @@ export const leaveGuild = (id, fetchFn) =>
   discordFetch(`/users/@me/guilds/${id}`, { method: 'DELETE', fetchFn });
 export const fetchChannels = (guildId, fetchFn) =>
   discordFetch(`/guilds/${guildId}/channels`, { fetchFn });
+
+// Read the tail of a channel (newest first from Discord — the renderer
+// reverses). Clamped to the API's own1..100 window so a bad caller gets a
+// sane request instead of a 400.
+export const fetchMessages = (channelId, { limit = 50 } = {}, fetchFn = fetch) => {
+  const n = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  return discordFetch(`/channels/${channelId}/messages?limit=${n}`, { fetchFn });
+};
+
+// Invite in, code out: bare codes, discord.gg links, discord.com/invite
+// links, with or without scheme/www. Anything else is refused HERE so the
+// API call never fires with garbage and the user learns what format works.
+export function parseInviteCode(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const m = s.match(/^(?:https?:\/\/)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com\/invite)\/([A-Za-z0-9-]+)/i);
+  if (m) return m[1];
+  if (/^[A-Za-z0-9-]{2,}$/.test(s)) return s;
+  return '';
+}
+
+// Join a server from an invite link — the in-app route (user request:
+// "join via link dc, tanpa buka aplikasi discord"). POST /invites/{code}
+// accepts the invite as the signed-in user; the returned guild is what the
+// list refresh will show.
+export async function joinInvite(raw, fetchFn = fetch) {
+  const code = parseInviteCode(raw);
+  if (!code) throw new Error('Not a Discord invite — paste a discord.gg/… link or the invite code');
+  return discordFetch(`/invites/${encodeURIComponent(code)}`, { method: 'POST', fetchFn });
+}
 
 export async function sendMessage(channelId, content, fetchFn = fetch) {
   const text = String(content || '').trim();
@@ -326,11 +454,20 @@ function connectHtml(note = '') {
   return `
     <div class="card">
       <div class="card-title">Connect Discord</div>
-      <p class="small mb-8">Two ways in. <b>Login with Discord</b> is the official flow — create an
-      application at <span class="mono">discord.com/developers</span>, copy its <b>Client ID</b>
-      (public, never a secret), and register this exact Redirect URI
-      (OAuth2 → Redirects — must match <b>character for character, including the trailing slash</b>):</p>
+      <p class="small mb-8">Two ways in. <b>Login with Discord</b> is the official flow. In the
+      <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">Discord developer portal</a>
+      (OAuth2 tab):</p>
+      <ol class="small mb-8" style="margin: 0 0 8px 18px; padding: 0;">
+        <li>Add this exact Redirect URI under <b>Redirects</b> — character for character,
+          <b>including the trailing slash</b> — and press <b>Save Changes</b>:</li>
+      </ol>
       <p class="small mono mb-8" id="discordRedirect">${escapeHtml(redirectUri())}</p>
+      ${redirectUri() !== 'http://localhost/'
+        ? '<p class="small mb-8">Also register <span class="mono">http://localhost/</span> (same id, no port) — that is what the Android app build redirects to; without it the phone build fails with the same invalid-redirect error.</p>'
+        : ''}
+      <p class="small mb-8">2. Turn <b>Public Client</b> ON (this app keeps no secret — the
+      exchange is PKCE-only, and Discord refuses it while the toggle is off). 3. Copy the
+      <b>Client ID</b> into the field below.</p>
       ${originWarn}
       <div class="field">
         <label for="discordClientId">Client ID</label>
@@ -344,6 +481,7 @@ function connectHtml(note = '') {
       <div class="field">
         <label for="discordToken">Or paste a user token</label>
         <input class="input mono" id="discordToken" type="password" autocomplete="off" placeholder="token (keeps this device only)">
+        <div class="small dim">Get it: Discord in a browser → F12 → Network → any <span class="mono">/api/v10/…</span> request → request headers → copy the raw <b>Authorization</b> value — no “Bearer ”, no quotes.</div>
       </div>
       <button type="button" class="btn" id="btnDiscordConnect">Connect with token</button>
       <div id="discordStatus" class="small dim mt-16">${escapeHtml(note)}</div>
@@ -383,12 +521,65 @@ function guildHtml(g, mode) {
       <div class="discord-guild-main">
         <div class="discord-guild-name">${escapeHtml(g.name || g.id)}<span class="small dim">${owner}</span></div>
         <div class="discord-guild-actions">
-          <a class="btn btn-ghost btn-sm" href="https://discord.com/channels/${escapeHtml(g.id)}" target="_blank" rel="noopener noreferrer">Open</a>
+          <button type="button" class="btn btn-ghost btn-sm" data-guild-chat="${escapeHtml(g.id)}">Chat</button>
           <button type="button" class="btn btn-ghost btn-sm" data-guild-channels="${escapeHtml(g.id)}">Channels</button>
           <button type="button" class="btn btn-danger btn-sm" data-guild-leave="${escapeHtml(g.id)}" data-guild-name="${escapeHtml(g.name || g.id)}">Leave</button>
         </div>
       </div>
     </div>`;
+}
+
+// ── chat: read + poll ─────────────────────────────────────────────
+// Plain-text rendering, escaped, pre-wrap: Discord content is user input,
+// and markdown/HTML from strangers must never reach the DOM. Embed-only
+// messages get an honest placeholder instead of a blank row.
+const POLL_MS = 5000;
+
+export function messagesHtml(list) {
+  const rows = (Array.isArray(list) ? list : []).slice().reverse(); // newest first → read top-down
+  if (!rows.length) return '<p class="small dim">No messages yet — say hi.</p>';
+  return rows.map((m) => {
+    const a = m?.author || {};
+    const av = a.avatar
+      ? `https://cdn.discordapp.com/avatars/${a.id}/${a.avatar}.png?size=32`
+      : 'https://cdn.discordapp.com/embed/avatars/0.png';
+    const name = a.global_name || a.username || 'unknown';
+    const when = m?.timestamp ? new Date(m.timestamp).toLocaleString() : '';
+    const body = String(m?.content || '').trim()
+      || (m?.embeds?.length ? '[embed]' : m?.attachments?.length ? '[attachment]' : '[empty]');
+    return `<div class="discord-msg">
+      <img class="discord-msg-av" src="${escapeHtml(av)}" alt="" width="28" height="28">
+      <div class="discord-msg-main">
+        <div class="discord-msg-head"><b>${escapeHtml(name)}</b><span class="small dim">${escapeHtml(when)}</span></div>
+        <div class="discord-msg-body">${escapeHtml(body)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadMessages(box, channelId) {
+  const holder = box?.querySelector('.discord-msgs');
+  if (!holder || !channelId) return;
+  try {
+    const list = await fetchMessages(channelId);
+    holder.innerHTML = messagesHtml(list);
+    holder.scrollTop = holder.scrollHeight;
+  } catch (e) {
+    // A read that fails says WHY in place — the pane is not left stale and
+    // pretending to be current.
+    holder.innerHTML = `<p class="small dim">⚠️ ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+// Poll while the pane exists; self-cleans when it leaves the DOM or the tab
+// hides. Re-picking a channel replaces the interval — never stacks two.
+function ensurePoll(box, channelId) {
+  if (!box || !channelId) return;
+  if (box._poll) clearInterval(box._poll);
+  box._poll = setInterval(async () => {
+    if (!document.body.contains(box) || document.hidden) return;
+    await loadMessages(box, box.dataset.channel);
+  }, POLL_MS);
 }
 
 export async function renderDiscord(root, fetchFn = fetch) {
@@ -426,6 +617,10 @@ export async function renderDiscord(root, fetchFn = fetch) {
     ${profileHtml(me, auth)}
     <div class="card mt-16">
       <div class="card-title">Servers (${guilds.length})</div>
+      <div class="discord-invite-row mb-8">
+        <input class="input mono" id="discordInvite" placeholder="discord.gg/invite-code" aria-label="Invite link or code" maxlength="100">
+        <button type="button" class="btn btn-sm" id="btnDiscordJoin">Join via invite</button>
+      </div>
       <div class="discord-guild-actions mb-8">
         <button type="button" class="btn btn-danger ${guilds.length > 1 ? '' : 'hidden'}" id="btnDiscordLeaveAll">Leave all ${guilds.length} servers</button>
       </div>
@@ -484,6 +679,34 @@ function confirmLeave(ids, label) {
   };
 }
 
+// Expand a guild row into its channel list + chat pane. Extracted so the
+// Chat button and the Channels button share ONE implementation (the Chat
+// button is just Channels with a channel already picked).
+async function expandChannels(guildEl, guildId) {
+  const existing = guildEl?.querySelector('.discord-guild-channels');
+  if (existing) return existing;
+  const btn = guildEl?.querySelector('[data-guild-channels]');
+  if (btn) btn.disabled = true;
+  try {
+    const chans = await fetchChannels(guildId);
+    const text = chans.filter((c) => c.type === 0 || c.type === 5)   // text/announcement
+      .map((c) => `<button type="button" class="discord-chan mono" data-chan-select="${escapeHtml(c.id)}"># ${escapeHtml(c.name || c.id)}</button>`).join('');
+    const box = document.createElement('div');
+    box.className = 'discord-guild-channels mt-8';
+    box.innerHTML = `${text || '<p class="small dim">No text channels.</p>'}
+      <div class="discord-msgs" data-msgs><p class="small dim">Pick a channel to read it.</p></div>
+      <div class="discord-send ${text ? '' : 'hidden'}">
+        <span class="small dim" id="discordChanPick">Pick a channel</span>
+        <input class="input" id="discordMsg" placeholder="Message (token connect only)" maxlength="2000">
+        <button type="button" class="btn btn-sm" data-chan-send="${escapeHtml(guildId)}">Send</button>
+      </div>`;
+    guildEl.appendChild(box);
+    return box;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 /**
  * Delegated listeners for everything the view paints. Bound ONCE from
  * app.js — innerHTML swaps replace the nodes, never this binding.
@@ -516,12 +739,17 @@ export function bindDiscordPanel(deps = {}) {
     }
 
     if (t.id === 'btnDiscordConnect') {
-      const token = $('#discordToken')?.value?.trim();
+      const token = normalizeToken($('#discordToken')?.value);
       if (!token) { say('Paste a token first', 'error'); return; }
+      const wrong = tokenLooksWrong(token);
+      if (wrong) { say(wrong, 'error'); return; }
       t.disabled = true;
       try {
         writeAuth({ mode: 'token', access: token, refresh: null, expires: null });
         await fetchMe();                       // validates before trusting it
+        if (await looksLikeOAuthToken(token)) {
+          throw new Error('That is an OAuth2 access token — channels/chat/leave refuse it (401 by design). Get the USER token: discord.com → F12 → Network → any /api/v10 request → copy the Authorization header value.');
+        }
         toast('Connected', 'success');
         if (root()) await renderDiscord(root());
       } catch (err) {
@@ -552,31 +780,60 @@ export function bindDiscordPanel(deps = {}) {
       return;
     }
 
+    if (t.id === 'btnDiscordJoin') {
+      const raw = $('#discordInvite')?.value || '';
+      t.disabled = true;
+      try {
+        const guild = await joinInvite(raw);
+        toast(`Joined ${guild?.name || guild?.id || 'server'}`, 'success');
+        if (root()) await renderDiscord(root());
+      } catch (err) {
+        say(err.message, 'error');
+      } finally {
+        t.disabled = false;
+      }
+      return;
+    }
+
     const leaveId = t.dataset?.guildLeave;
     if (leaveId) {
       confirmLeave([leaveId], t.dataset.guildName || leaveId);
       return;
     }
 
+    const chatGuild = t.dataset?.guildChat;
+    if (chatGuild) {
+      const guildEl = t.closest('.discord-guild');
+      if (!guildEl) return;
+      t.disabled = true;
+      try {
+        const box = await expandChannels(guildEl, chatGuild);
+        // Chat = channels with a channel already open: pick the first text
+        // channel and load it. (The old "Open" was an <a target=_blank> to
+        // discord.com — on a phone that hands the user straight to the
+        // installed app, the exact thing this feature must not do.)
+        const first = box?.querySelector('.discord-chan');
+        if (first && !box.dataset.channel) first.click();
+        box?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      } catch (err) {
+        say(err.message, 'error');
+      } finally {
+        t.disabled = false;
+      }
+      return;
+    }
+
     const chanGuild = t.dataset?.guildChannels;
     if (chanGuild) {
       const guildEl = t.closest('.discord-guild');
-      const existing = guildEl?.querySelector('.discord-guild-channels');
-      if (existing) { existing.remove(); return; }
+      if (!guildEl) return;
+      if (guildEl.querySelector('.discord-guild-channels')) {
+        guildEl.querySelector('.discord-guild-channels').remove();
+        return;
+      }
       t.disabled = true;
       try {
-        const chans = await fetchChannels(chanGuild);
-        const text = chans.filter((c) => c.type === 0 || c.type === 5)   // text/announcement
-          .map((c) => `<button type="button" class="discord-chan mono" data-chan-select="${escapeHtml(c.id)}"># ${escapeHtml(c.name || c.id)}</button>`).join('');
-        const box = document.createElement('div');
-        box.className = 'discord-guild-channels mt-8';
-        box.innerHTML = `${text || '<p class="small dim">No text channels.</p>'}
-          <div class="discord-send ${text ? '' : 'hidden'}">
-            <span class="small dim" id="discordChanPick">Pick a channel</span>
-            <input class="input" id="discordMsg" placeholder="Message (token connect only)" maxlength="2000">
-            <button type="button" class="btn btn-sm" data-chan-send="${escapeHtml(chanGuild)}">Send</button>
-          </div>`;
-        guildEl.appendChild(box);
+        await expandChannels(guildEl, chanGuild);
       } catch (err) {
         say(err.message, 'error');
       } finally {
@@ -592,6 +849,12 @@ export function bindDiscordPanel(deps = {}) {
       if (box) box.dataset.channel = chanPick;
       const label = box?.querySelector('#discordChanPick');
       if (label) label.textContent = t.textContent.trim();
+      // The pane reads the channel it claims to show — immediately, then
+      // on the poll clock while the row stays in the DOM.
+      if (box) {
+        await loadMessages(box, chanPick);
+        ensurePoll(box, chanPick);
+      }
       return;
     }
 

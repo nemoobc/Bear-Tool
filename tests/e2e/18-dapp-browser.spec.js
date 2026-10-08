@@ -528,9 +528,12 @@ test.describe('dApp browser', () => {
 
   test('the pair sheet picks a copied wc: link straight out of the clipboard', async ({ page }) => {
     test.setTimeout(120_000);
-    // Clipboard read is permission-gated; grant it for this origin only.
+    // Clipboard permission is granted PER ORIGIN. A hardcoded localhost:8080
+    // worked locally and died in CI (2026-10-07: "Write permission denied" —
+    // the runner's page origin differs), so take it from the page itself:
+    // the origin we are actually about to write from.
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'],
-      { origin: 'http://localhost:8080' });
+      { origin: new URL(page.url()).origin });
     const WC_URI = 'wc:pair-topic-123@1?relay-protocol=irn&symKey=deadbeef';
     await page.evaluate((uri) => navigator.clipboard.writeText(uri), WC_URI);
 
@@ -548,5 +551,132 @@ test.describe('dApp browser', () => {
     await page.evaluate(() => navigator.clipboard.writeText('just some text'));
     await page.locator('#dbrWcPair').click();
     await expect(page.locator('#wcPairUri')).toHaveValue('');
+  });
+
+  // ── the injected provider, end-to-end ─────────────────────────────────
+  // Regression pins for everything the live research run proved broken
+  // (2026-10-08, publicnode.com): eth_chainId → "0xNaN", personal_sign and
+  // eth_sendTransaction → node -32601/-32602 AFTER the user approved,
+  // wallet_switchEthereumChain → node -32601 with no chainChanged event.
+
+  async function fire(page, req) {
+    await page.evaluate((r) => {
+      window.__done = false;
+      window.__r = undefined;
+      window.__e = null;
+      window.ethereum.request(r).then(
+        (v) => { window.__r = v; window.__done = true; },
+        (e) => { window.__e = { code: e.code, msg: String(e.message).slice(0, 400) }; window.__done = true; },
+      );
+    }, req);
+  }
+
+  async function settled(page) {
+    await page.waitForFunction(() => window.__done === true, null, { timeout: 20_000 });
+    return page.evaluate(() => ({ r: window.__r, e: window.__e }));
+  }
+
+  // Click "yes" on the confirm dialog whose question matches, so a sequence
+  // of prompts (consent → grant → sign) never clicks the wrong one. The
+  // question text distinguishes them: the grant says "Authorise …", the
+  // per-call sign does not.
+  async function answerWhen(page, match, exclude) {
+    await page.waitForFunction(({ m, x }) => {
+      const el = document.querySelector('.tx-confirm .question');
+      if (!el) return false;
+      const txt = el.textContent || '';
+      return txt.includes(m) && (!x || !txt.includes(x));
+    }, { m: match, x: exclude }, { timeout: 20_000 });
+    await page.click('#confirmYes');
+  }
+
+  test('eth_chainId answers a real chain id (regression: 0xNaN)', async ({ page }) => {
+    const chain = await page.evaluate(() => window.ethereum.request({ method: 'eth_chainId' }));
+    expect(chain).toBe('0x1');
+    const net = await page.evaluate(() => window.ethereum.request({ method: 'net_version' }));
+    expect(net).toBe('1');
+  });
+
+  test('refusals stay honest: 4200 allow-list, 4100 gate, permissions as []', async ({ page }) => {
+    const bad = await page.evaluate(() => window.ethereum.request({ method: 'eth_sign' })
+      .then(() => null, (e) => ({ code: e.code })));
+    expect(bad.code).toBe(4200);
+
+    // Unconnected: empty answers where the spec wants empties, refusal where
+    // it wants one — and never a node error (was: -32601 Method not found).
+    const empty = await page.evaluate(() => Promise.all([
+      window.ethereum.request({ method: 'eth_accounts' }),
+      window.ethereum.request({ method: 'wallet_getPermissions' }),
+    ]));
+    expect(empty[0]).toEqual([]);
+    expect(empty[1]).toEqual([]);
+
+    const denied = await page.evaluate(() => window.ethereum.request({
+      method: 'personal_sign',
+      params: ['0x68656c6c6f', '0x' + 'ab'.repeat(20)],
+    }).then(() => null, (e) => ({ code: e.code })));
+    expect(denied.code).toBe(4100);
+  });
+
+  test('connect → wallet_getPermissions → personal_sign signs locally (regression: node -32601)', async ({ page }) => {
+    test.setTimeout(120_000);
+    await fire(page, { method: 'eth_requestAccounts' });
+    await answerWhen(page, 'Connect this site');
+    const conn = await settled(page);
+    expect(conn.e).toBeNull();
+    expect(conn.r[0]).toMatch(/^0x[0-9a-fA-F]{40}$/);
+
+    const perms = await page.evaluate(() => window.ethereum.request({ method: 'wallet_getPermissions' }));
+    expect(perms).toHaveLength(1);
+    expect(perms[0].parentCapability).toBe('eth_accounts');
+
+    await fire(page, { method: 'personal_sign', params: ['0x68656c6c6f', conn.r[0]] });
+    await answerWhen(page, 'Authorise personal_sign');
+    await answerWhen(page, 'personal_sign', 'Authorise');
+    const signed = await settled(page);
+    expect(signed.e).toBeNull();
+    expect(signed.r).toMatch(/^0x[0-9a-f]{130}$/, 'a real 65-byte signature, not a node error');
+  });
+
+  test('wallet_switchEthereumChain: null + chainChanged + chain moved (regression: -32601, silent)', async ({ page }) => {
+    test.setTimeout(120_000);
+    await fire(page, { method: 'eth_requestAccounts' });
+    await answerWhen(page, 'Connect this site');
+    expect((await settled(page)).e).toBeNull();
+
+    await page.evaluate(() => {
+      window.__cc = [];
+      window.ethereum.on('chainChanged', (id) => window.__cc.push(id));
+    });
+    expect(await page.evaluate(() => window.ethereum.request({ method: 'eth_chainId' }))).toBe('0x1');
+
+    await fire(page, { method: 'wallet_switchEthereumChain', params: [{ chainId: '0x89' }] });
+    await answerWhen(page, 'Authorise wallet_switchEthereumChain');
+    const sw = await settled(page);
+    expect(sw.e).toBeNull();
+    expect(sw.r).toBeNull(); // EIP-3326: null on success
+
+    const cc = await page.evaluate(() => window.__cc);
+    expect(cc).toEqual(['0x89']); // the event that never fired before
+    expect(await page.evaluate(() => window.ethereum.request({ method: 'eth_chainId' }))).toBe('0x89');
+  });
+
+  test('wallet_watchAsset: one confirm with the token details, then it is stored', async ({ page }) => {
+    test.setTimeout(120_000);
+    await fire(page, { method: 'eth_requestAccounts' });
+    await answerWhen(page, 'Connect this site');
+    expect((await settled(page)).e).toBeNull();
+
+    await fire(page, {
+      method: 'wallet_watchAsset',
+      params: [{ type: 'ERC20', options: { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', symbol: 'DAI', decimals: 18 } }],
+    });
+    await answerWhen(page, 'Watch DAI');
+    const res = await settled(page);
+    expect(res.e).toBeNull();
+    expect(res.r).toBe(true);
+
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('bear.customTokens') || '[]'));
+    expect(stored.some((t) => t.symbol === 'DAI' && t.chainId === 1)).toBe(true);
   });
 });

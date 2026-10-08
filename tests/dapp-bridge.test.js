@@ -162,3 +162,66 @@ test('sendAsync is not a way around the allow-list', async () => {
     p.sendAsync({ id: 1, method: 'eth_sign' }, (err) => { assert.ok(err); res(); });
   });
 });
+
+// ── EIP-2255 permissions: the wallet's bookkeeping, not a node's ─────────
+// Live 2026-10-08: wallet_getPermissions was forwarded to publicnode.com and
+// came back -32601 "Method not found". These calls are answered HERE.
+test('wallet_getPermissions: [] unconnected, EIP-2255 shape connected', async () => {
+  const { p, calls } = build();
+  const none = await p.request({ method: 'wallet_getPermissions' });
+  assert.deepEqual(none, [], 'no permissions granted = [] with no prompt and no error');
+  assert.equal(calls.filter((c) => c.kind === 'consent').length, 0, 'asking must not trigger a consent prompt');
+
+  await p.request({ method: 'eth_requestAccounts' });
+  const perms = await p.request({ method: 'wallet_getPermissions' });
+  assert.equal(perms.length, 1);
+  assert.equal(perms[0].parentCapability, 'eth_accounts');
+  assert.equal(perms[0].invoker, ORIGIN);
+  assert.equal(perms[0].caveats[0].type, 'restrictReturnedAccounts');
+  assert.deepEqual(perms[0].caveats[0].value, [ADDR]);
+  assert.equal(typeof perms[0].date, 'number');
+  assert.equal(typeof perms[0].id, 'string');
+});
+
+test('wallet_revokePermissions: revokes the session and answers null', async () => {
+  const { p } = build();
+  await p.request({ method: 'eth_requestAccounts' });
+  assert.deepEqual(await p.request({ method: 'eth_accounts' }), [ADDR]);
+  const out = await p.request({
+    method: 'wallet_revokePermissions',
+    params: [{ eth_accounts: {} }],
+  });
+  assert.equal(out, null, 'EIP-2255: null on success');
+  assert.deepEqual(await p.request({ method: 'eth_accounts' }), [], 'the session is gone');
+  // Revoking nothing is still a success, not an error.
+  assert.equal(await p.request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] }), null);
+});
+
+test('wallet_requestPermissions: consent once, then the grant is returned', async () => {
+  const { p, calls } = build();
+  const perms = await p.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
+  assert.equal(perms[0].parentCapability, 'eth_accounts');
+  assert.deepEqual(perms[0].caveats[0].value, [ADDR]);
+  assert.equal(calls.filter((c) => c.kind === 'consent').length, 1, 'first grant asks the user');
+  // Second request: already connected, no second prompt.
+  await p.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
+  assert.equal(calls.filter((c) => c.kind === 'consent').length, 1);
+});
+
+test('wallet_requestPermissions: refused → 4001, unsupported → 4201', async () => {
+  const { p } = build({ consent: false });
+  await assert.rejects(
+    () => p.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] }),
+    (e) => e.code === 4001,
+  );
+  const { p: p2 } = build();
+  await assert.rejects(
+    () => p2.request({ method: 'wallet_requestPermissions', params: [{ snap_dialog: {} }] }),
+    (e) => e.code === 4201,
+  );
+  const { p: p3 } = build();
+  await assert.rejects(
+    () => p3.request({ method: 'wallet_requestPermissions', params: [] }),
+    (e) => e.code === 4201,
+  );
+});

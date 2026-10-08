@@ -66,11 +66,17 @@
           <circle cx="120" cy="118" r="62" fill="url(#fur)" stroke="#2D2A32" stroke-width="6"/>
           <!-- face patch -->
           <ellipse cx="120" cy="134" rx="36" ry="28" fill="url(#belly)" stroke="#2D2A32" stroke-width="3"/>
-          <!-- eyes (class="eye" enables blink animation) -->
-          <ellipse class="eye" cx="101" cy="112" rx="9" ry="11" fill="#2D2A32"/>
-          <ellipse class="eye" cx="139" cy="112" rx="9" ry="11" fill="#2D2A32"/>
-          <circle cx="105" cy="108" r="3.5" fill="#fff"/>
-          <circle cx="143" cy="108" r="3.5" fill="#fff"/>
+          <!-- eyes as the mata-garis-miring (visibility-off) icon; class="eye" keeps the blink -->
+          <g class="eye">
+            <ellipse cx="101" cy="112" rx="9" ry="11" fill="none" stroke="#2D2A32" stroke-width="5"/>
+            <circle cx="101" cy="113" r="3.5" fill="#2D2A32"/>
+            <path d="M94 120 L108 104" stroke="#2D2A32" stroke-width="5" stroke-linecap="round"/>
+          </g>
+          <g class="eye">
+            <ellipse cx="139" cy="112" rx="9" ry="11" fill="none" stroke="#2D2A32" stroke-width="5"/>
+            <circle cx="139" cy="113" r="3.5" fill="#2D2A32"/>
+            <path d="M132 120 L146 104" stroke="#2D2A32" stroke-width="5" stroke-linecap="round"/>
+          </g>
           <!-- nose -->
           <ellipse cx="120" cy="126" rx="12" ry="8" fill="#2D2A32"/>
           <!-- mouth -->

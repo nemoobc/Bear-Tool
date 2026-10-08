@@ -36,6 +36,7 @@ import { renderDiscord, bindDiscordPanel, finishOAuthRedirect } from './discord.
 // that panel had to be rewritten to say the checks are not applied.
 import { scanTransaction } from './security.js';
 import { createProvider, announceLock, announceAccounts, disconnectOrigin, PROVIDER_FLAG } from './dapp-bridge.js';
+import { executeLocal, currentChainId } from './dapp-exec.js';
 import { siteAllowed } from './dapp-sessions.js';
 import { startUpdateGuard } from './update-guard.js';
 import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers, cancelListing, listNft, parseOpenSeaInput } from './opensea-api.js';
@@ -684,7 +685,11 @@ function installBridge() {
     origin: location.origin,
     getAddress: () => get('address'),
     isUnlocked: () => !!get('unlocked'),
-    getChainId: () => get('networkId') || 1,
+    // A NUMBER. This used to be `get('networkId') || 1` — the network's string
+    // id ('ethereum') — and Number('ethereum') is NaN, so every page asking
+    // eth_chainId was answered "0xNaN" (live, 2026-10-08). currentChainId()
+    // resolves the registry entry and can only return a real chain id.
+    getChainId: () => currentChainId(),
     onRequest: async ({ method, params, kind, origin }) => {
       if (kind === 'consent') {
         return confirmTx({
@@ -737,7 +742,30 @@ function installBridge() {
         });
         if (!okToSign) return null;
       }
-      // Plain calls: hand the request to the node the wallet is already using.
+      // Wallet-side methods are answered HERE, by the wallet. This fall-through
+      // used to be `provider.send(method, …)` for EVERYTHING — so after the
+      // user approved, personal_sign/eth_sendTransaction/wallet_* went to the
+      // RPC node, which holds no keys and no permission bookkeeping, and every
+      // one of them came back -32601/-32602 (live, 2026-10-08). executeLocal
+      // owns those; only genuine reads reach the node below.
+      const local = await executeLocal({
+        method,
+        params,
+        origin,
+        activateNetwork,
+        confirmAsset: (info) => confirmTx({
+          title: '➕ Watch ' + (info.symbol || 'this token') + '?',
+          rows: [
+            { k: 'Site', v: info.site },
+            { k: 'Symbol', v: info.symbol || 'TOKEN' },
+            { k: 'Decimals', v: String(info.decimals ?? 18) },
+            { k: 'Address', v: info.address },
+          ],
+          confirmText: 'Add',
+        }),
+      });
+      if (local.done) return local.value;
+      // Plain reads: hand the request to the node the wallet is already using.
       const provider = get('provider');
       if (!provider) throw new Error('No RPC provider.');
       return provider.send(method, ...params);
@@ -1081,8 +1109,11 @@ function showWelcomeModal() {
 }
 
 function showUnlockModal() {
+  // No ✕ / no backdrop escape (user request 2026-10-07): this sheet IS the
+  // lock. Closing it used to drop a "locked" user onto the shell behind an
+  // empty overlay — nothing to click, nothing to unlock. There is exactly
+  // one way out of here: the password.
   openModal(`
-    <button class="modal-close" type="button" data-close-modal>✕</button>
     <div class="tx-confirm">
       <img src="assets/bear.svg" alt="Bear Tool">
       <div class="question">${escapeHtml(t('unlock.title'))}</div>
@@ -1092,7 +1123,7 @@ function showUnlockModal() {
       </div>
       <button class="btn btn-primary btn-block" id="unlockBtn">${escapeHtml(t('unlock.button'))}</button>
     </div>
-  `, { wide: true });
+  `, { wide: true, dismissible: false });
   const pw = $('#unlockPw');
   pw.focus();
   const doUnlock = async () => {
@@ -1467,6 +1498,15 @@ function showNetworkModal() {
     activateNetwork(e.target.value, { close: false }));
 }
 
+// Tell connected pages the chain moved. EIP-1193's chainChanged event — one
+// payload shape, every switcher (menu, bridge, dApp request, WalletConnect)
+// goes through it so a page hears about a change exactly once.
+export function announceChainChanged(chainId) {
+  const cid = Number(chainId);
+  if (!bearProvider || !Number.isFinite(cid) || cid <= 0) return;
+  try { bearProvider._emit?.('chainChanged', '0x' + cid.toString(16)); } catch { /* a listener must never break a switch */ }
+}
+
 // Switch the wallet's active network — ONE chokepoint for every entry
 // point (modal rows, bridge source chain). Same id → no-op: a picker that
 // re-selects the current network must not toast "switched" or reload the
@@ -1477,6 +1517,7 @@ export function activateNetwork(id, { close = true } = {}) {
   if (String(id) === String(get('networkId'))) return false;
   set('networkId', id);
   localStorage.setItem('bear.networkId', id);
+  announceChainChanged(getNetworkById(id)?.chainId);
   if (close) closeModal();
   toast('Network switched', 'success');
   updateTopbar();

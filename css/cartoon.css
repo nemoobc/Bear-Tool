@@ -1828,6 +1828,16 @@ select.input option, select.select option, .input option {
 .discord-chan.active { border-color: var(--ink); font-weight: 700; }
 .discord-send { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
 .discord-send .input { flex: 1; min-width: 180px; }
+/* Chat pane: bounded scroll region, plain-text rows (JS escapes content;
+   pre-wrap keeps the author's line breaks without honoring HTML). */
+.discord-msgs { max-height: 320px; min-height: 60px; overflow-y: auto; margin-top: 8px; padding: 8px; background: var(--cream); border: 1px solid var(--border); border-radius: 10px; display: flex; flex-direction: column; gap: 8px; }
+.discord-msg { display: flex; gap: 8px; align-items: flex-start; }
+.discord-msg-av { border-radius: 50%; flex: 0 0 auto; }
+.discord-msg-main { min-width: 0; }
+.discord-msg-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.discord-msg-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .86rem; }
+.discord-invite-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.discord-invite-row .input { flex: 1; min-width: 180px; }
 /* Security Center back in Settings (M3): collapsed by default */
 .sec-details { margin-top: 6px; }
 .sec-details summary { cursor: pointer; font-weight: 700; }

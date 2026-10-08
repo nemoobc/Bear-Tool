@@ -102,6 +102,38 @@ export function createProvider(cfg) {
       return [cfg.getAddress?.()].filter(Boolean);
     }
 
+    // EIP-2255 permissions are the WALLET's own bookkeeping — answered here,
+    // never forwarded to a node (live: node replied -32601 Method not found
+    // for wallet_getPermissions on publicnode). These sit BEFORE the
+    // connection gate on purpose: asking what is granted must return [] when
+    // nothing is, not an error, and revoking nothing is still a success.
+    if (method === 'wallet_getPermissions') {
+      return permissionsFor(origin, cfg.getAddress?.());
+    }
+
+    if (method === 'wallet_revokePermissions') {
+      removeSite(origin);
+      return null;
+    }
+
+    if (method === 'wallet_requestPermissions') {
+      const asked = params?.[0];
+      const keys = asked && typeof asked === 'object' ? Object.keys(asked) : [];
+      if (!keys.length || keys.some((k) => k !== 'eth_accounts')) {
+        throw makeProviderError(4201, 'Bear Tool only supports the eth_accounts permission.');
+      }
+      if (!allowed) {
+        const granted = await cfg.onRequest?.({ method, params, kind: 'consent', origin });
+        if (!granted) throw makeProviderError(4001, 'The user rejected the permission request.');
+        addSite(origin, { name: origin });
+        if (!siteAllowed(origin)) {
+          throw makeProviderError(4001, 'The permission could not be recorded, so it stays refused.');
+        }
+        emit('connect', { provider: this });
+      }
+      return permissionsFor(origin, cfg.getAddress?.());
+    }
+
     // The chain id is a fact about this wallet, not something to ask a signer
     // about, and answering it locally keeps the locked-wallet refusal above as
     // the only thing standing between a page and the network details.
@@ -180,4 +212,21 @@ export function announceAccounts(provider, address) {
 export function disconnectOrigin(provider, origin) {
   removeSite(origin);
   announceAccounts(provider, null);
+}
+
+/**
+ * EIP-2255 permission objects for a site: one eth_accounts grant when the
+ * site is connected, [] when it is not. Shape per the spec — id, invoker,
+ * parentCapability, caveats, date — so a dApp parsing the response (most
+ * feature-detect on parentCapability) finds what it expects.
+ */
+export function permissionsFor(origin, address) {
+  if (!origin || !address || !siteAllowed(origin)) return [];
+  return [{
+    id: `bear:eth_accounts:${origin}`,
+    invoker: origin,
+    parentCapability: 'eth_accounts',
+    caveats: [{ type: 'restrictReturnedAccounts', value: [address] }],
+    date: Date.now(),
+  }];
 }

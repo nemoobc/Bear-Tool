@@ -1259,6 +1259,19 @@ export function renderDeployedRegistry() {
 }
 
 // ── password toggle helper ──
+// Ikon garis (SVG inline), bukan emoji: emoji bergantung font sistem (🚫 di
+// beberapa Android, berbeda bentuk antar perangkat) dan tidak ikut currentColor.
+// Mata garis miring = status "terlihat" (klik untuk sembunyikan lagi) —
+// pasangan open-eye yang sudah ada di markup tombol.
+const EYE_ON_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" '
+  + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+  + 'aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>'
+  + '<circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" '
+  + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+  + 'aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>'
+  + '<path d="M3 3l18 18"/></svg>';
+
 function bindPasswordToggle(btnId, inputId) {
   const btn = $(btnId);
   const input = $(inputId);
@@ -1266,7 +1279,11 @@ function bindPasswordToggle(btnId, inputId) {
   btn.addEventListener('click', () => {
     const isPassword = input.type === 'password';
     input.type = isPassword ? 'text' : 'password';
-    btn.textContent = isPassword ? '🙈' : '👁️';
+    // isPassword diukur SEBELUM toggle: baru saja dibuka → tampilkan mata
+    // garis_miring (status terlihat, aksi berikutnya = sembunyikan).
+    btn.innerHTML = isPassword ? EYE_OFF_SVG : EYE_ON_SVG;
+    btn.setAttribute('aria-pressed', isPassword ? 'true' : 'false');
+    btn.setAttribute('aria-label', isPassword ? 'Hide target key' : 'Show target key');
   });
 }
 

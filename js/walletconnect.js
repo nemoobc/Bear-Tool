@@ -366,6 +366,10 @@ async function handleRequest({ id, topic, params }) {
       const app = await import('./app.js').catch(() => null);
       app?.updateTopbar?.();
       app?.refreshView?.('dashboard');
+      // Same event to the INJECTED provider that the WalletConnect session
+      // gets below — a page on this wallet's own origin hears every switch,
+      // whoever asked for it.
+      app?.announceChainChanged?.(want);
       toast('Network switched to ' + net.name + ' (requested by the dApp).', 'info');
       // EIP-1193 promises chainChanged — without it a dApp sits on a stale UI
       // until it polls eth_chainId. Best-effort: the JSON-RPC response below

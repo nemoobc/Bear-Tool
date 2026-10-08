@@ -457,7 +457,8 @@ const dynamicSkip = new Set([
   // modal), because the view's contents depend on the auth state — a static
   // card in discord.jsx would flash the wrong shape on every reconnect.
   // Audited below: each id has id="…" in discord.js.
-  'discordStatus','discordClientId','discordToken','btnDiscordLeaveConfirm'
+  // #discordInvite (invite join row, painted with the Servers card).
+  'discordStatus','discordClientId','discordToken','btnDiscordLeaveConfirm','discordInvite'
 ]);
 
 test('E2E-probe: every $(\'#id\') reference across ALL js files exists in the page markup', async () => {

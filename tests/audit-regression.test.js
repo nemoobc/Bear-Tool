@@ -426,3 +426,20 @@ test('Escape in a modal never leaks to the browser underneath it', () => {
   assert.match(db, /modalOverlay'\)\?\.classList\.contains\('open'\)\) return;/,
     'dapp-browser still guards — it wins the race when IT registered first');
 });
+
+test('the lock sheet has no way out but the password', () => {
+  // User request 2026-10-07 ("tombol x ilangin"): closing the welcome-back
+  // sheet dropped a LOCKED user onto the shell behind an empty overlay —
+  // nothing to click, nothing to unlock. The sheet now refuses all three
+  // exits: ✕, backdrop, Escape.
+  const app = read('js/app.js');
+  const show = app.slice(app.indexOf('function showUnlockModal'), app.indexOf('function showCreateModal'));
+  assert.ok(!show.includes('modal-close'), 'no ✕ on the lock sheet');
+  assert.match(show, /dismissible: false/, 'it opens as non-dismissible');
+
+  const ui = read('js/ui.js');
+  assert.match(ui, /e\.target === overlay && currentDismissible/,
+    'backdrop clicks are honoured only when the sheet allows dismissal');
+  assert.match(ui, /if \(!currentDismissible\) return;/,
+    'Escape is refused too — before the press is consumed');
+});
