@@ -27,17 +27,11 @@
   <!-- face patch -->
   <ellipse cx="100" cy="118" rx="42" ry="34" fill="url(#belly)" stroke="#2D2A32" stroke-width="3"/>
 
-  <!-- eyes: mata garis miring (visibility-off) icon -->
-  <g>
-    <ellipse cx="78" cy="92" rx="11" ry="13" fill="none" stroke="#2D2A32" stroke-width="5"/>
-    <circle cx="78" cy="93" r="4" fill="#2D2A32"/>
-    <path d="M69 101 L87 83" stroke="#2D2A32" stroke-width="5" stroke-linecap="round"/>
-  </g>
-  <g>
-    <ellipse cx="122" cy="92" rx="11" ry="13" fill="none" stroke="#2D2A32" stroke-width="5"/>
-    <circle cx="122" cy="93" r="4" fill="#2D2A32"/>
-    <path d="M113 101 L131 83" stroke="#2D2A32" stroke-width="5" stroke-linecap="round"/>
-  </g>
+  <!-- eyes -->
+  <ellipse cx="78" cy="92" rx="11" ry="13" fill="#2D2A32"/>
+  <ellipse cx="122" cy="92" rx="11" ry="13" fill="#2D2A32"/>
+  <circle cx="82" cy="88" r="4" fill="#fff"/>
+  <circle cx="126" cy="88" r="4" fill="#fff"/>
 
   <!-- eyebrows -->
   <path d="M64 76 Q78 68 92 76" stroke="#2D2A32" stroke-width="4" fill="none" stroke-linecap="round"/>
