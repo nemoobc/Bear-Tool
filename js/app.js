@@ -14,6 +14,7 @@ import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
          fmtAmount, fmtUsd, fmtTime, fmtTimeShort, escapeHtml, animateValue, titleCase } from './ui.js';
 import { runIntro, initTheme } from './theme.js';
+import { initPullRefresh } from './pull-refresh.js';
 import { get, set, on, off, setUnlockHandler, addActivity, loadActivity,
          reconcileActivity, activityMatchesSymbol, getCustomTokens, persistCustomToken } from './state.js';
 import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate, isRateLimit, fitCandles } from './price.js';
@@ -108,6 +109,9 @@ window.addEventListener('DOMContentLoaded', () => {
   try { bindTopbar(); } catch (e) { console.error('[BearTool] topbar binding failed:', e); }
   try { bindViews(); } catch (e) { console.error('[BearTool] view binding failed:', e); }
   try { initScrollTopFab(); } catch (e) { console.error('[BearTool] scroll-top binding failed:', e); }
+  // Pull-to-refresh at the top of the main screen → emits the same
+  // 'refresh' event as every other refresh path (one pipeline, one truth).
+  try { initPullRefresh(); } catch (e) { console.error('[BearTool] pull-refresh binding failed:', e); }
 
   // M4 activity: boot-only reconcile left a stuck row pending until the next
   // reload/network switch — settle pending rows while the app stays open.

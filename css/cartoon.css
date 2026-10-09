@@ -79,6 +79,9 @@ html, body {
   background: var(--cream);
   color: var(--ink);
   overflow-x: hidden;
+  /* Retire Chrome/Android's native pull-to-refresh: it would reload the
+     whole SPA on top of our own gesture (js/pull-refresh.js). */
+  overscroll-behavior-y: none;
 }
 
 /* ── playful dotted background ── */
@@ -3745,3 +3748,40 @@ select.input option, select.select option, .input option {
 .delegation-badge.delegated{background:rgba(167,139,250,.18);color:#a78bfa}
 .activity-icon.delegate{color:#a78bfa}
 .activity-icon.deploy{color:#38bdf8}
+
+/* ── pull-to-refresh indicator (js/pull-refresh.js) ── */
+.pull-refresh {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 950;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--white, #fff);
+  border: var(--border-thick, 2px solid #2d2a32);
+  box-shadow: 3px 3px 0 rgba(45, 42, 50, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-72px);
+  transition: transform 0.22s ease, opacity 0.15s ease;
+}
+.pull-refresh.show { opacity: 1; }
+/* while the thumb is down: no easing, the disc sticks to the finger;
+   release snaps it home because this class is removed first */
+.pull-refresh.pull { transition: none; }
+.pr-spin {
+  width: 16px;
+  height: 16px;
+  border: 3px solid var(--ink, #2d2a32);
+  border-top-color: transparent;
+  border-radius: 50%;
+}
+.pull-refresh.go .pr-spin { animation: pr-spin 0.7s linear infinite; }
+@keyframes pr-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .pull-refresh { transition: none; }
+  .pull-refresh.go .pr-spin { animation-duration: 1.4s; }
+}
