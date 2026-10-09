@@ -14,6 +14,7 @@
     "check": "node tools/check.mjs",
     "test:e2e": "node tools/e2e.mjs",
     "test:e2e:browserstack": "BEAR_E2E_BROWSERSTACK=1 BEAR_BASE_URL=http://localhost:8080 node tools/e2e.mjs",
+    "test:e2e-wc": "node tests/e2e-wc.mjs",
     "verify": "npm run test:all",
     "test:all": "npm run check && npm test && npm run test:fork && npm run test:e2e",
     "test:live": "node --test --test-concurrency=1 --test-timeout=240000 tests/*.live.js"
@@ -27,6 +28,7 @@
   },
   "devDependencies": {
     "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.2",
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.5.2",
     "@capacitor/core": "^8.5.2",

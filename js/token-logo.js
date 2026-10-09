@@ -97,9 +97,15 @@ export function cacheLogo(key, url) {
 let counter = 0;
 const nextUid = () => `tk${(++counter).toString(36)}${Math.floor(performance.now() % 1e6).toString(36)}`;
 
-function markSvg(sym, size) {
+function markSvg(sym, size, opt = {}) {
   const s = (sym || '').toLowerCase();
-  const m = MARKS[s];
+  // A CONTRACT token never wears the hand-tuned brands: those marks belong to
+  // the native coin / listed project with that ticker, and a freshly deployed
+  // "USDC" wearing Circle's $ disc is exactly the counterfeit-mark bug
+  // (user report 2026-10-08: "deploy token malah kedetect logo lain tapi
+  // ticker sama"). opt.contract suppresses the brand; the peach initial disc
+  // stands until a contract-keyed CoinGecko image proves the identity.
+  const m = opt.contract === true ? null : MARKS[s];
   const uid = nextUid();
   if (m) {
     const [c1, c2, glyph, fs] = m;
@@ -125,19 +131,25 @@ function markSvg(sym, size) {
  */
 export function tokenLogoHTML(sym, size = 32, opt = {}) {
   const remote = opt.remote !== false;
+  const address = String(opt.address || '').trim();
   if (remote) {
     // Looked up by CONTRACT when one is given, so a counterfeit ticker cannot
     // reach the real project's mark. The symbol is still what the generated
     // fallback draws.
-    const url = getCachedLogo(logoKeyFor({ address: opt.address, symbol: sym }));
+    const url = getCachedLogo(logoKeyFor({ address, symbol: sym }));
     if (url) {
       // Falls back to the generated mark if the cached image is dead, so a
       // stale URL degrades instead of showing a broken-image icon.
-      return `<img class="token-logo-img token-mark" data-mark-fallback="${escapeHtml(sym || '')}" src="${escapeHtml(url)}" `
+      return `<img class="token-logo-img token-mark" data-mark-fallback="${escapeHtml(sym || '')}" `
+        + (address ? `data-mark-contract="1" ` : '')
+        + `src="${escapeHtml(url)}" `
         + `alt="" width="${size}" height="${size}" loading="lazy" decoding="async">`;
     }
   }
-  return markSvg(sym, size);
+  // No cache: a contract token must not reach the branded MARKS either (see
+  // markSvg) — an own/deployed token whose ticker matches a listed project
+  // used to render that project's brand right here, no network needed.
+  return markSvg(sym, size, { contract: Boolean(address) });
 }
 
 /** Attach the onerror fallback to every rendered logo inside a root. */
@@ -147,12 +159,181 @@ export function guardTokenLogos(root) {
     if (img.dataset.guarded) return;
     img.dataset.guarded = '1';
     img.addEventListener('error', () => {
-      img.outerHTML = markSvg(img.dataset.markFallback || '', Number(img.getAttribute('width')) || 24);
+      img.outerHTML = markSvg(img.dataset.markFallback || '', Number(img.getAttribute('width')) || 24,
+        { contract: img.dataset.markContract === '1' });
     }, { once: true });
   });
 }
 
 export { markSvg as tokenMarkSvg };
+
+// ── CoinGecko auto-detect (fetch once per token, cache 24h) ──────────────
+// Two lookups that answer DIFFERENT identities:
+//
+// 1. CONTRACT lookup — `/coins/{platform}/contract/{address}` — the only
+//    correct one for a token with an address: it is keyed by the contract,
+//    so it cannot borrow another project's image. Unknown chain → no
+//    platform → no fetch (the initial disc stands).
+// 2. SYMBOL search — the old `fetchCoinGeckoLogo(sym)` — kept ONLY for native
+//    coins (no contract, ticker IS the identity). It used to run for contract
+//    tokens too: the first exact-symbol coin won, so a freshly deployed token
+//    "detected" a stranger's logo while showing its own ticker (live report
+//    2026-10-08). Never again for contracts.
+export const COINGECKO_PLATFORMS = {
+  1: 'ethereum', 56: 'bsc', 137: 'polygon-pos', 42161: 'arbitrum-one',
+  10: 'optimistic-ethereum', 8453: 'base', 43114: 'avalanche', 100: 'gnosis',
+  59144: 'linea', 534352: 'scroll', 81457: 'blast', 324: 'zksync-era',
+  42220: 'celo', 146: 'sonic', 5000: 'mantle',
+};
+
+// Native tickers whose hand-tuned mark is already local — no fetch, ever.
+// (Moved from app.js MANUAL_LOGO_SYMS: the skip was applied to contract
+// tokens as well, which kept a counterfeit ticker wearing the brand mark.)
+const MANUAL_NATIVE_SYMS = new Set([
+  'eth', 'ether', 'usdc', 'usdt', 'dai', 'wbtc', 'link', 'uni', 'aave',
+  'reth', 'cbeth', 'wsteth', 'frax',
+]);
+
+// Distinguishes an ANSWER from an OUTAGE: {data} = the endpoint replied
+// (a 404 says "not listed"), {failed} = the network/CORS/rate-limit case
+// where no verdict about the token exists. Only failures count toward the
+// breaker below — a run of unlisted tokens must not shut the batch down.
+async function cgFetchJson(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (res.status === 429 || res.status >= 500) return { failed: true };
+    if (!res.ok) return { data: null };
+    return { data: await res.json() };
+  } catch { return { failed: true }; }
+  finally { clearTimeout(timer); }
+}
+
+async function fetchContractLogo(address, platform) {
+  const r = await cgFetchJson(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(platform)}/contract/${encodeURIComponent(address)}`);
+  return { url: r?.data?.image?.large || null, failed: Boolean(r?.failed) };
+}
+
+async function fetchSymbolLogo(sym) {
+  const r = await cgFetchJson(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(sym)}`);
+  const coins = Array.isArray(r?.data?.coins) ? r.data.coins : [];
+  const hit = coins.find(c => (c.symbol || '').toLowerCase() === String(sym).toLowerCase() && c.large);
+  return { url: hit?.large || null, failed: Boolean(r?.failed) };
+}
+
+// Fetch + cache logos for tokens not covered by a local mark.
+// Never throws — logo failures just leave the default mark in place.
+//
+// Paced, one lookup at a time with a gap: a parallel burst of a dozen
+// contract requests trips CoinGecko's rate limit. The throttled answers
+// arrive WITHOUT CORS headers (the console fills with ERR_FAILED and the
+// browser reports a policy block) and nothing gets cached — so every
+// dashboard load repeated the whole storm. A failed lookup is remembered
+// for a few minutes instead of being retried on each render.
+//
+// TWO holes closed after the 2026-10-08 boot capture (46 /contract/ errors
+// in one load):
+// 1. The memory was a module-level Map — a RELOAD dropped it and the whole
+//    storm ran again. Misses are mirrored to localStorage, which a reload
+//    keeps; the Map stays as the fast path.
+// 2. Nothing declared the endpoint sick: the batch paced through all 46
+//    tokens while every single answer was a network failure. Two
+//    CONSECUTIVE network failures (throw, or 5xx/429) open a cooldown —
+//    the rest of the batch is remembered as misses without a request. A
+//    404 is an ANSWER ("not listed"), not an outage, so it never counts.
+const LOGO_MISS_TTL = 5 * 60 * 1000;
+const LOGO_MISS_STORE = 'bear.logoMisses';
+const logoMisses = new Map();               // logo key → epoch ms of the miss
+let logoQueue = Promise.resolve();          // one paced queue for the whole app
+let cgSickUntil = 0;                        // endpoint cooldown (epoch ms)
+
+function readStoredMisses() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOGO_MISS_STORE) || '{}');
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch { return {}; }
+}
+
+function writeStoredMisses(misses) {
+  try { localStorage.setItem(LOGO_MISS_STORE, JSON.stringify(misses)); }
+  catch { /* private mode / quota — the in-memory copy still gates this session */ }
+}
+
+function recordMiss(key) {
+  const at = Date.now();
+  logoMisses.set(key, at);
+  const stored = readStoredMisses();
+  stored[key] = at;
+  writeStoredMisses(stored);
+}
+
+function missedRecently(key) {
+  let at = logoMisses.get(key);
+  if (at === undefined) {
+    at = readStoredMisses()[key];           // the memory a reload keeps
+    if (typeof at === 'number') logoMisses.set(key, at);
+  }
+  if (!at) return false;
+  if (Date.now() - at > LOGO_MISS_TTL) {
+    logoMisses.delete(key);
+    const stored = readStoredMisses();
+    if (stored[key]) { delete stored[key]; writeStoredMisses(stored); }
+    return false;
+  }
+  return true;
+}
+
+/** Test hook: forget the short-lived miss memory (tests reset the rest). */
+export function resetLogoMisses() {
+  logoMisses.clear();
+  cgSickUntil = 0;
+  try { localStorage.removeItem(LOGO_MISS_STORE); } catch { /* private mode */ }
+}
+
+export function ensureTokenLogos(tokens, chainId) {
+  const platform = COINGECKO_PLATFORMS[Number(chainId)] || null;
+  const missing = (tokens || []).filter((t) => t && t.symbol
+    && !getCachedLogo(logoKeyFor(t)) && !missedRecently(logoKeyFor(t)));
+  if (!missing.length) return Promise.resolve();
+  const job = logoQueue.then(async () => {
+    try {
+      let consecutiveFailures = 0;
+      for (let i = 0; i < missing.length; i++) {
+        const t = missing[i];
+        // Endpoint declared sick (or still cooling down): remember the rest
+        // as misses instead of asking — the storm stop.
+        if (consecutiveFailures >= 2 || Date.now() < cgSickUntil) {
+          recordMiss(logoKeyFor(t));
+          continue;
+        }
+        const address = String(t.address || '').trim();
+        let url = null;
+        let failed = false;
+        if (address) {
+          if (platform) { // unknown chain: no truthful lookup
+            const r = await fetchContractLogo(address, platform);
+            url = r.url; failed = r.failed;
+          }
+        } else if (!MANUAL_NATIVE_SYMS.has(String(t.symbol).toLowerCase())) {
+          const r = await fetchSymbolLogo(t.symbol);
+          url = r.url; failed = r.failed;
+        }
+        const key = logoKeyFor(t);
+        if (url) { cacheLogo(key, url); logoMisses.delete(key); consecutiveFailures = 0; }
+        else {
+          recordMiss(key);
+          if (failed) {
+            if (++consecutiveFailures >= 2) cgSickUntil = Date.now() + LOGO_MISS_TTL;
+          } else consecutiveFailures = 0;   // a 404 is an answer, not an outage
+        }
+        if (i < missing.length - 1) await new Promise((r) => setTimeout(r, 350));
+      }
+    } catch { /* never throws — a stray storage error leaves the default mark */ }
+  });
+  logoQueue = job.catch(() => { /* one bad batch must not wedge the queue */ });
+  return job;
+}
 
 // ── network SVG logos ──
 // Extracted from app.js so the network modal and every network picker render

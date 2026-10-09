@@ -247,4 +247,15 @@ test('looksLikeUrl is the line between opening and filtering', () => {
   assert.equal(looksLikeUrl('aave'), false, 'a bare name is a filter');
   assert.equal(looksLikeUrl('nft marketplace'), false, 'a phrase with a space can never be a host');
   assert.equal(looksLikeUrl(''), false, 'an empty box opens nothing');
+
+  // "Support all URL": this detector and classifyInput must not disagree.
+  // The old regex here missed a port, localhost, an IP with a port and an IDN
+  // host — Enter became a silent no-op while the bar clearly held an address
+  // (live: typing localhost:8123 only filtered the grid).
+  assert.equal(looksLikeUrl('localhost:8123'), true, 'localhost with a port is an address');
+  assert.equal(looksLikeUrl('example.com:8080'), true, 'a port on a host is an address');
+  assert.equal(looksLikeUrl('192.168.1.10:3000'), true, 'an IP with a port is an address');
+  assert.equal(looksLikeUrl('münchen.de'), true, 'an IDN host is an address');
+  assert.equal(looksLikeUrl('2.4'), false, 'a version number is a filter, not a host');
+  assert.equal(looksLikeUrl('myserver'), false, 'a bare word stays a filter');
 });

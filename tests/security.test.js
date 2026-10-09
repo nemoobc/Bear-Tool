@@ -187,6 +187,40 @@ test('sanitizeForStore rejects nonsense instead of persisting it', () => {
   assert.equal(sanitizeForStore('not a url at all'), null);
 });
 
+// ── scope: what "a secret in the URL" actually means ──────────────────────
+// The words used to be matched against the WHOLE string, so real dApps were
+// refused as key material: secret.network by its own name, seedify.fund by a
+// substring, and every etherscan.io/tx/0x… link by a PUBLIC hash in the path.
+// A secret pastes into the query or the fragment, as a parameter — that is
+// the scope, and everything else is a name.
+test('a hostname is never a secret: real dApps must open', () => {
+  for (const u of ['https://secret.network/', 'https://app.secret.network/swap',
+    'https://seedify.fund/', 'https://passwords.example.com/']) {
+    assert.equal(isSecretishUrl(u).secret, false, u);
+    assert.ok(sanitizeForStore(u), u);
+  }
+});
+
+test('a public tx hash in the path is not a secret', () => {
+  const u = 'https://etherscan.io/tx/0x' + 'ab'.repeat(32);
+  assert.equal(isSecretishUrl(u).secret, false, '0x + 64 hex in the path is a transaction, everyone shares these');
+  assert.ok(sanitizeForStore(u));
+});
+
+test('secrets as query/fragment parameters are still refused', () => {
+  assert.equal(isSecretishUrl('https://x.com/?password=hunter2').secret, true);
+  assert.equal(isSecretishUrl('https://x.com/#private_key=' + 'a'.repeat(64)).secret, true);
+  assert.equal(isSecretishUrl('https://x.com/callback#id_token=eyJhbGciOi.eyJzdWIi.c2ln').secret, true,
+    'a Web3Auth-style id_token in the fragment is still key material');
+});
+
+test('a filter value that merely reads like a keyword is not a secret', () => {
+  assert.equal(isSecretishUrl('https://dapps.example/browse?tab=secret').secret, false,
+    'the word appears as a VALUE, not as a parameter name');
+  assert.equal(isSecretishUrl('https://example.com/search?q=seed phrase tools').secret, false,
+    'two words are not a mnemonic');
+});
+
 // ── EIP-1193 allow-list ──────────────────────────────────────────────────
 test('reads are allowed, state changes need confirmation', () => {
   assert.ok(isAllowedMethod('eth_chainId'));

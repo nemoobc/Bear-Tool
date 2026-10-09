@@ -39,8 +39,12 @@ test('the saved chainId is the one the token was read on', () => {
 
 test('switching networks re-probes an open dialog', () => {
   // Otherwise a token probed on the old chain stays marked valid on the new one.
-  assert.match(app, /on\('networkId',[\s\S]{0,90}detect\(\)/,
+  // Named handler (not an inline arrow): detect()'s isConnected guard off()s it
+  // once the modal markup is gone — see token-detect-modal-lifecycle.test.js.
+  assert.match(app, /on\('networkId', onNetworkChange\)/,
     'a network change must re-run detection while the dialog is open');
+  assert.match(app, /const onNetworkChange = \(\) => \{[^}]*detect\(\)/,
+    'the registered handler must actually call detect()');
 });
 
 test('detection still reads name, symbol and decimals from the contract', () => {

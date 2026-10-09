@@ -67,6 +67,9 @@ const METHOD_UNSUPPORTED = { code: -32601, message: 'Method not supported by Bea
 
 let kit = null;
 let initing = null;
+// Topics this wallet disconnected itself (stale-session cleanup) — their
+// session_delete events must not toast "closed by the dApp".
+const silentDeleteTopics = new Set();
 
 // -- pure helpers (unit-tested without a browser or a network) -------------
 
@@ -163,6 +166,25 @@ function address() {
   return get('signer')?.address || '';
 }
 
+function wcDebugEnabled() {
+  try { return localStorage.getItem('bear.wcDebug') === '1'; } catch { return false; }
+}
+
+function consoleLogger() {
+  const line = (level) => (...args) => console[level === 'trace' || level === 'debug' ? 'log' : level]('[wc:' + level + ']', ...args);
+  const l = {
+    level: 'debug',
+    fatal: line('error'), error: line('error'), warn: line('warn'),
+    info: line('info'), debug: line('debug'), trace: line('trace'),
+    setLevel() {},
+    isLevelEnabled: () => true,
+  };
+  // @walletconnect/logger's build() calls logger.child({context}) — a plain
+  // object without child() crashes Core.init ("t.child is not a function").
+  l.child = () => l;
+  return l;
+}
+
 async function ensureKit() {
   if (kit) return kit;
   if (!initing) {
@@ -171,7 +193,20 @@ async function ensureKit() {
         import('@reown/walletkit'),
         import('@walletconnect/core'),
       ]);
-      const core = Core.init({ projectId: WC_PROJECT_ID });
+      // Core.init() returns a Promise (core ≥2.25, typed `Promise<Core>`).
+      // Without await, WalletKit receives a Promise as `core`: core.logger is
+      // undefined and init dies at `this.logger.trace(...)` — pairing failed
+      // with "Cannot read properties of undefined (reading 'trace')" and the
+      // dApp browser had no working connection path at all (user report
+      // 2026-10-08: "dapps browser ... gabisa connect wallet").
+      // Opt-in wire diagnostics (localStorage bear.wcDebug=1): publish/receive
+      // failures are swallowed at the SDK's debug level, so a silent
+      // "resolve with no delivery" is otherwise indistinguishable from
+      // success during live debugging of switch announcements.
+      const core = await Core.init({
+        projectId: WC_PROJECT_ID,
+        ...(wcDebugEnabled() ? { logger: consoleLogger() } : {}),
+      });
       const w = await WalletKit.init({
         core,
         metadata: {
@@ -183,8 +218,28 @@ async function ensureKit() {
       });
       w.on('session_proposal', (args) => { handleProposal(args).catch((e) => toast('WalletConnect: ' + e.message, 'error')); });
       w.on('session_request', (args) => { handleRequest(args).catch((e) => toast('WalletConnect: ' + e.message, 'error')); });
-      w.on('session_delete', () => toast('WalletConnect session closed by the dApp.', 'info'));
+      w.on('session_delete', (args) => {
+        // Topics WE disconnected during re-approve cleanup are not the dApp
+        // closing anything — no toast for those.
+        const t = args && args.topic;
+        if (t && silentDeleteTopics.delete(t)) return;
+        toast('WalletConnect session closed by the dApp.', 'info');
+      });
       kit = w;
+      if (wcDebugEnabled()) {
+        // Live-diagnosis probes (flag bear.wcDebug=1): ping proves the dApp's
+        // inbound session-topic subscription, announce re-fires a switch on
+        // demand — both answer "published but never received?" questions.
+        window.__wcDebug = {
+          sessions: () => Object.values(w.getActiveSessions?.() || {}),
+          // WalletKit has no ping wrapper; the sign-client engine does — it
+          // awaits the pong (createDelayedPromise), so a resolve PROVES the
+          // dApp's inbound session-topic subscription is alive.
+          ping: (topic) => (w.signClient?.engine || w.engine).ping({ topic }),
+          emit: (topic, name, data) =>
+            w.emitSessionEvent({ topic, chainId: 'eip155:1', event: { name, data } }),
+        };
+      }
       return w;
     })().catch((e) => { initing = null; throw e; });
   }
@@ -222,6 +277,17 @@ async function handleProposal({ id, params }) {
     await kit.rejectSession({ id, reason: USER_REJECTED }).catch(() => {});
     return;
   }
+  // One live session per dApp. Every re-pair (wallet page reload, dApp
+  // reconnect) used to stack ANOTHER 7-day session for the same URL: ghost
+  // entries in the session sheet, ghost publishes to topics nobody hears,
+  // and duplicated approvals the user never made. Collected BEFORE approve
+  // so only the pre-existing ones are killed.
+  const dappUrl = String(params?.proposer?.metadata?.url || '').toLowerCase().replace(/\/+$/, '');
+  const staleTopics = dappUrl
+    ? Object.values(kit.getActiveSessions?.() || {})
+        .filter((s) => String(s?.peer?.metadata?.url || '').toLowerCase().replace(/\/+$/, '') === dappUrl)
+        .map((s) => s.topic)
+    : [];
   await kit.approveSession({
     id,
     namespaces: {
@@ -233,6 +299,13 @@ async function handleProposal({ id, params }) {
       },
     },
   });
+  for (const topic of staleTopics) {
+    silentDeleteTopics.add(topic);
+    await kit.disconnectSession({
+      topic,
+      reason: { code: 6000, message: 'Replaced by a new session for this dApp.' },
+    }).catch(() => { silentDeleteTopics.delete(topic); });
+  }
   toast('Connected to ' + dappName + '.', 'info');
 }
 
@@ -377,7 +450,7 @@ async function handleRequest({ id, topic, params }) {
       kit.emitSessionEvent({
         topic,
         chainId: 'eip155:' + want,
-        event: { type: 'chainChanged', data: '0x' + want.toString(16) },
+        event: { name: 'chainChanged', data: '0x' + want.toString(16) },
       }).catch(() => { /* session may not list that chain — response still stands */ });
     }
     return respond(topic, id, null);
@@ -406,6 +479,42 @@ function fmtValue(v, unit = 'ETH') {
 }
 
 // -- UI --------------------------------------------------------------------
+
+/**
+ * Origins (lowercase) of every ACTIVE WalletConnect session — the dApp
+ * browser bar reads this to show "🔗 WalletConnect" on the tab that is
+ * actually paired, and to decide whether the pairing hint still applies.
+ */
+export function wcActiveOrigins() {
+  if (!kit || typeof kit.getActiveSessions !== 'function') return [];
+  try {
+    return Object.values(kit.getActiveSessions() || {})
+      .map((s) => { try { return new URL(s?.peer?.metadata?.url || '').origin.toLowerCase(); } catch { return ''; } })
+      .filter(Boolean);
+  } catch { return [];
+  }
+}
+
+/** The session paired for one origin, or null. */
+export function wcSessionForOrigin(origin) {
+  const o = String(origin || '').toLowerCase();
+  if (!o || !kit || typeof kit.getActiveSessions !== 'function') return null;
+  try {
+    return Object.values(kit.getActiveSessions() || {}).find((s) => {
+      try { return new URL(s?.peer?.metadata?.url || '').origin.toLowerCase() === o; } catch { return false; }
+    }) || null;
+  } catch { return null; }
+}
+
+/** Disconnect the session paired to `origin`. Resolves true when one was closed. */
+export async function disconnectWcOrigin(origin) {
+  const s = wcSessionForOrigin(origin);
+  if (!s) return false;
+  try {
+    await kit.disconnectSession({ topic: s.topic, reason: { code: 6000, message: 'User disconnected.' } });
+    return true;
+  } catch { return false; }
+}
 
 function renderSessions(root) {
   if (!kit) return;
@@ -437,9 +546,72 @@ function renderSessions(root) {
  * "this page did not load" fallback — both moments where the user is holding a
  * wc: URI with nowhere to put it.
  */
+// Tell every connected WalletConnect dApp the ACTIVE ACCOUNT moved — the
+// accountsChanged event the injected provider already gets (user report
+// 2026-10-08: "bug switch wallet yang sama" — a connected page kept showing
+// the previous wallet after the switch). Best-effort by contract: a session
+// that will not take the event keeps standing; the wallet itself switched.
+export function announceAccountsChanged(address) {
+  if (!kit) {
+    // After a page reload the sessions are still in storage but the kit is
+    // not awake until something pairs — a switch right then must still reach
+    // the dApps. ensureKit() is deduped; wake it and re-run once (the guard
+    // below stops any recursion if the kit came back without sessions API).
+    ensureKit()
+      .then(() => { if (kit) announceAccountsChanged(address); })
+      .catch(() => { /* relay unavailable — wallet state stands */ });
+    return;
+  }
+  if (typeof kit.getActiveSessions !== 'function') return;
+  const list = address ? [address] : [];
+  let sessions = [];
+  try { sessions = Object.values(kit.getActiveSessions() || {}); } catch { return; }
+  for (const s of sessions) {
+    try {
+      // Emit on a chain the session actually holds — an event filed under a
+      // chain outside the namespace is dropped by the relay.
+      const acc0 = s?.namespaces?.eip155?.accounts?.[0] || '';
+      const p = acc0.split(':');
+      const chainId = p.length >= 2 ? `${p[0]}:${p[1]}` : 'eip155:1';
+      // The EVENT moves the dApp's UI; the SESSION keeps eth_accounts
+      // answering approve-time addresses forever. Sync both, or a dApp that
+      // re-reads its session (its own reload, a balance refetch) snaps back
+      // to a wallet the user already switched away from.
+      const ns = s?.namespaces?.eip155;
+      if (address && ns) {
+        const chains = Array.isArray(ns.chains) && ns.chains.length
+          ? ns.chains
+          : [...new Set((ns.accounts || []).map((a) => a.split(':').slice(0, 2).join(':')))];
+        if (chains.length) {
+          kit.updateSession({
+            topic: s.topic,
+            namespaces: {
+              ...s.namespaces,
+              eip155: { ...ns, accounts: chains.map((c) => c + ':' + address) },
+            },
+          }).catch((e) => console.warn('[wc] session accounts not updated:', (e && e.message) || e));
+        }
+      }
+      kit.emitSessionEvent({
+        topic: s.topic,
+        chainId,
+        // WC session events are keyed by `name` on the wire — the sign-client
+        // validator reads event.name and rejects event.type outright
+        // ("Missing or invalid. emit() event"), which is why connected dApps
+        // never heard an account switch (live proof 2026-10-08).
+        event: { name: 'accountsChanged', data: list },
+      }).catch((e) => {
+        // Silent by contract (the wallet state already moved), but never
+        // invisible: live debugging of "dApp still shows the old account"
+        // needs to tell an undeliverable event from an ignored one.
+        console.warn('[wc] accountsChanged not delivered:', (e && e.message) || e);
+      });
+    } catch { /* one bad session must not silence the rest */ }
+  }
+}
+
 export function openPairWalletConnect(prefill = '') {
   openModal(`
-    <button class="modal-close" type="button" data-close-modal>Close</button>
     <h2>WalletConnect</h2>
     <p class="small dim">Open the dApp in a browser tab, choose <strong>Connect wallet -&gt; WalletConnect</strong>,
     then paste the <code>wc:</code> URI here. The dApp browses outside; every signature still stops at Bear Tool.</p>
@@ -472,6 +644,26 @@ export function openPairWalletConnect(prefill = '') {
       .then((t) => { const s = (t || '').trim(); if (s.startsWith('wc:')) fill(s); })
       .catch(() => { /* denied or empty — the Paste button stays the answer */ });
   }
+  // Auto-paste when the user RETURNS to this window with the sheet still
+  // open — the real flow is: open the sheet here → browse the dApp elsewhere
+  // → Connect → copy wc: → come back. The open-time read above misses that
+  // copy, which used to leave the field empty behind a manual Paste. Pairing
+  // still lands on the dApp's proposal consent modal: this removes the paste,
+  // never the approval. Each URI is consumed once — a clipboard that still
+  // holds it must not re-pair on every focus. (Live-verified 2026-10-09.)
+  const seenWc = new Set(prefill ? [prefill] : []);
+  const onWcReturn = async () => {
+    if (!document.getElementById('wcPairUri')) { window.removeEventListener('focus', onWcReturn); return; }
+    try {
+      const t = (await navigator.clipboard.readText() || '').trim();
+      if (!t.startsWith('wc:') || seenWc.has(t) || !isValidWcUri(t)) return;
+      seenWc.add(t);
+      fill(t);
+      msg.textContent = 'Pairing link found in the clipboard — connecting...';
+      go.click();
+    } catch { /* clipboard denied — the Paste button stays the answer */ }
+  };
+  window.addEventListener('focus', onWcReturn);
   // Clipboard read is permission-gated on mobile Chrome: a refusal shows a
   // message instead of throwing — the manual paste path stays open.
   paste.onclick = async () => {
@@ -516,4 +708,36 @@ export function openPairWalletConnect(prefill = '') {
 /** Close the sheet from outside (e.g. lock). */
 export function closePairWalletConnect() {
   try { closeModal(); } catch { /* already closed */ }
+}
+
+// A wc: link can reach the wallet two ways, both opening the pair sheet with
+// the URI already filled: natively, Android's manifest intent-filter (wc:
+// scheme) delivers the link to appUrlOpen; on plain web/PWA the same link can
+// arrive as ?wc=<uri> (share sheet, bookmark, desktop shortcut). The
+// Capacitor import is lazy and best-effort — without the native plugin the
+// event simply never fires and the ?wc= fallback still works.
+const wcDeepLinked = new Set();
+export function initWcDeepLink() {
+  const openFromUrl = (uri) => {
+    const u = String(uri || '').trim();
+    if (!u.startsWith('wc:') || wcDeepLinked.has(u)) return;
+    wcDeepLinked.add(u);
+    openPairWalletConnect(u);
+    toast('WalletConnect link opened in Bear Tool.', 'info');
+  };
+  try {
+    const q = new URLSearchParams(location.search).get('wc');
+    if (q) openFromUrl(q);
+  } catch { /* no location (worker context) — nothing to open */ }
+  import('@capacitor/app')
+    .then(({ App }) => App.addListener('appUrlOpen', ({ url }) => {
+      // Android delivers the raw "wc:..." string; a wrapped custom-scheme URL
+      // carries it as the wc query param.
+      let u = String(url || '');
+      try {
+        if (!u.startsWith('wc:')) u = new URL(u).searchParams.get('wc') || u;
+      } catch { /* raw string stands */ }
+      openFromUrl(u);
+    }))
+    .catch(() => { /* plugin absent — the ?wc= web fallback above still works */ });
 }

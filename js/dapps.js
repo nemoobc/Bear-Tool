@@ -7,8 +7,9 @@
 
 import { escapeHtml } from './ui.js';
 import { openDappBrowser as openInBrowser, openDappHome, openExternalNotice, initDappBrowser } from './dapp-browser.js';
-import { inspectUrl, baseHost, VERDICT } from './dapp-safety.js';
+import { classifyInput, inspectUrl, baseHost, VERDICT } from './dapp-safety.js';
 import { listBlocked, listTrusted } from './dapp-sessions.js';
+import { isNativeDappBrowser } from './native-dapp.js';
 
 // frameable:false → the site ships clickjacking protection (X-Frame-Options or
 // frame-ancestors), so NO in-app browser can embed it. Re-probed live against
@@ -83,6 +84,9 @@ initDappBrowser({ catalog: POPULAR_DAPPS, catStyle: CAT_STYLE });
  */
 export function openDappBrowser(url, name) {
   if (!url) return openDappHome();
+  // Native build (Capacitor): the WebView host opens every site full-page —
+  // frameability and the external-notice sheet are web-build concepts.
+  if (isNativeDappBrowser()) return openInBrowser(url, name);
   const entry = POPULAR_DAPPS.find((d) => d.url === url || baseHost(d.url) === baseHost(url));
   if (entry && entry.frameable === false) {
     // X-Frame-Options / frame-ancestors cannot be worked around from a web page.
@@ -107,9 +111,11 @@ export { openDappHome, openInBrowser, openExternalNotice };
  * "app.aave.com" and "https://app.aave.com" open, spaces always mean search.
  */
 export function looksLikeUrl(v) {
-  const s = (v || '').trim();
-  if (!s || /\s/.test(s)) return false;
-  return /^https?:\/\//i.test(s) || /^[\w-]+(\.[\w-]+)+([/?#].*)?$/.test(s);
+  // One detector, one truth: delegate to classifyInput, the gate the browser
+  // itself uses. A second regex here drifted from it — this one had no port,
+  // no localhost, no IDN rule — so `localhost:8123` was an address to the
+  // address bar and a filter to the Open button, and Enter did nothing.
+  return classifyInput(v).kind === 'url';
 }
 
 export function renderDapps(container) {

@@ -14,7 +14,7 @@ import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
          fmtAmount, fmtUsd, fmtTime, fmtTimeShort, escapeHtml, animateValue, titleCase } from './ui.js';
 import { runIntro, initTheme } from './theme.js';
-import { get, set, on, setUnlockHandler, addActivity, loadActivity,
+import { get, set, on, off, setUnlockHandler, addActivity, loadActivity,
          reconcileActivity, activityMatchesSymbol, getCustomTokens, persistCustomToken } from './state.js';
 import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate, isRateLimit, fitCandles } from './price.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
@@ -57,6 +57,17 @@ window.addEventListener('DOMContentLoaded', () => {
       switchView('discord');
     }
   }).catch((e) => toast(e.message, 'error'));
+  // wc: deep links (native Android intent, or ?wc= on web) open the pair
+  // sheet with the URI already filled — no clipboard round-trip needed when
+  // the dApp hands the link straight to the OS.
+  import('./walletconnect.js')
+    .then((m) => m.initWcDeepLink?.())
+    .catch(() => { /* optional surface — the wallet works without it */ });
+  // Native dApp browser: accept RPC from the BearDappBrowser WebView (no-op
+  // on plain web, where the iframe browser stays in charge).
+  import('./native-dapp.js')
+    .then((m) => m.initNativeDappRpc?.())
+    .catch(() => { /* web build — nothing to listen for */ });
   on('refresh', async () => {
     if (!get('address')) return;
     // Awaited: the swap form's balance line and the token lists read the
@@ -253,6 +264,14 @@ window.addEventListener('DOMContentLoaded', () => {
     const reset = () => { box.style.display = 'none'; saveBtn.disabled = true; };
 
     const detect = async () => {
+      // The modal's markup dies when openModal() overwrites innerHTML (closing
+      // only toggles classes), but on('networkId') listeners are NEVER cleaned
+      // up by closeModal — so after any other modal replaced this form, a network
+      // switch re-ran detect() and getElementById('tdSymbol') === null crashed
+      // as an unhandled rejection on EVERY switch. Bail out when the form is
+      // gone and take the stale listener with us. (Live E2E 2026-10-09: two
+      // switches after opening Add Token → two TypeError textContent crashes.)
+      if (!box.isConnected) { off('networkId', onNetworkChange); return; }
       const addr = addrEl.value.trim();
       if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) { reset(); return; }
       const provider = get('provider');
@@ -264,7 +283,15 @@ window.addEventListener('DOMContentLoaded', () => {
       document.getElementById('tdDecimals').textContent = '';
       document.getElementById('tdNote').textContent = 'Reading name, symbol and decimals from the contract…';
       try {
-        const c = new ethers.Contract(addr, ERC20, provider);
+        // ethers v6 rejects a MIXED-case address whose EIP-55 checksum does not
+        // match, and the throw happened before any network call — soft() ate it
+        // as a null, so a case-only mistake on an otherwise-correct address came
+        // back as "No ERC-20 name/symbol found at that address" (live E2E
+        // 2026-10-09: 0xDAI typed as …094c44… vs …094C44… → the wrong verdict,
+        // while the same address in lowercase probed fine). Case carries no
+        // bytes: probe the literal hex instead, so wrong-case reads correctly
+        // and a genuinely wrong address still fails at the contract read.
+        const c = new ethers.Contract(addr.toLowerCase(), ERC20, provider);
         // symbol()/name() are optional on some tokens — resolve each defensively.
         const soft = async (fn, fb) => { try { return await fn(); } catch { return fb; } };
         const [sym, nm, dec] = await Promise.all([
@@ -273,6 +300,15 @@ window.addEventListener('DOMContentLoaded', () => {
         if (mine !== probeSeq) return; // a newer paste won
         if (sym == null && nm == null) {
           reset();
+          // reset() HIDES the box — writing the note afterwards put the answer
+          // in a hidden element, so the user watched "Detecting…" vanish with
+          // no explanation at all (silent dead end, same class as the NFT
+          // import bug). Mirror the catch branch: show the box with the note,
+          // and clear the stale "Detecting…" row. (Live E2E 2026-10-09.)
+          document.getElementById('tdSymbol').textContent = '—';
+          document.getElementById('tdName').textContent = '';
+          document.getElementById('tdDecimals').textContent = '';
+          document.getElementById('tokenDetect').style.display = '';
           document.getElementById('tdNote').textContent = 'No ERC-20 name/symbol found at that address on this network.';
           return;
         }
@@ -300,8 +336,10 @@ window.addEventListener('DOMContentLoaded', () => {
     addrEl.addEventListener('paste', () => setTimeout(detect, 0));
     addrEl.addEventListener('input', detect);
     // Switching networks underneath an open modal used to leave a token probed
-    // on the old chain looking valid on the new one. Re-probe instead.
-    on('networkId', () => { if (!saveBtn.disabled || addrEl.value.trim()) detect(); });
+    // on the old chain looking valid on the new one. Re-probe instead. Named so
+    // detect()'s isConnected guard can unsubscribe it (see top of detect).
+    const onNetworkChange = () => { if (!saveBtn.disabled || addrEl.value.trim()) detect(); };
+    on('networkId', onNetworkChange);
 
     saveBtn?.addEventListener('click', async () => {
       const addr = addrEl.value.trim();
@@ -311,7 +349,11 @@ window.addEventListener('DOMContentLoaded', () => {
       const provider = get('provider');
       if (!provider) return toast('Wallet not ready', 'error');
       try {
-        const c = new ethers.Contract(addr, ERC20, provider);
+        // Same EIP-55 trap as detect(): a case-only checksum mismatch must not
+        // fail the save — probe with the literal hex, store the checksummed
+        // form ethers computes from those bytes.
+        const normalized = ethers.getAddress(addr.toLowerCase());
+        const c = new ethers.Contract(normalized, ERC20, provider);
         const [sym, dec, bal] = await Promise.all([
           c.symbol().catch(() => saveBtn.dataset.sym || '?'),
           c.decimals().catch(() => Number(saveBtn.dataset.dec) || 18),
@@ -319,10 +361,10 @@ window.addEventListener('DOMContentLoaded', () => {
         ]);
         const tokens = get('tokens') || [];
         if (tokens.some(t => t.address?.toLowerCase() === addr.toLowerCase())) return toast('Token already added', 'info');
-        tokens.push({ address: addr, symbol: sym, decimals: Number(dec), balance: bal.toString(), chainId, usd: null });
+        tokens.push({ address: normalized, symbol: sym, decimals: Number(dec), balance: bal.toString(), chainId, usd: null });
         set('tokens', tokens);
         // Persist the typed facts — state.tokens alone dies on refresh.
-        persistCustomToken({ address: addr, symbol: sym, decimals: Number(dec), chainId });
+        persistCustomToken({ address: normalized, symbol: sym, decimals: Number(dec), chainId });
         closeModal();
         toast(`✅ ${sym} added!`, 'success');
         if (window._assetTokens) renderAssets(tokens);
@@ -679,10 +721,9 @@ function formatNativeValue(wei) {
   try { return ethers.formatEther(BigInt(wei)) + ' native'; } catch { return String(wei); }
 }
 
-function installBridge() {
-  if (globalThis[PROVIDER_FLAG]) return bearProvider;
-  bearProvider = createProvider({
-    origin: location.origin,
+function makeBearProvider(origin) {
+  return createProvider({
+    origin,
     getAddress: () => get('address'),
     isUnlocked: () => !!get('unlocked'),
     // A NUMBER. This used to be `get('networkId') || 1` — the network's string
@@ -771,6 +812,11 @@ function installBridge() {
       return provider.send(method, ...params);
     },
   });
+}
+
+function installBridge() {
+  if (globalThis[PROVIDER_FLAG]) return bearProvider;
+  bearProvider = makeBearProvider(location.origin);
   globalThis[PROVIDER_FLAG] = bearProvider;
   if (!globalThis.ethereum) globalThis.ethereum = bearProvider;
   // The browser toolbar calls this to cut a site off. Defined here because this
@@ -790,7 +836,15 @@ function bridgeLocked() {
 }
 
 function bridgeAccounts() {
+  // EIP-1193 accountsChanged for the injected provider, plus the same event
+  // pushed to every WalletConnect session. Called from EVERY place the active
+  // account can move (switch, delete, unlock): it used to be defined and
+  // never called, so a connected page kept showing the previous wallet —
+  // "switch wallet → yang sama" (live report 2026-10-08).
   if (bearProvider) announceAccounts(bearProvider, get('address'));
+  import('./walletconnect.js')
+    .then((m) => m.announceAccountsChanged?.(get('address')))
+    .catch(() => { /* WalletConnect is an optional surface — injected pages already heard */ });
 }
 
 // ── OpenSea panel (WL check + Accept Top Offer + Coin Price) ──
@@ -1133,6 +1187,7 @@ function showUnlockModal() {
       set('address', signer.address);
       set('unlocked', true);
       wallet.saveSession(secret);
+      bridgeAccounts();   // a page saw the wallet go dark (lock) — it must see it return
       pw.value = '';
       closeModal();
       toast('Wallet unlocked! 🐻', 'success');
@@ -1813,6 +1868,7 @@ function showAccountModal() {
       wallet.setActiveAccount(i);
       set('signer', signer);
       set('address', signer.address);
+      bridgeAccounts();   // connected pages must hear the account moved
       closeModal();
       toast('Switched account', 'success');
       updateTopbar();
@@ -1861,6 +1917,7 @@ function showAccountModal() {
         const signer = await wallet.unlockWallet(pw, wallet.getActiveAccountIndex());
         set('signer', signer);
         set('address', signer.address);
+        bridgeAccounts();   // the surviving active account may be a different one now
         loadDashboard();
       } catch (e) {
         // The delete cannot be undone, and a signer for an account that is no
@@ -2052,7 +2109,7 @@ async function loadDashboard(opts = {}) {
     // Auto-detect logos from CoinGecko for tokens outside the manual map,
     // then re-render once — but only if this is still the active token list
     // (a network switch may have replaced it while the fetch was in flight).
-    ensureTokenLogos(tokens).then(() => {
+    ensureTokenLogos(tokens, net.chainId).then(() => {
       if (window._assetTokens === tokens) renderAssets(tokens);
     });
     // not awaited on purpose (NFT scan is slow) — but its rejection must be
@@ -2107,40 +2164,12 @@ function holdingUsd(t) {
 }
 
 // ── CoinGecko token logos (auto-detect, cached 24h) ──
-// The manual SVG map covers the popular tokens; anything else asks CoinGecko
-// search once per symbol and caches the result so the list stays fast.
-// The cache + mark rendering now live in js/token-logo.js so the dashboard and
-// the Swap/Bridge pickers cannot drift apart. Re-exported here because several
-// call sites in this file still use the old local names.
-import { tokenLogoHTML, getCachedLogo, cacheLogo, guardTokenLogos, readLogoCache as loadLogoCache, logoKeyFor, getNetworkLogo } from './token-logo.js';
+// Fetch + cache + render ALL live in js/token-logo.js (shared with the
+// Swap/Bridge pickers) since the counterfeit-mark fix (2026-10-08): a token
+// with a contract is fetched BY CONTRACT, a native coin by symbol, and a
+// contract never renders a hand-tuned brand mark. This file only calls it.
+import { tokenLogoHTML, guardTokenLogos, getNetworkLogo, ensureTokenLogos } from './token-logo.js';
 import { explainError } from './errors.js';
-const MANUAL_LOGO_SYMS = new Set(['eth', 'ether', 'usdc', 'usdt', 'dai', 'wbtc', 'link', 'uni', 'aave', 'reth', 'cbeth', 'wsteth', 'frax']);
-
-async function fetchCoinGeckoLogo(sym) {
-  const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(sym)}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const coins = Array.isArray(data?.coins) ? data.coins : [];
-    const hit = coins.find(c => (c.symbol || '').toLowerCase() === String(sym).toLowerCase() && c.large);
-    return hit?.large || null;
-  } catch { return null; }
-  finally { clearTimeout(timer); }
-}
-// Fetch + cache logos for tokens not covered by the manual SVG map.
-// Never throws — logo failures just leave the default SVG in place.
-async function ensureTokenLogos(tokens) {
-  const missing = (tokens || []).filter(t =>
-    t.symbol && !MANUAL_LOGO_SYMS.has(t.symbol.toLowerCase()) && !getCachedLogo(logoKeyFor(t))
-  );
-  await Promise.allSettled(missing.map(async (t) => {
-    const url = await fetchCoinGeckoLogo(t.symbol);
-    if (url) cacheLogo(logoKeyFor(t), url);
-  }));
-}
 
 function renderAssets(tokens) {
   const assetList = $('#assetList');
@@ -2612,6 +2641,16 @@ function bindViews() {
   // Auto-lock is a dropdown — reflect the saved value (not the HTML default)
   const autoLockEl = $('#setAutoLock');
   if (autoLockEl) autoLockEl.value = String(get('settings').autoLock ?? 5);
+  // Currency and language ride in the same bear.settings blob, so they need
+  // the same read-back. A dropdown that WRITES its value but reads back the
+  // markup default shows "USD $"/"en" while the app keeps rendering "IDR Rp"
+  // and Indonesian labels — the control lies about the state it controls.
+  // (Live E2E 2026-10-09: reload → bear.settings.currency="idr" but the
+  // select showed "usd"; #setLang likewise reset to "en".)
+  const currencyEl = $('#setCurrency');
+  if (currencyEl) currencyEl.value = get('settings').currency || 'usd';
+  const langEl = $('#setLang');
+  if (langEl) langEl.value = get('settings').lang || 'en';
   // The testnet switch, from the stored setting rather than from the markup.
   // A switch that boots showing "on" while the setting says "off" is a control
   // that will be flipped by someone who was told the opposite.

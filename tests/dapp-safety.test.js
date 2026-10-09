@@ -28,6 +28,47 @@ test('classifyInput: an explicit http URL is kept as typed', () => {
 test('classifyInput: words are a search, not a URL', () => {
   assert.equal(classifyInput('uniswap swap eth').kind, 'search');
   assert.equal(classifyInput('how to stake').kind, 'search');
+  assert.equal(classifyInput('myserver').kind, 'search');   // bare word, no dot
+  assert.equal(classifyInput('2.4').kind, 'search');        // a version, not a host
+});
+
+// "Support all URL": everything the omnibox can plausibly mean as an address
+// must classify as a URL. Each of these used to fall through to search (or,
+// worse, be eaten by the scheme grammar and BLOCKED), so the browser refused
+// to open an address the user plainly typed.
+test('classifyInput: a host with a port is a URL, not a blocked scheme', () => {
+  // scheme grammar /^[a-z][a-z0-9+.-]*:/ matches "example.com:" and used to
+  // answer "Only http and https can be opened; example.com: is not allowed."
+  assert.deepEqual(classifyInput('example.com:8080'), { kind: 'url', url: 'https://example.com:8080' });
+  assert.deepEqual(classifyInput('localhost:3000'), { kind: 'url', url: 'http://localhost:3000' });
+  assert.deepEqual(classifyInput('app.aave.com:8443/wallet'), { kind: 'url', url: 'https://app.aave.com:8443/wallet' });
+});
+
+test('classifyInput: path, query and hash survive on a bare host', () => {
+  assert.deepEqual(classifyInput('example.com/path?q=1#frag'), { kind: 'url', url: 'https://example.com/path?q=1#frag' });
+  assert.deepEqual(classifyInput('app.uniswap.org/swap?chain=mainnet'), { kind: 'url', url: 'https://app.uniswap.org/swap?chain=mainnet' });
+  assert.deepEqual(classifyInput('example.com.'), { kind: 'url', url: 'https://example.com.' });  // trailing dot
+});
+
+test('classifyInput: IP literals open over http (LAN / dev nodes)', () => {
+  assert.deepEqual(classifyInput('192.168.1.10:3000'), { kind: 'url', url: 'http://192.168.1.10:3000' });
+  assert.deepEqual(classifyInput('1.2.3.4'), { kind: 'url', url: 'http://1.2.3.4' });
+  assert.deepEqual(classifyInput('[fe80::1]:8080'), { kind: 'url', url: 'http://[fe80::1]:8080' });
+  assert.deepEqual(classifyInput('127.0.0.1'), { kind: 'url', url: 'http://127.0.0.1' });
+});
+
+test('classifyInput: an IDN host is a URL (inspectUrl still flags homographs)', () => {
+  assert.deepEqual(classifyInput('münchen.de'), { kind: 'url', url: 'https://münchen.de' });
+  assert.deepEqual(classifyInput('пример.рф'), { kind: 'url', url: 'https://пример.рф' });
+});
+
+test('classifyInput: a host-shaped unknown scheme stays a search, not a URL', () => {
+  // "example.com:banana" — dot in the token before ':' means host, not scheme;
+  // loading it as https is honest (it will fail visibly), scheme-blocking it
+  // would tell the user http/https "is not allowed" for a hostname.
+  assert.equal(classifyInput('example.com:banana').kind, 'search');
+  // …while a real unknown scheme keeps being refused outright.
+  assert.equal(classifyInput('foo:bar').kind, 'blocked');
 });
 
 // ── the attacks the gate exists for ───────────────────────────────────────
@@ -56,6 +97,21 @@ test('GATE: a mixed-script host is DANGER even without punycode', () => {
   const i = inspectUrl('https://аpple.com/id', CATALOG);
   assert.equal(i.verdict, VERDICT.DANGER);
   assert.ok(i.signals.some((s) => /Mixed-script/i.test(s.label)));
+});
+
+test('IDN: a single-script foreign host is caution, not a dead end', () => {
+  // "Support all URL": münchen.de (Latin umlaut) and пример.рф (Cyrillic)
+  // must reach the caution sheet — a named reason, a way to proceed — not the
+  // no-way-past DANGER sheet. Refusing every non-ASCII host would mean the
+  // browser supports all URLs except those written in other languages.
+  const m = inspectUrl('https://münchen.de/', CATALOG);
+  assert.notEqual(m.verdict, VERDICT.DANGER, 'ü is Latin — münchen mixes no scripts');
+  const p = inspectUrl('https://пример.рф/', CATALOG);
+  assert.notEqual(p.verdict, VERDICT.DANGER, 'one foreign script is unusual, not proven deceptive');
+  assert.ok(p.signals.length >= 1, 'but the host is still reported with a reason');
+  // The deceptive shape stays lethal: mixing scripts inside ONE label.
+  assert.equal(inspectUrl('https://метамаск.com/', CATALOG).verdict, VERDICT.CAUTION,
+    'pure Cyrillic can imitate latin glyphs, but only caution can carry that reason honestly');
 });
 
 test('GATE: a lure word on a cheap TLD is DANGER', () => {

@@ -65,7 +65,19 @@ const SEL_PLAIN_NAMES = Object.fromEntries(Object.entries(SEL_PLAIN).map(([k, v]
 // ═══ URL secret hygiene ═══════════════════════════════════════════════════
 
 // Words that only appear in a URL when someone put a secret in it.
-const SECRET_WORDS = /(seed|mnemonic|recovery[-_]?phrase|privkey|priv[-_]?key|private[-_]?key|secret|passphrase|password|api[-_]?key|apikey|token=|bearer)/i;
+// A secret-shaped PARAMETER name, anchored to the query/fragment: "&password=",
+// "#id_token=". Scoped this way so secret.network, seedify.fund and
+// "?tab=secret" are names — not key material. The unscoped word list refused
+// all three as secrets.
+// Group 2 captures the parameter NAME so the refusal can quote it — reporting
+// the separator instead ("?") told the user nothing about what was refused.
+const SECRET_PARAM = /(^|[?&#])([a-z0-9_-]*(?:seed|mnemonic|recovery[-_]?phrase|privkey|priv[-_]?key|private[-_]?key|secret|passphrase|password|api[-_]?key|apikey|token|bearer)[a-z0-9_-]*)=/i;
+
+// A shared explorer link — etherscan.io/tx/0x… — is PUBLIC chain data:
+// everyone posts these, and refusing them would break the most common URL a
+// user pastes. The hex bytes are identical to a pasted key, so the SHAPE
+// around them is what distinguishes the two, and this is that shape.
+const PUBLIC_TX_LINK = /\/(?:tx|txs|txid|transaction|hash)\/0x[0-9a-f]{64,}[0-9a-f]*/gi;
 
 /** A long hex run: 32+ bytes of raw key material in a path or query. */
 // '#' belongs in the boundary class. It was missing, and that is the one
@@ -101,7 +113,7 @@ function looksLikeMnemonic(text) {
   // string "?s=abandon" - ten characters with a question mark and an equals
   // sign in it. That failed the word shape test and let a real pasted mnemonic
   // straight through while the identical phrase in a fragment was caught.
-  let body = text.trim();
+  let body = text.trim().replace(/^[#?]+/, '');
   const eq = body.indexOf('=');
   if (eq !== -1 && eq < 24) body = body.slice(eq + 1);
   // And ignore any further "&param=" splits: only the value can be a phrase.
@@ -123,27 +135,52 @@ function normaliseForScan(s) {
 }
 
 /**
+ * The part of a URL a request ACTUALLY carries: everything before '#'.
+ * Browsers never transmit the fragment — that is why OAuth puts its tokens
+ * there — so this is the half whose secrets can reach a server, and the line
+ * the navigation gate draws. Persistence gates on the WHOLE string instead.
+ */
+export function transmittedPart(url) {
+  const s = String(url || '');
+  const i = s.indexOf('#');
+  return i >= 0 ? s.slice(0, i) : s;
+}
+
+/**
  * Should this URL never be written into history, bookmarks or a tab list?
  * @returns {{secret:boolean, why:string|null}}
  */
 export function isSecretishUrl(url) {
   const s = String(url || '');
   if (!s) return { secret: false, why: null };
-  // Scanning happens on the decoded copy: an encoded key is still a key.
-  const flat_hex = (re) => s.match(re) || normaliseForScan(s).match(re);
-  let m = s.match(SECRET_WORDS);
-  if (m) return { secret: true, why: `the address contains "${m[1]}"` };
-  m = flat_hex(HEX_BLOB) || flat_hex(BARE_HEX_64);
-  if (m) {
-    const body = m[1].replace(/^[/?&=]/, '');
-    return { secret: true, why: `a ${body.length}-character hex run — that is key material, not a page address` };
-  }
-  // Only meaningful inside the query or fragment; a long path segment of words
-  // is far more likely to be a title.
-  const flat = normaliseForScan(s);
-  const tail = flat.split('#')[1] || (flat.includes('?') ? flat.slice(flat.indexOf('?')) : '');
-  if (tail && WORD_RUN.test(tail) && looksLikeMnemonic(tail)) {
-    return { secret: true, why: 'a ' + tail.trim().split(/\s+/).length + '-word run in the query — that is a BIP-39 mnemonic length, and that is how a recovery phrase gets pasted by accident' };
+  // Scope decides everything here. A secret pastes into the QUERY or the
+  // FRAGMENT as a parameter; a hostname is a name. Matching words against the
+  // whole string refused real dApps as key material — secret.network by its
+  // own name, seedify.fund by a substring, and every etherscan.io/tx/0x… link
+  // by a PUBLIC transaction hash sitting in the path.
+  // Neutralise the public link shape first, then scan the rest as before.
+  const cleaned = s.replace(PUBLIC_TX_LINK, '/tx/0xpublic');
+  const at = cleaned.search(/[?#]/);
+  const tail = at >= 0 ? cleaned.slice(at) : '';
+  const flatHex = (re, str) => str.match(re) || normaliseForScan(str).match(re);
+  const hexWhy = (m) => {
+    const hex = m[0].replace(/^[?&=/#]/, '');
+    return `a ${hex.length}-character hex run — that is key material, not a page address`;
+  };
+  const m = tail.match(SECRET_PARAM);
+  if (m) return { secret: true, why: `the query or fragment carries a secret-shaped parameter ("${m[2]}")` };
+  // A bare 64-character hex run is a private key wherever it sits — path,
+  // query or fragment: no scheme, no parameter name, just the raw material.
+  const bare = flatHex(BARE_HEX_64, cleaned);
+  if (bare) return { secret: true, why: hexWhy(bare) };
+  // So is a 0x run outside a public link shape: people paste keys into the
+  // path and the fragment exactly as they arrive from a keystore file.
+  const blob = flatHex(HEX_BLOB, cleaned);
+  if (blob) return { secret: true, why: hexWhy(blob) };
+  // The mnemonic scan sees the WHOLE tail — query and fragment together.
+  const flat = normaliseForScan(tail);
+  if (flat && WORD_RUN.test(flat) && looksLikeMnemonic(flat)) {
+    return { secret: true, why: 'a ' + flat.trim().split(/\s+/).length + '-word run in the query — that is a BIP-39 mnemonic length, and that is how a recovery phrase gets pasted by accident' };
   }
   return { secret: false, why: null };
 }

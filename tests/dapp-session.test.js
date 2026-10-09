@@ -128,7 +128,7 @@ test('saveSession only ever persists non-incognito tabs', () => {
 
 test('bookmarks toggle is idempotent and persists to the store', () => {
   const fn = body('function toggleBookmark()', 'function rememberHistory(');
-  assert.match(fn, /findIndex\(\(b\) => b\.url === t\.url\)/, 'toggle finds by url — one entry per page');
+  assert.match(fn, /findIndex\(\(b\) => b\.url === safe\)/, 'toggle finds by the SANITISED url — one entry per page, and no secret ever matches or is stored');
   assert.match(fn, /list\.splice\(i, 1\)/, 'second press removes rather than duplicates');
   assert.match(fn, /write\(LS\.bookmarks, list\)/, 'the list actually reaches storage');
 });
@@ -139,4 +139,41 @@ test('history dedupes by url, refuses secrets, and caps at 60', () => {
   assert.match(fn, /if \(!clean\) return;/, 'a secret-shaped url is not remembered at all');
   assert.match(fn, /h\.url !== clean/, 'a revisited url moves to the front instead of duplicating');
   assert.match(fn, /slice\(0, 60\)/, 'the history list is bounded');
+});
+
+// ── the fragment loads, the secret never persists ─────────────────────────
+
+test('the fragment reaches the frame but never the disk', () => {
+  // pushHistory used to run sanitizeForStore BEFORE the frame saw the URL, so
+  // every hash-routed dApp ("/#/swap") opened at its root — the address bar
+  // showed what was typed, the frame got something else. The strip belongs at
+  // persistence, where it still happens (below), not at navigation.
+  const fn = body('function pushHistory(', 'const active =');
+  assert.ok(!fn.includes('sanitizeForStore'),
+    'navigation must keep the full URL — the fragment strip belongs to saveSession');
+
+  seed([{ url: 'https://app.uniswap.org/#/swap?chain=eth', name: 'Uniswap',
+    hist: [{ url: 'https://app.uniswap.org/#/swap?chain=eth', name: 'Uniswap' }], i: 0 }]);
+  assert.equal(restoreSession(), true);
+  saveSession();
+  const rows = savedTabs();
+  assert.equal(rows.length, 1);
+  assert.ok(!rows[0].url.includes('#'), 'the fragment is stripped on the way to disk');
+  assert.ok(!rows[0].hist[0].url.includes('#'), '…in every history entry too');
+});
+
+test('a secret-shaped URL is dropped from persistence entirely', () => {
+  // It LOADS — a dApp callback like #id_token=… must reach the frame or
+  // Web3Auth-style logins die — but from that moment the tab behaves like
+  // incognito: nothing about it is ever written out.
+  seed([{ url: 'https://x.com/callback#id_token=eyJhbGciOi.eyJzdWIi.c2ln', name: 'x',
+    hist: [{ url: 'https://x.com/callback#id_token=eyJhbGciOi.eyJzdWIi.c2ln', name: 'x' }], i: 0 }]);
+  assert.equal(restoreSession(), true);
+  saveSession();
+  assert.deepEqual(savedTabs(), [], 'a tab carrying a secret persists like incognito: not at all');
+});
+
+test('bookmarking goes through the secret filter at the writer', () => {
+  const fn = body('function toggleBookmark()', 'function rememberHistory(');
+  assert.match(fn, /sanitizeForStore/, 'bookmarks are written to disk — they meet the same gate as history');
 });

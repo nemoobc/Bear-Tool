@@ -37,3 +37,7 @@ __*.html
 __*.mjs
 __*
 dist/
+
+# local artifacts (never ship)
+tmp/
+test-results-*/

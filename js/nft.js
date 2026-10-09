@@ -9,7 +9,7 @@
 // showed up). Honest messages when an indexer is required.
 // ═══════════════════════════════════════════════════════════════
 
-import { $, escapeHtml } from './ui.js';
+import { $, escapeHtml, toast } from './ui.js';
 import { get, set } from './state.js';
 import { getNetworkById, ERC721_ABI } from './network.js';
 import { listDeployed } from './registry.js';
@@ -220,7 +220,16 @@ function wireNftImport() {
   btn.dataset.wired = '1';
   const add = () => {
     const addr = (inp.value || '').trim();
-    if (!ethers.isAddress(addr)) { inp.setAttribute('aria-invalid', 'true'); return; }
+    if (!ethers.isAddress(addr)) {
+      inp.setAttribute('aria-invalid', 'true');
+      // aria-invalid is for assistive tech and has no styling in cartoon.css —
+      // a sighted user saw the click land and NOTHING happen (silent dead
+      // end). Mirror the deploy form's toast so the rejection is visible.
+      // (Live E2E 2026-10-09: empty and "not-an-address" both gave zero
+      // feedback while #btnDeploy answers with "Enter a token name".)
+      toast(addr ? 'Enter a valid contract address (0x…)' : 'Enter a collection contract address', 'error');
+      return;
+    }
     inp.removeAttribute('aria-invalid');
     const chainId = getNetworkById(get('networkId')).chainId;
     const all = get('nftImports') || {};

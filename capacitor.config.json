@@ -1,7 +1,7 @@
 {
   "appId": "com.nemoobc.beartool",
   "appName": "Bear Tool",
-  "webDir": "www",
+  "webDir": "dist",
   "android": {
     "allowMixedContent": false,
     "captureInput": true,

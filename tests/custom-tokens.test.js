@@ -58,8 +58,10 @@ test('payload rusak / penyimpanan korup tidak melempar', () => {
 // ── 2. view layer (textual app.js) ─────────────────────────────────────
 
 test('handler Add Token memanggil persistCustomToken dengan fakta token', () => {
+  // `normalized` (getAddress from the literal bytes), bukan `addr` mentah:
+  // alamat yang diketik salah case disimpan dalam bentuk EIP-55 yang benar.
   assert.match(app,
-    /persistCustomToken\(\{ address: addr, symbol: sym, decimals: Number\(dec\), chainId \}\)/,
+    /persistCustomToken\(\{ address: normalized, symbol: sym, decimals: Number\(dec\), chainId \}\)/,
     'simpan ke localStorage wajib di jalur konfirmasi Add Token');
 });
 

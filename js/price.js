@@ -192,7 +192,11 @@ async function fetchWithTimeout(url, timeoutMs = 10000) {
 // say so on screen. DexScreener calls keep plain fetchWithTimeout — they are
 // a different host with a different limit.
 const CG_COOLDOWN_MS = 60_000;
+const CG_COOLDOWN_MAX_MS = 15 * 60_000;
+const CG_COOLDOWN_STORE = 'bear.cgCooldownUntil';
+const CG_COOLDOWN_STRIKES_STORE = 'bear.cgCooldownStrikes';
 let cgCooldownUntil = 0;
+let cgStrikes = 0;   // consecutive failed probes; grows the backoff
 
 /** The one error that means "the limit, not the token". */
 export function rateLimitError() {
@@ -203,13 +207,84 @@ export function isRateLimit(e) {
   return /rate-limit|429/.test(String((e && e.message) || ''));
 }
 
+// The cooldown check reads PERSISTED state too: a reload drops the module
+// variable, and without this the very next boot re-ran the whole failing
+// batch (console capture 2026-10-08: 4 CORS errors after the logo fix, all
+// from this path). A cooldown survives a reload the same way the logo miss
+// memory does — for the same reason: it is a fact about the endpoint, not
+// about the page.
+//
+// The backoff GROWS per failed probe (1m → 2m → … → 15m cap) because a flat
+// 60s still produced a periodic storm: capture at t=367s shows the cooldown
+// expiring and three fresh errors landing the same minute. A probe that
+// fails twice in a row is unlikely to succeed a minute later; a probe that
+// SUCCEEDS resets the ladder (see cgFetch).
+function cgCooldownActive() {
+  if (Date.now() < cgCooldownUntil) return true;
+  try {
+    const until = Number(localStorage.getItem(CG_COOLDOWN_STORE) || 0);
+    if (until > Date.now()) { cgCooldownUntil = until; return true; }
+  } catch { /* private mode — in-memory only */ }
+  return false;
+}
+
+function openCgCooldown() {
+  cgStrikes += 1;
+  const step = Math.min(CG_COOLDOWN_MAX_MS, CG_COOLDOWN_MS * (2 ** (cgStrikes - 1)));
+  cgCooldownUntil = Date.now() + step;
+  try {
+    localStorage.setItem(CG_COOLDOWN_STORE, String(cgCooldownUntil));
+    localStorage.setItem(CG_COOLDOWN_STRIKES_STORE, String(cgStrikes));
+  } catch { /* private mode — in-memory still covers this session */ }
+}
+
+function noteCgSuccess() {
+  if (!cgStrikes) return;
+  cgStrikes = 0;                     // healthy again: the ladder starts over
+  try { localStorage.removeItem(CG_COOLDOWN_STRIKES_STORE); } catch { /* private mode */ }
+}
+
+// Strikes must survive a reload too, or every boot restarts at 1 minute.
+function cgStrikeCount() {
+  if (cgStrikes) return cgStrikes;
+  try {
+    const n = Number(localStorage.getItem(CG_COOLDOWN_STRIKES_STORE) || 0);
+    if (Number.isFinite(n) && n > 0) cgStrikes = n;
+  } catch { /* private mode */ }
+  return cgStrikes;
+}
+
+/** Test hook: forget the endpoint cooldown (tests reset between cases). */
+export function resetCgCooldown() {
+  cgCooldownUntil = 0;
+  cgStrikes = 0;
+  try {
+    localStorage.removeItem(CG_COOLDOWN_STORE);
+    localStorage.removeItem(CG_COOLDOWN_STRIKES_STORE);
+  } catch { /* private mode */ }
+}
+
 async function cgFetch(url, timeoutMs = 10000) {
-  if (Date.now() < cgCooldownUntil) throw rateLimitError();
-  const res = await fetchWithTimeout(url, timeoutMs);
+  if (cgCooldownActive()) throw rateLimitError();
+  cgStrikeCount();                   // hydrate the persisted ladder before judging
+  let res;
+  try {
+    res = await fetchWithTimeout(url, timeoutMs);
+  } catch (e) {
+    // In a browser a rate-limited CoinGecko answers WITHOUT CORS headers, so
+    // the 429 status is invisible — the fetch just throws a TypeError and the
+    // `status === 429` check below never fires. That is why the cooldown was
+    // dead code in production while the console kept filling up. An endpoint
+    // that cannot deliver a response is the same verdict as one that answers
+    // 429: back off.
+    openCgCooldown();
+    throw e;
+  }
   if (res.status === 429) {
-    cgCooldownUntil = Date.now() + CG_COOLDOWN_MS;
+    openCgCooldown();
     throw rateLimitError();
   }
+  noteCgSuccess();
   return res;
 }
 

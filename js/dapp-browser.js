@@ -31,9 +31,10 @@
 
 import { escapeHtml, toast } from './ui.js';
 import { inspectUrl, classifyInput, VERDICT, renderSignalList, baseHost, matchHostList, matchCatalog } from './dapp-safety.js';
-import { sanitizeForStore, isSecretishUrl } from './security.js';
+import { sanitizeForStore, isSecretishUrl, transmittedPart } from './security.js';
 import { getSecurityConfig, addBlockedHost, addTrustedHost, clearBrowsingData, listBlocked, listTrusted } from './dapp-sessions.js';
 import { openPairWalletConnect } from './walletconnect.js';
+import { isNativeDappBrowser } from './native-dapp.js';
 import { get, set, on } from './state.js';
 import { getNetworkById } from './network.js';
 
@@ -44,6 +45,29 @@ const LS = {
   history: 'bear.dapp.history',
   wcHint: 'bear.dapp.wcHint',
 };
+
+// WalletConnect sessions, by dApp origin — the bar has to show them, and the
+// paint path is sync, so the set is a cache refreshed in the background.
+const wcOrigins = new Set();
+let wcRefreshing = false;
+function refreshWcState() {
+  if (wcRefreshing) return;
+  wcRefreshing = true;
+  import('./walletconnect.js')
+    .then((m) => m.wcActiveOrigins?.())
+    .then((list) => {
+      wcRefreshing = false;
+      if (!Array.isArray(list)) return;
+      const next = new Set(list.map((o) => String(o).toLowerCase()));
+      let changed = next.size !== wcOrigins.size;
+      for (const o of next) if (!wcOrigins.has(o)) { changed = true; break; }
+      wcOrigins.clear();
+      for (const o of next) wcOrigins.add(o);
+      // Only repaint when the answer actually moved — this fires on every paint.
+      if (changed && overlay && !overlay.hidden) paint();
+    })
+    .catch(() => { wcRefreshing = false; });
+}
 
 const SEARCH_URL = 'https://duckduckgo.com/?q=';
 
@@ -98,13 +122,24 @@ function newTab(url = null, opts = {}) {
 }
 
 function pushHistory(tab, url, name) {
-  // Anything that looks like a secret never reaches history or storage.
-  const safe = sanitizeForStore(url);
-  if (!safe) return false;
+  // The FULL URL — fragment included — is what the frame loads and what
+  // back/forward replays. Sanitising HERE (the old behaviour) fetched
+  // "https://x/#/swap" as "https://x/": every hash-routed dApp opened at its
+  // root while the address bar showed what was typed. What leaves the device
+  // is decided at persistence — saveSession, rememberHistory, toggleBookmark —
+  // which still strip fragments and refuse secret-shaped addresses outright.
+  const full = String(url || '').trim();
+  if (!full) return false;
+  // What the REQUEST carries is what can leak: scheme, host, path and query
+  // all go to the server — the fragment never does (that is why OAuth puts
+  // its tokens there). So a secret in the transmitted part refuses the
+  // navigation outright, while an #id_token=… callback still loads and is
+  // then dropped from every store by saveSession/rememberHistory/bookmarks.
+  if (isSecretishUrl(transmittedPart(full)).secret) return false;
   tab.hist = tab.hist.slice(0, tab.i + 1);
-  tab.hist.push({ url: safe, name: name || baseHost(safe) || safe });
+  tab.hist.push({ url: full, name: name || baseHost(full) || full });
   tab.i = tab.hist.length - 1;
-  tab.url = safe;
+  tab.url = full;
   tab.name = name || tab.hist[tab.i].name;
   return true;
 }
@@ -120,11 +155,21 @@ export function saveSession() {
   // outlives the overlay is discarded rather than quietly persisted.
   const rows = persistable()
     .filter((x) => x.url)
-    .map((x) => ({ url: x.url, name: x.name, hist: x.hist, i: x.i }));
+    // Persistence is where "what leaves the device" is decided: the fragment
+    // is stripped (it is never sent to a server and routinely holds an OAuth
+    // token), and a secret-shaped URL drops the whole tab — from the moment it
+    // was typed, that tab behaves like incognito.
+    .map((x) => (sanitizeForStore(x.url) ? {
+      url: x.url.split('#')[0],
+      name: x.name,
+      hist: x.hist.map((h) => ({ url: h.url.split('#')[0], name: h.name })),
+      i: x.i,
+    } : null))
+    .filter(Boolean);
   write(LS.tabs, rows);
   if (activeId) {
     const a = tabs.find((x) => x.id === activeId && !x.incognito);
-    if (a) write(LS.active, a.url);
+    if (a && sanitizeForStore(a.url)) write(LS.active, a.url.split('#')[0]);
   }
 }
 
@@ -412,6 +457,7 @@ function paint() {
     // the "ambiguous screen" bug — while a page from THIS origin must never
     // get allow-same-origin, or its scripts could walk into Bear Tool's
     // localStorage.
+    el.frame.removeAttribute('srcdoc');
     el.frame.setAttribute('sandbox', sandboxFor(t.url));
     el.frame.src = t.url;
     el.loading.hidden = false;
@@ -424,10 +470,26 @@ function paint() {
   paintSecure(v);
   el.back.disabled = t.i <= 0;
   el.fwd.disabled = t.i >= t.hist.length - 1;
-  const connected = window.__bearSites?.some((s) => s.origin === originOf(t.url));
+  const origin = originOf(t.url);
+  const injected = !!window.__bearSites?.some((s) => s.origin === origin);
+  // The same bar covers BOTH paths to a connected site: an injected provider
+  // (proxied mode / same-origin page) and a WalletConnect session. It used to
+  // read only __bearSites, so a WC pair — the one path a cross-origin site
+  // ever had — was invisible here, and the hint that explains pairing was
+  // never shown at all (no code path ever un-hid it).
+  const wc = wcOrigins.has(origin);
+  const connected = injected || wc;
   el.connect.hidden = !connected;
-  el.connect.textContent = connected ? '🔗 Connected' : '';
-  el.connect.title = connected ? 'This site can reach the wallet — disconnect' : '';
+  el.connect.textContent = connected ? (injected ? '🔗 Connected' : '🔗 WalletConnect') : '';
+  el.connect.title = connected ? 'This site is connected — disconnect' : '';
+  // The honest instruction, at the moment it applies: a loaded cross-origin
+  // page whose own Connect button cannot see the wallet. Hidden when already
+  // connected, when the user dismissed it (persisted), or for our own origin.
+  if (el.wcHint) {
+    const sameOrigin = origin === location.origin.toLowerCase();
+    el.wcHint.hidden = sameOrigin || connected || read(LS.wcHint) === 'dismissed' || !/^https?:/i.test(t.url);
+  }
+  refreshWcState();
 }
 
 const originOf = (u) => { try { return new URL(u).origin.toLowerCase(); } catch { return ''; } };
@@ -577,11 +639,28 @@ function navigate(rawUrl, name) {
 
   const url = verdict.url;
 
-  // A pasted seed phrase must never be navigated to, and never be stored.
-  const sec = isSecretishUrl(url);
+  // A pasted seed phrase must never be navigated to — but what actually
+  // leaves the device is only the part before the fragment, so an
+  // #id_token=… OAuth callback loads (the token stays on device) while a
+  // secret in the query or path is refused before any request goes out.
+  const sec = isSecretishUrl(transmittedPart(url));
   if (sec.secret) {
     toast('Refused: ' + sec.why + '. This address is not opened and not saved.', 'error');
     return false;
+  }
+
+  // X-Frame-Options / frame-ancestors 'self' cannot be worked around by any
+  // web page — framing one of these anyway gives a silent blank frame, which
+  // is exactly the report of "some URLs do not open" (Uniswap: frame-ancestors
+  // 'self', live check 2026-10-09). The curated list already knows who does
+  // this (frameable:false): those route to the notice sheet whose button opens
+  // a REAL browser tab — the site renders as itself, and it connects back over
+  // WalletConnect (the pair sheet auto-reads the wc: URI from the clipboard).
+  const framedOut = catalog.find((d) => d.frameable === false
+    && (d.url === url || baseHost(d.url) === baseHost(url)));
+  if (framedOut) {
+    return !!openExternalNotice(url, framedOut.name,
+      'This site sends a clickjacking protection header, so no in-app frame can embed it. It opens in your real browser instead — pair it back with WalletConnect.');
   }
 
   const v = inspectUrl(url, catalog, securityOpts());
@@ -782,16 +861,26 @@ function fwd() {
 }
 
 function isBookmarked(url) {
-  return read(LS.bookmarks, []).some((b) => b.url === url);
+  // Compare the way toggleBookmark stores: a hash-routed URL in memory and
+  // its stripped twin on disk are the same page.
+  const u = sanitizeForStore(url) || String(url || '');
+  return read(LS.bookmarks, []).some((b) => b.url === u);
 }
 
 function toggleBookmark() {
   const t = active();
   if (!t?.url) return;
+  // Bookmarks hit disk, so they meet the same gate as history: an address
+  // carrying a secret is shown, loaded and restored — but never written.
+  const safe = sanitizeForStore(t.url);
+  if (!safe) {
+    toast("That address carries a secret — it can't be bookmarked.", 'error');
+    return;
+  }
   const list = read(LS.bookmarks, []);
-  const i = list.findIndex((b) => b.url === t.url);
+  const i = list.findIndex((b) => b.url === safe);
   if (i >= 0) list.splice(i, 1);
-  else list.push({ url: t.url, name: t.name || baseHost(t.url) });
+  else list.push({ url: safe, name: t.name || baseHost(safe) });
   write(LS.bookmarks, list);
   toast(i >= 0 ? 'Bookmark removed' : 'Bookmarked', 'info');
   paint();
@@ -1050,7 +1139,15 @@ function wire() {
   el.connect.addEventListener('click', () => {
     const t = active();
     if (!t?.url) return;
-    window.__bearDisconnectSite?.(originOf(t.url));
+    const origin = originOf(t.url);
+    if (window.__bearSites?.some((s) => s.origin === origin)) {
+      window.__bearDisconnectSite?.(origin);
+      return;
+    }
+    import('./walletconnect.js')
+      .then((m) => m.disconnectWcOrigin?.(origin))
+      .then((ok) => { if (ok) toast('Disconnected ' + origin, 'info'); refreshWcState(); })
+      .catch(() => { /* kit not awake — nothing to disconnect */ });
   });
 
   el.url.addEventListener('keydown', (e) => {
@@ -1165,6 +1262,14 @@ export function initDappBrowser(cfg = {}) {
 }
 
 export function openDappBrowser(url, name) {
+  // Native build (Capacitor): dApps open in the BearDappBrowser WebView — a
+  // full-page top-level navigation with the provider injected (MetaMask
+  // model). The iframe overlay below is the WEB fallback, where
+  // frame-ancestors cannot be worked around from script.
+  if (isNativeDappBrowser()) {
+    if (url) import('./native-dapp.js').then((m) => m.openNativeDapp(url)).catch(() => {});
+    return { navigate: () => false, close: () => {} };
+  }
   if (!overlay) build();
   overlay.hidden = false;
   // Land the cursor in the address bar, which is what a browser does when one opens

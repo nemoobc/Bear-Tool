@@ -1,8 +1,12 @@
 // The guard that decides whether a pasted address may be opened at all.
 //
-// It is not a "do not save to history" hint: dapp-browser.js REFUSES to navigate
-// when this returns secret. That makes two things matter equally — it must
-// catch key material, and it must not block ordinary URLs.
+// It is not a "do not save to history" hint: dapp-browser.js REFUSES to
+// navigate when the TRANSMITTED part (scheme, host, path, query) returns
+// secret — that request would hand the key to the server. A fragment never
+// reaches the server, so a #id_token=… callback loads, and persistence then
+// drops it (saveSession/rememberHistory/bookmarks all gate on this function).
+// That makes two things matter equally — it must catch key material, and it
+// must not block ordinary URLs.
 //
 // Both halves were wrong before this file existed:
 //   - a private key after '#' slipped through, because '#' was missing from the
@@ -15,7 +19,7 @@
 //     actually produces.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSecretishUrl } from '../js/security.js';
+import { isSecretishUrl, transmittedPart } from '../js/security.js';
 
 const P12 = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const P15 = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
@@ -99,4 +103,30 @@ test('a refusal always explains itself', () => {
   const r = isSecretishUrl('https://x.com/?s=' + enc(P12));
   assert.equal(r.secret, true);
   assert.ok(r.why && r.why.length > 20, 'a refusal with no reason is indistinguishable from a bug');
+});
+
+test('a secret-parameter refusal names the parameter, not the separator', () => {
+  // Seen live: the message said `("?")` — group 1 was the [?&#] boundary, so
+  // the user was told the question mark was the secret. Name it instead.
+  for (const u of ['https://x.com/?password=hunter2', 'https://x.com/#access_token=abc', 'https://x.com/?a=1&api_key=k']) {
+    const r = isSecretishUrl(u);
+    assert.equal(r.secret, true, u);
+    const m = /parameter \("([^"]+)"\)/.exec(r.why);
+    assert.ok(m, `why must quote a name: ${r.why}`);
+    assert.notEqual(m[1], '?', 'the separator is not a parameter name');
+    assert.ok(/[a-z0-9_]/i.test(m[1]) && m[1] !== '=', `expected a real name, got "${m[1]}"`);
+  }
+});
+
+test('only the transmitted part blocks navigation; the fragment loads', () => {
+  // Browsers never send a "#". Everything before it goes to the server —
+  // that half must be clean — and everything after it stays on the device,
+  // which is exactly why OAuth puts its tokens there.
+  assert.equal(transmittedPart('https://x.com/#id_token=abc'), 'https://x.com/');
+  assert.equal(isSecretishUrl(transmittedPart('https://x.com/#id_token=abc')).secret, false,
+    'a fragment callback loads — the token never leaves the device');
+  assert.equal(isSecretishUrl(transmittedPart('https://x.com/?password=hunter2#x')).secret, true,
+    'a secret in the query is transmitted and still refuses');
+  assert.equal(isSecretishUrl(transmittedPart('https://x.com/' + 'ab'.repeat(32))).secret, true,
+    'a bare key in the path is transmitted and still refuses');
 });

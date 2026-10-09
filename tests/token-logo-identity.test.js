@@ -92,3 +92,24 @@ test('the generated mark is still used when nothing is cached', () => {
   assert.match(html, /<svg/, 'an uncached token falls back to the generated mark');
   assert.doesNotMatch(html, /<img/, 'and to nothing fetched from the network');
 });
+
+// ── the hole the deployed-token report fell through (2026-10-08) ──────────
+// The cache was addressed correctly, but an UNCACHED contract still fell to
+// markSvg(), which dresses any ticker in its hand-tuned brand: a token you
+// deploy named "USDC" rendered Circle's $ disc on sight, no network needed.
+test('an uncached contract token never wears the hand-tuned brand for its ticker', () => {
+  store.clear();
+  const html = tokenLogoHTML('USDC', 32, { address: FAKE_USDC });
+  assert.match(html, /<svg/, 'the counterfeit contract falls back to a generated mark');
+  assert.doesNotMatch(html, /2775CA/, 'the USDC brand gradient is the real project\'s identity, not any ticker\'s');
+  const native = tokenLogoHTML('USDC', 32); // no address: native identity IS the ticker
+  assert.match(native, /2775CA/, 'a native coin still wears its hand-tuned mark');
+});
+
+test('a dead remote image falls back to the non-branded disc for a contract', () => {
+  store.clear();
+  cacheLogo(logoKeyFor({ address: FAKE_USDC, symbol: 'LINK' }), 'https://example.test/dead.png');
+  const html = tokenLogoHTML('LINK', 32, { address: FAKE_USDC });
+  assert.match(html, /data-mark-contract="1"/, 'the renderer tells the guard this mark belongs to a contract');
+  assert.match(html, /data-mark-fallback="LINK"/, 'and which ticker the generated fallback should draw');
+});

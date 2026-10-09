@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import {
   fetchAllPrices,
   getPriceFromCache,
-  clearPriceCache
+  clearPriceCache,
+  resetCgCooldown
 } from '../js/price.js';
 
 // Minimal localStorage shim (Node has none without --experimental-webstorage).
@@ -38,6 +39,10 @@ function installFetch(routes) {
 beforeEach(() => {
   lsStore.clear();
   clearPriceCache();
+  // The endpoint cooldown is now real state (persisted across reloads, like
+  // the logo miss memory) — a network-failure case in one test must not
+  // silence CoinGecko for the next test in this file.
+  resetCgCooldown();
 });
 
 test('price: DexScreener empty token list falls back to search endpoint (same chain)', async () => {

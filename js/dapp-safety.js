@@ -79,13 +79,48 @@ function selfHost() {
  * Decide what the user typed.
  * @returns {{kind:'url'|'blocked'|'search', url?:string, reason?:string}}
  */
+/**
+ * A bare host with no scheme: `host[:port][/path][?query][#hash]`, no spaces.
+ * Returns the ready-to-load URL (scheme prefixed), or null when the string is
+ * not host-shaped at all.
+ *
+ * This must run BEFORE the scheme grammar below. `/^[a-z][a-z0-9+.-]*:/`
+ * matches "example.com:" and "localhost:" just as happily as "http:", so
+ * `localhost:3000` used to be answered with "Only http and https can be
+ * opened; localhost: is not allowed" — a dev URL blocked by the address bar —
+ * and `example.com/path?q=1` fell through to search and never loaded.
+ *
+ * Scheme choice matches the rest of this file: a hostname gets https, an IP
+ * literal or a loopback name gets http (LAN dev nodes serve no TLS).
+ */
+function bareHostUrl(s) {
+  if (!s || /\s/.test(s) || s.startsWith('/')) return null;
+  const m = s.match(/^(\[[0-9a-f:.]+\]|[0-9a-zÀ-￿][0-9a-zÀ-￿.-]*)(?::(\d{1,5}))?([/?#].*)?$/i);
+  if (!m) return null;
+  const host = m[1];
+  if (host.startsWith('[')) return 'http://' + s;                       // [::1], [fe80::1]
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return 'http://' + s;     // 1.2.3.4, 192.168.1.10:3000
+  if (/^(localhost|127\.0\.0\.1)$/i.test(host)) return 'http://' + s;
+  // A dotted name needs a letter somewhere: keeps "2.4"/"build3.1" out of
+  // the address bar while "v1.2", "münchen.de", "пример.рф" stay URLs.
+  if (host.includes('.') && /[a-zÀ-￿]/i.test(host)) return 'https://' + s;
+  return null;
+}
+
 export function classifyInput(input) {
   const s = (input || '').trim();
   if (!s) return { kind: 'search', reason: 'empty' };
 
+  // Bare host first — before any scheme can claim the token before a ':'.
+  const bare = bareHostUrl(s);
+  if (bare) return { kind: 'url', url: bare };
+
   // A scheme was written out. Trust the scheme, then vet it.
   const schemeMatch = s.match(/^([a-z][a-z0-9+.-]*):/i);
   if (schemeMatch) {
+    // A dot in the token before ':' means host-shaped, not a scheme
+    // ("example.com:banana") — search is honest, scheme-blocking is not.
+    if (schemeMatch[1].includes('.')) return { kind: 'search', url: s };
     const scheme = schemeMatch[1].toLowerCase() + ':';
     if (DEAD_SCHEMES.has(scheme)) {
       return { kind: 'blocked', reason: `The ${scheme} scheme can execute script or read local data, so it is never loaded.` };
@@ -95,16 +130,6 @@ export function classifyInput(input) {
     }
     if (!s.slice(scheme.length).trim()) return { kind: 'blocked', reason: 'No address after the scheme.' };
     return { kind: 'url', url: s };
-  }
-
-  // Bare hostname with a dot and no spaces — treat as a URL.
-  if (!/\s/.test(s) && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s)) {
-    return { kind: 'url', url: 'https://' + s };
-  }
-
-  // localhost / an IP, with an optional port and path.
-  if (!/\s/.test(s) && /^(localhost|127\.0\.0\.1|\[?::1\]?)(:\d+)?(\/.*)?$/i.test(s)) {
-    return { kind: 'url', url: 'http://' + s };
   }
 
   // Protocol-relative, e.g. //example.com — never typed on purpose, but cheap
@@ -227,11 +252,44 @@ export function inspectUrl(url, catalog = [], opts = {}) {
   // Homograph. The URL parser normalises an IDN host to punycode, so the raw
   // input has to be re-read to tell "typed a Cyrillic а" apart from "typed
   // xn--". Same attack, different spelling, so the label names which was seen.
-  const typedIdn = NON_ASCII_LETTER.test(url) || NON_ASCII_LETTER.test(label);
-  if (typedIdn) {
-    add('fail', 'Mixed-script host', 'The address was typed with non-Latin letters inside the domain name. That is how "аpple.com" — with a Cyrillic "а" — is spelled: visually identical, different site.');
-  } else if (host.includes('xn--')) {
+  //
+  // Mixing is judged PER LABEL. "münchen.de" mixes nothing — ü is Latin — and
+  // "пример.com" puts Cyrillic in one label and Latin in the next; neither
+  // pretends to be a word it is not. The attack is ONE label spelled two ways
+  // — "аpple" with a Cyrillic а inside Latin letters — so only that keeps the
+  // hard DANGER with no way past it. A host wholly in one foreign script gets
+  // the caution sheet with a named reason ("метамаск" imitating "metamask" is
+  // a reason a user can read and weigh): refusing every non-ASCII host would
+  // mean "all URLs" except those written in other languages.
+  const rawHost = String(url).replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split(/[/?#]/)[0].replace(/^[^/@]*@/, '');
+  const typedIdn = NON_ASCII_LETTER.test(rawHost);
+  const scriptOf = (ch) => {
+    const c = ch.codePointAt(0);
+    if (c < 0x80 || (c >= 0xc0 && c <= 0x24f) || (c >= 0x1e00 && c <= 0x1eff)) return 'latin';
+    if (c >= 0x400 && c <= 0x4ff) return 'cyrillic';
+    if (c >= 0x370 && c <= 0x3ff) return 'greek';
+    if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3040 && c <= 0x30ff) || (c >= 0xac00 && c <= 0xd7af)) return 'east-asian';
+    if (c >= 0x600 && c <= 0x6ff) return 'arabic';
+    if (c >= 0x590 && c <= 0x5ff) return 'hebrew';
+    if (c >= 0x900 && c <= 0x97f) return 'devanagari';
+    return 'other';
+  };
+  const labelMixed = (l) => {
+    const scripts = new Set();
+    for (const ch of String(l)) if (/\p{L}/u.test(ch)) scripts.add(scriptOf(ch));
+    return scripts.size > 1;
+  };
+  // Punycode the user TYPED hides its scripts — only the raw bytes can say so,
+  // and they say ASCII. That case keeps the old hard fail below.
+  const mixedLabel = !typedIdn && host.includes('xn--')
+    ? false
+    : rawHost.split('.').some(labelMixed);
+  if (mixedLabel) {
+    add('fail', 'Mixed-script host', 'One label mixes alphabets — that is how "аpple.com", with a Cyrillic "а", is spelled: visually identical, different site.');
+  } else if (!typedIdn && host.includes('xn--')) {
     add('fail', 'Punycode host', 'The hostname uses punycode (xn--), the usual written form of an IDN lookalike domain. A dApp you genuinely know will not need it.');
+  } else if (typedIdn) {
+    add('warn', 'Foreign-script host', 'The domain uses accented or non-Latin letters. Read it letter by letter: lookalike glyphs are how a known name gets faked.');
   }
 
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith('[')) {
