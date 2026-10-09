@@ -1,0 +1,100 @@
+name: Android Emulator Diag
+
+# Boot the debug APK on a headless emulator and read the TEMPORARY
+# diagnostic line (js/native-dapp.js diagNativeDapp → console.log) out of
+# logcat. Purpose: pin the "BearDappBrowser not implemented" root cause on a
+# real Android runtime WITHOUT a physical device — the line carries
+# build <sha>, Capacitor presence, Plugins.BearDappBrowser, isPluginAvailable
+# and a live back() ping.
+#
+# Local Termux cannot run an AVD (needs x86_64 + /dev/kvm) — CI ubuntu has
+# KVM. Manual trigger only (same economy rule as apk.yml: no build on push).
+on:
+  workflow_dispatch:
+
+jobs:
+  emulator:
+    name: Boot app on emulator, capture diag
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install platform android-36 + build-tools
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Rasterize bear assets (icon + splash)
+        run: node tools/make-assets.mjs
+
+      - name: Generate Android res from assets
+        run: npx @capacitor/assets generate --android --assetPath resources --iconBackgroundColor '#1a1a2e' --splashBackgroundColor '#1a1a2e'
+
+      - name: Build web bundle (dist/)
+        run: npm run build
+        env:
+          VITE_BUILD_SHA: ${{ github.sha }}
+
+      - name: Build www/ from dist and sync to the Android project
+        run: |
+          rm -rf www
+          mkdir -p www
+          cp -r dist/. www/
+          npx cap sync android
+
+      - name: Gradle assembleDebug
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install APK, boot app, capture logcat + screenshot
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-snapshot -no-window -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -n com.nemoobc.beartool/.MainActivity
+            # diagNativeDapp fires at boot; the WebView console reaches
+            # logcat via the chromium console channel.
+            sleep 30
+            adb exec-out screencap -p > emulator-boot.png
+            adb logcat -d > emulator-logcat.txt
+            echo "=== [dApp diag] line ==="
+            grep -a "\[dApp diag\]" emulator-logcat.txt || echo "DIAG_LINE_NOT_FOUND"
+            echo "=== crash? ==="
+            grep -a "FATAL\|AndroidRuntime" emulator-logcat.txt | head -20 || true
+
+      - name: Upload diag artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-diag
+          path: |
+            emulator-logcat.txt
+            emulator-boot.png
+          if-no-files-found: error
