@@ -9,6 +9,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -44,6 +46,7 @@ public class BearDappBrowserPlugin extends Plugin {
     private WebView dappView = null;
     private String providerScript = "";
     private ViewGroup parent = null;
+    private SwipeRefreshLayout refreshLayout = null;
 
     // MetaMask caps the page→native message (BackgroundBridge MAX_MESSAGE_LENGTH)
     // so a hostile page cannot flood the native side with an unbounded string.
@@ -102,6 +105,7 @@ public class BearDappBrowserPlugin extends Plugin {
                 if (js != null && !js.isEmpty() && isWebDocument(url)) {
                     view.evaluateJavascript(js, null);
                 }
+                if (refreshLayout != null) refreshLayout.setRefreshing(false); // pull-to-refresh spinner stops once the page lands
                 JSObject ev = new JSObject();
                 ev.put("event", "loadEnd");
                 ev.put("url", url);
@@ -118,11 +122,21 @@ public class BearDappBrowserPlugin extends Plugin {
                 notifyListeners("navigation", ev);
             }
         });
+        // Pull-to-refresh: a SwipeRefreshLayout wraps the WebView. It only lets a
+        // pull begin when the WebView is scrolled to the top (canChildScrollUp), so
+        // dragging down at the top of a dApp and releasing reloads the page — the
+        // standard wallet dApp-browser gesture (MetaMask/Trust).
+        refreshLayout = new SwipeRefreshLayout(getContext());
+        refreshLayout.setColorSchemeColors(0xFF7C4DFF, 0xFF448AFF, 0xFF18FFFF);
+        refreshLayout.setOnRefreshListener(() -> {
+            if (dappView != null) dappView.reload();
+        });
+        refreshLayout.addView(dappView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         parent = (ViewGroup) getBridge().getWebView().getParent();
         if (parent != null) {
-            parent.addView(dappView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            parent.addView(refreshLayout, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
-        dappView.setVisibility(View.GONE);
+        refreshLayout.setVisibility(View.GONE);
     }
 
     @PluginMethod
@@ -137,11 +151,12 @@ public class BearDappBrowserPlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             try {
                 if (dappView == null) createView();
-                if (parent != null && dappView.getParent() == null) {
-                    parent.addView(dappView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                if (parent != null && refreshLayout.getParent() == null) {
+                    parent.addView(refreshLayout, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
                 }
+                refreshLayout.setVisibility(View.VISIBLE);
+                refreshLayout.bringToFront();
                 dappView.setVisibility(View.VISIBLE);
-                dappView.bringToFront();
                 dappView.loadUrl(url);
                 JSObject ret = new JSObject();
                 ret.put("ok", true);
@@ -157,7 +172,10 @@ public class BearDappBrowserPlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             if (dappView != null) {
                 dappView.stopLoading();
-                dappView.setVisibility(View.GONE);
+                if (refreshLayout != null) {
+                    refreshLayout.setRefreshing(false);
+                    refreshLayout.setVisibility(View.GONE);
+                }
                 dappView.loadUrl("about:blank");
             }
             call.resolve();
@@ -173,7 +191,7 @@ public class BearDappBrowserPlugin extends Plugin {
                 dappView.goBack();
                 ret.put("handled", true);
             } else {
-                if (dappView != null) dappView.setVisibility(View.GONE);
+                if (refreshLayout != null) refreshLayout.setVisibility(View.GONE);
                 ret.put("handled", false);
             }
             call.resolve(ret);

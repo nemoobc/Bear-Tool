@@ -131,6 +131,27 @@ test('Android plugin carries the full transport contract', () => {
   assert.match(src, /isWebDocument\(url\)/, 'provider injection gated to web documents (no PDF/XML)');
 });
 
+test('MainActivity registers the plugin BEFORE super.onCreate (or the bridge never sees it)', () => {
+  let ma = readFileSync(join(root, 'android/app/src/main/java/com/nemoobc/beartool/MainActivity.java'), 'utf8');
+  ma = ma.replace(/\/\/.*$/gm, ''); // strip line comments so prose can't shadow the real call
+  const iReg = ma.indexOf('registerPlugin(BearDappBrowserPlugin.class)');
+  const iSuper = ma.indexOf('super.onCreate(');
+  assert.ok(iReg > -1, 'MainActivity must registerPlugin(BearDappBrowserPlugin.class)');
+  assert.ok(iSuper > -1, 'MainActivity must call super.onCreate');
+  assert.ok(iReg < iSuper,
+    'registerPlugin must run BEFORE super.onCreate — the bridge is built inside it (BridgeActivity.load→create); after it, staging a plugin has no effect');
+});
+
+test('native dApp browser has pull-to-refresh (SwipeRefreshLayout wraps the WebView)', () => {
+  const src = readFileSync(join(root, 'android/app/src/main/java/com/nemoobc/beartool/BearDappBrowserPlugin.java'), 'utf8');
+  assert.match(src, /SwipeRefreshLayout/, 'SwipeRefreshLayout used');
+  assert.match(src, /setOnRefreshListener/, 'a pull registers a refresh listener');
+  assert.match(src, /dappView\.reload\(\)/, 'releasing the pull reloads the current page');
+  assert.match(src, /setRefreshing\(false\)/, 'spinner stops when the page finishes');
+  const gradle = readFileSync(join(root, 'android/app/build.gradle'), 'utf8');
+  assert.match(gradle, /androidx\.swiperefreshlayout:swiperefreshlayout/, 'SwipeRefreshLayout dependency declared');
+});
+
 test('native routing wins BEFORE the iframe machinery in both browser entries', () => {
   const dbr = readFileSync(join(root, 'js/dapp-browser.js'), 'utf8');
   const iGuard = dbr.indexOf('isNativeDappBrowser())');
