@@ -80,14 +80,18 @@ jobs:
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -n com.nemoobc.beartool/.MainActivity
             # diagNativeDapp fires at boot; the WebView console reaches
-            # logcat via the chromium console channel.
+            # logcat via the chromium console channel. Logcat FIRST — a
+            # flaky screencap once aborted the whole script before it
+            # (adb exec-out "error: closed", 2026-10-10) and cost the run.
             sleep 30
-            adb exec-out screencap -p > emulator-boot.png
             adb logcat -d > emulator-logcat.txt
             echo "=== [dApp diag] line ==="
             grep -a "\[dApp diag\]" emulator-logcat.txt || echo "DIAG_LINE_NOT_FOUND"
             echo "=== crash? ==="
             grep -a "FATAL\|AndroidRuntime" emulator-logcat.txt | head -20 || true
+            adb shell screencap -p /sdcard/emulator-boot.png \
+              && adb pull /sdcard/emulator-boot.png emulator-boot.png \
+              || echo "screencap failed (logcat is already safe)"
 
       - name: Upload diag artifacts
         if: always()
