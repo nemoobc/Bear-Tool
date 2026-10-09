@@ -51,6 +51,10 @@ jobs:
 
       - name: Build web bundle (dist/)
         run: npm run build
+        env:
+          # Baked into the bundle so a device screenshot names its own build
+          # (js/native-dapp.js diag toast shows build <sha>).
+          VITE_BUILD_SHA: ${{ github.sha }}
 
       - name: Build www/ from dist and sync to the Android project
         run: |

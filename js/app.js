@@ -561,20 +561,46 @@ function initScrollTopFab() {
   const fab = $('#scrollTopFab');
   if (!fab) return;
   let queued = false;
+  // This layout scrolls <body>, not html: the `overflow-x: hidden` on
+  // html,body severs the viewport overflow propagation, so window.scrollY
+  // stays 0 forever — with the old scrollY read the FAB NEVER appeared
+  // (live proof 2026-10-09: body.scrollTop=333 while window.scrollY=0).
+  // The window scroll event still fires (event propagates; only the number
+  // is dead), so one listener + a read of every possible scroller.
+  const pos = () => Math.max(
+    window.scrollY || 0,
+    (document.scrollingElement && document.scrollingElement.scrollTop) || 0,
+    (document.body && document.body.scrollTop) || 0,
+  );
   const sync = () => {
     queued = false;
-    const show = window.scrollY > 400;
+    const show = pos() > 400;
     fab.classList.toggle('show', show);
     fab.setAttribute('aria-hidden', show ? 'false' : 'true');
     fab.tabIndex = show ? 0 : -1;
   };
-  window.addEventListener('scroll', () => {
+  const onScroll = () => {
     if (queued) return;
     queued = true;
     requestAnimationFrame(sync);
-  }, { passive: true });
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  // The scroll event does not bubble, and in this layout the BODY is the
+  // scroller — a window-level listener alone never fires (proven 2026-10-09:
+  // the manual window dispatch worked, the real body scroll went unheard).
+  // Listen on every candidate scroller; each only hears its own events.
+  if (document.body) document.body.addEventListener('scroll', onScroll, { passive: true });
+  const se = document.scrollingElement;
+  if (se && se !== document.body) se.addEventListener('scroll', onScroll, { passive: true });
   fab.addEventListener('click', () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // window.scrollTo({top:0}) is a no-op while the body holds the scroll
+    // (html cannot scroll) — scroll BOTH candidate scrollers, each one
+    // ignoring the call it does not own. Live-probed: body.scrollTo smooth
+    // lands body.scrollTop back on 0.
+    const opts = { top: 0, behavior: 'smooth' };
+    const de = document.scrollingElement || document.documentElement;
+    if (de && typeof de.scrollTo === 'function') de.scrollTo(opts);
+    if (document.body && typeof document.body.scrollTo === 'function') document.body.scrollTo(opts);
   });
   sync();
 }

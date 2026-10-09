@@ -53,10 +53,51 @@ async function ensurePlugin() {
   return plugin;
 }
 
-/** Native mode: open the dApp as a full-page WebView (top-level navigation). */
+/** Native mode: open the dApp as a full-page WebView (top-level navigation).
+ *  TEMPORARY (diagnostic build): a silent catch hid the "not implemented"
+ *  root cause behind a blank tap — every failure now surfaces verbatim. */
 export async function openNativeDapp(url) {
-  const p = await ensurePlugin();
-  await p.open({ url, providerScript: NATIVE_PROVIDER_SCRIPT });
+  try {
+    const p = await ensurePlugin();
+    await p.open({ url, providerScript: NATIVE_PROVIDER_SCRIPT });
+  } catch (e) {
+    const msg = '[dApp] open failed: ' + (e && e.message ? e.message : String(e));
+    console.error(msg, e);
+    toast(msg, 'error');
+    throw e;
+  }
+}
+
+/** TEMPORARY diagnostic — remove once the "not implemented" root cause is
+ *  pinned. One screenshot must carry the whole chain: which build is on the
+ *  device, whether the bridge knows the plugin, and whether a native method
+ *  actually answers. back() resolves unconditionally in the Java plugin, so a
+ *  clean ping = the plugin is registered and callable. */
+async function diagNativeDapp() {
+  try {
+    const c = window.Capacitor;
+    const sha = (import.meta.env && import.meta.env.VITE_BUILD_SHA) || 'local';
+    const known = !!(c && c.Plugins && c.Plugins.BearDappBrowser);
+    const avail = typeof (c && c.isPluginAvailable) === 'function'
+      ? String(c.isPluginAvailable('BearDappBrowser')) : 'n/a';
+    let ping;
+    try {
+      const p = await ensurePlugin();
+      const r = await Promise.race([
+        p.back({}),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout 2500ms')), 2500)),
+      ]);
+      ping = 'OK ' + JSON.stringify(r);
+    } catch (e) {
+      ping = 'ERR ' + (e && e.message ? e.message : String(e));
+    }
+    const line = `[dApp diag] build ${String(sha).slice(0, 8)} | cap=${!!c} `
+      + `| Plugins.BearDappBrowser=${known} | isPluginAvailable=${avail} | ping.back=${ping}`;
+    console.log(line);
+    toast(line, ping.startsWith('OK') ? 'info' : 'error');
+  } catch (e) {
+    console.warn('[dApp diag] crashed:', e);
+  }
 }
 
 /**
@@ -66,6 +107,7 @@ export async function openNativeDapp(url) {
  */
 export function initNativeDappRpc() {
   if (!isNativeDappBrowser()) return Promise.resolve(false);
+  diagNativeDapp(); // TEMPORARY diagnostic build — see diagNativeDapp()
   return ensurePlugin()
     .then((p) => {
       p.addListener('rpcRequest', (ev) => {

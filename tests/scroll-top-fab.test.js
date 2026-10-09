@@ -48,11 +48,21 @@ test('boot binds the FAB: rAF-throttled scroll, smooth scroll home', () => {
   assert.match(app, /try \{ initScrollTopFab\(\); \} catch/,
     'boot calls it inside the non-stranding try/catch row');
   const fn = app.slice(app.indexOf('function initScrollTopFab'), app.indexOf('function switchView'));
-  assert.match(fn, /window\.scrollY > 400/, 'shows past the fold, not at 0');
+  // This layout scrolls <body>: window.scrollY stays 0, so a scrollY-only
+  // read left the FAB invisible forever (live-proved 2026-10-09).
+  assert.match(fn, /const pos = \(\) => Math\.max\(/,
+    'position must aggregate every possible scroller');
+  assert.match(fn, /document\.body\.scrollTop\)[\s]*\|\| 0/,
+    'body.scrollTop — the scroller that actually moves here — is read');
+  assert.match(fn, /const show = pos\(\) > 400/, 'shows past the fold, not at 0');
   assert.match(fn, /requestAnimationFrame\(sync\)/, 'scroll handler is rAF-throttled');
   assert.match(fn, /fab\.setAttribute\('aria-hidden', show \? 'false' : 'true'\)/,
     'hidden state tracks visibility');
   assert.match(fn, /fab\.tabIndex = show \? 0 : -1/, 'focusable exactly when visible');
-  assert.match(fn, /scrollTo\(\{ top: 0, behavior: 'smooth' \}\)/, 'click = smooth scroll to top');
+  assert.match(fn, /document\.body\.scrollTo\(opts\)/,
+    'click scrolls the body-scroller home — window.scrollTo is a no-op here');
+  assert.match(fn, /de\.scrollTo\(opts\)/, 'the html scroller path stays covered too');
   assert.match(fn, /\{ passive: true \}/, 'scroll listener never blocks scrolling');
+  assert.match(fn, /document\.body\.addEventListener\('scroll', onScroll/,
+    'scroll does not bubble and body IS the scroller here — window alone never fires');
 });

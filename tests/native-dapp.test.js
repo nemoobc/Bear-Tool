@@ -174,3 +174,19 @@ test('native RPC glue refuses to sign while locked and falls back honestly', () 
   assert.match(src, /User rejected the request/, 'user rejection is a proper EIP-1193 error');
   assert.doesNotMatch(src, /isMetaMask: true/, 'the glue must never claim to be MetaMask');
 });
+
+// TEMPORARY diagnostic build (remove once the "not implemented" root cause is
+// pinned on device) — pin the instrumentation so it cannot be lost silently,
+// and so removing it later is a deliberate, visible act.
+test('diagnostic build: open failures surface verbatim + plugin ping at boot', () => {
+  const src = readFileSync(join(root, 'js/native-dapp.js'), 'utf8');
+  assert.match(src, /open failed: /,
+    'openNativeDapp toasts the exact failure — the old silent catch hid the root cause');
+  assert.match(src, /diagNativeDapp\(\); \/\/ TEMPORARY/,
+    'boot runs the bridge-state diagnostic on native');
+  assert.match(src, /ping\.back=/, 'the diagnostic reports the native ping result');
+  assert.match(src, /ping timeout 2500ms/, 'a hung bridge is reported, not hung forever');
+  const apk = readFileSync(join(root, '.github/workflows/apk.yml'), 'utf8');
+  assert.match(apk, /VITE_BUILD_SHA: \$\{\{ github\.sha \}\}/,
+    'the CI build stamps its own commit into the bundle so a screenshot names the build');
+});
