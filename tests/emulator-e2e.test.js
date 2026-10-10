@@ -141,8 +141,8 @@ test('the workflow serves the dApp fixture to the emulator and keeps its server 
   // The fixture must be reachable from the emulator over PLAIN http: a second
   // WebView does not trust Capacitor's local-server certificate, so
   // https://localhost would die at net::ERR_CERT before the first assertion.
-  assert.match(wfRaw, /python3 -m http\.server 8080 --directory dist/,
-    'server fixture wajib ada, port 8080, menyajikan dist yang baru dibangun');
+  assert.match(wfRaw, /python3 -u -m http\.server 8080 --directory dist/,
+    'server fixture wajib ada (-u, tanpa buffering), port 8080, menyajikan dist yang baru dibangun');
   // Same origin the driver opens — port drift = the journey dies at CDP attach.
   assert.match(driverSrc, /http:\/\/10\.0\.2\.2:8080\/dapp-rpc-fixture\.html/,
     'driver wajib membuka URL yang persis disajikan workflow (10.0.2.2 = host dari emulator)');

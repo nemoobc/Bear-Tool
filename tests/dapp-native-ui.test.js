@@ -72,3 +72,29 @@ test('the fixture page can never hang the journey — every request races a dead
   assert.match(fixture, /done=(?:'|\+ ?'?)?ok|done', 'ok'/, 'penanda selesai ada');
   assert.match(fixture, /bear-rpc-fixture/, 'judul = identitas target CDP yang dicari driver');
 });
+
+test('cleartext is a DEBUG-only door — the fixture loads, production stays blocked', () => {
+  const debugManifest = readFileSync(path.join(here, '..', 'android', 'app', 'src', 'debug', 'AndroidManifest.xml'), 'utf8');
+  const mainManifest = readFileSync(path.join(here, '..', 'android', 'app', 'src', 'main', 'AndroidManifest.xml'), 'utf8');
+  // Run 38031909581 (2026-10-10): targetSdk 28+ refuses http://10.0.2.2 —
+  // loadStart+loadEnd in the SAME millisecond, zero bytes reached the
+  // server, and the journey died waiting for a confirm that could never be
+  // asked. The fixture needs plain http (a second WebView does not trust
+  // Capacitor's local certificate) — so the door opens in src/debug only.
+  assert.match(debugManifest, /android:usesCleartextTraffic="true"/,
+    'manifest debug wajib buka cleartext — tanpanya fixture tak pernah termuat');
+  assert.doesNotMatch(mainManifest, /usesCleartextTraffic/,
+    'produksi wajib TETAP memblokir cleartext — dapp nyata = https, pintu tes tak boleh ikut terbangun');
+});
+
+test('the fixture server log cannot hide behind buffering, and native failures get a real screen', () => {
+  const driverSrc = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const wfRaw = readFileSync(path.join(here, '..', '.github', 'workflows', 'emulator.yml'), 'utf8');
+  assert.match(wfRaw, /python3 -u -m http\.server/,
+    '-u wajib: banner & baris akses kebuffer = http-server.log kosong saat diagnosis (run 38031909581)');
+  // A CDP screenshot only ever shows the wallet's DOM — the overlay, the
+  // toolbar and a stuck native load live outside every page target.
+  assert.match(driverSrc, /shotScreen\('99-failure-screen'\)/,
+    'jalur gagal wajib menangkap layar UTUH via adb — 99-failure.png CDP memperlihatkan dashboard tenang saat dapp WebView macet');
+});

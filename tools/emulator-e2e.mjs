@@ -446,6 +446,12 @@ async function main() {
     // The stuck screen is the diagnosis — capture it before the error message
     // (device may already be gone; best effort, never masks the real error).
     await page.shot('99-failure').catch(() => {});
+    // The CDP shot above shows only the wallet's DOM — the native overlay
+    // (dapp view, toolbar, stuck modal) lives OUTSIDE every page target, so
+    // a native failure needs the real screen to be diagnosable at all
+    // (run 38031909581: 99-failure.png showed a calm dashboard while the
+    // dapp WebView sat there with a failed load).
+    await shotScreen('99-failure-screen').catch(() => {});
     throw e;
   }
 }

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only (gradle source set src/debug — CI's assembleDebug and
+  every local `./gradlew assembleDebug`; release builds never see it).
+
+  The E2E dApp fixture is served over plain http from the CI host
+  (http://10.0.2.2:8080): Capacitor's local server uses a certificate the
+  SECOND WebView does not trust, so https://localhost dies at the cert and
+  any other https hop would need a public host. Android 9+ (targetSdk 28+)
+  blocks cleartext by default, and run 38031909581 (2026-10-10) proved the
+  block: loadStart + loadEnd in the same millisecond, zero bytes reached
+  http-server.log, no modal ever appeared, and the journey died at
+  "timeout waiting for #confirmYes".
+
+  Production keeps cleartext BLOCKED on purpose: real dApps are https, and
+  weakening the shipped transport to suit a test harness would be the wrong
+  trade. If a fixture ever has to run on a release build, give it a real
+  certificate instead of flipping this flag.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:usesCleartextTraffic="true" />
+</manifest>

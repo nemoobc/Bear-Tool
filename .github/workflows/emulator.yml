@@ -97,7 +97,7 @@ jobs:
             adb devices -l > emulator-devices-boot.txt 2>&1 || true
             df -h > disk-usage.txt 2>&1 || true
             ( for i in $(seq 1 30); do echo "$(date -Is) adb=[$(adb devices 2>/dev/null | tr "\n" " ")qemu=$(pgrep -fc qemu 2>/dev/null) app=$(adb shell pidof com.nemoobc.beartool 2>/dev/null | tr -d "\r")"; sleep 10; done ) > emulator-heartbeat.txt 2>&1 &
-            python3 -m http.server 8080 --directory dist > http-server.log 2>&1 &
+            python3 -u -m http.server 8080 --directory dist > http-server.log 2>&1 &
             timeout 480 env E2E_OUT=emulator-artifacts node tools/emulator-e2e.mjs > e2e-stdout.log 2>&1 || echo E2E_FAILED_RC=$?
             cat e2e-stdout.log || true
             echo "=== crash / fatal ==="
