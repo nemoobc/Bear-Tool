@@ -33,11 +33,16 @@ test('the swap test resolves its stablecoin through the helper, not by hand', ()
 });
 
 test('every mainnet in the token table yields a stable through knownStable()', () => {
-  // The exact set, not a minimum. Seven networks carry known tokens and five are
-  // testnets with none; a count of "at least N" would keep passing after a network
-  // was dropped, which is the failure this detector exists to catch. Listing them
-  // makes a drop visible as a diff.
-  const expected = ['ethereum', 'bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'sepolia'];
+  // The exact set, not a minimum. Seventeen networks carry known tokens and
+  // six are testnets with none (plus blast, a mainnet whose only dollar token
+  // is USDB — a null row, not a missing one); a count of "at least N" would
+  // keep passing after a network was dropped, which is the failure this
+  // detector exists to catch. Listing them makes a drop visible as a diff.
+  const expected = [
+    'ethereum', 'bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'sepolia',
+    'avalanche', 'gnosis', 'celo', 'sonic', 'linea', 'scroll', 'mantle',
+    'zksync', 'unichain', 'worldchain'
+  ];
   assert.deepEqual([...MAINNETS_WITH_TOKENS].sort(), [...expected].sort(),
     'jaringan yang punya token berubah — tabel atau daftarnya harus diperbarui dua-duanya');
   for (const name of MAINNETS_WITH_TOKENS) {

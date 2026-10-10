@@ -68,7 +68,26 @@ export const FORK_NETWORKS = {
   'arbitrum-sepolia': { chainId: 421614, rpc: 'https://sepolia-rollup.arbitrum.io/rpc',      type: 'testnet' },
   'optimism-sepolia': { chainId: 11155420, rpc: 'https://sepolia.optimism.io',               type: 'testnet' },
   'base-sepolia':     { chainId: 84532, rpc: 'https://sepolia.base.org',                     type: 'testnet' },
-  'bsc-testnet':      { chainId: 97,    rpc: 'https://data-seed-prebsc-1-s1.binance.org:8545', type: 'testnet' }
+  'bsc-testnet':      { chainId: 97,    rpc: 'https://data-seed-prebsc-1-s1.binance.org:8545', type: 'testnet' },
+  // 2026-10-10: the remaining 11 mainnets, so the fork matrix covers every
+  // chain the app ships (17 mainnet + 6 testnet). Every endpoint answered
+  // eth_chainId with the right id the same day (probe: 11/11); the address
+  // tables below were probed with eth_getCode + symbol() after — three rounds
+  // of remembered addresses came back with the WRONG contract (one character
+  // off on gnosis WETH, a non-existent linea/mantle trio), which is why every
+  // row here was read from the app's own probe-verified POPULAR_TOKENS
+  // (docs/research/bridge-tokens-2026-10-05.md) and re-probed before landing.
+  avalanche:   { chainId: 43114, rpc: 'https://api.avax.network/ext/bc/C/rpc',             type: 'mainnet' },
+  gnosis:      { chainId: 100,   rpc: 'https://rpc.gnosischain.com',                        type: 'mainnet' },
+  celo:        { chainId: 42220, rpc: 'https://forno.celo.org',                             type: 'mainnet' },
+  sonic:       { chainId: 146,   rpc: 'https://rpc.soniclabs.com',                          type: 'mainnet' },
+  linea:       { chainId: 59144, rpc: 'https://rpc.linea.build',                            type: 'mainnet' },
+  scroll:      { chainId: 534352, rpc: 'https://rpc.scroll.io',                             type: 'mainnet' },
+  blast:       { chainId: 81457, rpc: 'https://rpc.blast.io',                               type: 'mainnet' },
+  mantle:      { chainId: 5000,  rpc: 'https://rpc.mantle.xyz',                             type: 'mainnet' },
+  zksync:      { chainId: 324,   rpc: 'https://mainnet.era.zksync.io',                      type: 'mainnet' },
+  unichain:    { chainId: 130,   rpc: 'https://mainnet.unichain.org',                       type: 'mainnet' },
+  worldchain:  { chainId: 480,   rpc: 'https://worldchain-mainnet.g.alchemy.com/public',    type: 'mainnet' }
 };
 
 export const NETWORK_NAMES = Object.keys(FORK_NETWORKS);
@@ -750,7 +769,29 @@ export const KNOWN_TOKENS = {
   'arbitrum-sepolia': { weth: null, usdc: null },
   'optimism-sepolia': { weth: null, usdc: null },
   'base-sepolia': { weth: null, usdc: null },
-  'bsc-testnet': { weth: null, usdc: null }
+  'bsc-testnet': { weth: null, usdc: null },
+  // 2026-10-10 — the other 11 mainnets. Every address below was probed on
+  // chain TODAY (eth_getCode != 0x AND symbol() returns the expected string)
+  // against the chain's own public RPC: 13/13, including the wrapped-native
+  // row for avalanche (WAVAX, not the bridged WETH.e). The first attempt
+  // failed 8/13 because the addresses came from memory — three of them were
+  // one character off and four did not exist at all — so these rows were
+  // re-read from js/network.js POPULAR_TOKENS (probe-verified 2026-10-05)
+  // and then re-probed here. blast is null/null on purpose: its app list
+  // carries USDB, and USDB in a `usdc` field would be a stablecoin wearing
+  // the wrong name; the token-table gate forces the pair to agree, and a
+  // null row is a claim while a missing row is silence.
+  avalanche:   { weth: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', usdc: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E' },
+  gnosis:      { weth: '0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1', usdc: '0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83' },
+  celo:        { weth: '0x122013fd7dF1C6F636a5bb8f03108E876548b455', usdc: '0xcebA9300f2b948710d2653dD7B07f33A8B32118C' },
+  sonic:       { weth: '0x50c42dEAcD8Fc9773493ED674b675bE577f2634b', usdc: '0x29219dd400f2Bf60E5a23d13Be72B486D4038894' },
+  linea:       { weth: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', usdc: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff' },
+  scroll:      { weth: '0x5300000000000000000000000000000000000004', usdc: '0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4' },
+  blast:       { weth: null, usdc: null },
+  mantle:      { weth: '0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111', usdc: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9' },
+  zksync:      { weth: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', usdc: '0x1d17CBcF0D6D143135aE902365D2E5e2A16538D4' },
+  unichain:    { weth: '0x4200000000000000000000000000000000000006', usdc: '0x078D782b760474a361dDA0AF3839290b0EF57AD6' },
+  worldchain:  { weth: '0x4200000000000000000000000000000000000006', usdc: '0x79A02482A880bCE3F13e09Da970dC34db4CD24d1' }
 };
 
 // ── token lookup ──

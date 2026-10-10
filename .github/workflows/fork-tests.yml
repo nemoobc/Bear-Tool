@@ -1,11 +1,15 @@
 name: Onchain Fork Tests (Anvil)
 
-# Real on-chain transactions against an anvil fork of every network:
-# mainnets (Ethereum, BSC, Polygon, Arbitrum, OP, Base) + testnets
-# (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet).
-# Each job forks the network from a public RPC and runs the fork suite:
-# deploy ERC-20/721/1155, native + ERC-20 send, swap via verified router,
-# approval lifecycle, EIP-7702 delegation (skips honestly if unsupported).
+# Real on-chain transactions against an anvil fork of every network the app
+# ships: all 17 mainnets (Ethereum, BSC, Polygon, Arbitrum, OP, Base,
+# Avalanche, Gnosis, Celo, Sonic, Linea, Scroll, Blast, Mantle, zkSync Era,
+# Unichain, World Chain) + all 6 testnets (Sepolia, Amoy, Arbitrum Sepolia,
+# OP Sepolia, Base Sepolia, BSC Testnet). Each job forks the network from a
+# public RPC and runs the fork suite: deploy ERC-20/721/1155, native +
+# ERC-20 send, swap via verified router, approval lifecycle, EIP-7702
+# delegation (skips honestly if unsupported). "Bergiliran": max-parallel 4
+# walks the matrix four jobs at a time, fail-fast off so one red chain never
+# hides the rest.
 
 on:
   push:
@@ -21,7 +25,30 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        network: [ethereum, bsc, polygon, arbitrum, optimism, base, sepolia, amoy, arbitrum-sepolia, optimism-sepolia, base-sepolia, bsc-testnet]
+        network:
+          - ethereum
+          - bsc
+          - polygon
+          - arbitrum
+          - optimism
+          - base
+          - avalanche
+          - gnosis
+          - celo
+          - sonic
+          - linea
+          - scroll
+          - blast
+          - mantle
+          - zksync
+          - unichain
+          - worldchain
+          - sepolia
+          - amoy
+          - arbitrum-sepolia
+          - optimism-sepolia
+          - base-sepolia
+          - bsc-testnet
     steps:
       - uses: actions/checkout@v4
 
