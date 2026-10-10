@@ -94,16 +94,12 @@ jobs:
             adb shell am start -n com.nemoobc.beartool/.MainActivity || echo AM_START_FAILED_RC=$?
             sleep 8
             timeout 20 adb logcat -d > logcat-boot.txt || echo LOGCAT_BOOT_RC=$?
-            grep -aF "[dApp diag]" logcat-stream.txt | head -5 || true
-            grep -aqF "[dApp diag]" logcat-stream.txt || echo DIAG_LINE_NOT_FOUND_AT_BOOT
             adb devices -l > emulator-devices-boot.txt 2>&1 || true
             df -h > disk-usage.txt 2>&1 || true
             ( for i in $(seq 1 30); do echo "$(date -Is) adb=[$(adb devices 2>/dev/null | tr "\n" " ")qemu=$(pgrep -fc qemu 2>/dev/null) app=$(adb shell pidof com.nemoobc.beartool 2>/dev/null | tr -d "\r")"; sleep 10; done ) > emulator-heartbeat.txt 2>&1 &
+            python3 -m http.server 8080 --directory dist > http-server.log 2>&1 &
             timeout 480 env E2E_OUT=emulator-artifacts node tools/emulator-e2e.mjs > e2e-stdout.log 2>&1 || echo E2E_FAILED_RC=$?
             cat e2e-stdout.log || true
-            echo "=== [dApp diag] after run (stream) ==="
-            grep -aF "[dApp diag]" logcat-stream.txt | head -5 || true
-            grep -aqF "[dApp diag]" logcat-stream.txt || echo DIAG_LINE_NOT_FOUND
             echo "=== crash / fatal ==="
             grep -aE "FATAL|AndroidRuntime|Fatal signal|panic" logcat-stream.txt | head -20 || true
             echo "=== last heartbeat ==="
@@ -126,6 +122,7 @@ jobs:
             emulator-devices-boot.txt
             emulator-devices-final.txt
             disk-usage.txt
+            http-server.log
             emulator-boot.png
             emulator-artifacts/
           if-no-files-found: error

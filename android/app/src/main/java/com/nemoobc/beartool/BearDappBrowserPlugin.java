@@ -8,6 +8,8 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.LinearLayout;
 
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
@@ -47,6 +49,7 @@ public class BearDappBrowserPlugin extends Plugin {
     private String providerScript = "";
     private ViewGroup parent = null;
     private SwipeRefreshLayout refreshLayout = null;
+    private View toolbar = null;
 
     // MetaMask caps the page→native message (BackgroundBridge MAX_MESSAGE_LENGTH)
     // so a hostile page cannot flood the native side with an unbounded string.
@@ -136,6 +139,36 @@ public class BearDappBrowserPlugin extends Plugin {
         if (parent != null) {
             parent.addView(refreshLayout, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
+        // A native toolbar ON TOP of the dapp view: back through the dapp's
+        // own history, and close to return to the wallet. The wallet's own UI
+        // lives UNDERNEATH this overlay — openDappBrowser()'s native branch
+        // builds no UI of its own (the iframe toolbar is web-only) — so
+        // without native controls the user is trapped in the dapp forever.
+        // The contentDescription names each button for accessibility AND for
+        // the E2E driver's uiautomator tap (tests/emulator-e2e.test.js).
+        LinearLayout bar = new LinearLayout(getContext());
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setBackgroundColor(0xCC1A1A2E);
+        Button backBtn = new Button(getContext());
+        backBtn.setText("\u2190");
+        backBtn.setContentDescription("dapp-back");
+        backBtn.setTextColor(0xFFFFFFFF);
+        backBtn.setBackgroundColor(0x00000000);
+        backBtn.setOnClickListener(v -> doBack());
+        Button closeBtn = new Button(getContext());
+        backBtn.setAllCaps(false);
+        closeBtn.setText("\u2715");
+        closeBtn.setContentDescription("dapp-close");
+        closeBtn.setTextColor(0xFFFFFFFF);
+        closeBtn.setBackgroundColor(0x00000000);
+        closeBtn.setOnClickListener(v -> doClose());
+        bar.addView(backBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        bar.addView(closeBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        toolbar = bar;
+        if (parent != null) {
+            parent.addView(toolbar, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        toolbar.setVisibility(View.GONE);
         refreshLayout.setVisibility(View.GONE);
     }
 
@@ -156,6 +189,10 @@ public class BearDappBrowserPlugin extends Plugin {
                 }
                 refreshLayout.setVisibility(View.VISIBLE);
                 refreshLayout.bringToFront();
+                if (toolbar != null) {
+                    toolbar.setVisibility(View.VISIBLE);
+                    toolbar.bringToFront(); // above the dapp view, always
+                }
                 dappView.setVisibility(View.VISIBLE);
                 dappView.loadUrl(url);
                 JSObject ret = new JSObject();
@@ -170,16 +207,16 @@ public class BearDappBrowserPlugin extends Plugin {
     @PluginMethod
     public void close(PluginCall call) {
         getActivity().runOnUiThread(() -> {
-            if (dappView != null) {
-                dappView.stopLoading();
-                if (refreshLayout != null) {
-                    refreshLayout.setRefreshing(false);
-                    refreshLayout.setVisibility(View.GONE);
-                }
-                dappView.loadUrl("about:blank");
-            }
+            doClose();
             call.resolve();
         });
+    }
+
+    private void doClose() {
+        if (dappView != null) {
+            dappView.stopLoading();
+            hideDappView();
+        }
     }
 
     /** History back inside the dApp; hides the view when there is nothing to go back to. */
@@ -187,14 +224,55 @@ public class BearDappBrowserPlugin extends Plugin {
     public void back(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             JSObject ret = new JSObject();
-            if (dappView != null && dappView.canGoBack()) {
-                dappView.goBack();
-                ret.put("handled", true);
-            } else {
-                if (refreshLayout != null) refreshLayout.setVisibility(View.GONE);
-                ret.put("handled", false);
-            }
+            ret.put("handled", doBack());
             call.resolve(ret);
+        });
+    }
+
+    private boolean doBack() {
+        if (dappView != null && dappView.canGoBack()) {
+            dappView.goBack();
+            return true;
+        }
+        hideDappView();
+        return false;
+    }
+
+    private void hideDappView() {
+        if (refreshLayout != null) {
+            refreshLayout.setRefreshing(false);
+            refreshLayout.setVisibility(View.GONE);
+        }
+        if (toolbar != null) toolbar.setVisibility(View.GONE);
+        if (dappView != null) dappView.loadUrl("about:blank");
+    }
+
+    /**
+     * Flash to the wallet while a confirmation is up.
+     *
+     * handleNativeRpc's confirmTx renders in the WALLET's webview — which this
+     * full-screen overlay covers. Without this the Connect/Sign/Send prompt is
+     * drawn underneath the dapp: invisible, unclickable, every confirmation-
+     * bound RPC hanging forever on a tap nobody can make. The wallet JS hides
+     * the dapp around each confirm and restores it after (depth-counted, so
+     * two simultaneous requests cannot restore under the first prompt).
+     * A no-op when the browser was never opened.
+     */
+    @PluginMethod
+    public void setVisible(PluginCall call) {
+        Boolean visible = call.getBoolean("visible", false);
+        getActivity().runOnUiThread(() -> {
+            if (dappView != null) {
+                if (refreshLayout != null) {
+                    refreshLayout.setVisibility(visible ? View.VISIBLE : View.GONE);
+                    if (visible) refreshLayout.bringToFront();
+                }
+                if (toolbar != null) {
+                    toolbar.setVisibility(visible ? View.VISIBLE : View.GONE);
+                    if (visible) toolbar.bringToFront(); // toolbar stays topmost
+                }
+            }
+            call.resolve();
         });
     }
 

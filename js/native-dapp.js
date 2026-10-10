@@ -107,6 +107,26 @@ export function initNativeDappRpc() {
     .catch(() => false);
 }
 
+// Flash to the wallet while a confirmation is up: confirmTx renders in the
+// WALLET's webview, and the native dapp view covers the whole screen — a
+// prompt drawn underneath that overlay is invisible and unclickable, so every
+// confirmation-bound RPC (connect, sign, send) would hang forever on a tap
+// nobody can make. Depth-counted: two dapp requests confirming at once must
+// not restore the view under the first prompt. No dapp open → the plugin's
+// setVisible is a no-op, so normal wallet confirms pass straight through.
+let confirmDepth = 0;
+async function askUser(fn) {
+  const p = plugin;
+  confirmDepth += 1;
+  if (p) { try { await p.setVisible({ visible: false }); } catch { /* view never opened */ } }
+  try {
+    return await fn();
+  } finally {
+    confirmDepth -= 1;
+    if (p && confirmDepth === 0) { try { await p.setVisible({ visible: true }); } catch { /* view gone */ } }
+  }
+}
+
 async function handleNativeRpc({ id, origin, payload }) {
   if (!plugin) return;
   let msg = {};
@@ -141,7 +161,7 @@ async function handleNativeRpc({ id, origin, payload }) {
   }
 
   if (method === 'eth_requestAccounts') {
-    const ok = await confirmTx({
+    const ok = await askUser(() => confirmTx({
       title: 'Connect "' + site + '" to Bear Tool?',
       rows: [
         { k: 'Site', v: site },
@@ -149,7 +169,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: 'Can request', v: 'accounts, sign, send transactions' },
       ],
       confirmText: 'Connect',
-    });
+    }));
     if (!ok) return respondError(USER_REJECTED);
     connectedOrigins.add(site);
     return respond([signer.address]);
@@ -157,7 +177,7 @@ async function handleNativeRpc({ id, origin, payload }) {
 
   if (method === 'personal_sign') {
     const [hex] = msg.params || [];
-    const ok = await confirmTx({
+    const ok = await askUser(() => confirmTx({
       title: 'Sign message?',
       rows: [
         { k: 'Chain', v: chainId },
@@ -166,7 +186,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: 'Message', v: String(hexToBytes(hex)).slice(0, 80) },
       ],
       confirmText: 'Sign',
-    });
+    }));
     if (!ok) return respondError(USER_REJECTED);
     return respond(await signer.signMessage(hexToBytes(hex)));
   }
@@ -185,7 +205,7 @@ async function handleNativeRpc({ id, origin, payload }) {
       toast(m, 'error');
       return respondError({ code: -32000, message: m });
     }
-    const ok = await confirmTx({
+    const ok = await askUser(() => confirmTx({
       title: 'Sign typed data?',
       rows: [
         { k: 'Chain', v: chainId },
@@ -195,7 +215,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: 'Account', v: shortAddr(signer.address) },
       ],
       confirmText: 'Confirm',
-    });
+    }));
     if (!ok) return respondError(USER_REJECTED);
     const types = { ...(parsed.types || {}) };
     delete types.EIP712Domain;
@@ -213,7 +233,7 @@ async function handleNativeRpc({ id, origin, payload }) {
     }
     const provider = get('provider');
     if (!provider) return respondError({ code: -32000, message: 'No provider for the current network.' });
-    const ok = await confirmTx({
+    const ok = await askUser(() => confirmTx({
       title: 'Send transaction?',
       rows: [
         { k: 'Chain', v: chainId },
@@ -223,7 +243,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: 'Data', v: txReq.data && txReq.data !== '0x' ? (String(txReq.data).length / 2 - 1) + ' bytes' : 'none' },
       ],
       confirmText: 'Confirm',
-    });
+    }));
     if (!ok) return respondError(USER_REJECTED);
     // Keystore signers are plain ethers.Wallet instances with NO provider —
     // broadcasting without .connect(provider) dies with "missing provider"
@@ -245,4 +265,15 @@ async function handleNativeRpc({ id, origin, payload }) {
   }
 
   return respondError({ code: 4200, message: method + ' is not supported by the native dApp browser yet.' });
+}
+
+// E2E hook (pinned by tests/emulator-e2e.test.js): the native build has no
+// address bar yet — openDappBrowser()'s native branch opens catalogue cards
+// only — so the emulator driver needs the same power a card tap has: open
+// THIS url in the dapp browser. Same authority as tapping a card; no wallet
+// state, native-only (plain web keeps the iframe browser in charge).
+if (typeof window !== 'undefined') {
+  window.__bearE2EOpenDapp = (url) => (isNativeDappBrowser()
+    ? openNativeDapp(url)
+    : Promise.reject(new Error('dapp browser hook is native-only')));
 }

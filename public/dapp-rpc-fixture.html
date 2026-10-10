@@ -1,0 +1,61 @@
+<!doctype html>
+<!-- dapp-rpc-fixture — the E2E proof page for the NATIVE dApp browser.
+     Loaded inside the BearDappBrowser WebView (served over http://10.0.2.2:8080
+     from the CI host; https://localhost would face Capacitor's local-server
+     certificate in a second WebView). It exercises the real chain a dApp
+     uses: injected provider → eth_chainId → eth_requestAccounts (the wallet
+     asks the user) → eth_accounts, and writes each answer into #out, which
+     the E2E driver reads over CDP from this page's own target.
+     A plain browser without the Bear bridge must land on error=… lines,
+     never hang: every request is raced against a deadline. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bear-rpc-fixture</title>
+<style>body{font:14px monospace;background:#101018;color:#d8d8ff;margin:0;padding:12px}pre{white-space:pre-wrap}</style>
+</head>
+<body>
+<h1 id="title">bear-rpc-fixture</h1>
+<pre id="out">pending</pre>
+<script>
+(function () {
+  var lines = [];
+  var out = document.getElementById('out');
+  function rec(k, v) {
+    lines.push(k + '=' + (typeof v === 'object' ? JSON.stringify(v) : String(v)));
+    out.textContent = lines.join('\n');
+  }
+  function deadline(ms, label) {
+    return new Promise(function (_, rej) {
+      setTimeout(function () { rej(new Error(label + ' timeout ' + ms + 'ms')); }, ms);
+    });
+  }
+  rec('hasProvider', !!(window.ethereum && window.ethereum.isBear));
+  if (!window.ethereum) { rec('error', 'no window.ethereum'); rec('done', 'failed'); return; }
+  Promise.all([
+    window.ethereum.request({ method: 'eth_chainId' }),
+    deadline(30000, 'eth_chainId'),
+  ]).then(function (r) {
+    rec('chainId', r[0]);
+    return Promise.all([
+      window.ethereum.request({ method: 'eth_requestAccounts' }),
+      deadline(60000, 'eth_requestAccounts'),
+    ]);
+  }).then(function (r) {
+    rec('account0', ((r[0] || [])[0] || '').toLowerCase());
+    return Promise.all([
+      window.ethereum.request({ method: 'eth_accounts' }),
+      deadline(15000, 'eth_accounts'),
+    ]);
+  }).then(function (r) {
+    rec('accountsAgain', ((r[0] || [])[0] || '').toLowerCase());
+    rec('done', 'ok');
+  }).catch(function (e) {
+    rec('error', e && e.message ? e.message : String(e));
+    rec('done', 'failed');
+  });
+})();
+</script>
+</body>
+</html>

@@ -112,17 +112,18 @@ test('every adb line is self-guarded — one failing line kills the rest of the 
 test('the workflow captures logcat at BOOT via a stream started before anything else', () => {
   // The device died ~30-60s after boot in every run; a dump taken later was
   // always 0 bytes. The only reliable capture is a stream started FIRST —
-  // it keeps writing up to the exact moment the device vanishes, and it is
-  // where [dApp diag] (fired at boot) has to be found.
+  // it keeps writing up to the exact moment the device vanishes.
   assert.ok(scriptLines[0].includes('adb logcat -v time > logcat-stream.txt'),
     'baris pertama wajib stream logcat — jendela device hidup hanya detik');
   assert.match(script, /logcat-boot\.txt/, 'dump sekunder tetap ada (device mungkin masih hidup)');
   assert.match(script, /logcat-stream\.txt/, 'stream = sumber utama diagnosis');
   assert.match(script, /emulator-heartbeat\.txt/, 'heartbeat adb+qemu+app: membedakan emulator mati vs adb wedged');
-  // Guards must be able to fire: `grep | head || echo` never echoes (pipeline
-  // status is head's). The marker needs grep LAST or grep -q on its own line.
-  assert.match(script, /grep -aqF "\[dApp diag\]" logcat-stream\.txt \|\| echo DIAG_LINE_NOT_FOUND/,
-    'marker DIAG_LINE_NOT_FOUND harus bisa tercetak (grep -q, bukan di pipeline head)');
+  // The boot-time [dApp diag] instrumentation was removed once pinned
+  // (ba6ed69); its grep markers would print DIAG_LINE_NOT_FOUND forever —
+  // stale probes are worse than none. The diagnosis lives in the report now
+  // (report.native / consoleTrail over CDP).
+  assert.doesNotMatch(script, /DIAG_LINE_NOT_FOUND/,
+    'probe [dApp diag] sudah punah — jangan kembalikan mayatnya ke workflow');
 });
 
 test('the driver captures the native bridge state and the whole console trail', () => {
@@ -133,4 +134,39 @@ test('the driver captures the native bridge state and the whole console trail', 
   assert.match(driverSrc, /Error injecting safe area CSS/,
     'noise upstream SystemBars.java (bukti: node_modules/@capacitor/android/.../SystemBars.java) masuk allowlist sadar, bukan luput');
   assert.match(driverSrc, /ping timeout 2500ms/, 'ping native wajib berbatas');
+});
+
+test('the workflow serves the dApp fixture to the emulator and keeps its server log', () => {
+  const wfRaw = readFileSync(path.join(here, '..', '.github', 'workflows', 'emulator.yml'), 'utf8');
+  // The fixture must be reachable from the emulator over PLAIN http: a second
+  // WebView does not trust Capacitor's local-server certificate, so
+  // https://localhost would die at net::ERR_CERT before the first assertion.
+  assert.match(wfRaw, /python3 -m http\.server 8080 --directory dist/,
+    'server fixture wajib ada, port 8080, menyajikan dist yang baru dibangun');
+  // Same origin the driver opens — port drift = the journey dies at CDP attach.
+  assert.match(driverSrc, /http:\/\/10\.0\.2\.2:8080\/dapp-rpc-fixture\.html/,
+    'driver wajib membuka URL yang persis disajikan workflow (10.0.2.2 = host dari emulator)');
+  // The server log survives the job: a fixture that never loaded has to be
+  // diagnosable from the artifact, not guesswork.
+  const uploadPaths = Object.values(workflow.jobs)
+    .flatMap((job) => job.steps || [])
+    .flatMap((step) => (step.with && (step.with.path || step.with.paths)) || [])
+    .join('\n');
+  assert.match(uploadPaths, /http-server\.log/, 'http-server.log wajib ikut artefak diagnosis');
+});
+
+test('the driver drives the native dApp browser end to end — open, confirm, read, back', () => {
+  assert.match(driverSrc, /__bearE2EOpenDapp/, 'jalur pembukaan = hook native (kartu katalog menunjuk eksternal)');
+  assert.match(driverSrc, /#confirmYes/, 'konfirmasi connect diklik di HALAMAN WALLET');
+  assert.match(driverSrc, /connectCDP\('10\.0\.2\.2:8080'\)/, 'hasil fixture dibaca dari target CDP KEDUA (halaman dapp)');
+  assert.match(driverSrc, /tapNativeButton\('dapp-back'\)/, 'kembali = tap tombol NATIVE asli lewat uiautomator — CDP tak melihat di luar WebView');
+  assert.match(driverSrc, /hasProvider=true/, 'rantai bukti: provider ter-inject');
+  assert.match(driverSrc, /account0=0x/, 'rantai bukti: akun dari konfirmasi');
+  assert.match(driverSrc, /done=ok/, 'rantai bukti: siklus penuh selesai');
+  // The flash-to-wallet question is answered by what the SCREEN shows, not
+  // what the DOM holds: a CDP click would work even behind the overlay.
+  assert.match(driverSrc, /shotScreen\('06-dapp-connect-modal'\)/, 'bukti jangkauan modal = tangkapan layar SELURUH layar');
+  // The account row cross-check ties the two WebViews together.
+  assert.match(driverSrc, /accountMatchesModal/, 'akun fixture wajib cocok dengan akun yang dimodalkan wallet');
+  assert.match(driverSrc, /did not return the wallet to view/, 'back palsu (tombol ketuk tapi layar tak pulih) wajib gagal');
 });

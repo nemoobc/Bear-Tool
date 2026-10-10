@@ -55,6 +55,44 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const adb = (...args) =>
   execFileSync(ADB, SERIAL ? ['-s', SERIAL, ...args] : args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 60_000 });
 
+const adbBin = (...args) =>
+  execFileSync(ADB, SERIAL ? ['-s', SERIAL, ...args] : args, { maxBuffer: 32 * 1024 * 1024, timeout: 60_000 });
+
+// Whole-screen capture: a CDP shot sees only ONE WebView — the native dapp
+// overlay and its toolbar live outside any page target, and the modal-behind
+// question ("is the confirm actually reachable?") is answered by what the
+// SCREEN shows, not what the DOM holds.
+async function shotScreen(name) {
+  try {
+    const buf = adbBin('exec-out', 'screencap', '-p');
+    if (buf && buf.length > 1000) {
+      writeFileSync(path.join(OUT, name + '.png'), buf);
+      return true;
+    }
+  } catch { /* device gone — the verdict carries the reason */ }
+  return false;
+}
+
+// Tap a native control by accessibility label: uiautomator is the only eye
+// that sees OUTSIDE the WebView (the plugin's toolbar buttons on top of the
+// dApp), and a real tap is the only honest click a native overlay admits.
+async function tapNativeButton(desc) {
+  for (let i = 0; i < 12; i++) {
+    try {
+      adb('shell', 'uiautomator', 'dump', '/sdcard/uidump.xml');
+      const xml = adb('shell', 'cat', '/sdcard/uidump.xml');
+      const node = xml.match(new RegExp('content-desc="' + desc + '"[^>]*bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"'));
+      if (node) {
+        const x1 = +node[1], y1 = +node[2], x2 = +node[3], y2 = +node[4];
+        adb('shell', 'input', 'tap', String((x1 + x2) >> 1), String((y1 + y2) >> 1));
+        return true;
+      }
+    } catch { /* dump races the UI — retry */ }
+    await sleep(1000);
+  }
+  return false;
+}
+
 // Console noise that is known, external, and not this app's fault.
 const ALLOWED_CONSOLE = [
   /coingecko/i, /statsig/i, /amplitude/i, /attestation/i,
@@ -140,7 +178,7 @@ function cdpClient(ws) {
   };
 }
 
-async function connectCDP() {
+async function connectCDP(urlMatch = null) {
   let lastErr;
   for (let i = 0; i < 30; i++) { // the WebView socket appears after app boot
     try {
@@ -152,8 +190,9 @@ async function connectCDP() {
       const t = setTimeout(() => ctrl.abort(), 5000);
       const targets = await (await fetch('http://127.0.0.1:9333/json', { signal: ctrl.signal })).json();
       clearTimeout(t);
-      const page = targets.find((x) => x.type === 'page') || targets[0];
-      if (!page || !page.webSocketDebuggerUrl) throw new Error('no page target');
+      const page = targets.find((x) => x.type === 'page' && (!urlMatch || String(x.url || '').includes(urlMatch)))
+        || (urlMatch ? null : targets.find((x) => x.type === 'page')) || targets[0];
+      if (!page || !page.webSocketDebuggerUrl) throw new Error(urlMatch ? `no page target matching ${urlMatch}` : 'no page target');
       const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false, maxPayload: 64 * 1024 * 1024 });
       await new Promise((resolve, reject) => {
         const to = setTimeout(() => reject(new Error('ws open timeout')), 5000);
@@ -212,7 +251,7 @@ function makePage(cdp) {
 // ── journey ────────────────────────────────────────────────────────────────
 async function main() {
   mkdirSync(OUT, { recursive: true });
-  report = { steps: [], consoleErrors: [], consoleTrail: [], exceptions: [], native: null, pass: false };
+  report = { steps: [], consoleErrors: [], consoleTrail: [], exceptions: [], native: null, dapp: null, pass: false };
   const step = (name) => { report.steps.push(name); markStep(name); };
 
   const cdp = await connectCDP();
@@ -270,6 +309,78 @@ async function main() {
     }
   }
 
+  // ── the native dApp browser, end to end ──────────────────────────────────
+  // The chain every previous run could only read in source: fixture page
+  // (served from the CI host, http://10.0.2.2:8080 — https://localhost would
+  // face Capacitor's local-server certificate in a second WebView) opens in
+  // the BearDappBrowser → provider injected → eth_chainId → the user's connect
+  // (the wallet asks — flash-to-wallet, the setVisible fix; a CDP click would
+  // work even behind the overlay, so the MODAL SCREENSHOT is the reachability
+  // evidence, and the account row is cross-checked against the fixture's
+  // answer) → eth_accounts. Answers are read from the fixture's OWN CDP
+  // target; the wallet page only ever sees the confirm modal.
+  const hasHook = await page.evaluate('typeof window.__bearE2EOpenDapp === "function"').catch(() => false);
+  if (hasHook) {
+    step('dapp browser: open fixture in the native WebView');
+    report.dapp = { hook: true };
+    await page.evaluate(
+      "window.__bearE2EOpenDapp('http://10.0.2.2:8080/dapp-rpc-fixture.html')"
+      + ".catch((e) => { throw new Error('openNativeDapp failed: ' + e.message); })"
+    );
+
+    step('dapp browser: connect prompt — flashed to the wallet');
+    await page.wait('#confirmYes', 20000);
+    report.dapp.askTitle = await page.evaluate(
+      'document.querySelector(".question") ? document.querySelector(".question").textContent : ""'
+    ).catch(() => '');
+    report.dapp.askRows = await page.evaluate(
+      `Array.from(document.querySelectorAll('.tx-detail .row')).map((r) => (r.querySelector('.k') ? r.querySelector('.k').textContent : '') + '=' + (r.querySelector('.v') ? r.querySelector('.v').textContent : ''))`
+    ).catch(() => []);
+    // Whole screen, not the DOM: if flash-to-wallet works, this shot shows the
+    // wallet's modal — not the fixture page still open underneath it.
+    await shotScreen('06-dapp-connect-modal');
+    await page.click('#confirmYes');
+
+    step('dapp browser: fixture reads accounts over its own CDP target');
+    const dapp = await connectCDP('10.0.2.2:8080');
+    const dpage = makePage(dapp);
+    let text = '';
+    const t0 = Date.now();
+    while (Date.now() - t0 < 45000) {
+      text = await dpage.evaluate('document.getElementById("out").textContent').catch(() => '');
+      if (/done=/.test(String(text))) break;
+      await sleep(500);
+    }
+    report.dapp.log = String(text).slice(0, 500);
+    for (const key of ['hasProvider=true', 'chainId=0x', 'account0=0x', 'accountsAgain=0x', 'done=ok']) {
+      if (!String(text).includes(key)) throw new Error(`fixture log missing ${key}:\n${text}`);
+    }
+    // The account the fixture received must be the account the modal named.
+    const acc = (String(text).match(/account0=(0x[0-9a-fA-F]{40})/) || [])[1] || '';
+    const shown = (report.dapp.askRows || []).find((r) => r.startsWith('Account=')) || '';
+    if (acc && !shown) throw new Error(`modal has no Account row to cross-check ${acc} against: ${JSON.stringify(report.dapp.askRows)}`);
+    if (acc && shown) {
+      const short = shown.slice('Account='.length); // shortAddr: 0x1234…abcd
+      const head = short.slice(0, 6), tail = short.slice(-4);
+      if (!acc.toLowerCase().startsWith(head.toLowerCase().replace('…', '')) || !acc.toLowerCase().endsWith(tail.toLowerCase())) {
+        throw new Error(`modal account ${short} does not match fixture account ${acc}`);
+      }
+      report.dapp.accountMatchesModal = true;
+    }
+    await dpage.shot('07-dapp-fixture').catch(() => {});
+    await shotScreen('07-dapp-screen'); // whole screen incl the native toolbar
+
+    step('dapp browser: native back (real tap) returns to the wallet');
+    report.dapp.backTapped = await tapNativeButton('dapp-back');
+    if (!report.dapp.backTapped) throw new Error('uiautomator never found the dapp-back toolbar button');
+    await sleep(1500);
+    await page.wait('#view-dashboard.active, .balance-card, #totalBalance', 15000).catch(() => {});
+    report.dapp.backToWallet = await page.evaluate(`!!document.querySelector('#view-dashboard.active, .balance-card')`).catch(() => false);
+    if (!report.dapp.backToWallet) throw new Error('native back did not return the wallet to view');
+    await shotScreen('08-back-to-wallet');
+    try { dapp.close(); } catch { /* target may die with the view */ }
+  }
+
   // ── native bridge diagnostics (permanent, CDP-side) ─────────────────────
   // Where the console-to-logcat routing is a moving target, the driver reads
   // the bridge state itself: does the plugin exist, does a native method
@@ -321,6 +432,7 @@ async function main() {
     exceptions: report.exceptions.length,
     consoleTrail: report.consoleTrail.length,
     native: report.native && (report.native.ping || report.native.evaluateFailed || 'n/a'),
+    dapp: report.dapp && (report.dapp.log ? String(report.dapp.log).split('\n').slice(-1)[0] : 'n/a'),
   }));
   if (report.consoleErrors.length || report.exceptions.length) {
     die('unfiltered console errors / exceptions:\n  ' + [...report.consoleErrors, ...report.exceptions].join('\n  '));
