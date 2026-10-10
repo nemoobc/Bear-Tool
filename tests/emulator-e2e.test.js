@@ -170,3 +170,24 @@ test('the driver drives the native dApp browser end to end — open, confirm, re
   assert.match(driverSrc, /accountMatchesModal/, 'akun fixture wajib cocok dengan akun yang dimodalkan wallet');
   assert.match(driverSrc, /did not return the wallet to view/, 'back palsu (tombol ketuk tapi layar tak pulih) wajib gagal');
 });
+
+test('the dapp block is a truth machine — CDP polls the DOM and the page keeps its own voice', () => {
+  // Run 38040858378: provider reported 'resolved' but the fixture looked dead
+  // on a 20s-old screenshot. The judgment now comes from the DOM over CDP,
+  // before the wallet even answers, with the dapp page's console and
+  // exceptions captured — the view has no WebChromeClient, so this is the
+  // only voice it will ever have.
+  assert.match(driverSrc, /attach the fixture page over its own CDP target/,
+    'attach datang SEBELUM nunggu modal — tanpa itu path fatal tak pernah punya suara dapp');
+  assert.match(driverSrc, /const pollOut = async/, 'poll #out via CDP — DOM, bukan pixel');
+  assert.match(driverSrc, /chainId=\|error=\|done=/,
+    'poll discriminate: chainId (jalan) / error (deadline berteriak) / done — satu dari ketiganya WAJIB muncul');
+  assert.match(driverSrc, /report\.dapp\.href/, 'location.href ikut tercatat — dokumen yang dieval harus bisa dibuktikan');
+  assert.match(driverSrc, /dappEvents\.push\('exception: /,
+    'exception halaman dapp menyeberang ke report — Uncaught di dapp view selama ini hilang tanpa jejak');
+  assert.match(driverSrc, /fixture never saw eth_chainId/,
+    'kegagalan chainId melempar dengan #out + href + console dapp dalam pesan — diagnosis dari error message, bukan dari tebakan');
+  // the old strict gates survive the restructure
+  assert.match(driverSrc, /accountMatchesModal/, 'cross-check akun tetap ada');
+  assert.match(driverSrc, /tapNativeButton\('dapp-back'\)/, 'tombol back native tetap diuji');
+});

@@ -352,6 +352,52 @@ async function main() {
       + ".catch((e) => { throw new Error('openNativeDapp failed: ' + e.message); })"
     );
 
+    step('dapp browser: attach the fixture page over its own CDP target');
+    const dapp = await connectCDP('10.0.2.2:8080');
+    const dpage = makePage(dapp);
+    await dapp.send('Runtime.enable').catch(() => {});
+
+    // Ground truth BEFORE the wallet answers: poll #out over CDP — the DOM,
+    // not the paint (a screenshot only ever shows the last composited frame;
+    // run 38040858378 showed a 20s-old frame while the provider reported
+    // 'resolved'). The fixture's own deadlines turn "never settled" into a
+    // loud error= line, and every uncaught exception in the dapp page lands
+    // in dappEvents below — the dapp view has no other voice (no
+    // WebChromeClient, no logcat mirror).
+    const pollOut = async (re, timeoutMs) => {
+      let t = '';
+      const s = Date.now();
+      while (Date.now() - s < timeoutMs) {
+        t = await dpage.evaluate('document.getElementById("out") ? document.getElementById("out").textContent : ""').catch(() => '');
+        if (re.test(String(t))) return String(t);
+        await sleep(500);
+      }
+      return String(t);
+    };
+    const dappEvents = [];
+    const drainDapp = () => {
+      for (const ev of (dapp.events || []).splice(0)) {
+        if (ev.method === 'Runtime.consoleAPICalled') {
+          dappEvents.push('console ' + ev.params.type + ': '
+            + (ev.params.args || []).map((a) => a.value ?? a.description ?? '').join(' ').slice(0, 200));
+        }
+        if (ev.method === 'Runtime.exceptionThrown') {
+          dappEvents.push('exception: ' + ((ev.params.exceptionDetails && ev.params.exceptionDetails.exception && ev.params.exceptionDetails.exception.description) || (ev.params.exceptionDetails && ev.params.exceptionDetails.text) || '?').slice(0, 300));
+        }
+      }
+    };
+    report.dapp.href = await dpage.evaluate('location.href').catch((e) => 'eval-failed: ' + e.message);
+
+    step('dapp browser: eth_chainId lands in the fixture (or its deadline screams)');
+    let text = await pollOut(/chainId=|error=|done=/, 40000);
+    drainDapp();
+    report.dapp.chainStage = String(text).slice(0, 300);
+    report.dapp.console = dappEvents.slice(0, 20);
+    if (!/chainId=/.test(text)) {
+      throw new Error('fixture never saw eth_chainId. #out=' + JSON.stringify(String(text))
+        + ' href=' + report.dapp.href + ' dappConsole=' + JSON.stringify(report.dapp.console));
+    }
+
     step('dapp browser: connect prompt — flashed to the wallet');
     await page.wait('#confirmYes', 20000);
     report.dapp.askTitle = await page.evaluate(
@@ -366,16 +412,10 @@ async function main() {
     await page.click('#confirmYes');
 
     step('dapp browser: fixture reads accounts over its own CDP target');
-    const dapp = await connectCDP('10.0.2.2:8080');
-    const dpage = makePage(dapp);
-    let text = '';
-    const t0 = Date.now();
-    while (Date.now() - t0 < 45000) {
-      text = await dpage.evaluate('document.getElementById("out").textContent').catch(() => '');
-      if (/done=/.test(String(text))) break;
-      await sleep(500);
-    }
+    text = await pollOut(/done=/, 60000);
+    drainDapp();
     report.dapp.log = String(text).slice(0, 500);
+    report.dapp.console = dappEvents.slice(0, 20);
     for (const key of ['hasProvider=true', 'chainId=0x', 'account0=0x', 'accountsAgain=0x', 'done=ok']) {
       if (!String(text).includes(key)) throw new Error(`fixture log missing ${key}:\n${text}`);
     }
