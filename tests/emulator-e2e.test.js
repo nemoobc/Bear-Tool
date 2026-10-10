@@ -204,3 +204,14 @@ test('the heartbeat carries memory and the qemu identity — a dead run must be 
   assert.match(rawScript, /pgrep -af qemu/,
     'identitas lengkap proses qemu per tick — qemu=2→1 kini bisa ditelusuri siapa mati');
 });
+
+test('the emulator job runs on a PINNED image — a floating -latest hides every death', () => {
+  // Four runs (38040231871…38045063225) lost qemu with identical code and a
+  // healthy host — deaths clustered on the 24.04.5 fleet while earlier runs
+  // on the same label lived. Once pinned, a fleet regression becomes a
+  // visible bisect decision instead of a rerun lottery.
+  const job = workflow.jobs.emulator;
+  assert.ok(job['runs-on'], 'emulator job wajib punya runs-on');
+  assert.ok(!String(job['runs-on']).includes('latest'),
+    'runs-on dilarang ubuntu-latest — image melayang membuat kematian emulator tak bisa dibedakan dari bug');
+});

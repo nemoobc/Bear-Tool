@@ -15,7 +15,12 @@ on:
 jobs:
   emulator:
     name: Boot app on emulator, capture diag
-    runs-on: ubuntu-latest
+    # PINNED, never -latest: runs 38040231871/38042207486/38042758668/38045063225
+    # lost qemu ~10s after the E2E driver connected (defunct, 14GB RAM free, no
+    # app FATAL, same code path as the run that survived) — deaths clustered on
+    # the 24.04.5 fleet after 09:00Z while 06:43–09:17Z runs lived. A floating
+    # image makes every failure a guessing game; 22.04 is a separate pool.
+    runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
