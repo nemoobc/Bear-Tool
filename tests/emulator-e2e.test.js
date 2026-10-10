@@ -55,8 +55,12 @@ test('every step lands in steps.log synchronously, so a SIGKILL still shows the 
 
 test('CDP calls are bounded and the socket rejects pending calls on close', () => {
   assert.match(driverSrc, /CDP_TIMEOUT_MS = 15_000/, 'setiap send() wajib punya timeout');
-  assert.match(driverSrc, /CDP timeout \$\{CDP_TIMEOUT_MS\}ms: \$\{method\}/,
-    'timeout harus menyebut method — tanpa itu hang-nya tak terbaca');
+  // per-call timeout (screenshot rides boot churn at 25s) — still must name
+  // the method and the budget actually used, or a hang is unreadable
+  assert.match(driverSrc, /send\(method, params = \{\}, timeoutMs = CDP_TIMEOUT_MS\)/,
+    'send() menerima batas per-panggilan, default 15s');
+  assert.match(driverSrc, /CDP timeout \$\{timeoutMs\}ms: \$\{method\}/,
+    'timeout harus menyebut method + budget aktual — tanpa itu hang-nya tak terbaca');
   assert.match(driverSrc, /ws\.on\('close'/, 'socket close harus reject semua pending call');
   assert.match(driverSrc, /ws\.on\('error'/, 'socket error harus reject semua pending call');
   assert.doesNotMatch(driverSrc, /Runtime\.evaluate.*timeout: 0/,
@@ -244,7 +248,7 @@ test('a fleet qemu death is recovered in-workflow — 3 bounded boots, death sig
 
   // classification gates — every observed death signature, nothing else
   assert.match(rec, /is_death\(\)/, 'klasifikasi tanda-mat wajib ada');
-  for (const sig of ['not found', 'device offline', 'socket closed', 'CDP connect failed']) {
+  for (const sig of ['not found', 'device offline', 'socket closed', 'CDP connect failed', 'Page.captureScreenshot']) {
     assert.match(rec, new RegExp(sig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       'signature kematian harus dikenali: ' + sig);
   }
@@ -316,4 +320,18 @@ test('href and probe wait for the fixture document — a passing report must not
   const stab = driver.indexOf("=== 'about:blank'");
   const href = driver.indexOf('report.dapp.href = await');
   assert.ok(stab > 0 && href > stab, 'stabilisasi mendahului capture href');
+});
+
+test('screenshots get their own 25s budget — a boot-churn readback stall is not a test result', () => {
+  // Run 38062223439: seed-screen Page.captureScreenshot timed out at the 15s
+  // CDP default while app AND renderer were alive (MediaProvider scan +
+  // Gralloc churn at boot). cdp.send takes a per-call timeout; the screenshot
+  // gets 25s to ride the stall out — everything else keeps the 15s default,
+  // so a genuinely wedged compositor still fails FAST via the wrapper.
+  const driver = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8');
+  assert.match(driver, /Page\.captureScreenshot', \{ format: 'png' \}, 25000/,
+    'screenshot memakai 25000ms — bukan default 15000');
+  // and the wrapper recovers it if 25s is not enough either
+  const rec = readFileSync(path.join(here, '..', 'tools', 'e2e-recover.sh'), 'utf8');
+  assert.match(rec, /\*"Page\.captureScreenshot"\*/, 'stall kompositor = signature yang boleh di-recover');
 });

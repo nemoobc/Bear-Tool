@@ -37,6 +37,9 @@ fatal_of() { # report's fatal field ('' when the report is missing/invalid)
 is_death() { # every signature the fleet produced: runs 13,15,16,17,18,19,21
   case "$1" in
     *"not found"*|*"device offline"*|*"socket closed"*|*"CDP connect failed"*) return 0 ;;
+    # compositor/readback stall: run 38062223439's seed screenshot wedged
+    # >15s with app + renderer alive (boot churn) — emulator domain, not app
+    *"Page.captureScreenshot"*) return 0 ;;
     *) return 1 ;;
   esac
 }

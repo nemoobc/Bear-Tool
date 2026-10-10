@@ -162,13 +162,13 @@ function cdpClient(ws) {
   ws.on('error', (err) => failAll(`CDP socket error: ${err.message}`));
   return {
     events,
-    send(method, params = {}) {
+    send(method, params = {}, timeoutMs = CDP_TIMEOUT_MS) {
       const id = ++seq;
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(id);
-          reject(new Error(`CDP timeout ${CDP_TIMEOUT_MS}ms: ${method}`));
-        }, CDP_TIMEOUT_MS);
+          reject(new Error(`CDP timeout ${timeoutMs}ms: ${method}`));
+        }, timeoutMs);
         pending.set(id, { resolve, reject, timer });
         try { ws.send(JSON.stringify({ id, method, params })); }
         catch (e) { clearTimeout(timer); pending.delete(id); reject(e); }
@@ -240,7 +240,11 @@ function makePage(cdp) {
       if (!ok) throw new Error('type target missing: ' + sel);
     },
     async shot(name) {
-      const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' });
+      // 25s, not the 15s default: run 38062223439's seed screenshot stalled
+      // >15s under boot churn (MediaProvider scan + Gralloc contention) with
+      // app and renderer both alive — a readback stall rides out, a wedged
+      // compositor still fails loud via the wrapper's classification.
+      const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' }, 25000);
       const file = path.join(OUT, name + '.png');
       writeFileSync(file, Buffer.from(data, 'base64'));
       return file;
