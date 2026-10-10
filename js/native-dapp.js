@@ -46,11 +46,32 @@ function hexToBytes(hex) {
   return bytes;
 }
 
+// The plugin object MUST be wrapped before it can cross any await/then
+// boundary. Capacitor v8's plugin proxy answers GET 'then' with a native
+// method wrapper; calling it fires an internal native call that rejects as
+// ITS OWN promise and never invokes the resolve/reject it was handed — so
+// `await proxy` / `return proxy` from an async function hangs FOREVER and
+// leaks one "BearDappBrowser.then() is not implemented" unhandled rejection.
+// Proven on a real Android runtime (CI emulator run 38012047691, 2026-10-10):
+// both boot-time adoption sites (diag ping, rpc init) hung, the rpc listener
+// never attached and open() never fired — the blank "not implemented" bug the
+// user reported. The proxy below makes 'then' read as undefined, so the value
+// is simply not thenable: awaits resolve with it, methods pass through.
+let pluginPromise = null;
 async function ensurePlugin() {
   if (plugin) return plugin;
-  const core = await import('@capacitor/core');
-  plugin = core.registerPlugin('BearDappBrowser');
-  return plugin;
+  if (!pluginPromise) {
+    pluginPromise = import('@capacitor/core').then((core) => {
+      const raw = core.registerPlugin('BearDappBrowser');
+      plugin = new Proxy(raw, {
+        get(t, k) {
+          return k === 'then' ? undefined : Reflect.get(t, k);
+        },
+      });
+      return plugin;
+    });
+  }
+  return pluginPromise; // real promise — single flight, no double registration
 }
 
 /** Native mode: open the dApp as a full-page WebView (top-level navigation).

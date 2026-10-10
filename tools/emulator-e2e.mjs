@@ -59,6 +59,13 @@ const adb = (...args) =>
 const ALLOWED_CONSOLE = [
   /coingecko/i, /statsig/i, /amplitude/i, /attestation/i,
   /Failed to fetch/i, /net::ERR/i, /walletconnect/i, /mixpanel/i,
+  // Upstream Capacitor v8.5.2, NOT this app: SystemBars.java injects its
+  // safe-area CSS into a documentElement that does not exist yet at boot
+  // (node_modules/@capacitor/android/capacitor/src/main/java/.../SystemBars.java;
+  // seen as 3x "Error injecting safe area CSS ... reading 'style'" in run
+  // 38012047691). Harmless on notch-less devices, unfixable from JS — the
+  // gate stays on for OUR errors and lets this one through deliberately.
+  /Error injecting safe area CSS/i,
 ];
 
 // Every step is appended here synchronously the moment it starts — the one
@@ -205,7 +212,7 @@ function makePage(cdp) {
 // ── journey ────────────────────────────────────────────────────────────────
 async function main() {
   mkdirSync(OUT, { recursive: true });
-  report = { steps: [], consoleErrors: [], exceptions: [], pass: false };
+  report = { steps: [], consoleErrors: [], consoleTrail: [], exceptions: [], native: null, pass: false };
   const step = (name) => { report.steps.push(name); markStep(name); };
 
   const cdp = await connectCDP();
@@ -263,12 +270,43 @@ async function main() {
     }
   }
 
+  // ── native bridge diagnostics (permanent, CDP-side) ─────────────────────
+  // Where the console-to-logcat routing is a moving target, the driver reads
+  // the bridge state itself: does the plugin exist, does a native method
+  // answer, and does the raw proxy still pretend to be thenable (the hang
+  // bug of run 38012047691 — awaiting it froze every consumer silently).
+  step('native bridge diagnostics');
+  report.native = await page.evaluate(`(async () => {
+    const c = window.Capacitor;
+    if (!c) return { cap: false };
+    const out = { cap: true, platform: String(c.getPlatform && c.getPlatform()) };
+    out.known = !!(c.Plugins && c.Plugins.BearDappBrowser);
+    try { out.available = String(c.isPluginAvailable && c.isPluginAvailable('BearDappBrowser')); }
+    catch (e) { out.available = 'throw ' + e.message; }
+    try {
+      const p = c.Plugins && c.Plugins.BearDappBrowser;
+      out.thenType = p ? typeof p.then : 'no-plugin';
+      const r = await Promise.race([
+        p.back({}),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout 2500ms')), 2500)),
+      ]);
+      out.ping = 'OK ' + JSON.stringify(r);
+    } catch (e) { out.ping = 'ERR ' + (e && e.message ? e.message : String(e)); }
+    return out;
+  })()`).catch((e) => ({ evaluateFailed: e.message }));
+
   // ── error verdict ────────────────────────────────────────────────────────
   step('verdict');
   for (const ev of cdp.events) {
-    if (ev.method === 'Runtime.consoleAPICalled' && ev.params.type === 'error') {
+    if (ev.method === 'Runtime.consoleAPICalled') {
       const text = (ev.params.args || []).map((a) => a.value ?? a.description ?? '').join(' ');
-      if (!ALLOWED_CONSOLE.some((re) => re.test(text))) report.consoleErrors.push(text.slice(0, 400));
+      // The whole console trail (all levels, capped) rides along in the
+      // report — the [dApp diag] line and friends must be readable from the
+      // artifact alone, never depending on how Android routes console levels.
+      if (report.consoleTrail.length < 200) report.consoleTrail.push(ev.params.type + ': ' + text.slice(0, 300));
+      if (ev.params.type === 'error' && !ALLOWED_CONSOLE.some((re) => re.test(text))) {
+        report.consoleErrors.push(text.slice(0, 400));
+      }
     }
     if (ev.method === 'Runtime.exceptionThrown') {
       const d = ev.params.exceptionDetails;
@@ -277,7 +315,13 @@ async function main() {
   }
 
   writeFileSync(path.join(OUT, 'emulator-report.json'), JSON.stringify(report, null, 2));
-  console.log('[e2e] report: ' + JSON.stringify({ steps: report.steps.length, consoleErrors: report.consoleErrors.length, exceptions: report.exceptions.length }));
+  console.log('[e2e] report: ' + JSON.stringify({
+    steps: report.steps.length,
+    consoleErrors: report.consoleErrors.length,
+    exceptions: report.exceptions.length,
+    consoleTrail: report.consoleTrail.length,
+    native: report.native && (report.native.ping || report.native.evaluateFailed || 'n/a'),
+  }));
   if (report.consoleErrors.length || report.exceptions.length) {
     die('unfiltered console errors / exceptions:\n  ' + [...report.consoleErrors, ...report.exceptions].join('\n  '));
     return;

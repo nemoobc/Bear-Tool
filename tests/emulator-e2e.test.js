@@ -124,3 +124,13 @@ test('the workflow captures logcat at BOOT via a stream started before anything 
   assert.match(script, /grep -aqF "\[dApp diag\]" logcat-stream\.txt \|\| echo DIAG_LINE_NOT_FOUND/,
     'marker DIAG_LINE_NOT_FOUND harus bisa tercetak (grep -q, bukan di pipeline head)');
 });
+
+test('the driver captures the native bridge state and the whole console trail', () => {
+  assert.match(driverSrc, /report\.native = await page\.evaluate/,
+    'diagnostik native dibaca langsung via CDP — jangan bergantung routing console→logcat');
+  assert.match(driverSrc, /report\.consoleTrail/,
+    'seluruh jejak console (semua level) ikut report — baris [dApp diag] harus terbaca dari artefak');
+  assert.match(driverSrc, /Error injecting safe area CSS/,
+    'noise upstream SystemBars.java (bukti: node_modules/@capacitor/android/.../SystemBars.java) masuk allowlist sadar, bukan luput');
+  assert.match(driverSrc, /ping timeout 2500ms/, 'ping native wajib berbatas');
+});
