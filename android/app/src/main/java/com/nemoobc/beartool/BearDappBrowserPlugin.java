@@ -316,7 +316,7 @@ public class BearDappBrowserPlugin extends Plugin {
                 // loud. One bounded Log.d per RPC — trusted side, real trips
                 // only, same budget as the rpcRequest drop line.
                 String js = "(function () { try { return String(window.__bearNativeResolve("
-                    + id + "," + response + ")); } catch (e) { return 'ERR ' + (e && e.message); } })()";
+                    + id + "," + response + ")) + '|same=' + (window.__pageResolve === window.__bearNativeResolve); } catch (e) { return 'ERR ' + (e && e.message); } })()";
                 dappView.evaluateJavascript(js, value ->
                     android.util.Log.d("BearDappBrowser", "resolve#" + id + "->" + value + " :: " + response));
             }

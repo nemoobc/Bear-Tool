@@ -155,3 +155,21 @@ test('the fatal path carries the console too — a failed run reports what the w
     'definisi + DUA panggilan: verdict sukses DAN catch fatal');
   assert.match(driverSrc, /cdp\.events\.splice\(0\)/, 'drain sekali — dipanggil dua kali tak boleh menghitung ganda');
 });
+
+test('the truth probes exist — a "resolved" that never settles must be decidable', () => {
+  // Two independent runs (38040858378, 38046569239): resolve#1->"resolved"
+  // from Java, fixture page alive, zero exceptions, deadline screams 30s.
+  // The fixture stores ITS instance (Java echoes the same identity on its
+  // side) and settles a page-registered promise WITHOUT native — machinery
+  // and transport are now separable, whoever is lying.
+  const fixture = readFileSync(path.join(here, '..', 'public', 'dapp-rpc-fixture.html'), 'utf8');
+  assert.match(fixture, /window\.__pageResolve = window\.__bearNativeResolve;/,
+    'fixture menyimpan instan resolve-nya sendiri — identity dibandingkan DUA sisi hop');
+  assert.match(fixture, /window\.__bearE2EProbe = function/,
+    'probe self-settle: page menyelesaikan promise-nya SENDIRI tanpa native — mesin vs transport');
+  assert.match(fixture, /window\.__bearNativeResolve\(2, \{ result: '0xAB' \}\)/,
+    'probe memakai resolve instance yang sama persis');
+  const region = java.slice(java.indexOf('public void resolve'), java.indexOf('public void resolve') + 1800);
+  assert.match(region, /window\.__pageResolve === window\.__bearNativeResolve/,
+    'baris resolve# ikut melaporkan apakah konteks Java = konteks fixture (|same=)');
+});

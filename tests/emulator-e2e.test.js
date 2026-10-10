@@ -215,3 +215,13 @@ test('the emulator job runs on a PINNED image — a floating -latest hides every
   assert.ok(!String(job['runs-on']).includes('latest'),
     'runs-on dilarang ubuntu-latest — image melayang membuat kematian emulator tak bisa dibedakan dari bug');
 });
+
+test('the driver reads the truth probes before judging the chain', () => {
+  // run 38046569239 died at the new truth-machine step with a clean bill of
+  // health except the missing settle — probe data must ride into the report
+  // so the next dead run is decidable from the artifact alone.
+  assert.match(driverSrc, /report\.dapp\.probe = await dpage\.evaluate/,
+    'probe dijalankan SEBELUM poll chainStage — kegagalan tetap membawa bukti');
+  assert.match(driverSrc, /selfSettle: t/, 'hasil self-settle masuk report (mesin then-chain hidup/mati)');
+  assert.match(driverSrc, /head\.sameFn/, 'identitas instance (page vs Java) masuk report');
+});

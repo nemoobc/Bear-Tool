@@ -388,6 +388,18 @@ async function main() {
     };
     report.dapp.href = await dpage.evaluate('location.href').catch((e) => 'eval-failed: ' + e.message);
 
+    // Truth probes before judgment: sameFn/type = did Java's 'resolved' come
+    // from the instance THIS page registered in; selfSettle = can a promise
+    // the page registered settle at all when the PAGE itself resolves it
+    // (machinery) — separating a broken then-chain from a broken native hop.
+    report.dapp.probe = await dpage.evaluate(`(function () {
+      if (!window.__bearE2EProbe) return { missing: true };
+      var head = window.__bearE2EProbe();
+      return window.__probeSelf.then(function (t) {
+        return { sameFn: head.sameFn, type: head.type, selfSettle: t };
+      });
+    })()`).catch((e) => ({ probeFailed: e.message }));
+
     step('dapp browser: eth_chainId lands in the fixture (or its deadline screams)');
     let text = await pollOut(/chainId=|error=|done=/, 40000);
     drainDapp();

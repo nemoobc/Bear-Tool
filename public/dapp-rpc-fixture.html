@@ -33,6 +33,34 @@
   }
   rec('hasProvider', !!(window.ethereum && window.ethereum.isBear));
   if (!window.ethereum) { rec('error', 'no window.ethereum'); rec('done', 'failed'); return; }
+  // E2E truth probes — runs 38040858378/38046569239: the Java side logged
+  // resolve#1->"resolved" while this page's own deadline still screamed
+  // timeout, with no exception anywhere. Someone is lying; these two facts
+  // say who. __pageResolve = the instance THIS page registered its pending
+  // promise in (Java echoes window.__pageResolve === window.__bearNativeResolve
+  // on its side of the hop). __bearE2EProbe settles a promise BY THE PAGE
+  // ITSELF, no native involved: machinery (then-chain works) vs transport
+  // (the native hop) — decoupled at last.
+  window.__pageResolve = window.__bearNativeResolve;
+  window.__bearE2EProbe = function () {
+    var head = {
+      sameFn: window.__pageResolve === window.__bearNativeResolve,
+      type: typeof window.__bearNativeResolve,
+    };
+    try {
+      var pr = window.ethereum.request({ method: 'eth_chainId' }); // id=2
+      // page settles ITSELF synchronously — the native answer arriving later
+      // hits a deleted pending entry ('unknown-id', bounded, harmless)
+      window.__bearNativeResolve(2, { result: '0xAB' });
+      window.__probeSelf = pr.then(
+        function (r) { return 'settled:' + r; },
+        function (e) { return 'rejected:' + (e && e.message ? e.message : String(e)); }
+      );
+    } catch (e) {
+      window.__probeSelf = Promise.resolve('threw:' + e.message);
+    }
+    return head;
+  };
   Promise.all([
     window.ethereum.request({ method: 'eth_chainId' }),
     deadline(30000, 'eth_chainId'),
