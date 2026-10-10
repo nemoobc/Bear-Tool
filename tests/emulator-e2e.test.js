@@ -279,3 +279,22 @@ test('a fleet qemu death is recovered in-workflow — 3 bounded boots, death sig
     'driver telanjang di YAML = melewati klasifikasi — dilarang');
   assert.match(yaml, /timeout 2100/, 'wrapper dibatasi luar (3x480 + 2 recovery)');
 });
+
+test('the E2E boots a BARE image — GMS FontsProvider collateral kills are a closed class', () => {
+  // Run 38059524261, logcat 14:30:02.442+: gms.persistent died spontaneously
+  //   Killing com.nemoobc.beartool (adj 0): depends on provider
+  //   com.google.android.gms/.fonts.provider.FontsProvider in dying proc
+  //   com.google.android.gms.persistent (adj -10000)
+  // — four seconds into the fixture, the whole app SIGKILL'd, renderer gone,
+  // CDP evaluate timing out (the exact wedge signature). The app uses NO
+  // GMS/Firebase at runtime: google-services plugin is build-time only, zero
+  // firebase/gms references in js/, java/, AndroidManifest. The bare AOSP
+  // image removes the provider dependency, its death, and the Google-app
+  // background churn in one move — the app must not die because a stranger
+  // process did.
+  const yml = readFileSync(path.join(here, '..', '.github', 'workflows', 'emulator.yml'), 'utf8');
+  assert.match(yml, /target: default/, 'image bare — tanpa GMS, tanpa FontsProvider, tanpa kill berantai');
+  assert.doesNotMatch(yml, /target: google_apis/,
+    'google_apis mengembalikan kelas kill ini — hanya boleh kembali dengan bukti logcat baru');
+  assert.match(yml, /FontsProvider/, 'alasan ditulis di workflow — keputusan butuh jejak');
+});

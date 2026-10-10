@@ -229,8 +229,8 @@ test('the exact Promise.all member is tracked — inner-settled vs outer-pending
     'fixture menyimpan promise yang DIPAKAI Promise.all');
   assert.match(fixture, /window\.__id1 = \{ settled: false, value: null \};/,
     'tracker __id1 terpasang pada promise yang sama');
-  assert.match(fixture, /Promise\.all\(\[\s*p1,/,
-    'Promise.all menunggu p1 yang terlacak, bukan ekspresi anonim');
+  assert.match(fixture, /Promise\.race\(\[\s*p1,/,
+    'Promise.race menunggu p1 yang terlacak, bukan ekspresi anonim');
   const driver = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8');
   assert.match(driver, /report\.dapp\.final = await dpage\.evaluate/,
     'driver membaca keadaan akhir HANYA di cabang gagal — bukti ikut terkirim');
@@ -261,6 +261,28 @@ test('the fixture waits out the parser race and RECORDS it — providerLate is a
   assert.ok(mainIdx > 0 && pollIdx > mainIdx, 'main() dibuka sebelum poll IIFE');
   assert.match(fixture.slice(mainIdx, pollIdx), /window\.__pageResolve = window\.__bearNativeResolve/,
     'probe registrations di DALAM main() — setelah provider, bukan di parse time');
-  assert.match(fixture.slice(mainIdx, pollIdx), /Promise\.all\(\[\s*p1,/,
-    'rantai Promise.all di DALAM main()');
+  assert.match(fixture.slice(mainIdx, pollIdx), /Promise\.race\(\[\s*p1,/,
+    'rantai race di DALAM main()');
+});
+
+test('the deadline joins by RACE, never by ALL — Promise.all([p1, deadline]) can never fire .then', () => {
+  // THE root cause of runs 38046569239/38050667944's "mystery" (and the
+  // apparent contradiction resolve#1->"resolved|same=true" vs
+  // error=eth_chainId timeout 30000ms): deadline NEVER resolves — it only
+  // rejects at +30s — and Promise.all needs EVERY member to resolve. So
+  // .then was structurally unreachable, .catch always fired at 30s, and a
+  // perfect native hop looked broken. First settler wins = race. This shape
+  // must never come back: it fails in 30s while every probe says green.
+  const fixture = readFileSync(path.join(here, '..', 'public', 'dapp-rpc-fixture.html'), 'utf8');
+  // comment lines stripped first — the fix's own comment QUOTES the bug shape
+  const code = fixture.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.doesNotMatch(code, /Promise\.all\(\[[\s\S]{0,160}deadline/,
+    'Promise.all + deadline = .then must never run — the exact bug that faked a transport failure');
+  assert.match(fixture, /Promise\.race\(\[\s*p1,\s*deadline\(30000, 'eth_chainId'\)/,
+    'chainId menempuh race terhadap deadline-nya');
+  // value semantics follow race: .then receives the VALUE, not [value, ...]
+  assert.match(fixture, /\]\)\.then\(function \(chainId\) \{\s*rec\('chainId', chainId\)/,
+    'race memberikan nilai langsung — r[0] gaya Promise.all dilarang di sini');
+  assert.match(fixture, /rec\('account0', \(\(accounts \|\| \[\]\)\[0\]/,
+    'accounts race: nilai array langsung, bukan indeks tuple');
 });

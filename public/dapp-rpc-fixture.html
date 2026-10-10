@@ -69,32 +69,37 @@
     }
     return head;
   };
-  // The last open link: Java logged resolve#1->"resolved" (p.resolve called
-  // on THIS page's instance) while Promise.all timed out. __id1 tracks the
-  // exact promise Promise.all waits on — settled+value proves the outer
-  // promise followed the inner resolve; still-false at timeout isolates the
-  // break between inner and outer.
+  // THE bug behind runs 38046569239/38050667944's "contradiction": the chain
+  // below was Promise.all([p1, deadline]) — deadline NEVER resolves (it only
+  // rejects at +30s), so Promise.all could never fire .then no matter how
+  // fast the native hop answered (resolve#1->"resolved|same=true" at +100ms).
+  // Every "error=eth_chainId timeout 30000ms" was this fixture's primitive,
+  // not the transport. __id1 stays as the tripwire: settled+value at failure
+  // = outer promise followed the inner resolve while the chain refused to
+  // advance for its own structural reasons.
   var p1 = window.ethereum.request({ method: 'eth_chainId' });
   window.__id1 = { settled: false, value: null };
   p1.then(function (v) { window.__id1.settled = true; window.__id1.value = String(v); },
            function (e) { window.__id1.settled = 'rejected'; window.__id1.value = String(e && e.message); });
-  Promise.all([
+  // race: first settler wins — the deadline can reject, the request can
+  // resolve, and .then runs for the FAST answer instead of never.
+  Promise.race([
     p1,
     deadline(30000, 'eth_chainId'),
-  ]).then(function (r) {
-    rec('chainId', r[0]);
-    return Promise.all([
+  ]).then(function (chainId) {
+    rec('chainId', chainId);
+    return Promise.race([
       window.ethereum.request({ method: 'eth_requestAccounts' }),
       deadline(60000, 'eth_requestAccounts'),
     ]);
-  }).then(function (r) {
-    rec('account0', ((r[0] || [])[0] || '').toLowerCase());
-    return Promise.all([
+  }).then(function (accounts) {
+    rec('account0', ((accounts || [])[0] || '').toLowerCase());
+    return Promise.race([
       window.ethereum.request({ method: 'eth_accounts' }),
       deadline(15000, 'eth_accounts'),
     ]);
-  }).then(function (r) {
-    rec('accountsAgain', ((r[0] || [])[0] || '').toLowerCase());
+  }).then(function (again) {
+    rec('accountsAgain', ((again || [])[0] || '').toLowerCase());
     rec('done', 'ok');
   }).catch(function (e) {
     rec('error', e && e.message ? e.message : String(e));

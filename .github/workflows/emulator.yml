@@ -78,7 +78,16 @@ jobs:
         with:
           api-level: 33
           arch: x86_64
-          target: google_apis
+          # google_apis -> default (run 38059524261, evidence in logcat):
+          # gms.persistent died at +4s of the dapp step and AM killed THE APP
+          #   Killing com.nemoobc.beartool (adj 0): depends on provider
+          #   com.google.android.gms/.fonts.provider.FontsProvider in dying
+          #   proc com.google.android.gms.persistent (adj -10000)
+          # The app uses NO GMS/Firebase at runtime (google-services plugin is
+          # build-time only; zero firebase/gms refs in js/, java/, manifest) —
+          # the bare AOSP image removes that whole collateral-kill class plus
+          # the GMS/Google-app background churn that comes with it.
+          target: default
           disable-animations: true
           emulator-options: -no-snapshot -no-window -noaudio -no-boot-anim -camera-back none
           # HOW android-emulator-runner EXECUTES THIS (source: script-parser.ts
