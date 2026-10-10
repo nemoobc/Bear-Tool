@@ -392,7 +392,11 @@ async function main() {
     // from the instance THIS page registered in; selfSettle = can a promise
     // the page registered settle at all when the PAGE itself resolves it
     // (machinery) — separating a broken then-chain from a broken native hop.
-    report.dapp.probe = await dpage.evaluate(`(function () {
+    // Waits for __id1 (set by the fixture's main()) so the probe's own
+    // request is ALWAYS id=2 — its self-resolve target is hardcoded to 2.
+    report.dapp.probe = await dpage.evaluate(`(async () => {
+      const t0 = Date.now();
+      while (!window.__id1 && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 50));
       if (!window.__bearE2EProbe) return { missing: true };
       var head = window.__bearE2EProbe();
       return window.__probeSelf.then(function (t) {

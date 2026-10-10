@@ -237,3 +237,30 @@ test('the exact Promise.all member is tracked — inner-settled vs outer-pending
   assert.match(driver, /id1: window\.__id1/, 'id1 masuk final');
   assert.match(driver, /ethChainId.*ethereum\.chainId/, 'provider.chainId masuk final (cb .then jalan/tidak)');
 });
+
+test('the fixture waits out the parser race and RECORDS it — providerLate is a first-class fact', () => {
+  // Runs 38047794274/38056613084: all three native hooks logged
+  // inject@<stage>->"true" while the fixture's parse-time window.ethereum
+  // read came up empty — a local page parses in ~0ms and beats every queued
+  // evaluateJavascript. The E2E must survive that (real dApps tolerate late
+  // providers — EIP-6963), and the race must stay MEASURABLE: providerLate=0
+  // = injection won, N = the parser did. A fixture that silently waits would
+  // hide the very bug this line exists to expose.
+  const fixture = readFileSync(path.join(here, '..', 'public', 'dapp-rpc-fixture.html'), 'utf8');
+  assert.match(fixture, /rec\('providerLate', waited\)/,
+    'lateness provider dicatat sebagai fakta output (bukan disembunyikan)');
+  assert.match(fixture, /waited >= 3000\)\s*\{\s*rec\('error', 'no window\.ethereum'\)/,
+    'tunggu DIBATASI 3s — tanpa provider tetap gagal jujur, tidak menggantung');
+  assert.match(fixture, /function main\(\) \{/,
+    'rantai RPC pindah ke main() — hanya jalan SETELAH provider ada');
+  assert.match(fixture, /setTimeout\(poll, 50\)/, 'polling 50ms — jauh di bawah latensi injeksi mana pun');
+  // main() must enclose the probes and the chain (parse-time registration of
+  // __id1/__pageResolve would race the provider again)
+  const mainIdx = fixture.indexOf('function main()');
+  const pollIdx = fixture.indexOf('(function poll()');
+  assert.ok(mainIdx > 0 && pollIdx > mainIdx, 'main() dibuka sebelum poll IIFE');
+  assert.match(fixture.slice(mainIdx, pollIdx), /window\.__pageResolve = window\.__bearNativeResolve/,
+    'probe registrations di DALAM main() — setelah provider, bukan di parse time');
+  assert.match(fixture.slice(mainIdx, pollIdx), /Promise\.all\(\[\s*p1,/,
+    'rantai Promise.all di DALAM main()');
+});

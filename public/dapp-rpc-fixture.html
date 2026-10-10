@@ -32,7 +32,15 @@
     });
   }
   rec('hasProvider', !!(window.ethereum && window.ethereum.isBear));
-  if (!window.ethereum) { rec('error', 'no window.ethereum'); rec('done', 'failed'); return; }
+  // The provider injection races THIS parser (runs 38047794274/38056613084:
+  // all three native hooks logged landing=true while the parse-time
+  // window.ethereum read came up empty — a local page parses in ~0ms and
+  // beats every queued evaluateJavascript). Real dApps tolerate late wallets
+  // (EIP-6963 announce / ethereum#initialized); so does this fixture: wait
+  // up to 3s and RECORD the lateness — providerLate=0 = injection won the
+  // race, N = the parser did. The chain inside main() only runs once
+  // window.ethereum exists, so a lost race delays; it never lies.
+  function main() {
   // E2E truth probes — runs 38040858378/38046569239: the Java side logged
   // resolve#1->"resolved" while this page's own deadline still screamed
   // timeout, with no exception anywhere. Someone is lying; these two facts
@@ -92,6 +100,18 @@
     rec('error', e && e.message ? e.message : String(e));
     rec('done', 'failed');
   });
+  }
+  var waited = 0;
+  (function poll() {
+    if (window.ethereum && window.ethereum.isBear) {
+      rec('providerLate', waited);
+      main();
+      return;
+    }
+    if (waited >= 3000) { rec('error', 'no window.ethereum'); rec('done', 'failed'); return; }
+    waited += 50;
+    setTimeout(poll, 50);
+  })();
 })();
 </script>
 </body>
