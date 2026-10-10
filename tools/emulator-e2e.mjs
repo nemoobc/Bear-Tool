@@ -296,7 +296,10 @@ async function main() {
 
   try {
   step('boot: welcome screen');
-  await page.wait('#wCreate', 30000);
+  // 60s, not 30: a busy fleet boots slowly and #wCreate lagged past 30s on
+  // runs 38072294759 / 38074354011 (bridge registered, app alive — just a
+  // slow first paint). The journey still demands EVERY step after this.
+  await page.wait('#wCreate', 60000);
   await sleep(600);
   await page.shot('01-welcome');
 
