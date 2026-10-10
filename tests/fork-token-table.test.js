@@ -41,7 +41,7 @@ test('every mainnet in the token table yields a stable through knownStable()', (
   const expected = [
     'ethereum', 'bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'sepolia',
     'avalanche', 'gnosis', 'celo', 'sonic', 'linea', 'scroll', 'mantle',
-    'zksync', 'unichain', 'worldchain'
+    'unichain', 'worldchain'
   ];
   assert.deepEqual([...MAINNETS_WITH_TOKENS].sort(), [...expected].sort(),
     'jaringan yang punya token berubah — tabel atau daftarnya harus diperbarui dua-duanya');

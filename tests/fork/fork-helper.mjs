@@ -85,7 +85,14 @@ export const FORK_NETWORKS = {
   scroll:      { chainId: 534352, rpc: 'https://rpc.scroll.io',                             type: 'mainnet' },
   blast:       { chainId: 81457, rpc: 'https://rpc.blast.io',                               type: 'mainnet' },
   mantle:      { chainId: 5000,  rpc: 'https://rpc.mantle.xyz',                             type: 'mainnet' },
-  zksync:      { chainId: 324,   rpc: 'https://mainnet.era.zksync.io',                      alts: ['https://zksync.drpc.org'], type: 'mainnet' },
+  // zksync (chain 324) is DELIBERATELY absent — anvil cannot fork Era, ever:
+  // "unsupported fork network for chain 324: Anvil's EVM backend cannot
+  // execute native EraVM bytecode; use `anvil-zksync` for zkSync Era forks"
+  // (anvil 1.8.3-dev, local probe 2026-10-10; the same refusal hit BOTH CI
+  // candidates in six runs — 38010720148…38022733054: 39 boot failures, all
+  // 20 tests hookFailed, and two job-timeout kills (25m, then 40m) while the
+  // boot loop retried a refusal forever). EraVM forks need the separate
+  // anvil-zksync toolchain; this matrix is plain anvil.
   unichain:    { chainId: 130,   rpc: 'https://mainnet.unichain.org',                       type: 'mainnet' },
   worldchain:  { chainId: 480,   rpc: 'https://worldchain-mainnet.g.alchemy.com/public',    type: 'mainnet' }
 };
@@ -789,7 +796,6 @@ export const KNOWN_TOKENS = {
   scroll:      { weth: '0x5300000000000000000000000000000000000004', usdc: '0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4' },
   blast:       { weth: null, usdc: null },
   mantle:      { weth: '0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111', usdc: '0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9' },
-  zksync:      { weth: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', usdc: '0x1d17CBcF0D6D143135aE902365D2E5e2A16538D4' },
   unichain:    { weth: '0x4200000000000000000000000000000000000006', usdc: '0x078D782b760474a361dDA0AF3839290b0EF57AD6' },
   worldchain:  { weth: '0x4200000000000000000000000000000000000006', usdc: '0x79A02482A880bCE3F13e09Da970dC34db4CD24d1' }
 };
