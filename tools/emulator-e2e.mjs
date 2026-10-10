@@ -249,6 +249,30 @@ function makePage(cdp) {
 }
 
 // ── journey ────────────────────────────────────────────────────────────────
+// Drain accumulated CDP events into the report. Splice = idempotent, so BOTH
+// paths may call it: the verdict (success) and the fatal catch — the failure
+// report of run 38034404898 carried a consoleTrail of ZERO because the fatal
+// path never ran this transfer, and the coingecko CORS errors sitting on the
+// wire were only visible from logcat.
+function collectConsole(cdp) {
+  for (const ev of cdp.events.splice(0)) {
+    if (ev.method === 'Runtime.consoleAPICalled') {
+      const text = (ev.params.args || []).map((a) => a.value ?? a.description ?? '').join(' ');
+      // The whole console trail (all levels, capped) rides along in the
+      // report — readable from the artifact alone, never depending on how
+      // Android routes console levels.
+      if (report.consoleTrail.length < 200) report.consoleTrail.push(ev.params.type + ': ' + text.slice(0, 300));
+      if (ev.params.type === 'error' && !ALLOWED_CONSOLE.some((re) => re.test(text))) {
+        report.consoleErrors.push(text.slice(0, 400));
+      }
+    }
+    if (ev.method === 'Runtime.exceptionThrown') {
+      const d = ev.params.exceptionDetails;
+      report.exceptions.push((d.exception?.description || d.text || 'unknown').slice(0, 500));
+    }
+  }
+}
+
 async function main() {
   mkdirSync(OUT, { recursive: true });
   report = { steps: [], consoleErrors: [], consoleTrail: [], exceptions: [], native: null, dapp: null, pass: false };
@@ -408,22 +432,7 @@ async function main() {
 
   // ── error verdict ────────────────────────────────────────────────────────
   step('verdict');
-  for (const ev of cdp.events) {
-    if (ev.method === 'Runtime.consoleAPICalled') {
-      const text = (ev.params.args || []).map((a) => a.value ?? a.description ?? '').join(' ');
-      // The whole console trail (all levels, capped) rides along in the
-      // report — the [dApp diag] line and friends must be readable from the
-      // artifact alone, never depending on how Android routes console levels.
-      if (report.consoleTrail.length < 200) report.consoleTrail.push(ev.params.type + ': ' + text.slice(0, 300));
-      if (ev.params.type === 'error' && !ALLOWED_CONSOLE.some((re) => re.test(text))) {
-        report.consoleErrors.push(text.slice(0, 400));
-      }
-    }
-    if (ev.method === 'Runtime.exceptionThrown') {
-      const d = ev.params.exceptionDetails;
-      report.exceptions.push((d.exception?.description || d.text || 'unknown').slice(0, 500));
-    }
-  }
+  collectConsole(cdp);
 
   writeFileSync(path.join(OUT, 'emulator-report.json'), JSON.stringify(report, null, 2));
   console.log('[e2e] report: ' + JSON.stringify({
@@ -452,6 +461,7 @@ async function main() {
     // (run 38031909581: 99-failure.png showed a calm dashboard while the
     // dapp WebView sat there with a failed load).
     await shotScreen('99-failure-screen').catch(() => {});
+    collectConsole(cdp); // fatal path must carry the console too — drain before die() writes
     throw e;
   }
 }

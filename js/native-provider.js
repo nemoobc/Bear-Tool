@@ -41,15 +41,21 @@ export const NATIVE_PROVIDER_SCRIPT = `(function () {
   }
   window.__bearNativeResolve = function (id, response) {
     var p = pending[id];
-    if (!p) return; // late/duplicate resolve — drop, never throw into the page
+    // The return value is diagnosis, not protocol: the native side logs it
+    // (run 38034404898 lost a resolve with every hop silent — the dapp view
+    // has no WebChromeClient, so an evaluateJavascript failure logs NOTHING).
+    // 'unknown-id' = the pending map lost the request (re-injection, wrong id);
+    // 'resolved'/'error-sent' = the page's promise was settled for real.
+    if (!p) return 'unknown-id'; // late/duplicate resolve — drop, never throw into the page
     delete pending[id];
     if (response && response.error) {
       var err = new Error(response.error.message || 'Request failed');
       if (response.error.code) err.code = response.error.code;
       p.reject(err);
-    } else {
-      p.resolve(response ? response.result : undefined);
+      return 'error-sent';
     }
+    p.resolve(response ? response.result : undefined);
+    return 'resolved';
   };
   window.__bearNativeNotify = function (payload) {
     try {

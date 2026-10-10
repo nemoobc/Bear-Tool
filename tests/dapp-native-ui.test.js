@@ -129,3 +129,29 @@ test('the dApp page renders BELOW the toolbar — never underneath its own heade
   assert.match(java, /48 \* getActivity\(\)\.getResources\(\)\.getDisplayMetrics\(\)\.density/,
     'ukuran dp-density lewat getResources aktivitas — Plugin Capacitor tak mengekspos getResources() (compile error run 38033857612)');
 });
+
+test('a resolve is never silent — the provider reports its outcome and Java logs it', () => {
+  const prov = readFileSync(path.join(here, '..', 'js', 'native-provider.js'), 'utf8');
+  // Run 38034404898: the dapp view has no WebChromeClient, so a failed
+  // evaluateJavascript logs NOTHING anywhere — the resolve vanished with
+  // every hop quiet. The receiver now answers for itself.
+  assert.match(prov, /return 'unknown-id'/, 'pending map tanpa id wajib teriak, bukan diam');
+  assert.match(prov, /return 'resolved'/, 'sukses = status eksplisit untuk di-log sisi native');
+  assert.match(prov, /return 'error-sent'/, 'reject juga berstatus — error path tak boleh ambigu');
+  const region = java.slice(java.indexOf('public void resolve'), java.indexOf('public void resolve') + 1800);
+  assert.match(region, /try \{ return String\(window\.__bearNativeResolve\(/, 'eval dibungkus try/catch yang MENGEMBALIKAN status — callback null membisu');
+  assert.match(region, /resolve#" \+ id \+ "->"/, 'setiap resolve mengeluarkan satu baris Log.d ber-ID');
+  assert.match(region, /catch \(e\) \{ return 'ERR '/, 'exception evaluateJavascript wajib berubah jadi string yang tercatat');
+});
+
+test('the fatal path carries the console too — a failed run reports what the wire saw', () => {
+  const driverSrc = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  // The failure report of 38034404898 had consoleTrail=0 while logcat held
+  // the CORS errors: the transfer lived only in the verdict, which a fatal
+  // run never reaches.
+  assert.match(driverSrc, /function collectConsole\(cdp\)/, 'transfer jadi fungsi drain (splice = idempoten)');
+  assert.equal((driverSrc.match(/collectConsole\(cdp\)/g) || []).length, 3,
+    'definisi + DUA panggilan: verdict sukses DAN catch fatal');
+  assert.match(driverSrc, /cdp\.events\.splice\(0\)/, 'drain sekali — dipanggil dua kali tak boleh menghitung ganda');
+});

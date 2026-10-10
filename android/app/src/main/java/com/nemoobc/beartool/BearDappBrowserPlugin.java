@@ -307,7 +307,18 @@ public class BearDappBrowserPlugin extends Plugin {
             if (dappView != null) {
                 // response is JSON built by the wallet app (trusted side) —
                 // embedded verbatim so __bearNativeResolve sees a real object.
-                dappView.evaluateJavascript("window.__bearNativeResolve(" + id + "," + response + ");", null);
+                // Wrapped in try/catch WITH a logged outcome: the dapp view
+                // has no WebChromeClient, so a failed evaluateJavascript (or a
+                // missing __bearNativeResolve) logs NOTHING anywhere — run
+                // 38034404898 lost a whole resolve chain to that silence. The
+                // provider returns 'resolved'/'error-sent'/'unknown-id'; an
+                // exception or a null result (script never ran) is just as
+                // loud. One bounded Log.d per RPC — trusted side, real trips
+                // only, same budget as the rpcRequest drop line.
+                String js = "(function () { try { return String(window.__bearNativeResolve("
+                    + id + "," + response + ")); } catch (e) { return 'ERR ' + (e && e.message); } })()";
+                dappView.evaluateJavascript(js, value ->
+                    android.util.Log.d("BearDappBrowser", "resolve#" + id + "->" + value + " :: " + response));
             }
             call.resolve();
         });
