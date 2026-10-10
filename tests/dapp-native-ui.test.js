@@ -215,3 +215,25 @@ test('every @PluginMethod binds to ITS public PluginCall method — no orphans',
   assert.match(noComments, /@PluginMethod\s*\n\s*public void open\s*\(\s*PluginCall/,
     'open() HARUS berpasangan langsung dengan @PluginMethod');
 });
+
+test('the exact Promise.all member is tracked — inner-settled vs outer-pending must be visible', () => {
+  // Runs 38040858378/38046569239/38050667944: Java logged resolve#1->"resolved"
+  // (same instance, same context, pending[1] found) while Promise.all timed
+  // out. selfSettle proved the machinery works when the page calls it — so the
+  // last question is whether the OUTER promise (the one Promise.all waits on)
+  // followed the inner resolve. __id1 tracks that exact promise; the driver
+  // reads its end state plus provider.chainId (written by request()'s own
+  // .then) only in the failure branch — the dead run carries its own autopsy.
+  const fixture = readFileSync(path.join(here, '..', 'public', 'dapp-rpc-fixture.html'), 'utf8');
+  assert.match(fixture, /var p1 = window\.ethereum\.request\(\{ method: 'eth_chainId' \}\);/,
+    'fixture menyimpan promise yang DIPAKAI Promise.all');
+  assert.match(fixture, /window\.__id1 = \{ settled: false, value: null \};/,
+    'tracker __id1 terpasang pada promise yang sama');
+  assert.match(fixture, /Promise\.all\(\[\s*p1,/,
+    'Promise.all menunggu p1 yang terlacak, bukan ekspresi anonim');
+  const driver = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8');
+  assert.match(driver, /report\.dapp\.final = await dpage\.evaluate/,
+    'driver membaca keadaan akhir HANYA di cabang gagal — bukti ikut terkirim');
+  assert.match(driver, /id1: window\.__id1/, 'id1 masuk final');
+  assert.match(driver, /ethChainId.*ethereum\.chainId/, 'provider.chainId masuk final (cb .then jalan/tidak)');
+});

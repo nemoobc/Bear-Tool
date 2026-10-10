@@ -61,8 +61,17 @@
     }
     return head;
   };
+  // The last open link: Java logged resolve#1->"resolved" (p.resolve called
+  // on THIS page's instance) while Promise.all timed out. __id1 tracks the
+  // exact promise Promise.all waits on — settled+value proves the outer
+  // promise followed the inner resolve; still-false at timeout isolates the
+  // break between inner and outer.
+  var p1 = window.ethereum.request({ method: 'eth_chainId' });
+  window.__id1 = { settled: false, value: null };
+  p1.then(function (v) { window.__id1.settled = true; window.__id1.value = String(v); },
+           function (e) { window.__id1.settled = 'rejected'; window.__id1.value = String(e && e.message); });
   Promise.all([
-    window.ethereum.request({ method: 'eth_chainId' }),
+    p1,
     deadline(30000, 'eth_chainId'),
   ]).then(function (r) {
     rec('chainId', r[0]);

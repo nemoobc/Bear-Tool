@@ -406,8 +406,16 @@ async function main() {
     report.dapp.chainStage = String(text).slice(0, 300);
     report.dapp.console = dappEvents.slice(0, 20);
     if (!/chainId=/.test(text)) {
+      // Definitive end-state of the LAST open link: did the tracked id-1
+      // promise settle (outer promise followed), and did the provider's
+      // chainId field get written by request()'s own .then? inner-settled +
+      // outer-pending would localize the break to the .then chain itself.
+      report.dapp.final = await dpage.evaluate(
+        '({ id1: window.__id1 || null, ethChainId: (window.ethereum && window.ethereum.chainId) || null })'
+      ).catch((e) => ({ readFailed: e.message }));
       throw new Error('fixture never saw eth_chainId. #out=' + JSON.stringify(String(text))
-        + ' href=' + report.dapp.href + ' dappConsole=' + JSON.stringify(report.dapp.console));
+        + ' href=' + report.dapp.href + ' final=' + JSON.stringify(report.dapp.final)
+        + ' dappConsole=' + JSON.stringify(report.dapp.console));
     }
 
     step('dapp browser: connect prompt — flashed to the wallet');
