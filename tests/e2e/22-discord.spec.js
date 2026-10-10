@@ -111,7 +111,10 @@ test.describe('Discord view — in-app, no trip to the installed app', () => {
     // Join via an invite link — the in-app route, no discord.gg hand-off.
     await page.fill('#discordInvite', 'discord.gg/xyz');
     await page.locator('#btnDiscordJoin').click();
-    await expect(page.locator('text=Joined Server')).toBeVisible({ timeout: 10_000 });
+    // EXACT match: `text=Joined Server` (substring) also matched the success
+    // toast "Joined Joined Server" the instant it rendered — strict-mode
+    // violation on runs 38074850202 ×2. The guild row is matched exactly.
+    await expect(page.getByText('Joined Server', { exact: true })).toBeVisible({ timeout: 10_000 });
 
     // Leave: confirm dialog → the row is gone from the REFRESHED list.
     await page.locator('[data-guild-leave="G2"]').click();
