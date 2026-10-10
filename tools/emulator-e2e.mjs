@@ -415,8 +415,12 @@ async function main() {
     // from the instance THIS page registered in; selfSettle = can a promise
     // the page registered settle at all when the PAGE itself resolves it
     // (machinery) — separating a broken then-chain from a broken native hop.
-    // Waits for __id1 (set by the fixture's main()) so the probe's own
-    // request is ALWAYS id=2 — its self-resolve target is hardcoded to 2.
+    // Waits for __id1 (set by the fixture's main()) so the probe registers
+    // after the chain has started — but seq ORDER is unknowable from here
+    // (a racing dapp issues its own requests while this evaluate is in
+    // flight: run 38063650949's hardcoded resolve(2) landed on
+    // eth_requestAccounts' pending entry), so the probe settles by the
+    // request's OWN __bearId, never a guessed number.
     report.dapp.probe = await dpage.evaluate(`(async () => {
       const t0 = Date.now();
       while (!window.__id1 && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 50));

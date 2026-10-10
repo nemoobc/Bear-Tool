@@ -23,13 +23,14 @@ export const NATIVE_PROVIDER_SCRIPT = `(function () {
   function request(args) {
     var method = args && args.method;
     if (!method) return Promise.reject(new Error('method required'));
-    return new Promise(function (resolve, reject) {
-      var id = ++seq;
-      pending[id] = { resolve: resolve, reject: reject };
+    var reqId = 0;
+    var p = new Promise(function (resolve, reject) {
+      reqId = ++seq;
+      pending[reqId] = { resolve: resolve, reject: reject };
       try {
-        window.BearNativeBridge.postMessage(JSON.stringify({ id: id, method: method, params: (args && args.params) || [] }));
+        window.BearNativeBridge.postMessage(JSON.stringify({ id: reqId, method: method, params: (args && args.params) || [] }));
       } catch (e) {
-        delete pending[id];
+        delete pending[reqId];
         reject(new Error('Bear bridge unavailable: ' + (e && e.message)));
       }
     }).then(function (result) {
@@ -38,6 +39,14 @@ export const NATIVE_PROVIDER_SCRIPT = `(function () {
       if (method === 'wallet_switchEthereumChain' && args && args.params && args.params[0]) provider.chainId = args.params[0].chainId;
       return result;
     });
+    // The id this request went out with, non-enumerable. The dapp already
+    // sees it in its own postMessage — this only makes it reachable from the
+    // promise. E2E tooling settles by __bearId because seq ORDER is
+    // unknowable once the page races: run 38063650949's probe resolved a
+    // hardcoded 2 while id 2 was the dapp's eth_requestAccounts — the
+    // connect promise died with '0xAB' and account0 read '0'.
+    try { Object.defineProperty(p, '__bearId', { value: reqId }); } catch (e) { /* forensics only */ }
+    return p;
   }
   window.__bearNativeResolve = function (id, response) {
     var p = pending[id];

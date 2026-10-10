@@ -56,14 +56,22 @@
       type: typeof window.__bearNativeResolve,
     };
     try {
-      var pr = window.ethereum.request({ method: 'eth_chainId' }); // id=2
-      // page settles ITSELF synchronously — the native answer arriving later
-      // hits a deleted pending entry ('unknown-id', bounded, harmless)
-      window.__bearNativeResolve(2, { result: '0xAB' });
-      window.__probeSelf = pr.then(
-        function (r) { return 'settled:' + r; },
-        function (e) { return 'rejected:' + (e && e.message ? e.message : String(e)); }
-      );
+      var pr = window.ethereum.request({ method: 'eth_chainId' });
+      // settle BY THE REQUEST'S OWN __bearId — never a hardcoded guess: a
+      // racing dapp issues its own requests while this probe is in flight,
+      // and resolve(2,...) landed on eth_requestAccounts' pending entry in
+      // run 38063650949 (connect promise died with '0xAB', account0='0').
+      // Native's own answer arriving later hits the deleted entry
+      // ('unknown-id', bounded, harmless).
+      if (pr.__bearId == null) {
+        window.__probeSelf = Promise.resolve('no-bearId');
+      } else {
+        window.__bearNativeResolve(pr.__bearId, { result: '0xAB' });
+        window.__probeSelf = pr.then(
+          function (r) { return 'settled:' + r; },
+          function (e) { return 'rejected:' + (e && e.message ? e.message : String(e)); }
+        );
+      }
     } catch (e) {
       window.__probeSelf = Promise.resolve('threw:' + e.message);
     }

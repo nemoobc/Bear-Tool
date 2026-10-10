@@ -194,3 +194,24 @@ test('post-diagnostic build: failures surface verbatim, instrumentation gone, dr
   assert.match(apk, /VITE_BUILD_SHA: \$\{\{ github\.sha \}\}/,
     'the CI build stamps its own commit into the bundle so a screenshot names the build');
 });
+
+test('request() carries its own id as __bearId — probes must never guess seq order', async () => {
+  // Run 38063650949: the E2E probe settled a HARDCODED id 2 while the
+  // racing dapp's eth_requestAccounts was id 2 — the connect promise died
+  // with '0xAB' and the fixture's account0 read '0'. The id is reachable
+  // from the promise itself (non-enumerable, nothing leaks into spread):
+  const { sandbox, sent } = makePage();
+  const p1 = sandbox.ethereum.request({ method: 'eth_chainId' });
+  const p2 = sandbox.ethereum.request({ method: 'eth_requestAccounts' });
+  assert.equal(p1.__bearId, sent[0].id, 'id pada promise = id yang benar-benar terkirim');
+  assert.equal(p2.__bearId, sent[1].id, 'id berikutnya ikut terpakai, bukan ditebak');
+  assert.equal(Object.keys(p1).length, 0, '__bearId non-enumerable — spread/for-in dapp tak tercemar');
+  // settling p2 by ITS OWN id leaves p1 pending, and p1 settles cleanly after
+  let p1Settled = false;
+  p1.then(() => { p1Settled = true; });
+  sandbox.__bearNativeResolve(p2.__bearId, { result: ['0xAbC0000000000000000000000000000000000002'] });
+  assert.deepEqual(await p2, ['0xAbC0000000000000000000000000000000000002']);
+  assert.equal(p1Settled, false, 'resolve id yang satu TIDAK menyentuh pending yang lain');
+  sandbox.__bearNativeResolve(p1.__bearId, { result: '0x1' });
+  assert.equal(await p1, '0x1');
+});

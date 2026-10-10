@@ -167,8 +167,11 @@ test('the truth probes exist — a "resolved" that never settles must be decidab
     'fixture menyimpan instan resolve-nya sendiri — identity dibandingkan DUA sisi hop');
   assert.match(fixture, /window\.__bearE2EProbe = function/,
     'probe self-settle: page menyelesaikan promise-nya SENDIRI tanpa native — mesin vs transport');
-  assert.match(fixture, /window\.__bearNativeResolve\(2, \{ result: '0xAB' \}\)/,
-    'probe memakai resolve instance yang sama persis');
+  // (2026-10-10 run 38063650949: the target id is the request's OWN __bearId —
+  // a racing dapp makes seq order unknowable, and the old hardcoded 2
+  // killed eth_requestAccounts' pending entry instead of the probe's)
+  assert.match(fixture, /window\.__bearNativeResolve\(pr\.__bearId, \{ result: '0xAB' \}\)/,
+    'probe memakai resolve instance yang sama persis, dengan id milik request-nya');
   const region = java.slice(java.indexOf('public void resolve'), java.indexOf('public void resolve') + 1800);
   assert.match(region, /window\.__pageResolve === window\.__bearNativeResolve/,
     'baris resolve# ikut melaporkan apakah konteks Java = konteks fixture (|same=)');
@@ -285,4 +288,22 @@ test('the deadline joins by RACE, never by ALL — Promise.all([p1, deadline]) c
     'race memberikan nilai langsung — r[0] gaya Promise.all dilarang di sini');
   assert.match(fixture, /rec\('account0', \(\(accounts \|\| \[\]\)\[0\]/,
     'accounts race: nilai array langsung, bukan indeks tuple');
+});
+
+test('the probe settles by the request\'s OWN __bearId — hardcoded ids land on someone else\'s pending entry', () => {
+  // Run 38063650949: race fix made the fixture FAST (providerLate=0) — the
+  // dapp issued eth_requestAccounts (id 2) while the driver's probe was
+  // still in flight, and the probe's hardcoded resolve(2,'0xAB') killed the
+  // connect promise: account0='0' (that is '0xAB'[0]), accountsAgain='',
+  // done=ok — a corrupted answer wearing a success costume.
+  const provider = readFileSync(path.join(here, '..', 'js', 'native-provider.js'), 'utf8');
+  assert.match(provider, /Object\.defineProperty\(p, '__bearId', \{ value: reqId \}\)/,
+    'provider mengekspos __bearId non-enumerable di promise-nya sendiri');
+  const fixture = readFileSync(path.join(here, '..', 'public', 'dapp-rpc-fixture.html'), 'utf8');
+  assert.match(fixture, /__bearNativeResolve\(pr\.__bearId, \{ result: '0xAB' \}\)/,
+    'probe settle by id milik request-nya sendiri');
+  assert.match(fixture, /pr\.__bearId == null/,
+    'id tak terlihat = probe gagal jujur (no-bearId), bukan menebak angka');
+  assert.doesNotMatch(fixture, /__bearNativeResolve\(2,/,
+    'id hardcode dilarang — urutan seq tak bisa ditebak saat dapp ngebut');
 });
