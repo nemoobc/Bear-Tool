@@ -76,51 +76,42 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-snapshot -no-window -noaudio -no-boot-anim -camera-back none
-          # set +e on purpose: every command must be able to fail WITHOUT
-          # aborting the diagnostics below — losing logcat to an early abort
-          # has now cost this workflow two runs (2026-10-10).
+          # HOW android-emulator-runner EXECUTES THIS (source: script-parser.ts
+          # + main.ts @v2, read 2026-10-10): parseScript() SPLITS BY NEWLINE,
+          # DROPS `#` comment lines, then runs EVERY line as its OWN
+          # `sh -c <line>` process — a non-zero exit on ANY line calls
+          # setFailed() and the REST OF THE SCRIPT NEVER RUNS (emulator killed).
+          # Consequences, learned by losing runs to each one:
+          #   - `set +e` is a no-op: it only affects its own one-line process.
+          #   - Variables do NOT persist between lines (E2E_EXIT=0, HEARTBEAT=$!).
+          #   - `\\` line continuations become a broken trailing-backslash command.
+          #   - Every line must be self-contained AND exit 0 on its own:
+          #     guard with `|| echo ..._RC=$?` on the SAME line.
+          # One line = one job = self-guarded. No state between lines.
           script: |
-            set +e
-            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-            adb shell am start -n com.nemoobc.beartool/.MainActivity
-            # ── boot-window diagnostics: the device is known alive HERE ──
-            # [dApp diag] fires within seconds of app boot, and in every past
-            # run the device vanished before any logcat could be taken
-            # (0-byte dumps, "error: closed", "- waiting for device -").
-            # Take the log NOW, while it can still be taken.
-            sleep 12
-            adb devices -l > emulator-devices-boot.txt 2>&1
-            timeout 30 adb logcat -d > logcat-boot.txt
-            echo "=== [dApp diag] at boot ==="
-            grep -a "\[dApp diag\]" logcat-boot.txt | head -5 || echo "DIAG_LINE_NOT_FOUND_AT_BOOT"
-            # ── heartbeat: is the DEVICE dead or is only ADB lost? ──
-            # One line every 10s: adb's view, qemu's pid, the app's pid.
-            # Without this, "- waiting for device -" for 36 minutes gave no
-            # way to tell a crashed emulator from a wedged adb server.
-            ( for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
-                echo "$(date -Is) adb=[$(adb devices 2>/dev/null | tr '\n' ' ')qemu=$(pgrep -fc qemu 2>/dev/null) app=$(adb shell pidof com.nemoobc.beartool 2>/dev/null | tr -d '\r')"
-                sleep 10
-              done ) > emulator-heartbeat.txt 2>&1 &
-            HEARTBEAT=$!
-            # ── the E2E driver, hard-bounded: 8 minutes, no more ──
-            E2E_EXIT=0
-            timeout 480 env E2E_OUT=emulator-artifacts node tools/emulator-e2e.mjs || E2E_EXIT=$?
-            echo "E2E_EXIT=$E2E_EXIT"
-            # ── post-run dump, every part bounded and able to fail ──
-            timeout 30 adb logcat -d > emulator-logcat.txt
-            echo "LOGCAT_RC=$?"
-            adb devices -l > emulator-devices-final.txt 2>&1
-            echo "=== [dApp diag] after run ==="
-            grep -a "\[dApp diag\]" emulator-logcat.txt | head -5 || echo "DIAG_LINE_NOT_FOUND"
-            echo "=== crash? ==="
-            grep -a "FATAL\|AndroidRuntime" emulator-logcat.txt logcat-boot.txt 2>/dev/null | head -20 || true
+            adb logcat -v time > logcat-stream.txt 2>&1 &
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk || echo INSTALL_FAILED_RC=$?
+            adb shell am start -n com.nemoobc.beartool/.MainActivity || echo AM_START_FAILED_RC=$?
+            sleep 8
+            timeout 20 adb logcat -d > logcat-boot.txt || echo LOGCAT_BOOT_RC=$?
+            grep -aF "[dApp diag]" logcat-stream.txt | head -5 || true
+            grep -aqF "[dApp diag]" logcat-stream.txt || echo DIAG_LINE_NOT_FOUND_AT_BOOT
+            adb devices -l > emulator-devices-boot.txt 2>&1 || true
+            df -h > disk-usage.txt 2>&1 || true
+            ( for i in $(seq 1 30); do echo "$(date -Is) adb=[$(adb devices 2>/dev/null | tr "\n" " ")qemu=$(pgrep -fc qemu 2>/dev/null) app=$(adb shell pidof com.nemoobc.beartool 2>/dev/null | tr -d "\r")"; sleep 10; done ) > emulator-heartbeat.txt 2>&1 &
+            timeout 480 env E2E_OUT=emulator-artifacts node tools/emulator-e2e.mjs > e2e-stdout.log 2>&1 || echo E2E_FAILED_RC=$?
+            cat e2e-stdout.log || true
+            echo "=== [dApp diag] after run (stream) ==="
+            grep -aF "[dApp diag]" logcat-stream.txt | head -5 || true
+            grep -aqF "[dApp diag]" logcat-stream.txt || echo DIAG_LINE_NOT_FOUND
+            echo "=== crash / fatal ==="
+            grep -aE "FATAL|AndroidRuntime|Fatal signal|panic" logcat-stream.txt | head -20 || true
             echo "=== last heartbeat ==="
-            tail -3 emulator-heartbeat.txt
-            timeout 30 adb shell screencap -p /sdcard/emulator-boot.png \
-              && timeout 30 adb pull /sdcard/emulator-boot.png emulator-boot.png \
-              || echo "screencap failed (logcat is already safe)"
-            kill $HEARTBEAT 2>/dev/null
-            exit $E2E_EXIT
+            tail -5 emulator-heartbeat.txt || true
+            timeout 30 adb logcat -d > emulator-logcat.txt || echo LOGCAT_FINAL_RC=$?
+            adb devices -l > emulator-devices-final.txt 2>&1 || true
+            timeout 30 adb shell screencap -p /sdcard/emulator-boot.png || echo SCREENCAP_RC=$?
+            timeout 30 adb pull /sdcard/emulator-boot.png emulator-boot.png || echo PULL_RC=$?
 
       - name: Upload diag artifacts
         if: always()
@@ -128,11 +119,13 @@ jobs:
         with:
           name: emulator-diag
           path: |
-            emulator-logcat.txt
+            logcat-stream.txt
             logcat-boot.txt
+            emulator-logcat.txt
             emulator-heartbeat.txt
             emulator-devices-boot.txt
             emulator-devices-final.txt
+            disk-usage.txt
             emulator-boot.png
             emulator-artifacts/
           if-no-files-found: error

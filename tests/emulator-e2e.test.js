@@ -67,32 +67,60 @@ test('a failed journey captures the stuck screen before reporting', () => {
     'shot(99-failure) di catch: layar yang macet = diagnosis');
 });
 
-test('the workflow takes logcat at BOOT, while the device is still alive', () => {
-  // The device died ~50s after boot in every run before this one; the diag
-  // line fires at boot, so the early dump is the only one guaranteed to land.
-  const script = workflow.jobs?.emulator?.steps?.find((s) => s.with?.script)?.with?.script
-    || workflow.jobs?.emulator?.steps?.find((s) => s.run?.includes?.('adb install'))?.run
-    || '';
-  assert.ok(script, 'emulator.yml: script step tidak ditemukan');
-  assert.match(script, /logcat-boot\.txt/, 'logcat awal (pre-E2E) wajib ada');
-  assert.match(script, /set \+e/, 'set +e: satu perintah gagal tidak boleh mematikan diagnosis');
-  assert.match(script, /emulator-heartbeat\.txt/,
-    'heartbeat adb/qemu/app — tanpa ini "- waiting for device" 36 menit tak bisa didiagnosis');
+// ── how android-emulator-runner REALLY executes `script` ──────────────────
+// Source read 2026-10-10 (src/script-parser.ts + src/main.ts @v2): the input
+// is split PER NEWLINE, `#` comment lines are DROPPED, and every line runs as
+// its OWN `sh -c <line>` process — a non-zero exit on any line calls
+// setFailed() and every remaining line is skipped (emulator killed). Three
+// runs died on this: `set +e` that could only govern its own one-line
+// process, `E2E_EXIT` that evaporated between lines, `adb logcat -d` hanging
+// "- waiting for device -" with nothing able to bound it. These tests encode
+// the executor's real semantics, not shell intuition.
+const rawScript = workflow.jobs.emulator.steps.find((s) => s.with && s.with.script).with.script;
+// Mirror parseScript(): drop comments and blanks — that is what actually runs.
+const scriptLines = rawScript.split('\n')
+  .map((l) => l.trim())
+  .filter((l) => l && !l.startsWith('#'));
+const script = scriptLines.join('\n');
+
+test('the workflow is written for the executor it actually has (per-line sh -c)', () => {
+  // `set +e` looks like safety and governs exactly one one-line process.
+  assert.doesNotMatch(script, /set \+e/, 'set +e = no-op di executor per-baris');
+  // Continuations are split into a broken trailing-backslash command.
+  for (const line of scriptLines) {
+    assert.ok(!line.endsWith('\\'), `baris berakhir backslash = syntax error ter-split: ${line.slice(0, 60)}`);
+  }
+  // State does not survive between lines: assignments-only lines and $! are lies.
+  assert.doesNotMatch(script, /^\s*(E2E_EXIT|HEARTBEAT)=/m, 'variabel lintas baris tidak ada di executor ini');
+  assert.doesNotMatch(script, /kill \$/, 'kill $VAR lintas baris = selalu kosong');
+  assert.doesNotMatch(script, /exit \$/, 'exit $VAR lintas baris = exit proses sendiri yang kosong');
 });
 
-test('no unbounded adb command may remain in the emulator script', () => {
-  const script = workflow.jobs?.emulator?.steps?.find((s) => withScript(s))?.with?.script || '';
-  function withScript(s) { return typeof s?.with?.script === 'string' && s.with.script.includes('adb install'); }
-  assert.ok(script, 'script step tidak ditemukan');
-  // Every logcat/screencap/pull runs through `timeout`.
-  for (const line of script.split('\n')) {
-    if (/^\s*adb (logcat|shell screencap|pull)/.test(line)) {
-      assert.match(line, /^\s*timeout \d+ adb /,
-        `perintah tanpa timeout dilarang (job hang 36 menit gara-gara ini): ${line.trim()}`);
-    }
+test('every adb line is self-guarded — one failing line kills the rest of the script', () => {
+  for (const line of scriptLines) {
+    if (!/^(adb |timeout \d+ adb )/.test(line)) continue;
+    assert.ok(/\|\|/.test(line) || /&\s*$/.test(line),
+      `baris adb tanpa guard = satu gagal, sisanya mati: ${line.slice(0, 70)}`);
   }
-  assert.match(script, /timeout 480 env E2E_OUT/,
-    'driver E2E wajib dibatasi 8 menit — hang apa pun harus berhenti, bukan makan 40 menit job');
-  assert.match(script, /E2E_EXIT=\$E2E_EXIT/,
-    'exit code di-echo oleh SHELL (echo shell selalu tercetak, tidak kena race node)');
+  // The E2E run must fail LOUDLY without ending the diagnostics: same-line
+  // capture, output to a FILE (sync writes on POSIX — no lost FATAL), cat after.
+  assert.match(script, /timeout 480 env E2E_OUT=emulator-artifacts node tools\/emulator-e2e\.mjs > e2e-stdout\.log 2>&1 \|\| echo E2E_FAILED_RC=\$\?/,
+    'driver dibatasi 480s, output ke FILE, rc ditangkap di baris yang sama');
+  assert.match(script, /cat e2e-stdout\.log \|\| true/, 'output driver harus dibaca balik ke log step');
+});
+
+test('the workflow captures logcat at BOOT via a stream started before anything else', () => {
+  // The device died ~30-60s after boot in every run; a dump taken later was
+  // always 0 bytes. The only reliable capture is a stream started FIRST —
+  // it keeps writing up to the exact moment the device vanishes, and it is
+  // where [dApp diag] (fired at boot) has to be found.
+  assert.ok(scriptLines[0].includes('adb logcat -v time > logcat-stream.txt'),
+    'baris pertama wajib stream logcat — jendela device hidup hanya detik');
+  assert.match(script, /logcat-boot\.txt/, 'dump sekunder tetap ada (device mungkin masih hidup)');
+  assert.match(script, /logcat-stream\.txt/, 'stream = sumber utama diagnosis');
+  assert.match(script, /emulator-heartbeat\.txt/, 'heartbeat adb+qemu+app: membedakan emulator mati vs adb wedged');
+  // Guards must be able to fire: `grep | head || echo` never echoes (pipeline
+  // status is head's). The marker needs grep LAST or grep -q on its own line.
+  assert.match(script, /grep -aqF "\[dApp diag\]" logcat-stream\.txt \|\| echo DIAG_LINE_NOT_FOUND/,
+    'marker DIAG_LINE_NOT_FOUND harus bisa tercetak (grep -q, bukan di pipeline head)');
 });
