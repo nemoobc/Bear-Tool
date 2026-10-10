@@ -84,8 +84,12 @@
       ]);
     }).then(function (block) {
       rec('blockNumber', String(block));
+      // NB '0x0' is NOT valid for the strict ethers v6 JsonRpcProvider decode
+      // ("odd number of digits" — run 38072891879). Use the padded zero
+      // address (40 hex chars) so the node answers instead of rejecting the
+      // parameter shape.
       return Promise.race([
-        window.ethereum.request({ method: 'eth_getBalance', params: ['0x0'] }),
+        window.ethereum.request({ method: 'eth_getBalance', params: ['0x0000000000000000000000000000000000000000'] }),
         deadline(20000, 'eth_getBalance'),
       ]);
     }).then(function (bal) {
