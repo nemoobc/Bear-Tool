@@ -191,3 +191,16 @@ test('the dapp block is a truth machine — CDP polls the DOM and the page keeps
   assert.match(driverSrc, /accountMatchesModal/, 'cross-check akun tetap ada');
   assert.match(driverSrc, /tapNativeButton\('dapp-back'\)/, 'tombol back native tetap diuji');
 });
+
+test('the heartbeat carries memory and the qemu identity — a dead run must be judgeable', () => {
+  // Runs 38040231871/38042207486/38042758668: the emulator vanished mid-run
+  // (qemu 2→1, device gone, no app FATAL, script ran to completion). Whether
+  // the host was out of memory or qemu itself crashed must come from the
+  // artifact, not from a hunch — every 10s tick now records `free -m`
+  // available RAM plus the full cmdline of every qemu process (which one
+  // survives, which one vanished).
+  assert.match(rawScript, /free=\[\$\(free -m/,
+    'tiap tick heartbeat merekam RAM tersedia — OOM host harus terbukti dari artefak');
+  assert.match(rawScript, /pgrep -af qemu/,
+    'identitas lengkap proses qemu per tick — qemu=2→1 kini bisa ditelusuri siapa mati');
+});
