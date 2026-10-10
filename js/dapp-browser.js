@@ -504,7 +504,11 @@ function paintHome() {
   const cats = [...new Set(catalog.map((d) => d.category))];
   const recent = read(LS.history, []).slice(0, 8);
   const bms = read(LS.bookmarks, []);
-  const known = catalog.filter((d) => d.frameable);
+  const native = isNativeDappBrowser();
+  // The "verified frameable" split is a WEB-ONLY constraint (X-Frame-Options /
+  // frame-ancestors can only be beaten by a native view; on APK every dApp
+  // opens full-page in-app, so every card is loadable HERE).
+  const known = native ? catalog : catalog.filter((d) => d.frameable);
 
   el.homePage.innerHTML = `
     <div class="dbr-hero">
@@ -516,7 +520,8 @@ function paintHome() {
       <div class="dbr-mini">${bms.map((b) => `<button class="dbr-chip" data-open="${escapeHtml(b.url)}" data-name="${escapeHtml(b.name || baseHost(b.url))}">${escapeHtml(b.name || baseHost(b.url))}</button>`).join('')}</div>` : ''}
     ${recent.length ? `<div class="dbr-sec-h">🕘 Recent</div>
       <div class="dbr-mini">${recent.map((h) => `<button class="dbr-chip" data-open="${escapeHtml(h.url)}" data-name="${escapeHtml(h.name || baseHost(h.url))}">${escapeHtml(h.name || baseHost(h.url))}</button>`).join('')}</div>` : ''}
-    <div class="dbr-sec-h">◆ Loadable in-app <span class="small dim">(${known.length} verified frameable)</span></div>
+    ${native ? '<div class="dbr-sec-h">◆ All DApps — every address opens in-app</div>'
+             : `<div class="dbr-sec-h">◆ Loadable in-app <span class="small dim">(${known.length} verified frameable)</span></div>`}
     <div class="dbr-grid">${known.map(cardHTML).join('')}</div>
     <div class="dbr-sec-h">▦ All ${catalog.length} DApps</div>
     <div class="dbr-chips dbr-cats" role="group" aria-label="Filter by category">
@@ -559,7 +564,7 @@ const cardHTML = (d) => `
           data-category="${escapeHtml(d.category || '')}" style="--cat:${catFace(d.category || '').color}">
     <span class="dbr-card-ic" aria-hidden="true">${dappMark(d.name, catFace(d.category || '').color, 36)}</span>
     <span class="dbr-card-nm">${escapeHtml(d.name)}</span>
-    <span class="dbr-card-ct">${escapeHtml(d.category || '')}${d.frameable === false ? ' ↗' : ''}</span>
+    <span class="dbr-card-ct">${escapeHtml(d.category || '')}${!isNativeDappBrowser() && d.frameable === false ? ' ↗' : ''}</span>
   </button>`;
 
 // ═══════════════════════════════════════════════════════════════

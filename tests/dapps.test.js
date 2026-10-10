@@ -19,6 +19,21 @@ const htmlSrc = appSource();
 test('dapps: exports renderDapps function', () => {
   assert.match(dappsSrc, /export\s+function\s+renderDapps/);
 });
+test('dapps: the outward "new tab" split is web-only — native builds are all in-app', () => {
+  // The APK opens every dApp in a full-page WebView (X-Frame-Options does not
+  // apply one level up), so renderDapps must never advertise a New-tab section
+  // or an ↗ badge on the native build — the UI says in-app for everything.
+  assert.match(dappsSrc, /const native = isNativeDappBrowser\(\);/,
+    'renderDapps harus kenal build native (APK) vs web');
+  assert.match(dappsSrc, /data-frameable="\$\{native \|\| d\.frameable \? '1' : '0'\}"/,
+    'kartu native = frameable 1 (in-app) — frameability adalah batas WEB saja');
+  assert.match(dappsSrc, /native \|\| d\.frameable \? 'In-app' : '↗ New tab'/,
+    'badge native = In-app untuk SEMUA kartu, tidak ada ↗ New tab');
+  assert.match(dappsSrc, /const inTab = native \? \[\] : POPULAR_DAPPS\.filter/,
+    'section "new tab" tidak dirender di native (list kosong)');
+  assert.match(dappsSrc, /!list\.length \? '' :/,
+    'section kosong = tidak ada markup sama sekali');
+});
 test('dapps: exports POPULAR_DAPPS', () => {
   assert.ok(dappsSrc.includes('POPULAR_DAPPS'), 'POPULAR_DAPPS must exist');
   assert.ok(dappsSrc.includes('export'), 'must be exported');

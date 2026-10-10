@@ -120,24 +120,29 @@ export function looksLikeUrl(v) {
 
 export function renderDapps(container) {
   if (!container) return;
+  // Native build (APK): every dApp opens in-app (full-page WebView), where
+  // X-Frame-Options / frame-ancestors do NOT apply — so the web-only split
+  // ("Ready in-app" vs "Opens in a new tab") must not leak into the UI. On
+  // native, all cards are in-app; the tab section never renders.
+  const native = isNativeDappBrowser();
   const cats = [...new Set(POPULAR_DAPPS.map((d) => d.category))];
   const card = (d) => `
     <div class="dapp-card" role="button" tabindex="0"
          data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}"
-         data-frameable="${d.frameable ? '1' : '0'}" data-category="${escapeHtml(d.category)}"
-         aria-label="${escapeHtml(d.name)}, ${escapeHtml(d.category)}${d.frameable ? '' : ', opens in a new tab'}">
+         data-frameable="${native || d.frameable ? '1' : '0'}" data-category="${escapeHtml(d.category)}"
+         aria-label="${escapeHtml(d.name)}, ${escapeHtml(d.category)}${native || d.frameable ? '' : ', opens in a new tab'}">
       <div class="dapp-icon" style="--cat:${catStyle(d.category).color}">${dappMark(d.name, catStyle(d.category).color, 44)}</div>
       <div class="dapp-name">${escapeHtml(d.name)}</div>
       <div class="dapp-category">${escapeHtml(d.category)}</div>
-      <div class="dapp-frame-note">${d.frameable ? 'In-app' : '↗ New tab'}</div>
+      <div class="dapp-frame-note">${native || d.frameable ? 'In-app' : '↗ New tab'}</div>
     </div>`;
 
   // One grid, two sections — what opens HERE first, what needs a real tab.
   // Both stay inside #dappGrid because every existing test counts cards
   // through it; the section headers are the only new markup it ever sees.
-  const inApp = POPULAR_DAPPS.filter((d) => d.frameable);
-  const inTab = POPULAR_DAPPS.filter((d) => !d.frameable);
-  const section = (key, label, list) => `
+  const inApp = native ? POPULAR_DAPPS : POPULAR_DAPPS.filter((d) => d.frameable);
+  const inTab = native ? [] : POPULAR_DAPPS.filter((d) => !d.frameable);
+  const section = (key, label, list) => !list.length ? '' : `
     <div class="dapp-sec" data-sec="${key}">
       <h4 class="dapp-sec-h">${label} <span class="dapp-sec-n">${list.length}</span></h4>
       ${list.map(card).join('')}
