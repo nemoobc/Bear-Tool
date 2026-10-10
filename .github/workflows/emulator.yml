@@ -106,7 +106,7 @@ jobs:
             # ONE recovery cycle against fleet qemu deaths (10 of 19 runs):
             # classification + relaunch live in the script — one line, no state
             # across the parser's one-process-per-line model.
-            timeout 1300 env E2E_OUT=emulator-artifacts bash tools/e2e-recover.sh || echo E2E_FAILED_RC=$?
+            timeout 2100 env E2E_OUT=emulator-artifacts bash tools/e2e-recover.sh || echo E2E_FAILED_RC=$?
             cat e2e-stdout.log || true
             echo "=== crash / fatal ==="
             grep -aE "FATAL|AndroidRuntime|Fatal signal|panic" logcat-stream.txt | head -20 || true

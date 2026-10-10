@@ -108,8 +108,8 @@ test('every adb line is self-guarded — one failing line kills the rest of the 
   // The run goes through the recovery wrapper (10 of 19 fleet qemu deaths);
   // the wrapper owns the per-attempt bound (480s), the file append, and the
   // one relaunch cycle — the YAML line must stay one self-guarded call.
-  assert.match(script, /timeout 1300 env E2E_OUT=emulator-artifacts bash tools\/e2e-recover\.sh \|\| echo E2E_FAILED_RC=\$\?/,
-    'wrapper dibatasi 1300s luar, rc ditangkap di baris yang sama');
+  assert.match(script, /timeout 2100 env E2E_OUT=emulator-artifacts bash tools\/e2e-recover\.sh \|\| echo E2E_FAILED_RC=\$\?/,
+    'wrapper dibatasi 2100s luar (3 attempt x 480 + 2 recovery), rc ditangkap di baris yang sama');
   assert.match(script, /cat e2e-stdout\.log \|\| true/, 'output driver harus dibaca balik ke log step');
 });
 
@@ -230,7 +230,7 @@ test('the driver reads the truth probes before judging the chain', () => {
   assert.match(driverSrc, /head\.sameFn/, 'identitas instance (page vs Java) masuk report');
 });
 
-test('a fleet qemu death is recovered in-workflow — one rerun, death signatures only', () => {
+test('a fleet qemu death is recovered in-workflow — 3 bounded boots, death signatures only', () => {
   // Runs 5,7,8,9,13,15,16,17,18,19 lost their emulator at random (qemu
   // <defunct> then gone, 10–14GB RAM free, no OOM, no app FATAL, both
   // pinned images) — 10 of 19. A dead fleet is not a test result: the
@@ -262,12 +262,14 @@ test('a fleet qemu death is recovered in-workflow — one rerun, death signature
   assert.match(rec, /am start -n com\.nemoobc\.beartool/, 'app dijalankan ulang');
   assert.match(rec, /logcat -v time >> logcat-stream\.txt/,
     'logcat menyambung ke device baru — bukti run penyintas ikut terkumpul');
-  assert.match(rec, /run_driver; rc2=\$\?\s*\nexit "\$rc2"/,
-    'persis SATU siklus kedua, hasil akhir = RC attempt kedua');
-
-  // bounded: exactly one recovery, never a loop
-  assert.equal((rec.match(/run_driver;/g) || []).length, 2,
-    'run_driver dipanggil tepat 2× (awal + 1 recovery) — tanpa loop');
+  // bounded: a counter, not faith — ATTEMPTS boots max (run 38058320932
+  // burned attempt 1 AND its relaunch inside one run; two boots ≈ 75%, three
+  // ≈ 87% at the observed ~50% per-boot death rate)
+  assert.match(rec, /ATTEMPTS=3/, 'tiga boot maksimum — naik hanya dengan bukti angka');
+  assert.match(rec, /\$attempt" -ge "\$ATTEMPTS"/, 'loop keluar saat habis — tanpa counter = loop tanpa dasar');
+  assert.match(rec, /while :; do/, 'siklus = loop bercounter, bukan duplikasi kode');
+  assert.match(rec, /journey failure, not a fleet death/,
+    'gagal journey TIDAK boleh memakai retry — exit dengan RC driver');
 
   // the workflow routes through the wrapper; the raw driver is not callable
   // from YAML anymore (one self-contained line, no state across sh -c)
@@ -275,5 +277,5 @@ test('a fleet qemu death is recovered in-workflow — one rerun, death signature
   assert.match(yaml, /bash tools\/e2e-recover\.sh/, 'workflow memanggil wrapper');
   assert.doesNotMatch(yaml, /node tools\/emulator-e2e\.mjs/,
     'driver telanjang di YAML = melewati klasifikasi — dilarang');
-  assert.match(yaml, /timeout 1300/, 'wrapper dibatasi luar (480+240+480 sisa)');
+  assert.match(yaml, /timeout 2100/, 'wrapper dibatasi luar (3x480 + 2 recovery)');
 });
