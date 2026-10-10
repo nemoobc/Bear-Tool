@@ -173,7 +173,7 @@ public class BearDappBrowserPlugin extends Plugin {
         closeBtn.setTextColor(0xFFFFFFFF);
         closeBtn.setBackgroundColor(0x00000000);
         closeBtn.setOnClickListener(v -> doClose());
-        int barH = (int) (48 * getResources().getDisplayMetrics().density); // fixed: layout math must not wait on measure timing
+        int barH = (int) (48 * getActivity().getResources().getDisplayMetrics().density); // fixed: layout math must not wait on measure timing
         bar.addView(backBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
         bar.addView(closeBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
         toolbar = bar;

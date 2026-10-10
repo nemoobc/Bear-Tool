@@ -126,5 +126,6 @@ test('the dApp page renders BELOW the toolbar — never underneath its own heade
   assert.match(java, /refreshLayout\.setPadding\(0, barH, 0, 0\)/,
     'padding di refreshLayout sendiri: margin lewat LayoutParams parent bisa hilang saat addView me-regenerate params');
   assert.match(java, /MATCH_PARENT, barH\)/, 'tinggi toolbar tetap (48dp * density) — jarak halaman = tinggi bar, tanpa menunggu measure');
-  assert.match(java, /48 \* getResources\(\)\.getDisplayMetrics\(\)\.density/, 'ukuran dipakai satuan dp-density, bukan px mentah');
+  assert.match(java, /48 \* getActivity\(\)\.getResources\(\)\.getDisplayMetrics\(\)\.density/,
+    'ukuran dp-density lewat getResources aktivitas — Plugin Capacitor tak mengekspos getResources() (compile error run 38033857612)');
 });
