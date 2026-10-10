@@ -175,17 +175,21 @@ test('native RPC glue refuses to sign while locked and falls back honestly', () 
   assert.doesNotMatch(src, /isMetaMask: true/, 'the glue must never claim to be MetaMask');
 });
 
-// TEMPORARY diagnostic build (remove once the "not implemented" root cause is
-// pinned on device) — pin the instrumentation so it cannot be lost silently,
-// and so removing it later is a deliberate, visible act.
-test('diagnostic build: open failures surface verbatim + plugin ping at boot', () => {
+// The diagnostic build served its purpose: emulator run 38014313964 pinned the
+// root cause (proxy-'then' hang, ping.back=OK after the fix) and the boot-time
+// instrumentation was removed the same day it stopped earning its keep. What
+// stays forever: failures surface verbatim, the build stamps its sha, and the
+// E2E driver owns the bridge ping from now on.
+test('post-diagnostic build: failures surface verbatim, instrumentation gone, driver pings', () => {
   const src = readFileSync(join(root, 'js/native-dapp.js'), 'utf8');
   assert.match(src, /open failed: /,
     'openNativeDapp toasts the exact failure — the old silent catch hid the root cause');
-  assert.match(src, /diagNativeDapp\(\); \/\/ TEMPORARY/,
-    'boot runs the bridge-state diagnostic on native');
-  assert.match(src, /ping\.back=/, 'the diagnostic reports the native ping result');
-  assert.match(src, /ping timeout 2500ms/, 'a hung bridge is reported, not hung forever');
+  assert.doesNotMatch(src, /diagNativeDapp/,
+    'the boot-time diagnostic was removed once pinned (run 38014313964) — its job moved to the E2E driver');
+  const driver = readFileSync(join(root, 'tools/emulator-e2e.mjs'), 'utf8');
+  assert.match(driver, /report\.native/,
+    'the driver owns the bridge diagnostics: cap/known/ping straight over CDP');
+  assert.match(driver, /ping timeout 2500ms/, 'a hung bridge is reported, not hung forever');
   const apk = readFileSync(join(root, '.github/workflows/apk.yml'), 'utf8');
   assert.match(apk, /VITE_BUILD_SHA: \$\{\{ github\.sha \}\}/,
     'the CI build stamps its own commit into the bundle so a screenshot names the build');
