@@ -97,14 +97,7 @@ public class BearDappBrowserPlugin extends Plugin {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 currentUrl = url == null ? "" : url; // main thread — the ONLY writer the bridge thread reads
-                // The provider must exist before the dApp's own scripts run.
-                // onPageStarted is the same hook react-native-webview uses for
-                // injectedJavaScriptBeforeContentLoaded on Android; the script
-                // itself is idempotent, so re-runs on every navigation are safe.
-                String js = providerScript;
-                if (js != null && !js.isEmpty() && isWebDocument(url)) {
-                    view.evaluateJavascript(js, null);
-                }
+                injectProvider(view, "start", url);
                 JSObject ev = new JSObject();
                 ev.put("event", "loadStart");
                 ev.put("url", url);
@@ -112,13 +105,23 @@ public class BearDappBrowserPlugin extends Plugin {
             }
 
             @Override
+            public void onPageCommitVisible(WebView view, String url) {
+                // THE RACE-CLOSER (run 38047794274): onPageStarted is
+                // PRE-commit — its evaluateJavascript can execute against the
+                // OLD document (fixture parsed with window.ethereum missing
+                // while the previous run injected fine: a race, not a bug).
+                // onPageFinished is post-parser — too late for dApps that read
+                // window.ethereum at parse time. onPageCommitVisible fires once
+                // the NEW document has committed and the parser is still
+                // waiting on the network: provider lands BEFORE the dApp's own
+                // scripts, deterministically. Idempotent script makes the
+                // triple injection safe on every navigation.
+                injectProvider(view, "commit", url);
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
-                // Second chance for engines that commit the document before
-                // onPageStarted's evaluateJavascript lands (idempotent script).
-                String js = providerScript;
-                if (js != null && !js.isEmpty() && isWebDocument(url)) {
-                    view.evaluateJavascript(js, null);
-                }
+                injectProvider(view, "finish", url);
                 if (refreshLayout != null) refreshLayout.setRefreshing(false); // pull-to-refresh spinner stops once the page lands
                 JSObject ev = new JSObject();
                 ev.put("event", "loadEnd");
@@ -191,6 +194,20 @@ public class BearDappBrowserPlugin extends Plugin {
     }
 
     @PluginMethod
+    // Inject the provider on a lifecycle hook AND prove where it landed:
+    // every stage logs inject@<stage>->true/false — silent misses are how
+    // run 38047794274 reached hasProvider=false with no trace. true means
+    // window.ethereum.isBear was visible in THAT document right after the
+    // stage ran (idempotent script: extra trues are re-confirms, not bugs).
+    private void injectProvider(final WebView view, final String stage, final String url) {
+        final String js = providerScript;
+        if (js == null || js.isEmpty() || !isWebDocument(url)) return;
+        view.evaluateJavascript(js, null);
+        view.evaluateJavascript(
+            "(function(){try{return String(!!(window.ethereum&&window.ethereum.isBear));}catch(e){return 'ERR';}})()",
+            value -> android.util.Log.d("BearDappBrowser", "inject@" + stage + "->" + value + " :: " + url));
+    }
+
     public void open(PluginCall call) {
         String url = call.getString("url");
         String provider = call.getString("providerScript", "");

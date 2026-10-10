@@ -173,3 +173,20 @@ test('the truth probes exist — a "resolved" that never settles must be decidab
   assert.match(region, /window\.__pageResolve === window\.__bearNativeResolve/,
     'baris resolve# ikut melaporkan apakah konteks Java = konteks fixture (|same=)');
 });
+
+test('the provider injection closes the commit race — three hooks, each proves it landed', () => {
+  // Run 38047794274: the fixture parsed window.ethereum = missing while the
+  // previous run injected fine. onPageStarted is pre-commit (evaluate can
+  // hit the OLD document), onPageFinished is post-parser (too late for
+  // eager dApps). onPageCommitVisible is the deterministic point: committed
+  // document, parser still on the network.
+  assert.match(java, /public void onPageCommitVisible\(WebView view, String url\)/,
+    'hook commit-visible di pasang — post-commit, pre-parser');
+  const hooks = ['start', 'commit', 'finish'];
+  for (const stage of hooks) {
+    assert.match(java, new RegExp('injectProvider\\(view, "' + stage + '", url\\)'),
+      'injeksi jalan di hook ' + stage + ' — tiga titik, script idempoten');
+  }
+  assert.match(java, /inject@" \+ stage \+ "->"/,
+    'setiap hook membuktikan landing (inject@stage->true/false) — miss tak lagi bisu');
+});
