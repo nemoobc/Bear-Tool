@@ -50,6 +50,16 @@ public class BearDappBrowserPlugin extends Plugin {
     private ViewGroup parent = null;
     private SwipeRefreshLayout refreshLayout = null;
     private View toolbar = null;
+    // The loaded URL, written on the MAIN thread (onPageStarted) and read by
+    // Bridge.postMessage on the JavaBridge thread. WebView.getUrl() THROWS
+    // off-thread — checkThread() — and postMessage's silent catch ate it:
+    // run 38032829356 (2026-10-10) proved every dapp RPC dying there
+    // ("A WebView method was called on thread 'JavaBridge'" -> getUrl ->
+    // Bridge.postMessage), the request pending forever while the connect
+    // prompt never appeared. A volatile field is the one source BOTH threads
+    // may touch — and it stays native-side: a page can never name its own
+    // origin, same trust as getUrl() (the navigation lifecycle, not the page).
+    private volatile String currentUrl = "";
 
     // MetaMask caps the page→native message (BackgroundBridge MAX_MESSAGE_LENGTH)
     // so a hostile page cannot flood the native side with an unbounded string.
@@ -86,6 +96,7 @@ public class BearDappBrowserPlugin extends Plugin {
         dappView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                currentUrl = url == null ? "" : url; // main thread — the ONLY writer the bridge thread reads
                 // The provider must exist before the dApp's own scripts run.
                 // onPageStarted is the same hook react-native-webview uses for
                 // injectedJavaScriptBeforeContentLoaded on Android; the script
@@ -162,13 +173,20 @@ public class BearDappBrowserPlugin extends Plugin {
         closeBtn.setTextColor(0xFFFFFFFF);
         closeBtn.setBackgroundColor(0x00000000);
         closeBtn.setOnClickListener(v -> doClose());
-        bar.addView(backBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        bar.addView(closeBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        int barH = (int) (48 * getResources().getDisplayMetrics().density); // fixed: layout math must not wait on measure timing
+        bar.addView(backBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        bar.addView(closeBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
         toolbar = bar;
         if (parent != null) {
-            parent.addView(toolbar, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            parent.addView(toolbar, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barH));
         }
         toolbar.setVisibility(View.GONE);
+        // The dApp page renders BELOW the toolbar: an overlaying bar sits on
+        // top of every dApp's own header (the fixture's title was under it in
+        // run 38032829356). Padding on refreshLayout itself — a margin through
+        // the parent's LayoutParams could be dropped whenever addView
+        // regenerates params; a view property survives re-adds.
+        refreshLayout.setPadding(0, barH, 0, 0);
         refreshLayout.setVisibility(View.GONE);
     }
 
@@ -307,11 +325,16 @@ public class BearDappBrowserPlugin extends Plugin {
                 int id = new JSONObject(json).optInt("id", 0);
                 JSObject ev = new JSObject();
                 ev.put("id", id);
-                ev.put("origin", dappView != null ? dappView.getUrl() : "");
+                ev.put("origin", currentUrl); // NEVER dappView.getUrl(): checkThread() throws on JavaBridge
                 ev.put("payload", json);
                 notifyListeners("rpcRequest", ev);
             } catch (Exception e) {
-                // Malformed JSON from a hostile page: drop, never crash the view.
+                // Malformed JSON from a hostile page: drop, never crash the view —
+                // but NEVER silently: the empty catch above hid a dead RPC path
+                // for a whole run (38032829356). Bounded diagnosis: the
+                // exception CLASS only — the page's own payload never reaches
+                // the log (log injection), the fixed string never grows.
+                android.util.Log.w("BearDappBrowser", "rpcRequest dropped: " + e.getClass().getSimpleName());
             }
         }
     }

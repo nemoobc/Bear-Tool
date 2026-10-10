@@ -98,3 +98,33 @@ test('the fixture server log cannot hide behind buffering, and native failures g
   assert.match(driverSrc, /shotScreen\('99-failure-screen'\)/,
     'jalur gagal wajib menangkap layar UTUH via adb — 99-failure.png CDP memperlihatkan dashboard tenang saat dapp WebView macet');
 });
+
+test('Bridge.postMessage never touches the WebView — origin comes from a main-thread field', () => {
+  const idx = java.indexOf('public void postMessage');
+  assert.ok(idx > 0, 'Bridge.postMessage (jalur RPC dapp) harus ada');
+  // Comments quote the forbidden shape (the origin line itself warns about
+  // getUrl()); the detector judges code only — strip inline // tails.
+  const region = java.slice(idx, idx + 1600).replace(/\/\/.*$/gm, '');
+  // Run 38032829356 (2026-10-10): getUrl() from the JavaBridge thread threw
+  // checkThread(), the SILENT catch ate it, and every dapp RPC waited forever
+  // with no log line to explain the empty screen.
+  assert.doesNotMatch(region, /getUrl\(\)/,
+    'getUrl() dari thread JavaBridge = IllegalStateException via checkThread — seluruh RPC dapp mati diam-diam di catch');
+  assert.match(region, /ev\.put\("origin", currentUrl\)/,
+    'origin wajib dibaca dari field volatile yang ditulis onPageStarted (main thread) — tetap native-side, halaman tak bisa menamai originnya sendiri');
+  assert.match(region, /rpcRequest dropped: /,
+    'catch wajib meninggalkan jejak — drop tanpa log = diagnosis musta (run 38032829356)');
+  assert.match(region, /e\.getClass\(\)\.getSimpleName\(\)/,
+    'yang dicatat hanya class exception — payload halaman tak boleh masuk log (log injection)');
+  assert.match(region, /Log\.w\("BearDappBrowser", "rpcRequest dropped: " \+ e\.getClass\(\)\.getSimpleName\(\)\)/,
+    'bentuk log persis: prefix tetap + class exception — getMessage()/payload tak boleh ikut');
+  assert.match(java, /volatile String currentUrl/, 'volatile: ditulis main thread, dibaca JavaBridge thread');
+  assert.match(java, /currentUrl = url/, 'satu-satunya penulis = onPageStarted (lifecycle navigasi)');
+});
+
+test('the dApp page renders BELOW the toolbar — never underneath its own header band', () => {
+  assert.match(java, /refreshLayout\.setPadding\(0, barH, 0, 0\)/,
+    'padding di refreshLayout sendiri: margin lewat LayoutParams parent bisa hilang saat addView me-regenerate params');
+  assert.match(java, /MATCH_PARENT, barH\)/, 'tinggi toolbar tetap (48dp * density) — jarak halaman = tinggi bar, tanpa menunggu measure');
+  assert.match(java, /48 \* getResources\(\)\.getDisplayMetrics\(\)\.density/, 'ukuran dipakai satuan dp-density, bukan px mentah');
+});
