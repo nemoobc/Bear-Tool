@@ -193,12 +193,15 @@ public class BearDappBrowserPlugin extends Plugin {
         refreshLayout.setVisibility(View.GONE);
     }
 
-    @PluginMethod
     // Inject the provider on a lifecycle hook AND prove where it landed:
     // every stage logs inject@<stage>->true/false — silent misses are how
     // run 38047794274 reached hasProvider=false with no trace. true means
     // window.ethereum.isBear was visible in THAT document right after the
     // stage ran (idempotent script: extra trues are re-confirms, not bugs).
+    // NOTE: keep this helper OUT from between any @PluginMethod annotation
+    // and its method — an orphaned annotation rebinds to THIS declaration,
+    // open() drops out of PluginHeaders, and JS throws
+    // "BearDappBrowser.open() is not implemented on android" (run 38048894477).
     private void injectProvider(final WebView view, final String stage, final String url) {
         final String js = providerScript;
         if (js == null || js.isEmpty() || !isWebDocument(url)) return;
@@ -208,6 +211,7 @@ public class BearDappBrowserPlugin extends Plugin {
             value -> android.util.Log.d("BearDappBrowser", "inject@" + stage + "->" + value + " :: " + url));
     }
 
+    @PluginMethod
     public void open(PluginCall call) {
         String url = call.getString("url");
         String provider = call.getString("providerScript", "");

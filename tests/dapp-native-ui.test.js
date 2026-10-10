@@ -190,3 +190,28 @@ test('the provider injection closes the commit race — three hooks, each proves
   assert.match(java, /inject@" \+ stage \+ "->"/,
     'setiap hook membuktikan landing (inject@stage->true/false) — miss tak lagi bisu');
 });
+
+test('every @PluginMethod binds to ITS public PluginCall method — no orphans', () => {
+  // Run 38048894477: a helper method was inserted between @PluginMethod and
+  // open(). Java binds the orphaned annotation to the NEXT declaration
+  // (injectProvider, private); open() vanishes from the native-injected
+  // PluginHeaders and the JS core's method resolver throws
+  // '"BearDappBrowser.open()" is not implemented on android' — while
+  // addListener (base method, no annotation) keeps working, which is what
+  // made the failure look impossible.
+  const noComments = java.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const lines = noComments.split('\n');
+  let checked = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (!/@PluginMethod\s*\(?[^)]*\)?\s*$/.test(lines[i])) continue;
+    let j = i + 1;
+    while (j < lines.length && !lines[j].trim()) j++;
+    assert.match(lines[j] || '', /public\s+[\w<>\[\], .]+\s+\w+\s*\(\s*PluginCall/,
+      '@PluginMethod yatim — deklarasi berikutnya harus public …(PluginCall), dapat: ' + (lines[j] || 'END'));
+    checked++;
+  }
+  assert.ok(checked >= 3, 'minimal 3 @PluginMethod terdeteksi, dapat: ' + checked);
+  // the specific casualty of run 38048894477
+  assert.match(noComments, /@PluginMethod\s*\n\s*public void open\s*\(\s*PluginCall/,
+    'open() HARUS berpasangan langsung dengan @PluginMethod');
+});
