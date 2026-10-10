@@ -20,7 +20,13 @@ jobs:
   fork:
     name: Fork ${{ matrix.network }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 40, not 25: zksync's era-fork legs are the slowest in the matrix (canonical
+    # RPC throttles anvil's upstream reads) and the25-min cap killed the job MID-
+    # RUN five times running — runs 38010720148/38014312972/38015750587/
+    # 38018390385 all show "Fork tests — zksync → cancelled", and the rerun's
+    # step ran 03:28:45→03:53:57 = 25m12s, exactly the cap. Other chains finish
+    # in 10–20; zksync needs headroom, not a shorter fuse.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       max-parallel: 4

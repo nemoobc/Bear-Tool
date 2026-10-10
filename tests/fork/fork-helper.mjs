@@ -85,7 +85,7 @@ export const FORK_NETWORKS = {
   scroll:      { chainId: 534352, rpc: 'https://rpc.scroll.io',                             type: 'mainnet' },
   blast:       { chainId: 81457, rpc: 'https://rpc.blast.io',                               type: 'mainnet' },
   mantle:      { chainId: 5000,  rpc: 'https://rpc.mantle.xyz',                             type: 'mainnet' },
-  zksync:      { chainId: 324,   rpc: 'https://mainnet.era.zksync.io',                      type: 'mainnet' },
+  zksync:      { chainId: 324,   rpc: 'https://mainnet.era.zksync.io',                      alts: ['https://zksync.drpc.org'], type: 'mainnet' },
   unichain:    { chainId: 130,   rpc: 'https://mainnet.unichain.org',                       type: 'mainnet' },
   worldchain:  { chainId: 480,   rpc: 'https://worldchain-mainnet.g.alchemy.com/public',    type: 'mainnet' }
 };
