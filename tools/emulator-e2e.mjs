@@ -570,7 +570,13 @@ async function main() {
     while (Date.now() - extWait < 45000) {
       ext = await dpage.evaluate(`({ h: location.href, t: document.title, b: !!(window.ethereum && window.ethereum.isBear) })`)
         .catch(() => null);
-      if (ext && String(ext.h).includes('example.com')) break;
+      // BREAK ONLY WHEN BOTH LAND. Run 38073423764: inject@commit/finish
+      // logged ->"true" for example.com while the driver's first poll saw
+      // b:false — the poll broke on href alone right before the native
+      // commit-inject executed (the same pre-commit race the Java side
+      // race-closes for the PAGE; the driver must retry instead of trusting
+      // the first committed read).
+      if (ext && String(ext.h).includes('example.com') && ext.b) break;
       await sleep(1000);
     }
     report.dapp.external = ext || { h: null };
