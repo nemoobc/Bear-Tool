@@ -104,6 +104,11 @@ const ALLOWED_CONSOLE = [
   // 38012047691). Harmless on notch-less devices, unfixable from JS — the
   // gate stays on for OUR errors and lets this one through deliberately.
   /Error injecting safe area CSS/i,
+  // The scheme-guard TEST throws on purpose (run 38073969421): every refused
+  // scheme logs "[dApp] open failed: unsupported scheme \"…\"" — the proof,
+  // not a defect. Without this the four refusals would fail the run as
+  // "unfiltered console errors".
+  /\[dApp\] open failed: unsupported scheme/i,
 ];
 
 // Every step is appended here synchronously the moment it starts — the one
