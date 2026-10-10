@@ -386,6 +386,25 @@ async function main() {
         }
       }
     };
+    // The attach can BEAT the navigation commit (bare image = fast local
+    // parse): the target still reads about:blank, href records a lie, and
+    // the probe dies with "Execution context was destroyed" — run
+    // 38061409481 passed but its report carried href=about:blank + probeFailed,
+    // forensics a future reader cannot trust. Stabilize first: poll
+    // location.href until it leaves about:blank, retrying across context
+    // destruction — a document swap mid-poll rejects that attempt, not the
+    // journey.
+    for (let i = 0; i < 3; i++) {
+      const seen = await dpage.evaluate(`(async () => {
+        const t0 = Date.now();
+        while ((location.href || 'about:blank') === 'about:blank' && Date.now() - t0 < 8000)
+          await new Promise((r) => setTimeout(r, 50));
+        return location.href;
+      })()`).catch((e) => ({ destroyed: /destroyed/i.test(String(e && e.message)) }));
+      if (typeof seen === 'string') break;          // stable document reached
+      if (!seen || seen.destroyed !== true) break;  // genuine eval failure: don't spin
+      await new Promise((r) => setTimeout(r, 300)); // swap in flight — retry
+    }
     report.dapp.href = await dpage.evaluate('location.href').catch((e) => 'eval-failed: ' + e.message);
 
     // Truth probes before judgment: sameFn/type = did Java's 'resolved' come

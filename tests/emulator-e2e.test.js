@@ -298,3 +298,22 @@ test('the E2E boots a BARE image — GMS FontsProvider collateral kills are a cl
     'google_apis mengembalikan kelas kill ini — hanya boleh kembali dengan bukti logcat baru');
   assert.match(yml, /FontsProvider/, 'alasan ditulis di workflow — keputusan butuh jejak');
 });
+
+test('href and probe wait for the fixture document — a passing report must not say about:blank', () => {
+  // Run 38061409481 PASSED (pass:true, full journey) but its forensics lied:
+  // the attach beat the navigation commit, so href recorded about:blank and
+  // the probe died "Execution context was destroyed" — useless data in the
+  // one artifact future readers trust most. Stabilization is pinned here:
+  // poll location.href off about:blank, retry only on context destruction
+  // (a genuine eval failure must not spin), THEN capture href.
+  const driver = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8');
+  assert.match(driver, /while \(\(location\.href \|\| 'about:blank'\) === 'about:blank'/,
+    'polling ke luar about:blank sebelum href+probe');
+  assert.match(driver, /destroyed: \/destroyed\/i\.test/,
+    'retry HANYA saat konteks hancur — kegagalan eval asli tidak boleh diulang');
+  assert.match(driver, /i < 3;/, 'retry berbatas 3× — tanpa batas = loop tanpa dasar');
+  // order: stabilization block must precede the href capture
+  const stab = driver.indexOf("=== 'about:blank'");
+  const href = driver.indexOf('report.dapp.href = await');
+  assert.ok(stab > 0 && href > stab, 'stabilisasi mendahului capture href');
+});
