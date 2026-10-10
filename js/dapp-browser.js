@@ -29,7 +29,7 @@
 // wallet, so the damage surface is a web page, not a signing key.
 // ═══════════════════════════════════════════════════════════════
 
-import { escapeHtml, toast } from './ui.js';
+import { escapeHtml, toast, dappMark } from './ui.js';
 import { inspectUrl, classifyInput, VERDICT, renderSignalList, baseHost, matchHostList, matchCatalog } from './dapp-safety.js';
 import { sanitizeForStore, isSecretishUrl, transmittedPart } from './security.js';
 import { getSecurityConfig, addBlockedHost, addTrustedHost, clearBrowsingData, listBlocked, listTrusted } from './dapp-sessions.js';
@@ -218,7 +218,7 @@ const SHELL = `
              placeholder="Search DApps or type an address" aria-label="Address and search">
     </div>
     <button class="dbr-btn dbr-ic dbr-ext" id="dbrExt" title="Open this page in a new tab" aria-label="Open this page in a new tab" hidden>↗</button>
-    <button class="dbr-btn dbr-ic dbr-conn" id="dbrConnect" title="Connect this site to the wallet" aria-label="Connect this site to the wallet" hidden>🔗</button>
+    <button class="dbr-btn dbr-ic dbr-conn" id="dbrConnect" title="Connect this site to the wallet" aria-label="Connect this site to the wallet" hidden><img class="dbr-conn-logo" src="assets/bear.svg" alt="" width="20" height="20"></button>
     <button class="dbr-btn dbr-ic dbr-net" id="dbrNet" title="Switch network" aria-label="Current network — switch network">
       <span class="dbr-net-ic" id="dbrNetIc" aria-hidden="true"></span>
     </button>
@@ -557,7 +557,7 @@ function paintHome() {
 const cardHTML = (d) => `
   <button class="dbr-card" data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}"
           data-category="${escapeHtml(d.category || '')}" style="--cat:${catFace(d.category || '').color}">
-    <span class="dbr-card-ic" aria-hidden="true">${escapeHtml(d.icon || '◈')}</span>
+    <span class="dbr-card-ic" aria-hidden="true">${dappMark(d.name, catFace(d.category || '').color, 36)}</span>
     <span class="dbr-card-nm">${escapeHtml(d.name)}</span>
     <span class="dbr-card-ct">${escapeHtml(d.category || '')}${d.frameable === false ? ' ↗' : ''}</span>
   </button>`;

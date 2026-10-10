@@ -32,6 +32,16 @@ export function escapeHtml(str) {
     .replaceAll("'", '&#39;');
 }
 
+// A deterministic tile-mark for a dApp with no real logo: gradient tile +
+// first letter, so a card is never bare text or a hollow emoji. Injected with
+// the category colour inline (--mk) and used by the discovery grid (.dapp-icon)
+// and the browser home cards (.dbr-card-ic).
+export function dappMark(name, color, size = 40) {
+  const letter = ((name || '?').trim().charAt(0) || '?').toUpperCase();
+  const px = Math.max(16, Math.round(size * 0.52));
+  return `<span class="dapp-mark" style="--mk:${escapeHtml(color || '#94A3B8')};width:${size}px;height:${size}px;font-size:${px}px" aria-hidden="true">${escapeHtml(letter)}</span>`;
+}
+
 // ── toast ──
 export function toast(msg, type = 'info') {
   const wrap = $('#toast-wrap');

@@ -11,6 +11,8 @@ const dappsSrc = readFileSync(new URL('../js/dapps.js', import.meta.url), 'utf8'
 // The browser moved into its own module; the browser assertions below are
 // checked against that file, and the catalogue ones against dapps.js.
 const browserSrc = readFileSync(new URL('../js/dapp-browser.js', import.meta.url), 'utf8');
+// Shared helper that renders the tile-marks (dappMark lives here).
+const uiSrc = readFileSync(new URL('../js/ui.js', import.meta.url), 'utf8');
 // Halaman = index.html + section view (M2: src/views/*.jsx).
 const htmlSrc = appSource();
 
@@ -167,19 +169,25 @@ test('dapps: a pasted secret is refused and never stored', () => {
   assert.match(browserSrc, /sanitizeForStore/, 'history and bookmarks must be sanitised');
 });
 
-test('dapps: field icon di-escape di KEDUA tampilan (daftar & browser chrome)', () => {
-  // name/category/url sudah lewat escapeHtml; `d.icon` masih tertanam mentah
-  // ke innerHTML. Katalog hari ini berisi emoji — field itu tetap field
-  // template yang belum lewat filter, di dua file yang berbeda.
-  assert.match(dappsSrc, /\$\{escapeHtml\(d\.icon\)\}/,
-    'renderDapps harus meng-escape d.icon');
+test('dapps: kartu pakai tile-mark deterministik, bukan emoji mentah (daftar & browser chrome)', () => {
+  // name/category/url sudah lewat escapeHtml; emoji `d.icon` sebelumnya
+  // tertanam mentah ke innerHTML dan bisa kosong (2026-10-10: kartu dApps
+  // tampil tanpa logo). Sekarang KEDUA tampilan memakai dappMark() — tile
+  // gradien + inisial yang SELALU render, warna dari kategori.
+  assert.match(dappsSrc, /dappMark\(d\.name, catStyle\(d\.category\)\.color/,
+    'renderDapps harus memakai tile-mark (warna kategori + inisial)');
   assert.ok(!/\$\{d\.icon\}/.test(dappsSrc),
-    'd.icon masih dipasang mentah di js/dapps.js');
-  assert.match(browserSrc, /\$\{escapeHtml\(d\.icon \|\| '◈'\)\}/,
-    'cardHTML harus meng-escape d.icon (fallback ◈ ikut di-escape)');
+    'd.icon tidak boleh dipasang lagi di js/dapps.js');
+  assert.match(browserSrc, /dappMark\(d\.name, catFace\(d\.category \|\| ''\)\.color/,
+    'cardHTML harus memakai tile-mark yang sama');
   assert.ok(!/\$\{d\.icon \|\|/.test(browserSrc),
-    'd.icon masih dipasang mentah di js/dapp-browser.js');
+    'd.icon tidak boleh dipasang lagi di js/dapp-browser.js');
   // …dengan helper yang benar-benar diimpor di kedua modul.
-  assert.match(dappsSrc, /import \{ escapeHtml \} from '\.\/ui\.js'/);
-  assert.match(browserSrc, /import \{ escapeHtml, toast \} from '\.\/ui\.js'/);
+  assert.match(dappsSrc, /import \{ escapeHtml, dappMark \} from '\.\/ui\.js'/);
+  assert.match(browserSrc, /import \{ escapeHtml, toast, dappMark \} from '\.\/ui\.js'/);
+  // Dan helper itu sendiri ada + aman buat markup (nama di-escape, ada fallback).
+  assert.match(uiSrc, /export function dappMark\(name, color, size = 40\)/,
+    'dappMark harus tinggal di ui.js supaya dua modul pakai satu sumber');
+  assert.match(uiSrc, /escapeHtml\(color \|\| '#94A3B8'\)/,
+    'warna kategori harus di-escape sebelum masuk style inline');
 });

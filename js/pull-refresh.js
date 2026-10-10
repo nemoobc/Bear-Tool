@@ -63,7 +63,7 @@ export function initPullRefresh(opts = {}) {
   // 'pull' class on release is what snaps it home.
   const rest = () => {
     pxNow = 0;
-    if (ind.style) ind.style.transform = 'translateY(-72px)';
+    if (ind.style) ind.style.transform = 'translate(-50%, -72px)';
     ind.classList.remove('show', 'pull', 'go');
     armed = false;
     pulling = false;
@@ -87,7 +87,7 @@ export function initPullRefresh(opts = {}) {
     if (pulling && dy > 0) {
       if (e.cancelable) e.preventDefault();
       pxNow = Math.min(MAX_PULL, dy * DAMPING);
-      if (ind.style) ind.style.transform = `translateY(${-72 + pxNow}px)`;
+      if (ind.style) ind.style.transform = `translate(-50%, ${-72 + pxNow}px)`;
     }
   };
 
@@ -103,7 +103,7 @@ export function initPullRefresh(opts = {}) {
     busy = true;
     ind.classList.remove('pull');
     ind.classList.add('go');
-    if (ind.style) ind.style.transform = `translateY(${MAX_PULL / 2}px)`;
+    if (ind.style) ind.style.transform = `translate(-50%, ${MAX_PULL / 2}px)`;
     const started = Date.now();
     // Called synchronously on release (one deterministic commit point), then
     // the promise — if any — only paces how long the spinner stays.
@@ -153,7 +153,7 @@ export function initPullRefresh(opts = {}) {
 
   // First paint: park the indicator above the viewport until the first pull.
   pxNow = 0;
-  if (ind.style) ind.style.transform = 'translateY(-72px)';
+  if (ind.style) ind.style.transform = 'translate(-50%, -72px)';
 
   return {
     destroy() {

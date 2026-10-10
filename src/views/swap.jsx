@@ -82,7 +82,11 @@ export default function SwapView() {
               </div>
               <div className="field mb-8">
                 <label htmlFor="swapRouterSelect">Router</label>
-                <select className="select" id="swapRouterSelect"><option value="auto">Auto (Best Price)</option><option value="kyberswap">KyberSwap</option><option value="1inch">1inch</option><option value="paraswap">ParaSwap</option><option value="sushiswap">SushiSwap</option><option value="uniswap_v3">Uniswap V3</option><option value="uniswap_v2">Uniswap V2</option></select>
+                <div className="token-picker" data-picker="swapRouterSelect">
+                  <select className="select token-picker-native" id="swapRouterSelect" aria-label="swap provider"><option value="auto">Auto (Best Price)</option><option value="kyberswap">KyberSwap</option><option value="1inch">1inch</option><option value="paraswap">ParaSwap</option><option value="sushiswap">SushiSwap</option><option value="uniswap_v3">Uniswap V3</option><option value="uniswap_v2">Uniswap V2</option></select>
+                  <button type="button" className="token-picker-trigger" id="swapRouterSelectBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose swap provider"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button>
+                  <div className="token-picker-panel" id="swapRouterSelectPanel" role="listbox" hidden></div>
+                </div>
               </div>
               <div className="swap-extras">
                 <div className="field">

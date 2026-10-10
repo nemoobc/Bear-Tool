@@ -50,6 +50,11 @@ public class BearDappBrowserPlugin extends Plugin {
     private ViewGroup parent = null;
     private SwipeRefreshLayout refreshLayout = null;
     private View toolbar = null;
+    private android.widget.EditText addressField = null;
+    private Button backBtn = null;
+    private Button forwardBtn = null;
+    private static final int ADDRESS_LOADING = 0x663355FF;  // blue tint while the page loads
+    private static final int ADDRESS_IDLE = 0x33222244;     // dim idle field
     // The loaded URL, written on the MAIN thread (onPageStarted) and read by
     // Bridge.postMessage on the JavaBridge thread. WebView.getUrl() THROWS
     // off-thread — checkThread() — and postMessage's silent catch ate it:
@@ -97,6 +102,12 @@ public class BearDappBrowserPlugin extends Plugin {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 currentUrl = url == null ? "" : url; // main thread — the ONLY writer the bridge thread reads
+                // Address bar follows the navigation; blue tint = loading.
+                if (addressField != null) {
+                    addressField.setText(url == null ? "" : url);
+                    addressField.setBackgroundColor(ADDRESS_LOADING);
+                }
+                updateNavButtons();
                 injectProvider(view, "start", url);
                 JSObject ev = new JSObject();
                 ev.put("event", "loadStart");
@@ -122,6 +133,12 @@ public class BearDappBrowserPlugin extends Plugin {
             @Override
             public void onPageFinished(WebView view, String url) {
                 injectProvider(view, "finish", url);
+                // Address bar settles: idle tint, live back/forward state.
+                if (addressField != null) {
+                    addressField.setText(url == null ? "" : url);
+                    addressField.setBackgroundColor(ADDRESS_IDLE);
+                }
+                updateNavButtons();
                 if (refreshLayout != null) refreshLayout.setRefreshing(false); // pull-to-refresh spinner stops once the page lands
                 JSObject ev = new JSObject();
                 ev.put("event", "loadEnd");
@@ -160,29 +177,89 @@ public class BearDappBrowserPlugin extends Plugin {
         // without native controls the user is trapped in the dapp forever.
         // The contentDescription names each button for accessibility AND for
         // the E2E driver's uiautomator tap (tests/emulator-e2e.test.js).
+        // OKX-style toolbar: [ ← ] [ → ] [ address ......... ] [ ⟳ ] [ ✕ ].
+        // Address bar navigates like a browser: Enter loads the typed URL
+        // (https:// prepended when bare), guarded by the same http/https gate
+        // as open(). Back/forward reflect the WebView history live.
         LinearLayout bar = new LinearLayout(getContext());
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setBackgroundColor(0xCC1A1A2E);
-        Button backBtn = new Button(getContext());
+        final float density = getActivity().getResources().getDisplayMetrics().density;
+        int navW = (int) (46 * density);
+
+        backBtn = new Button(getContext());
         backBtn.setText("\u2190");
         backBtn.setContentDescription("dapp-back");
+        backBtn.setAllCaps(false);
         backBtn.setTextColor(0xFFFFFFFF);
         backBtn.setBackgroundColor(0x00000000);
+        backBtn.setEnabled(false);
         backBtn.setOnClickListener(v -> doBack());
+
+        forwardBtn = new Button(getContext());
+        forwardBtn.setText("\u2192");
+        forwardBtn.setContentDescription("dapp-forward");
+        forwardBtn.setAllCaps(false);
+        forwardBtn.setTextColor(0xFFFFFFFF);
+        forwardBtn.setBackgroundColor(0x00000000);
+        forwardBtn.setEnabled(false);
+        forwardBtn.setOnClickListener(v -> {
+            if (dappView != null && dappView.canGoForward()) dappView.goForward();
+        });
+
+        addressField = new android.widget.EditText(getContext());
+        addressField.setContentDescription("dapp-address");
+        addressField.setSingleLine(true);
+        addressField.setInputType(android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        addressField.setHint("Search or enter address");
+        addressField.setHintTextColor(0x99FFFFFF);
+        addressField.setTextColor(0xFFFFFFFF);
+        addressField.setTextSize(14);
+        addressField.setBackgroundColor(ADDRESS_IDLE);
+        addressField.setPadding((int) (10 * density), 0, (int) (10 * density), 0);
+        addressField.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_GO);
+        addressField.setImeActionLabel("Go", android.view.inputmethod.EditorInfo.IME_ACTION_GO);
+        addressField.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO
+                    || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                loadFromAddress();
+                return true;
+            }
+            return false;
+        });
+
+        Button refreshBtn = new Button(getContext());
+        refreshBtn.setText("\u27F3");
+        refreshBtn.setContentDescription("dapp-reload");
+        refreshBtn.setAllCaps(false);
+        refreshBtn.setTextColor(0xFFFFFFFF);
+        refreshBtn.setBackgroundColor(0x00000000);
+        refreshBtn.setOnClickListener(v -> {
+            if (dappView != null) dappView.reload();
+        });
+
         Button closeBtn = new Button(getContext());
-        backBtn.setAllCaps(false);
         closeBtn.setText("\u2715");
         closeBtn.setContentDescription("dapp-close");
+        closeBtn.setAllCaps(false);
         closeBtn.setTextColor(0xFFFFFFFF);
         closeBtn.setBackgroundColor(0x00000000);
         closeBtn.setOnClickListener(v -> doClose());
-        int barH = (int) (48 * getActivity().getResources().getDisplayMetrics().density); // fixed: layout math must not wait on measure timing
-        bar.addView(backBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        bar.addView(closeBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+
+        int barH = (int) (48 * density); // fixed: layout math must not wait on measure timing
+        bar.addView(backBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
+        bar.addView(forwardBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
+        bar.addView(addressField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        bar.addView(refreshBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
+        bar.addView(closeBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         toolbar = bar;
         if (parent != null) {
             parent.addView(toolbar, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barH));
         }
+        // Page content stays clear of the native overlay: shrink the WebView
+        // by the toolbar height instead of letting pages hide underneath it.
+        // Top padding — the toolbar is the top band, so the page starts BELOW it.
+        if (refreshLayout != null) refreshLayout.setPadding(0, barH, 0, 0);
         toolbar.setVisibility(View.GONE);
         // The dApp page renders BELOW the toolbar: an overlaying bar sits on
         // top of every dApp's own header (the fixture's title was under it in
@@ -289,6 +366,31 @@ public class BearDappBrowserPlugin extends Plugin {
         }
         hideDappView();
         return false;
+    }
+
+    /** Address-bar navigation with the same http/https gate as open(). */
+    private void loadFromAddress() {
+        if (addressField == null || dappView == null) return;
+        String raw = addressField.getText().toString().trim();
+        if (raw.isEmpty()) return;
+        String url = raw;
+        if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return;
+        dappView.loadUrl(url);
+    }
+
+    /** Reflect WebView history state on the native toolbar (main thread only). */
+    private void updateNavButtons() {
+        if (backBtn != null) {
+            boolean can = dappView != null && dappView.canGoBack();
+            backBtn.setEnabled(can);
+            backBtn.setAlpha(can ? 1f : 0.35f);
+        }
+        if (forwardBtn != null) {
+            boolean can = dappView != null && dappView.canGoForward();
+            forwardBtn.setEnabled(can);
+            forwardBtn.setAlpha(can ? 1f : 0.35f);
+        }
     }
 
     private void hideDappView() {

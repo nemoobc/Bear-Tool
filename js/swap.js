@@ -13,7 +13,7 @@ import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, withTimeout } from './safetx.js';
 import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import { SWAP_ROUTERS, getSwapRoutersForChain, getBestSwapRouter, getRouterAddress, getQuoterAddress, CHAIN_NAMES } from './routers.js';
-import { initTokenPicker } from './token-picker.js';
+import { initTokenPicker, initOptionPicker } from './token-picker.js';
 import { resolveMax } from './max-ui.js';
 import { explainError } from './errors.js';
 
@@ -200,6 +200,12 @@ export function bindSwapEvents() {
 export function loadSwapTokens() {
   const from = $('#swapFrom'), to = $('#swapTo');
   if (!from || !to) return;
+  // Router list drawn INSIDE the app, bridge-style. The old native <select>
+  // drew its options as an OS popup that escapes the page on a phone (same
+  // report as the original swap token select) — in-app picker keeps the list
+  // clamped to the view, and the native select stays authoritative.
+  initOptionPicker('swapRouterSelect',
+    [...($('#swapRouterSelect')?.options || [])].map((o) => o.textContent));
   const net = getNetworkById(get('networkId'));
 
   // Offer the chain's popular tokens plus anything the user holds. Previously

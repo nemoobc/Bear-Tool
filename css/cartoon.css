@@ -3088,6 +3088,19 @@ select.input option, select.select option, .input option {
   border: 2px solid var(--ink); border-radius: 16px;
   background: var(--cat, var(--honey));
 }
+/* Deterministic tile-mark for catalogue cards without a real logo
+   (js/ui.js dappMark): gradient tile seeded from the category colour, with the
+   dApp's first letter — always renders, never a hollow emoji. */
+.dapp-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: inherit;
+  background: linear-gradient(135deg, var(--mk, #94A3B8) 0%, rgba(0, 0, 0, 0.28) 100%);
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  user-select: none;
+}
 .dapp-name { font-size: 12px; font-weight: 600; text-align: center; }
 .dapp-category { font-size: 10px; opacity: 0.6; }
 .dapp-frame { width: 100%; border-radius: 12px; overflow: hidden; border: 2px solid var(--border, #ddd); }
@@ -3388,6 +3401,7 @@ select.input option, select.select option, .input option {
 .dbr-secure.bad { color: #b23b3b; }
 .dbr-url { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; padding: 4px 0; font-size: .82rem; outline: none; }
 .dbr-conn { font-size: .85rem; }
+.dbr-conn-logo { display: block; border-radius: 6px; }
 /* Chain badge in the top-right corner: the active network as its own icon on
    its own chain colour, exactly where OKX puts it. */
 .dbr-net { border-color: transparent; }
@@ -3765,7 +3779,7 @@ select.input option, select.select option, .input option {
   box-shadow: 3px 3px 0 rgba(45, 42, 50, 0.35);
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-72px);
+  transform: translate(-50%, -72px);
   transition: transform 0.22s ease, opacity 0.15s ease;
 }
 .pull-refresh.show { opacity: 1; }
