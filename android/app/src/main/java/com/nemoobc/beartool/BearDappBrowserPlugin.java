@@ -219,6 +219,20 @@ public class BearDappBrowserPlugin extends Plugin {
             call.reject("url required");
             return;
         }
+        // Scheme guard (MetaMask parity: their in-app browser only ever loads
+        // http/https). Everything else — javascript:, data:, file:, wc: — was
+        // previously handed straight to loadUrl(): javascript: would execute
+        // IN THIS VIEW, data:/file: render local content with no server, and
+        // wc: renders an error page. All three are refused HERE at the native
+        // gate, on the main thread, before any WebView work happens. The
+        // wallet-side JS mirror (openNativeDapp) catches the same shapes for
+        // an immediate toast; this is the authoritative second layer.
+        String u = url.trim();
+        if (!u.startsWith("http://") && !u.startsWith("https://")) {
+            String scheme = u.contains(":") ? u.substring(0, u.indexOf(':')) : "none";
+            call.reject("unsupported scheme \"" + scheme + "\" — the dApp browser opens http/https URLs only");
+            return;
+        }
         providerScript = provider == null ? "" : provider;
         getActivity().runOnUiThread(() -> {
             try {

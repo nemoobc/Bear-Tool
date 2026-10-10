@@ -485,14 +485,143 @@ async function main() {
     await dpage.shot('07-dapp-fixture').catch(() => {});
     await shotScreen('07-dapp-screen'); // whole screen incl the native toolbar
 
-    step('dapp browser: native back (real tap) returns to the wallet');
-    report.dapp.backTapped = await tapNativeButton('dapp-back');
-    if (!report.dapp.backTapped) throw new Error('uiautomator never found the dapp-back toolbar button');
-    await sleep(1500);
-    await page.wait('#view-dashboard.active, .balance-card, #totalBalance', 15000).catch(() => {});
-    report.dapp.backToWallet = await page.evaluate(`!!document.querySelector('#view-dashboard.active, .balance-card')`).catch(() => false);
-    if (!report.dapp.backToWallet) throw new Error('native back did not return the wallet to view');
-    await shotScreen('08-back-to-wallet');
+    // ── scheme guard: everything that is NOT http/https is refused ─────────
+    // The wallet-side hook runs openNativeDapp() → its JS scheme guard (and,
+    // past it, the Java gate) — a javascript:/data:/file:/wc: URL must never
+    // reach loadUrl. Verify all four shapes are refused with the guard's own
+    // message, then confirm the browser still works (fixture #2 next step).
+    step('dapp browser: dangerous schemes are refused at the gate');
+    report.dapp.schemes = {};
+    for (const bad of ['javascript:alert(1)', 'data:text/html,<b>injected</b>', 'file:///system/build.prop', 'wc:deadbeef@1?relay-protocol=irn']) {
+      const res = await page.evaluate(
+        `window.__bearE2EOpenDapp(${JSON.stringify(bad)})
+          .then(() => 'opened')
+          .catch((e) => 'refused: ' + (e && e.message ? e.message : String(e)))`
+      ).catch((e) => 'throw: ' + e.message);
+      report.dapp.schemes[bad.split(':')[0]] = String(res);
+      if (!String(res).startsWith('refused:') || !/http\/https/.test(String(res))) {
+        throw new Error(`open() accepted a dangerous scheme: ${bad} -> ${res}`);
+      }
+    }
+
+    // ── second URL: sign + read surface, proof "any URL in-app" ────────────
+    // Same WebView, same CDP target — openNavigates loadUrl() on the existing
+    // view, so the driver REUSES dpage (its document just swaps). Fixture #2
+    // goes further than connect: it asks for two signatures (wallet flashes
+    // its modal twice) and two read calls (answered from the wallet's own
+    // provider — the MetaMask-parity read forwarding).
+    step('dapp browser: second URL opens in-app — personal_sign + typed data + read RPC');
+    await page.evaluate(`window.__bearE2EOpenDapp('http://10.0.2.2:8080/dapp-sign-fixture.html')`)
+      .catch((e) => { throw new Error('open fixture#2 failed: ' + e.message); });
+    for (let i = 0; i < 3; i++) {
+      const seen = await dpage.evaluate(`(async () => {
+        const t0 = Date.now();
+        while (!(location.href || '').includes('dapp-sign-fixture') && Date.now() - t0 < 8000)
+          await new Promise((r) => setTimeout(r, 50));
+        return location.href;
+      })()`).catch((e) => ({ destroyed: /destroyed/i.test(String(e && e.message)) }));
+      if (typeof seen === 'string' && String(seen).includes('dapp-sign-fixture')) break;
+      if (!seen || seen.destroyed !== true) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    report.dapp.href2 = await dpage.evaluate('location.href').catch((e) => 'eval-failed: ' + e.message);
+    if (!String(report.dapp.href2).includes('dapp-sign-fixture')) {
+      throw new Error('fixture #2 never committed: href=' + String(report.dapp.href2));
+    }
+    // ChainId first (proves the provider re-injected into the NEW document);
+    // the wallet modal for personal_sign arrives right after the fixture asks.
+    await page.wait('#confirmYes', 20000);
+    report.dapp.signAskTitle = await page.evaluate(
+      'document.querySelector(".question") ? document.querySelector(".question").textContent : ""'
+    ).catch(() => '');
+    await shotScreen('09-sign-modal');
+    await page.click('#confirmYes');
+    text = await pollOut(/personalSign=0x|error=|done=/, 60000);
+    if (!/personalSign=0x[0-9a-fA-F]{130}/.test(String(text))) throw new Error(`personal_sign failed:\n${text}`);
+    report.dapp.personalSign = true;
+    // Second modal: eth_signTypedData_v4.
+    await page.wait('#confirmYes', 20000);
+    await shotScreen('10-typeddata-modal');
+    await page.click('#confirmYes');
+    text = await pollOut(/typedSign=0x|error=|done=/, 60000);
+    if (!/typedSign=0x[0-9a-fA-F]{130}/.test(String(text))) throw new Error(`typed-data sign failed:\n${text}`);
+    report.dapp.typedSign = true;
+    // Read forwarding: blockNumber + balance need NO modal — they must arrive
+    // from the wallet's provider as-is (parity with MetaMask).
+    text = await pollOut(/blockNumber=0x|error=/, 30000);
+    if (!/blockNumber=0x[0-9a-fA-F]+/.test(String(text))) throw new Error(`read forwarding (eth_blockNumber) failed:\n${text}`);
+    text = await pollOut(/done=/, 30000);
+    report.dapp.signLog = String(text).slice(0, 600);
+    for (const key of ['hasProvider=true', 'chainId=0x', 'blockNumber=0x', 'done=ok']) {
+      if (!String(text).includes(key)) throw new Error(`sign fixture log missing ${key}:\n${text}`);
+    }
+    await dpage.shot('11-sign-done').catch(() => {});
+    await shotScreen('11-sign-done-screen');
+
+    // ── a REAL external https site opens in-app, provider + RPC live ───────
+    // The strongest version of "any URL": not our own fixture — a public site
+    // on the internet, loaded inside the same native WebView (never an
+    // external browser), with the provider injected and a read RPC answered.
+    step('dapp browser: real external https site loads in-app with live RPC');
+    await page.evaluate(`window.__bearE2EOpenDapp('https://example.com')`)
+      .catch((e) => { throw new Error('open example.com failed: ' + e.message); });
+    const extWait = Date.now();
+    let ext = null;
+    while (Date.now() - extWait < 45000) {
+      ext = await dpage.evaluate(`({ h: location.href, t: document.title, b: !!(window.ethereum && window.ethereum.isBear) })`)
+        .catch(() => null);
+      if (ext && String(ext.h).includes('example.com')) break;
+      await sleep(1000);
+    }
+    report.dapp.external = ext || { h: null };
+    if (!ext || !String(ext.h).includes('example.com')) {
+      throw new Error('real https site never loaded in-app: ' + JSON.stringify(report.dapp.external));
+    }
+    if (!ext.b) throw new Error('provider not injected on the external site: ' + JSON.stringify(report.dapp.external));
+    report.dapp.externalTitle = String(ext.t || '');
+    // Live RPC on the real page: eth_chainId (wallet answers) + a read call
+    // forwarded to the node (proves the whole bridge works on external sites).
+    const extRpc = await dpage.evaluate(`(async () => {
+      var out = {};
+      try {
+        out.chainId = await Promise.race([
+          window.ethereum.request({ method: 'eth_chainId' }),
+          new Promise(function (_, rej) { setTimeout(function () { rej(new Error('chainId timeout')); }, 20000); }),
+        ]);
+      } catch (e) { out.chainId = 'ERR:' + (e && e.message ? e.message : String(e)); }
+      try {
+        out.block = await Promise.race([
+          window.ethereum.request({ method: 'eth_blockNumber' }),
+          new Promise(function (_, rej) { setTimeout(function () { rej(new Error('block timeout')); }, 20000); }),
+        ]);
+      } catch (e) { out.block = 'ERR:' + (e && e.message ? e.message : String(e)); }
+      return out;
+    })()`).catch((e) => ({ rpcFailed: e.message }));
+    report.dapp.externalRpc = extRpc;
+    if (!/^0x[0-9a-fA-F]+$/.test(String(extRpc && extRpc.chainId))) {
+      throw new Error('external eth_chainId failed: ' + JSON.stringify(extRpc));
+    }
+    if (!/^0x[0-9a-fA-F]+$/.test(String(extRpc && extRpc.block))) {
+      throw new Error('external read RPC failed: ' + JSON.stringify(extRpc));
+    }
+    await dpage.shot('12-external-site').catch(() => {});
+    await shotScreen('12-external-site-screen');
+
+    step('dapp browser: native back (real taps) walks the history to the wallet');
+    report.dapp.backTaps = 0;
+    report.dapp.backToWallet = false;
+    for (let i = 0; i < 5; i++) {
+      const tapped = await tapNativeButton('dapp-back').catch(() => false);
+      if (!tapped) { report.dapp.backTapped = i === 0; break; }
+      report.dapp.backTapped = true;
+      report.dapp.backTaps += 1;
+      await sleep(1500);
+      await page.wait('#view-dashboard.active, .balance-card, #totalBalance', 15000).catch(() => {});
+      report.dapp.backToWallet = await page.evaluate(`!!document.querySelector('#view-dashboard.active, .balance-card')`).catch(() => false);
+      if (report.dapp.backToWallet) break;
+    }
+    if (!report.dapp.backToWallet) throw new Error('native back did not return the wallet to view (taps=' + report.dapp.backTaps + ')');
+    await shotScreen('13-back-to-wallet');
     try { dapp.close(); } catch { /* target may die with the view */ }
   }
 

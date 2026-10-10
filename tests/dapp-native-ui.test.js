@@ -307,3 +307,103 @@ test('the probe settles by the request\'s OWN __bearId — hardcoded ids land on
   assert.doesNotMatch(fixture, /__bearNativeResolve\(2,/,
     'id hardcode dilarang — urutan seq tak bisa ditebak saat dapp ngebut');
 });
+
+test('open() gates the scheme at native — non-http(s) never reaches loadUrl (MetaMask parity)', () => {
+  // Before: open() rejected only an EMPTY url, so javascript:/data:/file:/wc:
+  // went straight into loadUrl(). MetaMask Mobile's in-app browser only ever
+  // loads http/https; every other shape must be refused HERE, on the main
+  // thread, with a message the dApp can read — not an error page, not script
+  // execution inside the view.
+  // NOTE the guard region is read from RAW java: the /\/\/.*/ comment stripper
+  // below eats `//` inside the "http://" string literals and produces a
+  // mutated open() that no guard can match (http: then garbage).
+  const region = java.slice(java.indexOf('public void open'), java.indexOf('public void open') + 1200);
+  assert.match(region, /!u\.startsWith\("http:\/\/"\) && !u\.startsWith\("https:\/\/"\)/,
+    'guard wajib menolak SEMUA scheme selain http/https — satu pengecualian = pintu celah');
+  assert.match(region, /call\.reject\("unsupported scheme/,
+    'penolakan wajib membawa pesan terbaca dApp (bukan diam)');
+  assert.match(region, /opens http\/https URLs only/,
+    'pesan wajib menjelaskan apa yang BOLEH — detail yang bisa ditindaki dApp');
+  const noComments = java.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  assert.match(noComments, /if \(!u\.startsWith\("http:/,
+    'deteksi guard hadir dalam bentuk ter-strip komentar (belum diperiksa ketat — strip memotong \"\/\/\" literal)');
+});
+
+test('the wallet-side open mirror gates the same shapes — fast toast, no plugin round-trip', () => {
+  const noComments = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.match(noComments, /!trimmed\.startsWith\('http:\/\/'\) && !trimmed\.startsWith\('https:\/\/'\)/,
+    'openNativeDapp menolak non-http(s) — mirror JS dari gerbang Java (startsWith, bukan regex, biar stripper scope.test tak memotong \\/\\/)');
+  assert.match(noComments, /'unsupported scheme "' \+ scheme \+ '" — the dApp browser opens http\/https URLs only'/,
+    'pesan JS identik — hook E2E juga kena gerbang (uji scheme = uji jalur ini)');
+  assert.match(noComments, /toast\(msg, 'error'\)/,
+    'wanprestasi tak boleh senyap: toast muncul di wallet');
+});
+
+test('read-only RPC is forwarded to the wallet provider — no modal, bounded deadline (MetaMask parity)', () => {
+  // A real dApp reads balances, calls and blocks through window.ethereum as
+  // much as it signs. Before: every read method fell through to 4200
+  // "not supported" — MetaMask answers them from the active node.
+  const noComments = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.match(noComments, /const NATIVE_READ_METHODS = new Set\(\[/,
+    'whitelist read methods wajib ada — daftar eksplisit, bukan wildcard');
+  assert.match(noComments, /'eth_blockNumber', 'eth_getBalance', 'eth_getTransactionCount'/,
+    'inti read eth_* wajib terdaftar');
+  assert.match(noComments, /'eth_call', 'eth_estimateGas'/,
+    'call + estimate ikut — pembacaan selengkap node');
+  assert.match(noComments, /'eth_getLogs', 'eth_syncing', 'eth_getProof'/,
+    'logs + syncing + proof ikut — pembacaan selengkap node');
+  assert.match(noComments, /NATIVE_READ_METHODS\.has\(method\)/,
+    'pertanyaan read dipilah lewat whitelist TERSENDIRI — sign/spend tetap lewat cabang eksplisitnya');
+  assert.match(noComments, /provider\.send\(method, msg\.params \|\| \[\]\)/,
+    'forward memakai provider wallet sendiri (ethers JsonRpcProvider)');
+  assert.match(noComments, /new Promise\(\(_, reject\) => setTimeout\(\(\) => reject/, 
+    'deadline PALSU==bounded: halaman tak bisa membuka bridge selamanya');
+  assert.match(noComments, /READ_DEADLINE_MS\)/,
+    'deadline read dipakai di race');
+  assert.match(noComments, /code: \(e && e\.code\) \|\| -32003/, 
+    'error node diteruskan dengan code-nya — dApp bisa membedakan kasus');
+});
+
+test('the sign fixture races every request and proves sign + read on a SECOND in-app URL', () => {
+  const f2 = readFileSync(path.join(here, '..', 'public', 'dapp-sign-fixture.html'), 'utf8');
+  assert.match(f2, /bear-sign-fixture/, 'judul = identitas target CDP pencarian driver');
+  assert.match(f2, /personal_sign/, 'fixture meminta personal_sign — modal sign pertama');
+  assert.match(f2, /eth_signTypedData_v4/, 'typed data — modal sign kedua (EIP-712)');
+  assert.match(f2, /personalSign/, 'hasil ttd dicatat sebagai fakta output');
+  assert.match(f2, /typedSign/);
+  assert.match(f2, /eth_blockNumber/, 'read forwarding diuji dari halaman nyata');
+  assert.match(f2, /eth_getBalance/);
+  assert.match(f2, /deadline\(/, 'semua request berdeadline — tanpa wallet gagal berisik, tak menggantung');
+  assert.match(f2, /done', 'ok'/, 'penanda selesai');
+});
+
+test('the driver exercises the whole matrix: scheme gate, second URL sign, real https site, back loop', () => {
+  const driver = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  // scheme refusal verified at runtime — not just source-pinned
+  assert.match(driver, /'javascript:alert\(1\)', 'data:text\/html,<b>injected<\/b>', 'file:\/\/\/system\/build\.prop', 'wc:/,
+    'driver menguji 4 bentuk berbahaya sekaligus');
+  assert.match(driver, /report\.dapp\.schemes\[bad\.split\(':'\)\[0\]\]/,
+    'hasil refusal dicatat per-scheme');
+  // fixture #2: second in-app URL re-injected with provider, two confirms
+  assert.match(driver, /dapp-sign-fixture\.html/,
+    'driver membuka URL kedua di WebView yang sama (in-app, bukan tab/browser baru)');
+  assert.match(driver, /report\.dapp\.href2/,
+    'komit dokumen kedua diverifikasi (href diterima)');
+  assert.match(driver, /personalSign=0x\[0-9a-fA-F\]\{130\}/,
+    'ttd personal_sign harus 65-byte (0x + 130 hex)');
+  assert.match(driver, /typedSign=0x\[0-9a-fA-F\]\{130\}/,
+    'ttd typed data juga 65-byte');
+  // real external https site: title + provider + live RPC
+  assert.match(driver, /'https:\/\/example\.com'/, 
+    'situs https EKSTERNAL nyata menjadi bukti all-url in-app');
+  assert.match(driver, /report\.dapp\.externalTitle/,
+    'judul situs eksternal dibaca — bukti halaman beneran termuat');
+  assert.match(driver, /externalRpc/,
+    'RPC live di situs eksternal diverifikasi (chainId + blockNumber)');
+  // back now walks the whole history (fixture1 → fixture2 → example.com)
+  assert.match(driver, /report\.dapp\.backTaps/,
+    'back loop menghitung tap — history 3 halaman, bukan 1');
+  assert.match(driver, /for \(let i = 0; i < 5; i\+\+\) \{/,
+    'loop back dibatasi (5) — tak bisa berputar selamanya');
+});

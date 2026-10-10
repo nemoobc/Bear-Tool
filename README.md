@@ -410,6 +410,23 @@ browser extension, and the Security Center in Settings says exactly that.
 Settings → Security lists connected sites and their individual grants, both site
 lists, the guardrails in force, and a button to forget the stored API key.
 
+### Native dApp browser (Android build)
+
+On Android, `BearDappBrowser` opens any URL **in-app** — a full-page WebView
+belongs to the wallet, not an external browser and not an iframe. There is no
+allow-list: `http://` and `https://` open as-is, `javascript:` / `data:` /
+`file:` / `wc:` schemes are refused at the native gate with a readable message
+(the same policy as MetaMask's in-app browser). The provider is injected before
+the page's own scripts on every navigation (triple-hook: start/commit/finish),
+announces itself via EIP-6963, and answers the full EIP-1193 surface — connect,
+`personal_sign`, `eth_signTypedData_v4`, `eth_sendTransaction`, plus read-only
+RPC (`eth_blockNumber`, `eth_getBalance`, `eth_call`, …) forwarded to the
+wallet's own node like MetaMask does. Every sign/send request flashes the same
+confirm modal the wallet itself uses, and the site's origin is named by native
+code, never by the page.
+
+Research & evidence: `docs/research/dapp-browser-all-url-2026-10-10.md`.
+
 ## 📄 License
 
 MIT — use freely, build your own. Original code, no copying from MetaMask/OKX/EIP-7702-TOOL.

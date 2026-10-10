@@ -1,0 +1,113 @@
+<!doctype html>
+<!-- dapp-sign-fixture — E2E proof for the NATIVE dApp browser's SIGN + READ
+     surface (the "connect wallet on all web" claim's second half: after
+     connect, a real dApp signs messages and reads chain state through the
+     same injected window.ethereum).
+     Sequence: provider poll → eth_chainId → eth_accounts → personal_sign
+     (wallet flashes a modal) → eth_signTypedData_v4 (modal again) →
+     eth_blockNumber + eth_getBalance (READ methods forwarded to the wallet's
+     own provider, no modal) → done=ok. Every request races a deadline so a
+     broken wallet answers in error=… lines, never hangs. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bear-sign-fixture</title>
+<style>body{font:14px monospace;background:#101018;color:#d8d8ff;margin:0;padding:12px}pre{white-space:pre-wrap}</style>
+</head>
+<body>
+<h1 id="title">bear-sign-fixture</h1>
+<pre id="out">pending</pre>
+<script>
+(function () {
+  var lines = [];
+  var out = document.getElementById('out');
+  function rec(k, v) {
+    lines.push(k + '=' + (typeof v === 'object' ? JSON.stringify(v) : String(v)));
+    out.textContent = lines.join('\n');
+  }
+  function deadline(ms, label) {
+    return new Promise(function (_, rej) {
+      setTimeout(function () { rej(new Error(label + ' timeout ' + ms + 'ms')); }, ms);
+    });
+  }
+  function hexOf(text) {
+    var s = '';
+    for (var i = 0; i < text.length; i++) s += text.charCodeAt(i).toString(16).padStart(2, '0');
+    return '0x' + s;
+  }
+  rec('hasProvider', !!(window.ethereum && window.ethereum.isBear));
+  function main() {
+    Promise.race([
+      window.ethereum.request({ method: 'eth_chainId' }),
+      deadline(30000, 'chainId'),
+    ]).then(function (chainId) {
+      rec('chainId', chainId);
+      return Promise.race([
+        window.ethereum.request({ method: 'eth_accounts' }),
+        deadline(15000, 'eth_accounts'),
+      ]);
+    }).then(function (accounts) {
+      var acc = ((accounts || [])[0] || '').toLowerCase();
+      rec('account', acc || '(none)');
+      var msg = hexOf('bear-sign-fixture personal message');
+      return Promise.race([
+        window.ethereum.request({ method: 'personal_sign', params: [msg, acc] }),
+        deadline(60000, 'personal_sign'),
+      ]);
+    }).then(function (sig) {
+      rec('personalSign', String(sig));
+      var typed = {
+        domain: { name: 'Bear Tool E2E', version: '1', chainId: 1 },
+        types: {
+          Person: [{ name: 'name', type: 'string' }],
+          Mail: [{ name: 'from', type: 'Person' }, { name: 'contents', type: 'string' }],
+        },
+        primaryType: 'Mail',
+        message: { from: { name: 'bear' }, contents: 'typed-data e2e' },
+      };
+      // params: [address, typedData] per EIP-712 convention; the wallet's
+      // chain-mismatch guard refuses domains whose chainId != current chain,
+      // so the domain above stays on the fixture's actual chain.
+      return Promise.race([
+        window.ethereum.request({ method: 'eth_signTypedData_v4', params: ['0x0', JSON.stringify(typed)] }),
+        deadline(60000, 'eth_signTypedData_v4'),
+      ]);
+    }).then(function (sig2) {
+      rec('typedSign', String(sig2));
+      // READ forwarding — eth_blockNumber needs NO modal (no sign, no spend):
+      // this is the proof the injected provider works like MetaMask's for
+      // the read calls every dApp makes.
+      return Promise.race([
+        window.ethereum.request({ method: 'eth_blockNumber' }),
+        deadline(20000, 'eth_blockNumber'),
+      ]);
+    }).then(function (block) {
+      rec('blockNumber', String(block));
+      return Promise.race([
+        window.ethereum.request({ method: 'eth_getBalance', params: ['0x0'] }),
+        deadline(20000, 'eth_getBalance'),
+      ]);
+    }).then(function (bal) {
+      rec('balance', String(bal));
+      rec('done', 'ok');
+    }).catch(function (e) {
+      rec('error', e && e.message ? e.message : String(e));
+      rec('done', 'failed');
+    });
+  }
+  var waited = 0;
+  (function poll() {
+    if (window.ethereum && window.ethereum.isBear) {
+      rec('providerLate', waited);
+      main();
+      return;
+    }
+    if (waited >= 3000) { rec('error', 'no window.ethereum'); rec('done', 'failed'); return; }
+    waited += 50;
+    setTimeout(poll, 50);
+  })();
+})();
+</script>
+</body>
+</html>
