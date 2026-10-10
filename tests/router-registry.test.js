@@ -240,7 +240,10 @@ test('the syntax gate runs on the platform the tests run on', () => {
   const countJs = (dir) => readdirSync(dir, { withFileTypes: true }).reduce((n, e) => {
     if (e.name === 'node_modules' || e.name.startsWith('.')) return n;
     const p = path.join(dir, e.name);
-    return n + (e.isDirectory() ? countJs(p) : (/\.m?js$/.test(e.name) ? 1 : 0));
+    // .sh included since check.mjs learned bash -n (tools/e2e-recover.sh): the
+    // count and the gate's filter must move together, both directions — gate
+    // drops .sh → 224 vs 225 red; count forgets it → 225 vs 224 red.
+    return n + (e.isDirectory() ? countJs(p) : (/\.m?js$|\.sh$/.test(e.name) ? 1 : 0));
   }, 0);
   // Follow the gate's own TARGETS list rather than repeating it here. Hardcoding
   // the directories duplicated the thing being checked, and immediately went stale:

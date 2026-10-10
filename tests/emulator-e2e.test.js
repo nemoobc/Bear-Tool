@@ -21,6 +21,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import yaml from 'js-yaml';
@@ -104,8 +105,11 @@ test('every adb line is self-guarded — one failing line kills the rest of the 
   }
   // The E2E run must fail LOUDLY without ending the diagnostics: same-line
   // capture, output to a FILE (sync writes on POSIX — no lost FATAL), cat after.
-  assert.match(script, /timeout 480 env E2E_OUT=emulator-artifacts node tools\/emulator-e2e\.mjs > e2e-stdout\.log 2>&1 \|\| echo E2E_FAILED_RC=\$\?/,
-    'driver dibatasi 480s, output ke FILE, rc ditangkap di baris yang sama');
+  // The run goes through the recovery wrapper (10 of 19 fleet qemu deaths);
+  // the wrapper owns the per-attempt bound (480s), the file append, and the
+  // one relaunch cycle — the YAML line must stay one self-guarded call.
+  assert.match(script, /timeout 1300 env E2E_OUT=emulator-artifacts bash tools\/e2e-recover\.sh \|\| echo E2E_FAILED_RC=\$\?/,
+    'wrapper dibatasi 1300s luar, rc ditangkap di baris yang sama');
   assert.match(script, /cat e2e-stdout\.log \|\| true/, 'output driver harus dibaca balik ke log step');
 });
 
@@ -224,4 +228,52 @@ test('the driver reads the truth probes before judging the chain', () => {
     'probe dijalankan SEBELUM poll chainStage — kegagalan tetap membawa bukti');
   assert.match(driverSrc, /selfSettle: t/, 'hasil self-settle masuk report (mesin then-chain hidup/mati)');
   assert.match(driverSrc, /head\.sameFn/, 'identitas instance (page vs Java) masuk report');
+});
+
+test('a fleet qemu death is recovered in-workflow — one rerun, death signatures only', () => {
+  // Runs 5,7,8,9,13,15,16,17,18,19 lost their emulator at random (qemu
+  // <defunct> then gone, 10–14GB RAM free, no OOM, no app FATAL, both
+  // pinned images) — 10 of 19. A dead fleet is not a test result: the
+  // wrapper reruns the journey ONCE on a fresh emulator, and only when the
+  // fatal matches a death signature. A journey bug exits with the driver's
+  // RC before any relaunch — the retry is reserved for the fleet.
+  const recPath = path.join(here, '..', 'tools', 'e2e-recover.sh');
+  const rec = readFileSync(recPath, 'utf8');
+  const syntax = spawnSync('bash', ['-n', recPath]);
+  assert.equal(syntax.status, 0, 'bash -n: ' + syntax.stderr);
+
+  // classification gates — every observed death signature, nothing else
+  assert.match(rec, /is_death\(\)/, 'klasifikasi tanda-mat wajib ada');
+  for (const sig of ['not found', 'device offline', 'socket closed', 'CDP connect failed']) {
+    assert.match(rec, new RegExp(sig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      'signature kematian harus dikenali: ' + sig);
+  }
+  assert.match(rec, /journey failure, not a fleet death/,
+    'gagal journey TIDAK boleh memakai retry — exit dengan RC driver');
+  assert.match(rec, /exit "\$rc"/, 'jalur non-mati keluar sebelum relaunch');
+
+  // the relaunch mirrors the action's own cmdline (heartbeat evidence) —
+  // same AVD + port keeps adb serial + the action's post-step emu kill valid
+  assert.match(rec, /-avd test/, 'AVD identik dengan yang dipakai action');
+  assert.match(rec, /-port 5554/, 'port identik — serial emulator-5554 tetap');
+  assert.match(rec, /adb wait-for-device/, 'menunggu device kembali');
+  assert.match(rec, /sys\.boot_completed/, 'menunggu boot SELESAI, bukan sekadar muncul');
+  assert.match(rec, /install -r "\$APK"/, 'APK dipasang ulang (boot = -no-snapshot, bersih)');
+  assert.match(rec, /am start -n com\.nemoobc\.beartool/, 'app dijalankan ulang');
+  assert.match(rec, /logcat -v time >> logcat-stream\.txt/,
+    'logcat menyambung ke device baru — bukti run penyintas ikut terkumpul');
+  assert.match(rec, /run_driver; rc2=\$\?\s*\nexit "\$rc2"/,
+    'persis SATU siklus kedua, hasil akhir = RC attempt kedua');
+
+  // bounded: exactly one recovery, never a loop
+  assert.equal((rec.match(/run_driver;/g) || []).length, 2,
+    'run_driver dipanggil tepat 2× (awal + 1 recovery) — tanpa loop');
+
+  // the workflow routes through the wrapper; the raw driver is not callable
+  // from YAML anymore (one self-contained line, no state across sh -c)
+  const yaml = readFileSync(path.join(here, '..', '.github', 'workflows', 'emulator.yml'), 'utf8');
+  assert.match(yaml, /bash tools\/e2e-recover\.sh/, 'workflow memanggil wrapper');
+  assert.doesNotMatch(yaml, /node tools\/emulator-e2e\.mjs/,
+    'driver telanjang di YAML = melewati klasifikasi — dilarang');
+  assert.match(yaml, /timeout 1300/, 'wrapper dibatasi luar (480+240+480 sisa)');
 });

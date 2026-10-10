@@ -1,4 +1,5 @@
-// node --check on every source file, in JavaScript.
+// node --check on every .js/.mjs source file, bash -n on every .sh — in
+// JavaScript.
 //
 // This replaced a shell loop — `for f in js/*.js; do node --check "$f"; done` —
 // which npm runs through cmd.exe on Windows, where it dies with
@@ -33,7 +34,7 @@ const walk = (dir) => {
     if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
     const rel = path.join(dir, entry.name);
     if (entry.isDirectory()) walk(rel);
-    else if (entry.name.endsWith('.js') || entry.name.endsWith('.mjs')) files.push(rel);
+    else if (/\.m?js$|\.sh$/.test(entry.name)) files.push(rel);
   }
 };
 for (const dir of TARGETS) walk(dir);
@@ -58,9 +59,18 @@ if (process.argv.includes('--list')) {
 
 const bad = [];
 for (const rel of files) {
-  const r = spawnSync(process.execPath, ['--check', path.join(root, rel)], { encoding: 'utf8' });
+  const abs = path.join(root, rel);
+  // .sh goes through bash -n — tools/e2e-recover.sh landed in a scanned
+  // directory and the old extension filter counted it as passed without ever
+  // parsing it, the exact silent gap this file's own header warns about.
+  // bash missing (ENOENT on a box without it) counts as FAILED, not skipped:
+  // a syntax gate that does not run is not a gate.
+  const r = rel.endsWith('.sh')
+    ? spawnSync('bash', ['-n', abs], { encoding: 'utf8' })
+    : spawnSync(process.execPath, ['--check', abs], { encoding: 'utf8' });
   if (r.status !== 0) {
-    bad.push({ rel, msg: (r.stderr || r.stdout || '').trim().split('\n').slice(0, 3).join(' | ') });
+    const msg = (r.error && r.error.message) || r.stderr || r.stdout || 'spawn failed';
+    bad.push({ rel, msg: msg.trim().split('\n').slice(0, 3).join(' | ') });
   }
 }
 

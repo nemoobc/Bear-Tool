@@ -103,7 +103,10 @@ jobs:
             df -h > disk-usage.txt 2>&1 || true
             ( for i in $(seq 1 30); do echo "$(date -Is) adb=[$(adb devices 2>/dev/null | tr "\n" " ")qemu=$(pgrep -fc qemu 2>/dev/null) app=$(adb shell pidof com.nemoobc.beartool 2>/dev/null | tr -d "\r") free=[$(free -m 2>/dev/null | awk '/^Mem:/{print "tot="$2" avail="$7}')q=[$(pgrep -af qemu 2>/dev/null | tr "\n" ";" | cut -c1-160)]"; sleep 10; done ) > emulator-heartbeat.txt 2>&1 &
             python3 -u -m http.server 8080 --directory dist > http-server.log 2>&1 &
-            timeout 480 env E2E_OUT=emulator-artifacts node tools/emulator-e2e.mjs > e2e-stdout.log 2>&1 || echo E2E_FAILED_RC=$?
+            # ONE recovery cycle against fleet qemu deaths (10 of 19 runs):
+            # classification + relaunch live in the script — one line, no state
+            # across the parser's one-process-per-line model.
+            timeout 1300 env E2E_OUT=emulator-artifacts bash tools/e2e-recover.sh || echo E2E_FAILED_RC=$?
             cat e2e-stdout.log || true
             echo "=== crash / fatal ==="
             grep -aE "FATAL|AndroidRuntime|Fatal signal|panic" logcat-stream.txt | head -20 || true
