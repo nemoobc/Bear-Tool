@@ -147,3 +147,40 @@ test('css: active account card is colored, first card clears the close float', (
   assert.ok(/clear:\s*(both|right)/.test(rowRule),
     `asset rows must clear the modal ✕ float so the first card keeps full width, got: ${rowRule.trim()}`);
 });
+
+test('modal: the confirm dialog\'s actions are full width, not a shrunk flex row', () => {
+  // User report 2026-10-11 (the WalletConnect connect prompt): "cancel sama
+  // confirm kotaknya ngga full harusnya full". confirmTx's row was
+  // `class="flex gap-8"` with no width rule, so both buttons hugged their text
+  // and filled neither the row nor half of it. Every other sheet in this app
+  // stacks full-width (btn-block), and this dialog sits on the money path (45
+  // call sites: send, deploy, sign, WC connect), so the shape is pinned here.
+  const ui = readFileSync(new URL('../js/ui.js', import.meta.url), 'utf8');
+  const start = ui.indexOf('export async function confirmTx');
+  assert.ok(start !== -1, 'confirmTx must exist');
+  const fn = ui.slice(start, ui.indexOf('export function promptPassword', start));
+  assert.match(fn, /class="btn btn-ghost btn-block" id="confirmNo"/,
+    'Cancel = lebar penuh (btn-block)');
+  assert.match(fn, /class="btn btn-block mt-8 \$\{danger \? 'btn-danger' : 'btn-primary'\}" id="confirmYes"/,
+    'Confirm = lebar penuh (btn-block) + jarak');
+  assert.doesNotMatch(fn, /class="flex gap-8"/,
+    'baris flex lama (dua tombol tak full) tidak boleh kembali');
+  // The WalletConnect pair sheet is the same defect in the same flow: its
+  // Connect / Paste / Cancel row was `flex gap-8` too, so all three hugged
+  // their labels instead of spanning the sheet.
+  const wc = readFileSync(new URL('../js/walletconnect.js', import.meta.url), 'utf8');
+  const pair = wc.slice(wc.indexOf('export function openPairWalletConnect'));
+  assert.match(pair, /class="btn btn-primary btn-block" id="wcPairGo"/, 'Connect = lebar penuh');
+  assert.match(pair, /class="btn btn-ghost btn-block mt-8" id="wcPairPaste"/, 'Paste = lebar penuh');
+  assert.match(pair, /class="btn btn-ghost btn-block mt-8" type="button" data-close-modal>Cancel/,
+    'Cancel = lebar penuh');
+  assert.doesNotMatch(pair, /class="flex gap-8"/, 'baris flex pair lama tidak boleh kembali');
+  // The invariant behind the whole report: an action row in a modal is full
+  // width, so no modal template may build one from a bare `flex gap-8` (which
+  // hugs the text). Covers the password prompt and the Delete Wallet dialog.
+  for (const f of ['ui.js', 'walletconnect.js', 'app.js']) {
+    const s = readFileSync(new URL('../js/' + f, import.meta.url), 'utf8');
+    assert.doesNotMatch(s, /class="flex gap-8"/,
+      `${f}: baris aksi modal wajib btn-block, bukan flex gap-8`);
+  }
+});

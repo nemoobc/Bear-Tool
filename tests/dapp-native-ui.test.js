@@ -79,6 +79,18 @@ test('the native confirm sheet exists, draws above the dapp, and cannot hang the
     'sheet = bottom-sheet di atas overlay');
   assert.match(java, /setContentDescription\("dapp-confirm-ok"\)/, 'tombol confirm berlabel — a11y + pilihan E2E');
   assert.match(java, /setContentDescription\("dapp-confirm-cancel"\)/);
+  // Full width: the actions used to sit on a HORIZONTAL row at 50% each, so
+  // neither box ever spanned the sheet (user report 2026-10-11: "cancel sama
+  // confirm kotaknya ngga full harusnya full"). Stacked vertically, each
+  // MATCH_PARENT — the same shape the web confirm dialog now uses.
+  assert.match(java, /btns\.setOrientation\(LinearLayout\.VERTICAL\)/,
+    'aksi sheet bertumpuk vertikal, bukan berdampingan 50%');
+  assert.doesNotMatch(java, /LinearLayout\.HORIZONTAL\);\s*\n\s*btns\.setPadding/,
+    'baris HORIZONTAL lama tidak boleh kembali');
+  assert.match(java, /btns\.addView\(cancel, new LinearLayout\.LayoutParams\(ViewGroup\.LayoutParams\.MATCH_PARENT/,
+    'cancel = lebar penuh');
+  assert.match(java, /btns\.addView\(ok, new LinearLayout\.LayoutParams\(ViewGroup\.LayoutParams\.MATCH_PARENT/,
+    'confirm = lebar penuh');
   assert.match(java, /removeView\(confirmRoot\)[\s\S]*c\.resolve\(r\)/, 'teardown melepas view + resolve pending — tidak ada promise menggantung');
   assert.match(java, /finishConfirm\(false\);[\s\S]*closeTabPanel\(\)/, 'menutup browser membatalkan prompt yang sedang tampil');
   assert.match(java, /finishConfirm\(false\);[\s\S]*super\.handleOnDestroy\(\)/, 'destroy juga membatalkan pending');

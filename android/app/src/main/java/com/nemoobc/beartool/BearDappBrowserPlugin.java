@@ -306,7 +306,12 @@ public class BearDappBrowserPlugin extends Plugin {
         sheet.addView(confirmRowsBox, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout btns = new LinearLayout(getContext());
-        btns.setOrientation(LinearLayout.HORIZONTAL);
+        // VERTICAL, full width: the two actions used to sit side by side at
+        // 50% each on a HORIZONTAL row, so neither box ever spanned the sheet
+        // (user report 2026-10-11: "cancel sama confirm kotaknya ngga full
+        // harusnya full"). Stacked full-width is also what every other sheet
+        // in this app does (see confirmTx in js/ui.js).
+        btns.setOrientation(LinearLayout.VERTICAL);
         btns.setPadding(0, (int) (18 * density), 0, 0);
 
         android.widget.TextView cancel = new android.widget.TextView(getContext());
@@ -332,10 +337,10 @@ public class BearDappBrowserPlugin extends Plugin {
         ok.setBackground(okBg);
         ok.setOnClickListener(v -> finishConfirm(true));
 
-        btns.addView(cancel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btns.addView(cancel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         android.widget.Space sp = new android.widget.Space(getContext());
-        btns.addView(sp, new LinearLayout.LayoutParams((int) (12 * density), 1));
-        btns.addView(ok, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btns.addView(sp, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (12 * density)));
+        btns.addView(ok, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         sheet.addView(btns, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         root.addView(sheet, new android.widget.FrameLayout.LayoutParams(

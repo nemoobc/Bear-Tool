@@ -425,9 +425,9 @@ export async function confirmTx({ title, rows, confirmText = 'Confirm', cancelTe
         <img src="assets/bear.svg" alt="Bear asks">
         <div class="question">${danger ? '⚠️ ' : ''}${escapeHtml(title)}</div>
         <div class="tx-detail">${rowsHtml}</div>
-        <div class="flex gap-8">
-          <button class="btn btn-ghost" id="confirmNo">${escapeHtml(cancelText)}</button>
-          <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="confirmYes">${escapeHtml(confirmText)}</button>
+        <div>
+          <button class="btn btn-ghost btn-block" id="confirmNo">${escapeHtml(cancelText)}</button>
+          <button class="btn btn-block mt-8 ${danger ? 'btn-danger' : 'btn-primary'}" id="confirmYes">${escapeHtml(confirmText)}</button>
         </div>
       </div>
     `);
@@ -452,9 +452,9 @@ export function promptPassword(title = 'Enter password') {
         <label for="pwInput">Password</label>
         <input class="input" id="pwInput" type="password">
       </div>
-      <div class="flex gap-8">
-        <button class="btn btn-ghost" id="pwCancel">Cancel</button>
-        <button class="btn btn-primary" id="pwOk">Unlock</button>
+      <div>
+        <button class="btn btn-ghost btn-block" id="pwCancel">Cancel</button>
+        <button class="btn btn-primary btn-block mt-8" id="pwOk">Unlock</button>
       </div>
     `);
     const input = $('#pwInput');

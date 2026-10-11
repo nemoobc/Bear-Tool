@@ -27,6 +27,14 @@ import { getNetworkById, getNetwork } from './network.js';
 export const WC_PROJECT_ID =
   (import.meta.env && import.meta.env.VITE_WC_PROJECT_ID) || '99909bde486039e2102663b92be74974';
 
+// Public home of the web build — what the dApp reads from the session metadata
+// (name / url / icons) and shows in its own connection prompt. It CANNOT be
+// location.origin: inside the Android app the WebView serves from
+// https://localhost, which no dApp can fetch — the prompt rendered a broken
+// icon and a "localhost" homepage. Override per build with VITE_PUBLIC_URL.
+export const WC_PUBLIC_URL =
+  (import.meta.env && import.meta.env.VITE_PUBLIC_URL) || 'https://nemoobc.github.io/Bear-Tool/';
+
 // Exactly the methods this wallet will answer — what the session grants is
 // what the confirm dialog can actually deliver. eth_sign is absent on
 // purpose: it signs raw digests with no readable content, and MetaMask refuses
@@ -212,8 +220,8 @@ async function ensureKit() {
         metadata: {
           name: 'Bear Tool',
           description: 'Self-custody wallet with a hardened dApp browser',
-          url: location.origin,
-          icons: [new URL('assets/bear.svg', location.origin).href],
+          url: WC_PUBLIC_URL,
+          icons: [new URL('assets/bear.svg', WC_PUBLIC_URL).href],
         },
       });
       w.on('session_proposal', (args) => { handleProposal(args).catch((e) => toast('WalletConnect: ' + e.message, 'error')); });
@@ -619,10 +627,10 @@ export function openPairWalletConnect(prefill = '') {
       <label for="wcPairUri">Connection URI</label>
       <input class="input" id="wcPairUri" placeholder="wc:..." spellcheck="false" autocomplete="off">
     </div>
-    <div class="flex gap-8">
-      <button class="btn btn-primary" id="wcPairGo" type="button">Connect</button>
-      <button class="btn btn-ghost" id="wcPairPaste" type="button">Paste</button>
-      <button class="btn btn-ghost" type="button" data-close-modal>Cancel</button>
+    <div>
+      <button class="btn btn-primary btn-block" id="wcPairGo" type="button">Connect</button>
+      <button class="btn btn-ghost btn-block mt-8" id="wcPairPaste" type="button">Paste</button>
+      <button class="btn btn-ghost btn-block mt-8" type="button" data-close-modal>Cancel</button>
     </div>
     <div id="wcPairMsg" class="small" role="status" aria-live="polite"></div>
     <div id="wcSessions"></div>

@@ -3120,9 +3120,9 @@ function clearAllData() {
     <button class="modal-close" type="button" data-close-modal>✕</button>
     <h2>🗑️ Delete Wallet?</h2>
     <div class="danger-box">This deletes ALL wallets, settings, and activity from this browser. Irreversible!</div>
-    <div class="flex gap-8" style="justify-content:center">
-      <button class="btn btn-danger btn-lg" id="clearBtn">Delete Wallet</button>
-      <button class="btn btn-ghost btn-lg" type="button" data-close-modal>No</button>
+    <div>
+      <button class="btn btn-danger btn-lg btn-block" id="clearBtn">Delete Wallet</button>
+      <button class="btn btn-ghost btn-lg btn-block mt-8" type="button" data-close-modal>No</button>
     </div>
   `);
   $('#clearBtn').onclick = () => {

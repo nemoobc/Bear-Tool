@@ -42,6 +42,23 @@ test('the projectId is a public config constant, build-overridable', () => {
   assert.ok(wc.WC_PROJECT_ID.length >= 32, 'and the fallback is a real 32-char id');
 });
 
+test('session metadata points at a PUBLIC url, never the WebView origin', () => {
+  // A dApp shows name/url/icons from this metadata in its own connection
+  // prompt. location.origin is https://localhost inside the Android app — the
+  // dApp cannot fetch it, so the prompt showed a broken icon and a "localhost"
+  // homepage. It must be the public web build, overridable per build.
+  assert.match(src, /export const WC_PUBLIC_URL\s*=\s*[\s\S]{0,120}VITE_PUBLIC_URL/,
+    'WC_PUBLIC_URL is build-overridable');
+  assert.equal(wc.WC_PUBLIC_URL, 'https://nemoobc.github.io/Bear-Tool/',
+    'node (no import.meta.env) lands on the public fallback');
+  const meta = src.slice(src.indexOf('metadata: {'), src.indexOf('metadata: {') + 300);
+  assert.doesNotMatch(meta, /location\.origin/,
+    'metadata url/icons tidak boleh pakai location.origin (https://localhost di app)');
+  assert.match(meta, /url: WC_PUBLIC_URL/, 'url = konstanta publik');
+  assert.match(meta, /icons: \[new URL\('assets\/bear\.svg', WC_PUBLIC_URL\)\.href\]/,
+    'icon dibangun dari konstanta publik yang sama');
+});
+
 test('the pair sheet auto-picks a copied wc: link, never blocking on the clipboard', () => {
   // The real flow is copy-then-paste; auto-fill removes the paste. It must
   // (a) only fire when no URI was passed in, (b) only accept something that
