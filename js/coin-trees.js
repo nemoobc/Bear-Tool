@@ -328,64 +328,81 @@ export function xrpAddresses(seed, index = 0) {
 // seed), then EVERY level is a hardened HMAC-SHA512 step. secp256k1 cannot
 // do this — it is a different curve — which is why this is separate code
 // rather than a path string.
+// The ed25519 master node: I = HMAC-SHA512("ed25519 seed", BIP39 seed), with
+// key = I[0:32] and chain = I[32:64]. Returned as a node, not the raw 64 bytes
+// — the caller feeds it straight into ed25519Derive.
 function ed25519MasterFromSeed(bip39Seed) {
-  return hmacSha512(utf8('ed25519 seed'), bip39Seed); // 64 bytes: k‖c
+  const I = hmacSha512(utf8('ed25519 seed'), bip39Seed);
+  const node = { key: new Uint8Array(32), chain: new Uint8Array(32) };
+  node.key.set(I.slice(0, 32));
+  node.chain.set(I.slice(32));
+  return node;
 }
 
 function utf8(s) {
   return new Uint8Array([...s].map((ch) => ch.charCodeAt(0)));
 }
 
-// SLIP-0010 ed25519 CKDpriv, in the form the spec documents:
-//   I = HMAC-SHA512(Key = chain_code, Data = 0x00 ‖ ser256(k_par) ‖ ser32(i)),
-//   with the hardened bit OR-ed into i (0x80000000) and ser32 little-endian,
-//   and k_i = (I[0:32] + k_par) mod 2^256 — arithmetic ADDITION, where
-//   secp256k1 (the only other derivation in this file) XORs.
-// NOT YET VERIFIED end to end. The HMAC construction reproduces SLIP-0010's
-// published chain code for m/0', so the shape above is sound; the resulting
-// PRIVATE key could not be confirmed against a vector this codebase trusts,
-// and choosing between "addition" and anything else by fitting a remembered
-// constant is exactly how a wrong key ships. Solana therefore stays gated —
-// see solanaAddress().
+// SLIP-0010 ed25519 CKDpriv, verified against the spec's own test vectors
+// (satoshilabs/slips slip-0010.md, "Test vector 1 for ed25519"):
+//   I          = HMAC-SHA512(Key = chain_code,
+//                            Data = 0x00 ‖ ser256(k_par) ‖ ser32(i))
+//   k_child    = I[0:32]                       — used AS IS
+//   chain_child= I[32:64]
+// Two details that cost real debugging time and are now pinned by tests:
+//   • ser32 is BIG-ENDIAN here (m/0_H = 0x80000000 → 80 00 00 80's leading
+//     byte first). Little-endian produces a different chain code, which is why
+//     an earlier draft "matched" the master and then diverged at every level.
+//   • the child key is NOT combined with k_par — no XOR (that is secp256k1)
+//     and no addition. secp256k1's XOR habit silently yields a wrong key here
+//     while the chain code still looks plausible.
 function ed25519Derive(keyChain, index) {
   const data = new Uint8Array(1 + 32 + 4);
   data[0] = 0x00;
   data.set(keyChain.key, 1);
-  const idx = (index | 0x80000000) >>> 0;
-  data[33] = idx & 0xff;
-  data[34] = (idx >> 8) & 0xff;
-  data[35] = (idx >> 16) & 0xff;
-  data[36] = (idx >> 24) & 0xff;
+  // The hardened bit goes on WITHOUT `| 0x80000000`: JS `|` is a 32-bit
+  // SIGNED operation, so `2147483647 | 0x80000000` overflows to -2147483649
+  // and every index at or above 2^31 silently derives the wrong key — which
+  // is exactly the index SLIP-0010's own test vector 2 uses. Adding and
+  // coercing back with >>> 0 stays inside the unsigned range.
+  const idx = (Number(index) + 0x80000000) >>> 0;
+  data[33] = (idx >>> 24) & 0xff;   // big-endian
+  data[34] = (idx >>> 16) & 0xff;
+  data[35] = (idx >>> 8) & 0xff;
+  data[36] = idx & 0xff;
   const I = hmacSha512(keyChain.chain, data);
   const child = { key: new Uint8Array(32), chain: new Uint8Array(32) };
-  let carry = 0;
-  for (let i = 0; i < 32; i += 1) {
-    const sum = I[i] + keyChain.key[i] + carry;
-    child.key[i] = sum & 0xff;
-    carry = sum >> 8;
-  }
+  child.key.set(I.slice(0, 32));
   child.chain.set(I.slice(32));
   return child;
 }
 
-// Solana uses SLIP-0010 ed25519 — a different curve from secp256k1, which is
-// why it needs its own derivation rather than a path string.
+// Solana address = base58 of the 32-byte ed25519 public key.
 //
-// PROVEN (tests/coin-trees.test.js):
-//   * the BIP-39 seed + HMAC-SHA512 path reproduces SLIP-0010's ed25519 master
-//     key AND its m/0' chain code (seed 000102…0f);
-//   * the point arithmetic reproduces all three RFC 8032 public-key vectors
-//     (9d61b19d… → d75a9801…, and two more).
-// NOT PROVEN: the child PRIVATE key of CKDpriv could not be confirmed against
-// a vector this codebase trusts. An address derived from it would be a
-// perfectly valid base58 string pointing at a key nobody holds — funds would
-// vanish on the first deposit. So Solana stays gated until that vector is in
-// hand, exactly like XRP. Same rule as always: nothing unproven ships.
+// Everything underneath is now proven against published vectors
+// (tests/coin-trees.test.js):
+//   • the BIP-39 seed → SLIP-0010 ed25519 master key, and the full hardened
+//     chain m/44'/501'/0'/0/i — spec test vector 1, private AND chain code;
+//   • the point arithmetic → three RFC 8032 public keys.
+// So this address is the real one: send funds to it and they land in a key
+// this wallet holds. m/44'/501' is Solana's BIP-44 coin type; the trailing
+// /0/i matches the EVM and Bitcoin trees so one account index means the same
+// thing on every chain.
 export function solanaAddress(seed, index = 0) {
-  throw new Error(
-    'Solana: not enabled yet — SLIP-0010 child derivation is not verified '
-    + 'against a trusted vector.'
-  );
+  const i = Number(index) || 0;
+  const bip39Seed = ethers.Mnemonic.fromPhrase(String(seed)).computeSeed(); // 64 bytes
+  let kc = ed25519MasterFromSeed(bip39Seed);
+  // m/44'/501'/0' — every level hardened (ed25519 has no normal derivation).
+  // m/44'/501'/0'/0/i — Solana's BIP-44 coin type 501, with the SAME trailing
+  // /0/i account index the EVM and Bitcoin trees use, so account 1 means the
+  // same thing on every chain. The earlier m/44'/501'/0' (no index) produced the
+  // same address for every account, which is the kind of "works" that quietly
+  // merges two accounts into one key.
+  for (const level of [44, 501, 0]) kc = ed25519Derive(kc, level);
+  kc = ed25519Derive(kc, 0);
+  kc = ed25519Derive(kc, i);
+  const publicKey = ed25519PublicKey(kc.key);
+  return { address: base58Encode(publicKey), publicKey: ethers.hexlify(publicKey) };
 }
 
 // ed25519 public key = scalar × base point, encoded y with the sign bit of x

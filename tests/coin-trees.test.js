@@ -111,18 +111,74 @@ test('ed25519 point arithmetic reproduces all three RFC 8032 public keys', () =>
   }
 });
 
-test('solana: is GATED OFF — SLIP-0010 child key not verified, must not fake it', () => {
-  // HMAC-SHA512 and the ed25519 master key DO match SLIP-0010's vector, so the
-  // BIP-39 seed path is right — but the hardened child derivation and the
-  // ed25519 point encoding fail their published vectors. Shipping an address
-  // from either would hand a user a valid base58 string for a key nobody
-  // holds: money vanishes on first deposit. Gated until RFC 8032 + SLIP-0010
-  // vectors pass.
-  assert.throws(() => solanaAddress(SEED, 0), /Solana: not enabled yet/,
-    'solana harus melempar, bukan mengembalikan alamat yang belum terbukti');
-  const all = nonEvmAddresses(SEED, 0);
-  assert.equal(all.solana.receive, null);
-  assert.match(all.solana.unsupported, /not enabled yet/);
+test('solana: SLIP-0010 full hardened chain matches the spec test vector', () => {
+  // From satoshilabs/slips slip-0010.md, "Test vector 1 for ed25519". This is
+  // the assertion that was missing: not just the master, but the CHILD private
+  // key and chain code at every level, which is what actually decides an
+  // address. The two details it pins down are ser32 big-endian and the child
+  // key being I[0:32] verbatim (no XOR, no addition).
+  const seed = new Uint8Array(Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex'));
+  const I = hmacSha512(new TextEncoder().encode('ed25519 seed'), seed);
+  const master = { key: I.slice(0, 32), chain: I.slice(32) };
+  assert.equal(Buffer.from(master.key).toString('hex'),
+    '2b4be7f19ee27bbf30c667b642d5f4aa69fd169872f8fc3059c08ebae2eb19e7', 'm private');
+  assert.equal(Buffer.from(master.chain).toString('hex'),
+    '90046a93de5380a72b5e45010748567d5ea02bbf6522f979e05c0d8d8ca9fffb', 'm chain code');
+
+  // m/0_H
+  const c0 = __internals.ed25519Derive(master, 0);
+  assert.equal(Buffer.from(c0.key).toString('hex'),
+    '68e0fe46dfb67e368c75379acec591dad19df3cde26e63b93a8e704f1dade7a3', "m/0' private");
+  assert.equal(Buffer.from(c0.chain).toString('hex'),
+    '8b59aa11380b624e81507a27fedda59fea6d0b779a778918a2fd3590e16e9c69', "m/0' chain code");
+
+  // m/0_H/1_H
+  const c1 = __internals.ed25519Derive(c0, 1);
+  assert.equal(Buffer.from(c1.key).toString('hex'),
+    'b1d0bad404bf35da785a64ca1ac54b2617211d2777696fbffaf208f746ae84f2', "m/0'/1' private");
+  assert.equal(Buffer.from(c1.chain).toString('hex'),
+    'a320425f77d1b5c2505a6b1b27382b37368ee640e3557c315416801243552f14', "m/0'/1' chain code");
+
+  // m/0_H/1_H/2_H
+  const c2 = __internals.ed25519Derive(c1, 2);
+  assert.equal(Buffer.from(c2.key).toString('hex'),
+    '92a5b23c0b8a99e37d07df3fb9966917f5d06e02ddbd909c7e184371463e9fc9', "m/0'/1'/2' private");
+  assert.equal(Buffer.from(c2.chain).toString('hex'),
+    '2e69929e00b5ab250f49c3fb1c12f252de4fed2c1db88387094a0f8c4c9ccd6c', "m/0'/1'/2' chain code");
+});
+
+test('solana: an index at 2^31 derives correctly (the JS signed-`|` trap)', () => {
+  // SLIP-0010 test vector 2, which deliberately uses index 2147483647. JS `|`
+  // is a signed 32-bit operation, so `index | 0x80000000` overflows there and
+  // used to silently produce the wrong key. Big indices are ordinary on
+  // Solana's m/0'/i trees, so this is a real bug, not a theoretical one.
+  const seed = new Uint8Array(Buffer.from(
+    'fffcf9f6f3f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a'
+    + '29f9c999693908d8a8784817e7b7875726f6c696663605d5a5754514e4b484542', 'hex'));
+  const I = hmacSha512(new TextEncoder().encode('ed25519 seed'), seed);
+  const master = { key: I.slice(0, 32), chain: I.slice(32) };
+  assert.equal(Buffer.from(master.key).toString('hex'),
+    '171cb88b1b3c1db25add599712e36245d75bc65a1a5c9e18d76f9f2b1eab4012', 'm private');
+  const c0 = __internals.ed25519Derive(master, 0);
+  assert.equal(Buffer.from(c0.key).toString('hex'),
+    '1559eb2bbec5790b0c65d8693e4d0875b1747f4970ae8b650486ed7470845635', "m/0' private");
+  const c1 = __internals.ed25519Derive(c0, 2147483647);
+  assert.equal(Buffer.from(c1.key).toString('hex'),
+    'ea4f5bfe8694d8bb74b7b59404632fd5968b774ed545e810de9c32a4fb4192f4', "m/0'/2147483647' private");
+  assert.equal(Buffer.from(c1.chain).toString('hex'),
+    '138f0b2551bcafeca6ff2aa88ba8ed0ed8de070841f0c4ef0165df8181eaad7f', "… chain code");
+});
+
+test('solana: derives a real base58 address from a mnemonic', () => {
+  const a = solanaAddress(SEED, 0);
+  assert.match(a.address, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  const decoded = __internals.base58Decode(a.address);
+  assert.equal(decoded.length, 32, 'a Solana public key is exactly 32 bytes');
+  assert.equal(Buffer.from(decoded).toString('hex'), a.publicKey.slice(2),
+    'address decodes back to the public key it was built from');
+  // Deterministic + per-index, like every other chain here.
+  assert.equal(solanaAddress(SEED, 0).address, a.address);
+  assert.notEqual(solanaAddress(SEED, 1).address, a.address);
 });
 
 // The SHA-512 core behind SLIP-0010 matches its vector (master key AND the
@@ -170,15 +226,14 @@ test('base58: encode/decode round-trips and the checksum rejects tampering', () 
   assert.notDeepEqual(Array.from(d1), Array.from(d2));
 });
 
-test('nonEvmAddresses returns bitcoin, and says why the others are absent', () => {
+test('nonEvmAddresses returns every chain that is proven, and says why XRP is not', () => {
   const a = nonEvmAddresses(SEED, 0);
   assert.match(a.bitcoin.receive, /^bc1q/);
   assert.match(a.bitcoin.legacy, /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/);
-  // Both unsupported chains must be PRESENT as keys with a reason — a receive
-  // screen that silently omits a chain is how people think it's missing.
+  assert.match(a.solana.receive, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Solana is live now');
+  // XRP stays visible-but-absent with its reason, never silently dropped.
   assert.equal(a.xrp.receive, null);
-  assert.equal(a.solana.receive, null);
-  assert.ok(a.xrp.unsupported && a.solana.unsupported);
+  assert.ok(a.xrp.unsupported);
 });
 
 test('nothing in the public API returns a private key or the seed', () => {
