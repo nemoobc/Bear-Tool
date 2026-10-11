@@ -453,7 +453,10 @@ describe('7. CROSS-CHECK: NUMBERS vs REALITY', () => {
     const js = readFileSync(join(ROOT, 'js/app.js'), 'utf8');
     const lines = js.split('\n').length;
     log(`✓ ${lines} lines in app.js`);
-    assert.ok(lines > 800 && lines < 3200, `app.js lines ${lines} out of expected range`);
+    // app.js crossed 3200 with the multi-chain Receive modal + non-EVM
+    // derivation (2026-10). The guard asks "did this balloon by accident?",
+    // not "freeze the file" — so bump it deliberately, never silently.
+    assert.ok(lines > 800 && lines < 3400, `app.js lines ${lines} out of expected range`);
   });
 });
 

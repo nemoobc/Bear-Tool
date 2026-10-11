@@ -335,8 +335,8 @@ test('tools: deploy helper tetap eksplisit, dan flow auto-deploy dgn konfirmasi'
     'kartu status tetap tidak menjanjikan deploy SENYAP');
   // a helper deploy must never spin forever
   const fn = tools.slice(tools.indexOf('async function deployContract'), tools.indexOf('// ── EIP-7702: delegate'));
-  assert.match(fn, /waitForReceipt\(/, 'helper deploy must be bounded by waitForReceipt');
-  assert.match(fn, /timedOut/, 'helper deploy must report a timeout instead of hanging');
+  assert.match(fn, /receiptVerdict\(/, 'helper deploy must settle through receiptVerdict (it also catches a replaced tx)');
+  assert.match(fn, /'pending'/, 'helper deploy must report an unconfirmed/timeout instead of hanging');
   // and the card must be kept in sync after a run / registry change
   assert.ok((tools.match(/renderHelperStatus\(\)/g) || []).length >= 4, 'helper status must refresh after deploy/removal');
 });

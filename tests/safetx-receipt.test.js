@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { waitForReceipt } from '../js/safetx.js';
+import { waitForReceipt, receiptVerdict } from '../js/safetx.js';
 
 const HASH = '0x' + 'ab'.repeat(32);
 
@@ -101,4 +101,55 @@ test('a persistent transient failure ends as an honest timeout, never a throw', 
   assert.equal(r.timedOut, true, 'a node that never answers is a timeout, not a crash');
   assert.equal(r.receipt, null);
   assert.equal(r.hash, HASH, 'an unconfirmed tx must still be trackable by hash');
+});
+
+// ── receiptVerdict ─────────────────────────────────────────────────────────
+// A REPLACED tx (speed-up / drop-and-replace) has NO receipt for the hash the
+// caller holds, only the replacement's. waitForReceipt says so honestly with
+// `receipt: null`; the shared shape `receipt.status === 1 ? success : failed`
+// then threw "Cannot read properties of null (reading 'status')" — in send,
+// swap, bridge and all five eip7702 flows. receiptVerdict() is the ONE place
+// that case is decided. These pin the verdict, and pin that no module reaches
+// for `.status` on a receipt that may be null.
+
+test('receiptVerdict: success / revert / timeout / replaced', () => {
+  assert.equal(receiptVerdict({ receipt: { status: 1 }, hash: HASH }).kind, 'success');
+  assert.equal(receiptVerdict({ receipt: { status: 0 }, hash: HASH }).kind, 'failed');
+  assert.equal(receiptVerdict({ receipt: null, timedOut: true, hash: HASH }).kind, 'pending');
+  const r = receiptVerdict({ receipt: null, replaced: true, replacement: HASH, hash: HASH });
+  assert.equal(r.kind, 'replaced');
+  assert.equal(r.receipt, null, 'a replaced tx has NO receipt — callers must not read one');
+});
+
+test('receiptVerdict: malformed input degrades to pending, never throws', () => {
+  for (const empty of [null, undefined, {}, { receipt: null }]) {
+    assert.equal(receiptVerdict(empty).kind, 'pending');
+    assert.equal(receiptVerdict(empty).receipt, null);
+  }
+});
+
+test('no app module reads .status/.gasUsed off a possibly-null receipt', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const path = (await import('node:path')).default;
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'js');
+  const NL = String.fromCharCode(10);
+  const bad = /(^|[^A-Za-z0-9_$])receipt[.](status|gasUsed)/g;
+  const offenders = [];
+  for (const f of readdirSync(dir).sort()) {
+    if (!f.endsWith('.js') || f === 'safetx.js') continue; // safetx defines the guard
+    const src = readFileSync(path.join(dir, f), 'utf8');
+    for (const m of src.matchAll(bad)) offenders.push(`${f}:${src.slice(0, m.index).split(NL).length}`);
+  }
+  assert.deepEqual(offenders, [], 'use receipt?.status or receiptVerdict()');
+});
+
+test('send / swap / bridge / eip7702 settle their tx through receiptVerdict', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const path = (await import('node:path')).default;
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'js');
+  for (const f of ['send.js', 'swap.js', 'bridge.js', 'eip7702-tools.js']) {
+    assert.match(readFileSync(path.join(dir, f), 'utf8'), /receiptVerdict[(]/, `${f} must use receiptVerdict()`);
+  }
 });
