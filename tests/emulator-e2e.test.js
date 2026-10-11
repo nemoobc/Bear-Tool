@@ -335,3 +335,24 @@ test('screenshots get their own 25s budget — a boot-churn readback stall is no
   const rec = readFileSync(path.join(here, '..', 'tools', 'e2e-recover.sh'), 'utf8');
   assert.match(rec, /\*"Page\.captureScreenshot"\*/, 'stall kompositor = signature yang boleh di-recover');
 });
+
+test('a dead emulator can no longer end the run GREEN — the report is the verdict', () => {
+  // Run 38121129070 concluded SUCCESS while its own artifact read
+  // pass:false / fatal:"CDP connect failed … emulator-5554 not found": all 3
+  // recover boots hit fleet qemu deaths. Every YAML script line is
+  // `|| echo ..._RC=$?`-guarded (android-emulator-runner runs one sh -c per
+  // line, a non-zero exit kills the rest), so nothing consumed the driver's
+  // exit code or its report. A gate that cannot fail is a false gate — the
+  // E2E must turn the job red.
+  const yml = readFileSync(path.join(here, '..', '.github', 'workflows', 'emulator.yml'), 'utf8');
+  assert.match(yml, /name: Assert the E2E actually passed/, 'langkah asersi wajib ada');
+  assert.match(yml, /emulator-artifacts\/emulator-report\.json/,
+    'verdict dibaca dari report driver, bukan exit code yang tertelan');
+  assert.match(yml, /if\(!r\.pass\)[\s\S]{0,120}process\.exit\(1\)/,
+    'job GAGAL (exit 1) saat report.pass != true');
+  // Order matters: the assertion sits before the upload, and the upload is
+  // `always()` so a red run still ships its evidence.
+  const assertIdx = yml.indexOf('Assert the E2E actually passed');
+  const uploadIdx = yml.indexOf('Upload diag artifacts');
+  assert.ok(assertIdx > 0 && uploadIdx > assertIdx, 'asersi harus sebelum upload artifact');
+});

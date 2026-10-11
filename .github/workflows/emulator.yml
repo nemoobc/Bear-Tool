@@ -126,6 +126,16 @@ jobs:
             timeout 30 adb shell screencap -p /sdcard/emulator-boot.png || echo SCREENCAP_RC=$?
             timeout 30 adb pull /sdcard/emulator-boot.png emulator-boot.png || echo PULL_RC=$?
 
+      - name: Assert the E2E actually passed
+        # The runner step above swallows EVERY failure: android-emulator-runner
+        # runs one `sh -c <line>` per line and each line is `|| echo ..._RC=$?`
+        # guarded, so a dead emulator (fleet qemu death, 3/3 boots) used to end
+        # the whole run GREEN with an all-FATAL report inside the artifact —
+        # a gate that cannot fail is a false gate. The report is the only
+        # verdict; make the job honour it. Missing report = fail too.
+        run: |
+          node -e "const r=require('./emulator-artifacts/emulator-report.json'); console.log('[gate] pass='+r.pass+' steps='+((r.steps||[]).length)+(r.fatal?(' fatal='+r.fatal):'')); if(r.dapp){console.log('[gate] dapp tabs='+JSON.stringify(r.dapp.tabs||null)+' chainChanged='+(r.dapp.chainChanged||'')+' netAfter='+(r.dapp.netAfter||''))} if(!r.pass){console.error('[gate] E2E did NOT pass'); process.exit(1)}"
+
       - name: Upload diag artifacts
         if: always()
         uses: actions/upload-artifact@v4
