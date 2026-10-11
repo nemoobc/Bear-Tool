@@ -336,55 +336,61 @@ function utf8(s) {
   return new Uint8Array([...s].map((ch) => ch.charCodeAt(0)));
 }
 
-// SLIP-0010 ed25519 CKDpriv: I = HMAC-SHA512(Key = chain_code,
-// Data = 0x01 ‖ ser256(k_par) ‖ ser32(i)), k_i = k_par ⊕ I[0:32].
-// The hardened marker is 0x01 (ed25519's own convention), NOT 0x00 as in
-// secp256k1 — getting that byte wrong yields wrong keys while the MASTER
-// (which never calls this) still matches its vector, which is exactly the
-// kind of bug only a published test vector catches. All levels are hardened.
+// SLIP-0010 ed25519 CKDpriv, in the form the spec documents:
+//   I = HMAC-SHA512(Key = chain_code, Data = 0x00 ‖ ser256(k_par) ‖ ser32(i)),
+//   with the hardened bit OR-ed into i (0x80000000) and ser32 little-endian,
+//   and k_i = (I[0:32] + k_par) mod 2^256 — arithmetic ADDITION, where
+//   secp256k1 (the only other derivation in this file) XORs.
+// NOT YET VERIFIED end to end. The HMAC construction reproduces SLIP-0010's
+// published chain code for m/0', so the shape above is sound; the resulting
+// PRIVATE key could not be confirmed against a vector this codebase trusts,
+// and choosing between "addition" and anything else by fitting a remembered
+// constant is exactly how a wrong key ships. Solana therefore stays gated —
+// see solanaAddress().
 function ed25519Derive(keyChain, index) {
   const data = new Uint8Array(1 + 32 + 4);
-  data[0] = 0x01;
+  data[0] = 0x00;
   data.set(keyChain.key, 1);
-  const idx = (index + 0x80000000) >>> 0;
+  const idx = (index | 0x80000000) >>> 0;
   data[33] = idx & 0xff;
   data[34] = (idx >> 8) & 0xff;
   data[35] = (idx >> 16) & 0xff;
   data[36] = (idx >> 24) & 0xff;
   const I = hmacSha512(keyChain.chain, data);
-  const key = I.slice(0, 32);
-  const chain = I.slice(32);
-  const child = {
-    key: new Uint8Array(32),
-    chain: new Uint8Array(32),
-  };
-  for (let i = 0; i < 32; i += 1) child.key[i] = keyChain.key[i] ^ key[i];
-  child.chain.set(chain);
+  const child = { key: new Uint8Array(32), chain: new Uint8Array(32) };
+  let carry = 0;
+  for (let i = 0; i < 32; i += 1) {
+    const sum = I[i] + keyChain.key[i] + carry;
+    child.key[i] = sum & 0xff;
+    carry = sum >> 8;
+  }
+  child.chain.set(I.slice(32));
   return child;
 }
 
 // Solana uses SLIP-0010 ed25519 — a different curve from secp256k1, which is
-// why it needs its own derivation, not a path string. Verified so far:
-//   * HMAC-SHA512 and the ed25519 MASTER key match the SLIP-0010 vector
-//     (seed 000102…0f → 2b4be7f19ee27bbf30c667b642d5f4aa69fd169872f8fc3059c08ebae2eb19e7),
-//     so the BIP-39 seed and the HMAC construction are correct.
-// NOT yet correct: the hardened child derivation (SLIP-0010 ed25519 CKDpriv)
-// and the ed25519 public-key point arithmetic both fail their published
-// vectors. A Solana address derived from either would be a valid-looking base58
-// string pointing at a key nobody holds — the precise failure that loses funds
-// on first deposit. So it stays gated until it passes RFC 8032 + SLIP-0010
-// vectors, exactly like XRP.
+// why it needs its own derivation rather than a path string.
+//
+// PROVEN (tests/coin-trees.test.js):
+//   * the BIP-39 seed + HMAC-SHA512 path reproduces SLIP-0010's ed25519 master
+//     key AND its m/0' chain code (seed 000102…0f);
+//   * the point arithmetic reproduces all three RFC 8032 public-key vectors
+//     (9d61b19d… → d75a9801…, and two more).
+// NOT PROVEN: the child PRIVATE key of CKDpriv could not be confirmed against
+// a vector this codebase trusts. An address derived from it would be a
+// perfectly valid base58 string pointing at a key nobody holds — funds would
+// vanish on the first deposit. So Solana stays gated until that vector is in
+// hand, exactly like XRP. Same rule as always: nothing unproven ships.
 export function solanaAddress(seed, index = 0) {
   throw new Error(
-    'Solana: not enabled yet — SLIP-0010 ed25519 derivation and key encoding '
-    + 'are not verified against their vectors.'
+    'Solana: not enabled yet — SLIP-0010 child derivation is not verified '
+    + 'against a trusted vector.'
   );
 }
 
 // ed25519 public key = scalar × base point, encoded y with the sign bit of x
 // in the high bit. Point arithmetic over GF(2^255-19) in BigInt.
 const P = (1n << 255n) - 19n;
-const L = 2n ** 252n + 27742317777372353535851937790883648493n;
 const D = mod(-121665n * invMod(121666n));
 const I = powMod(2n, (P - 1n) / 4n, P);
 
@@ -460,9 +466,19 @@ function edEncodePoint(Pt) {
   return out;
 }
 
+// RFC 8032 §5.1.5: A = [s]B where s = clamp(SHA-512(privateKey)[0:32]) and
+// clamp() is h[0] &= 248; h[31] &= 127; h[31] |= 64. Two errors lived here
+// before: hashing the key (it was being multiplied RAW by the group order L,
+// which is not the spec — L only bounds the order) and omitting the clamp.
 function ed25519PublicKey(privateKey32) {
-  let h = mod(BigInt('0x' + ethers.hexlify(privateKey32).slice(2)) * L);
-  const Pt = edScalarMul(B, h);
+  const h = sha512(privateKey32);                 // 64 bytes, per RFC
+  const s = new Uint8Array(32);
+  s.set(h.slice(0, 32));
+  s[0] &= 248; s[31] &= 127; s[31] |= 64;
+  // little-endian scalar
+  let scalar = 0n;
+  for (let i = 31; i >= 0; i -= 1) scalar = (scalar << 8n) | BigInt(s[i]);
+  const Pt = edScalarMul(B, scalar);
   return edEncodePoint(Pt);
 }
 

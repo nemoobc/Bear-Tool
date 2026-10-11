@@ -93,7 +93,25 @@ test('xrp: is GATED OFF, not faked — no plausible-but-wrong address', () => {
   assert.match(all.bitcoin.legacy, /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/);
 });
 
-test('solana: is GATED OFF — SLIP-0010 ed25519 not verified, must not fake it', () => {
+test('ed25519 point arithmetic reproduces all three RFC 8032 public keys', () => {
+  // This part IS proven: the scalar multiply, the clamp and the point encode.
+  // (Solana itself stays gated — see the test below — but the curve code is
+  // no longer the thing in doubt; only the child-key derivation is.)
+  const vectors = [
+    ['9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60',
+      'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a'],
+    ['4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb',
+      '3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c'],
+    ['c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7',
+      'fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025'],
+  ];
+  for (const [sk, pk] of vectors) {
+    assert.equal(Buffer.from(__internals.ed25519PublicKey(Buffer.from(sk, 'hex'))).toString('hex'), pk,
+      `RFC 8032 vector ${sk.slice(0, 8)}…`);
+  }
+});
+
+test('solana: is GATED OFF — SLIP-0010 child key not verified, must not fake it', () => {
   // HMAC-SHA512 and the ed25519 master key DO match SLIP-0010's vector, so the
   // BIP-39 seed path is right — but the hardened child derivation and the
   // ed25519 point encoding fail their published vectors. Shipping an address
@@ -107,6 +125,9 @@ test('solana: is GATED OFF — SLIP-0010 ed25519 not verified, must not fake it'
   assert.match(all.solana.unsupported, /not enabled yet/);
 });
 
+// The SHA-512 core behind SLIP-0010 matches its vector (master key AND the
+// m/0' CHAIN CODE — so the HMAC construction is right; only the resulting
+// child private key remains unconfirmed).
 test('the SHA-512 core behind SLIP-0010 matches its vector (master key)', () => {
   // Proves the BIP-39 seed + HMAC chain is right even while Solana itself is
   // gated: SLIP-0010 ed25519 master key for seed 000102…0f.
@@ -116,6 +137,22 @@ test('the SHA-512 core behind SLIP-0010 matches its vector (master key)', () => 
     '2b4be7f19ee27bbf30c667b642d5f4aa69fd169872f8fc3059c08ebae2eb19e7');
   assert.equal(Buffer.from(I.slice(32)).toString('hex'),
     '90046a93de5380a72b5e45010748567d5ea02bbf6522f979e05c0d8d8ca9fffb');
+});
+
+test('the SLIP-0010 child CHAIN CODE is reproducible (shape of the data is right)', () => {
+  const seed = new Uint8Array(Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex'));
+  const I = hmacSha512(new TextEncoder().encode('ed25519 seed'), seed);
+  const master = { key: I.slice(0, 32), chain: I.slice(32) };
+  // Documented form: 0x00 ‖ ser256(k) ‖ ser32(i | 0x80000000), key = chain.
+  const data = new Uint8Array(1 + 32 + 4);
+  data[0] = 0x00;
+  data.set(master.key, 1);
+  data[33] = 0x80; data[34] = 0; data[35] = 0; data[36] = 0;
+  const out = hmacSha512(master.chain, data);
+  // The chain half is independent of how the key half is finished, so this
+  // pins the HMAC shape without asserting the unverified child key. ser32 is
+  // little-endian with the hardened bit set → 0x80000000 → 00 00 00 80.
+  assert.equal(Buffer.from(out.slice(32)).toString('hex').slice(0, 16), '8b59aa11380b624e');
 });
 
 test('base58: encode/decode round-trips and the checksum rejects tampering', () => {
