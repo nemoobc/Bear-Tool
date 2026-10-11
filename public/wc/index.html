@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open in Bear Tool</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background: #1a1a2e; color: #f5f5f7;
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    text-align: center;
+  }
+  .card { max-width: 26rem; width: 100%; }
+  img { width: 96px; height: 96px; display: block; margin: 0 auto 16px; }
+  h1 { font-size: 1.25rem; margin: 0 0 8px; }
+  p { margin: 0 0 16px; color: #b9b9c9; }
+  a.btn {
+    display: block; width: 100%; padding: 14px 16px; border-radius: 12px;
+    background: #f5a623; color: #241a05; font-weight: 700; text-decoration: none;
+  }
+  a.btn:focus-visible, a.link:focus-visible { outline: 3px solid #ffd97a; outline-offset: 3px; }
+  a.link { color: #ffd97a; }
+  .note { margin-top: 16px; font-size: .875rem; color: #8f8fa3; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <img src="../assets/bear.svg" alt="" width="96" height="96">
+    <h1 id="title">Opening Bear Tool…</h1>
+    <p id="msg">If nothing happens in a second, tap the button below.</p>
+    <a class="btn" id="open" href="#" hidden>Open Bear Tool</a>
+    <p class="note" id="err" hidden></p>
+  </main>
+<script>
+// Universal-link landing page for the WalletConnect registry listing.
+//
+// A dApp (or the WalletConnect wallet list) sends the user to
+//   https://nemoobc.github.io/Bear-Tool/wc?uri=<encodeURIComponent("wc:...")>
+// matching the shape MetaMask / Trust Wallet use (<universal-base>/wc?uri=…).
+// This page only hands that URI back to the OS: navigating to the raw "wc:…"
+// scheme fires the intent-filter in AndroidManifest.xml, Bear Tool opens with
+// the pairing URI already filled (js/walletconnect.js → appUrlOpen →
+// openPairWalletConnect). No server, no redirect service, no tracking.
+//
+// The URI is attacker-controllable — anyone can paste a link — so it is treated
+// as DATA: only the "wc:" scheme is ever navigated to (never https:', never
+// javascript:, never data:), and it is never written into HTML, only into
+// href/textContent through the DOM.
+(function () {
+  var title = document.getElementById('title');
+  var msg = document.getElementById('msg');
+  var btn = document.getElementById('open');
+  var err = document.getElementById('err');
+  var params = new URLSearchParams(location.search);
+
+  function pickUri() {
+    // ?uri= is the registry convention; ?wc= is Bear Tool's own web fallback
+    // (js/walletconnect.js). Last resort: any parameter that already carries a
+    // wc: URI, so a slightly different generator still works.
+    var direct = [params.get('uri'), params.get('wc')];
+    for (var i = 0; i < direct.length; i++) {
+      if (direct[i] && direct[i].indexOf('wc:') === 0) return direct[i];
+    }
+    var found = '';
+    params.forEach(function (v) { if (!found && v.indexOf('wc:') === 0) found = v; });
+    return found;
+  }
+
+  function isValid(u) {
+    // WalletConnect pairing URIs are "wc:<topic>@2?relay=…&symKey=…" — a topic
+    // is 64 hex chars. Keep the check strict: this string is handed to the OS.
+    return typeof u === 'string'
+      && u.indexOf('wc:') === 0
+      && u.length > 20
+      && u.length < 2048
+      && !/[\s"'<>]/.test(u);
+  }
+
+  var uri = pickUri();
+  if (!isValid(uri)) {
+    title.textContent = 'This link is not a Bear Tool pairing link';
+    msg.textContent = 'A WalletConnect link looks like "wc:…". Open Bear Tool and paste the link there instead.';
+    err.textContent = uri ? 'Refused: the link did not start with wc:.' : 'No uri parameter was provided.';
+    return;
+  }
+
+  btn.href = uri;
+  btn.hidden = false;
+  // location.replace keeps the wc: attempt out of history: pressing Back must
+  // return the user to the dApp, not bounce through this page again.
+  try { location.replace(uri); } catch (e) { /* the button is the fallback */ }
+})();
+</script>
+</body>
+</html>

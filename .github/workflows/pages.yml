@@ -52,6 +52,13 @@ jobs:
       - name: Build dist/ (html + hashed css/js + runtime js/assets)
         run: npm run build
 
+      # The WalletConnect registry listing needs a square logo, and the dApp
+      # prompt/dashboard preview needs a public URL to look at. sharp is
+      # installed here, so the same tool that works on Termux (chromium) also
+      # works on the runner. See docs/WC-REGISTRY-LISTING.md.
+      - name: Generate the registry logo at a public URL
+        run: WC_LOGO_OUT=dist/assets/bear-512.png node tools/make-wc-logo.mjs
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
