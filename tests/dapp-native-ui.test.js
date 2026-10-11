@@ -532,7 +532,51 @@ test('the toolbar exposes native controls the E2E (and a real user) can reach', 
   assert.match(java, /\.setContentDescription\("dapp-tab-row-" \+ i\)/, 'baris tab berlabel per-indeks');
   assert.match(java, /\.setContentDescription\("dapp-tab-close-" \+ i\)/, 'tutup-tab berlabel per-indeks');
   assert.match(java, /\.setContentDescription\("dapp-network"\)/, 'chip network berlabel');
-  assert.match(java, /tabBtn\.setText\("\\u29C9 " \+ tabs\.size\(\)\)/, 'chip tabs menampilkan jumlah');
+  // Tab count is a BADGE over the ⧉ icon (OKX "2"), not glyph text: "⧉ 12"
+  // would squeeze the address out of a 48dp bar. Hidden at one tab.
+  assert.match(java, /\.setContentDescription\("dapp-tabs-count"\)/, 'badge jumlah tab berlabel — a11y + pilihan E2E');
+  assert.match(java, /tabCountBadge\.setText\(n > 99 \? "99\+" : String\.valueOf\(n\)\)/, 'badge menampilkan jumlah tab (dibat 99+)');
+  assert.match(java, /tabCountBadge\.setVisibility\(n > 1 \? View\.VISIBLE : View\.GONE\)/, 'satu tab = tanpa badge');
+});
+
+test('the ⋯ overflow menu is a real sheet — every row does the thing it says', () => {
+  assert.match(java, /setContentDescription\("dapp-menu"\)/, 'tombol ⋯ di toolbar berlabel');
+  assert.match(java, /private void showDappMenu\(\)/, 'menu membuka sheet');
+  assert.match(java, /Gravity\.BOTTOM/, 'sheet menempel di bawah seperti OKX');
+  assert.match(java, /root\.setBackgroundColor\(0x99000000\)/, 'scrim redup — dApp tetap kelihatan di belakang');
+  assert.match(java, /root\.setOnClickListener\(v -> closeDappMenu\(\)\)/, 'tap di luar menutup');
+  // Four icon actions + three rows, each with its own labelled tap target so
+  // the E2E driver can reach them without guessing coordinates.
+  for (const [desc, what] of [
+    ['dapp-menu-copy', 'Copy URL'], ['dapp-menu-fav', 'Favourite'],
+    ['dapp-menu-refresh', 'Refresh'], ['dapp-menu-share', 'Share'],
+    ['dapp-menu-desktop', 'Switch to desktop mode'],
+    ['dapp-menu-history', 'Transaction history'],
+    ['dapp-menu-clearcache', 'Clear cache'],
+  ]) {
+    assert.match(java, new RegExp('"' + desc + '"'), what + ' punya contentDescription');
+  }
+  // The actions must be real, not decorative.
+  assert.match(java, /ClipboardManager[\s\S]*setPrimaryClip/, 'Copy URL benar-benar ke clipboard');
+  assert.match(java, /ACTION_SEND/, 'Share membuka chooserIntent');
+  assert.match(java, /ACTION_VIEW[\s\S]*startActivity/, 'desktop mode membuka browser luar');
+  assert.match(java, /clearCache\(true\)/, 'Clear cache membersihkan WebView');
+  // Reminder is deliberately absent: Bear Tool has no reminder store, and a
+  // row that looks alive but does nothing is worse than a missing row. (The
+  // word appears only in the comment explaining why it is gone.)
+  assert.doesNotMatch(java, /setContentDescription\("dapp-menu-reminder"\)/,
+    'tidak boleh ada baris reminder tanpa implementasi');
+  // The sheet can never outlive the browser it describes.
+  assert.match(java, /closeDappMenu\(\);\s*\n\s*closeTabPanel\(\);/, 'hide menutup menu juga');
+});
+
+test('tab cards lead with a site tile, the way OKX leads with the logo', () => {
+  assert.match(java, /hostInitial\(t\)/, 'kartu tab diawali inisial host');
+  assert.match(java, /private static int tileColor\(Tab t\)/, 'warna tile stabil per situs');
+  // Deterministic: same host, same tile — a card that reshuffles its colour on
+  // every open is noise, not identity.
+  assert.match(java, /GradientDrawable\.OVAL/, 'tile bulat seperti logo situs');
+  assert.match(java, /Math\.abs\(h\) % palette\.length/, 'warna diturunkan dari hash host');
 });
 
 test('change network: the ◆ chip asks the WALLET, and setChain fans chainChanged into every tab', () => {

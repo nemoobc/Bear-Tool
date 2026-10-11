@@ -199,9 +199,27 @@ export function initNativeDappRpc() {
     .catch(() => false);
 }
 
-/** Native toolbar → wallet commands. Currently only the network picker. */
+/** Native toolbar/menu → wallet commands. */
 async function handleWalletCommand(ev) {
   const cmd = ev && ev.command;
+  if (cmd === 'toggleBookmark') {
+    // The ⋯ menu's star. The bookmark LIST is the wallet's, so a command with
+    // no handler here would leave a button that silently does nothing.
+    try {
+      const bm = await import('./dapp-browser.js');
+      if (typeof bm.toggleBookmarkFor === 'function') bm.toggleBookmarkFor(ev.url);
+      else toast('Bookmarks are not ready yet.', 'error');
+    } catch { toast('Bookmarks are not ready yet.', 'error'); }
+    return;
+  }
+  if (cmd === 'openActivity') {
+    // The ⋯ menu's "Transaction history": the wallet owns the history.
+    try {
+      const { switchView } = await import('./app.js');
+      switchView('activity');
+    } catch { /* activity view unavailable */ }
+    return;
+  }
   if (cmd !== 'openNetworkPicker') return;
   // The wallet's modal renders in the WALLET's webview, which the full-screen
   // dApp overlay covers — so hide the dapp around it (askUser, depth-counted)

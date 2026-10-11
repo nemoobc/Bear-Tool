@@ -875,9 +875,16 @@ function isBookmarked(url) {
 function toggleBookmark() {
   const t = active();
   if (!t?.url) return;
+  toggleBookmarkFor(t.url, t.name);
+}
+
+// URL-taking core. The native ⋯ menu lives OUTSIDE any tab, so it cannot use
+// active() — it names the page it was opened on. Same secret-address gate and
+// same toast as the in-page path, so both entry points behave identically.
+export function toggleBookmarkFor(url, name) {
   // Bookmarks hit disk, so they meet the same gate as history: an address
   // carrying a secret is shown, loaded and restored — but never written.
-  const safe = sanitizeForStore(t.url);
+  const safe = sanitizeForStore(url);
   if (!safe) {
     toast("That address carries a secret — it can't be bookmarked.", 'error');
     return;
@@ -885,7 +892,7 @@ function toggleBookmark() {
   const list = read(LS.bookmarks, []);
   const i = list.findIndex((b) => b.url === safe);
   if (i >= 0) list.splice(i, 1);
-  else list.push({ url: safe, name: t.name || baseHost(safe) });
+  else list.push({ url: safe, name: name || baseHost(safe) });
   write(LS.bookmarks, list);
   toast(i >= 0 ? 'Bookmark removed' : 'Bookmarked', 'info');
   paint();

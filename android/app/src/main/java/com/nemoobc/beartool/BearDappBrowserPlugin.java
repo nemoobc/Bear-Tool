@@ -66,6 +66,12 @@ public class BearDappBrowserPlugin extends Plugin {
     private android.widget.EditText addressField = null;
     private Button backBtn = null;
     private Button forwardBtn = null;
+    private Button menuBtn = null;
+    private android.widget.TextView tabCountBadge = null;
+
+    // ⋯ overflow sheet. Built fresh per open (its rows reflect THIS tab's URL)
+    // and torn down on dismiss, so it can never show a stale page's actions.
+    private android.widget.FrameLayout menuRoot = null;
 
     // Tabs. `stack` holds every tab's own wrapper; only one is VISIBLE.
     private android.widget.FrameLayout stack = null;
@@ -515,14 +521,25 @@ public class BearDappBrowserPlugin extends Plugin {
             notifyListeners("walletCommand", ev);
         });
 
-        // ⧉ Tabs — the count chip that opens the switcher sheet.
+        // ⧉ Tabs — opens the switcher sheet. The count is a BADGE pinned to the
+        // icon's top-right (OKX's "2"), not text jammed into the glyph: a
+        // multi-digit count would otherwise squeeze the bar.
         tabBtn = new Button(getContext());
-        tabBtn.setText("\u29C9 1");
+        tabBtn.setText("\u29C9");
         tabBtn.setContentDescription("dapp-tabs");
         tabBtn.setAllCaps(false);
         tabBtn.setTextColor(0xFFFFFFFF);
         tabBtn.setBackgroundColor(0x00000000);
         tabBtn.setOnClickListener(v -> toggleTabPanel());
+        tabCountBadge = new android.widget.TextView(getContext());
+        tabCountBadge.setTextColor(0xFFFFFFFF);
+        tabCountBadge.setTextSize(9);
+        tabCountBadge.setGravity(android.view.Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable badgeBg = new android.graphics.drawable.GradientDrawable();
+        badgeBg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        badgeBg.setColor(0xFF6C5CE7);
+        tabCountBadge.setBackground(badgeBg);
+        tabCountBadge.setContentDescription("dapp-tabs-count");
 
         Button reloadBtn = new Button(getContext());
         reloadBtn.setText("\u27F3");
@@ -540,14 +557,35 @@ public class BearDappBrowserPlugin extends Plugin {
         closeBtn.setBackgroundColor(0x00000000);
         closeBtn.setOnClickListener(v -> doClose());
 
+        // ⋯ Menu — the OKX overflow. Everything that is NOT a one-tap
+        // navigation action lives here instead of crowding the 48dp bar:
+        // copy/share/favorite, plus the page-level tools (reminder, desktop
+        // mode, this site's transactions, cache).
+        menuBtn = new Button(getContext());
+        menuBtn.setText("\u22EF");
+        menuBtn.setContentDescription("dapp-menu");
+        menuBtn.setAllCaps(false);
+        menuBtn.setTextColor(0xFFFFFFFF);
+        menuBtn.setBackgroundColor(0x00000000);
+        menuBtn.setOnClickListener(v -> showDappMenu());
+
         int barH = (int) (48 * density); // fixed: layout math must not wait on measure timing
         this.barH = barH;
         bar.addView(backBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         bar.addView(forwardBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         bar.addView(addressField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
         bar.addView(netBtn, new LinearLayout.LayoutParams((int) (52 * density), ViewGroup.LayoutParams.MATCH_PARENT));
-        bar.addView(tabBtn, new LinearLayout.LayoutParams((int) (44 * density), ViewGroup.LayoutParams.MATCH_PARENT));
+        android.widget.FrameLayout tabWrap = new android.widget.FrameLayout(getContext());
+        tabWrap.addView(tabBtn, new android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        android.widget.FrameLayout.LayoutParams badgeLp = new android.widget.FrameLayout.LayoutParams(
+            (int) (16 * density), (int) (16 * density), android.view.Gravity.TOP | android.view.Gravity.END);
+        badgeLp.rightMargin = (int) (1 * density);
+        badgeLp.topMargin = (int) (3 * density);
+        tabWrap.addView(tabCountBadge, badgeLp);
+        bar.addView(tabWrap, new LinearLayout.LayoutParams((int) (44 * density), ViewGroup.LayoutParams.MATCH_PARENT));
         bar.addView(reloadBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
+        bar.addView(menuBtn, new LinearLayout.LayoutParams((int) (40 * density), ViewGroup.LayoutParams.MATCH_PARENT));
         bar.addView(closeBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         toolbar = bar;
         if (parent != null) {
@@ -616,8 +654,220 @@ public class BearDappBrowserPlugin extends Plugin {
         else openTabPanel();
     }
 
+    // ── ⋯ overflow sheet (OKX parity) ──────────────────────────────────────
+    // Four one-tap actions as icons, four page tools as rows. Built over the
+    // dApp (the page stays visible behind a scrim, same contract as the confirm
+    // sheet) and torn down on any choice, on a tap outside, or on BACK.
+    private void showDappMenu() {
+        if (parent == null || dappView == null) return;
+        closeDappMenu();
+        final float density = getActivity().getResources().getDisplayMetrics().density;
+        final String url = dappView.getUrl() == null ? "" : dappView.getUrl();
+
+        android.widget.FrameLayout root = new android.widget.FrameLayout(getContext());
+        root.setBackgroundColor(0x99000000);
+        root.setContentDescription("dapp-menu-scrim");
+        root.setOnClickListener(v -> closeDappMenu());
+
+        LinearLayout sheet = new LinearLayout(getContext());
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setClickable(true);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(SHEET_BG);
+        float r = 18 * density;
+        bg.setCornerRadii(new float[]{ r, r, r, r, 0f, 0f, 0f, 0f });
+        sheet.setBackground(bg);
+        int pad = (int) (18 * density);
+        sheet.setPadding(pad, pad, pad, pad);
+
+        // Drag handle — the sheet says "pull me down" the way OKX's does.
+        android.view.View handle = new android.view.View(getContext());
+        android.graphics.drawable.GradientDrawable hg = new android.graphics.drawable.GradientDrawable();
+        hg.setColor(0x55FFFFFF);
+        hg.setCornerRadius(3 * density);
+        handle.setBackground(hg);
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams((int) (40 * density), (int) (4 * density));
+        hlp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+        hlp.bottomMargin = (int) (14 * density);
+        sheet.addView(handle, hlp);
+
+        // Icon row: Copy URL / Favorite / Refresh / Share.
+        LinearLayout icons = new LinearLayout(getContext());
+        icons.setOrientation(LinearLayout.HORIZONTAL);
+        icons.setGravity(android.view.Gravity.CENTER);
+        icons.addView(menuIconTile(density, "\u29C9", "Copy URL", "dapp-menu-copy",
+            v -> { copyToClipboard(getContext(), url); closeDappMenu(); }));
+        icons.addView(menuIconTile(density, "\u2606", "Favourite", "dapp-menu-fav",
+            v -> { toggleBookmark(url); closeDappMenu(); }));
+        icons.addView(menuIconTile(density, "\u27F3", "Refresh", "dapp-menu-refresh",
+            v -> { closeDappMenu(); reloadActive(); }));
+        icons.addView(menuIconTile(density, "\u2197", "Share", "dapp-menu-share",
+            v -> { shareUrl(url); closeDappMenu(); }));
+        sheet.addView(icons, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // Page tools. Every row here has a handler that ACTUALLY does the thing:
+        // "Set DApp reminder" was dropped from the OKX reference on purpose —
+        // Bear Tool has no reminder store, so the row would have been a button
+        // that looks alive and does nothing.
+        sheet.addView(menuRow(density, "\uD83D\uDCDD", "Switch to desktop mode", "dapp-menu-desktop",
+            v -> { openExternally(url); closeDappMenu(); }));
+        sheet.addView(menuRow(density, "\u21C9", "Transaction history", "dapp-menu-history",
+            v -> { walletCommand("openActivity", url); closeDappMenu(); }));
+        sheet.addView(menuRow(density, "\uD83D\uDDD1", "Clear cache", "dapp-menu-clearcache",
+            v -> { clearDappCache(); closeDappMenu(); }));
+
+        root.addView(sheet, new android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM));
+        menuRoot = root;
+        if (parent != null) {
+            parent.addView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            root.bringToFront();
+        }
+        if (toolbar != null) toolbar.bringToFront();
+    }
+
+    /** A sheet icon + its caption. Square tile, label under it. */
+    private View menuIconTile(float density, String glyph, String label, String desc, android.view.View.OnClickListener onClick) {
+        LinearLayout tile = new LinearLayout(getContext());
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        tile.setClickable(true);
+        tile.setContentDescription(desc);
+        tile.setOnClickListener(onClick);
+        android.widget.TextView icon = new android.widget.TextView(getContext());
+        icon.setText(glyph);
+        icon.setTextColor(0xFFFFFFFF);
+        icon.setTextSize(20);
+        icon.setGravity(android.view.Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable ib = new android.graphics.drawable.GradientDrawable();
+        ib.setColor(0xFF2A2A3A);
+        ib.setCornerRadius(14 * density);
+        icon.setBackground(ib);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams((int) (52 * density), (int) (52 * density));
+        tile.addView(icon, ip);
+        android.widget.TextView cap = new android.widget.TextView(getContext());
+        cap.setText(label);
+        cap.setTextColor(0xFFB9B9C9);
+        cap.setTextSize(11);
+        cap.setGravity(android.view.Gravity.CENTER);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cp.topMargin = (int) (6 * density);
+        tile.addView(cap, cp);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        rowLp.leftMargin = (int) (6 * density);
+        rowLp.rightMargin = (int) (6 * density);
+        return tile;
+    }
+
+    /** A full-width sheet row: icon, title, tap target. */
+    private View menuRow(float density, String glyph, String label, String desc, android.view.View.OnClickListener onClick) {
+        LinearLayout row = new LinearLayout(getContext());
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setClickable(true);
+        row.setContentDescription(desc);
+        row.setOnClickListener(onClick);
+        android.widget.TextView icon = new android.widget.TextView(getContext());
+        icon.setText(glyph);
+        icon.setTextColor(0xFFE6E6F0);
+        icon.setTextSize(16);
+        row.addView(icon, new LinearLayout.LayoutParams((int) (30 * density), (int) (44 * density)));
+        android.widget.TextView tv = new android.widget.TextView(getContext());
+        tv.setText(label);
+        tv.setTextColor(0xFFFFFFFF);
+        tv.setTextSize(15);
+        row.addView(tv, new LinearLayout.LayoutParams(0, (int) (44 * density), 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (44 * density));
+        lp.topMargin = (int) (2 * density);
+        return row;
+    }
+
+    private void closeDappMenu() {
+        if (menuRoot == null) return;
+        ViewGroup pp = (ViewGroup) menuRoot.getParent();
+        if (pp != null) pp.removeView(menuRoot);
+        menuRoot = null;
+    }
+
+    // ── menu actions ───────────────────────────────────────────────────────
+    private static void copyToClipboard(android.content.Context ctx, String url) {
+        try {
+            android.content.ClipboardManager cm =
+                (android.content.ClipboardManager) ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("url", url));
+            android.widget.Toast.makeText(ctx, "Link copied", android.widget.Toast.LENGTH_SHORT).show();
+        } catch (Exception ignored) { /* clipboard unavailable — nothing to claim */ }
+    }
+
+    private void shareUrl(String url) {
+        try {
+            android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_SEND);
+            i.setType("text/plain");
+            i.putExtra(android.content.Intent.EXTRA_TEXT, url);
+            getActivity().startActivity(android.content.Intent.createChooser(i, "Share"));
+        } catch (Exception ignored) { /* no app can receive it — stay silent, not wrong */ }
+    }
+
+    /** Open outside the in-app browser (the "desktop mode" escape hatch). */
+    private void openExternally(String url) {
+        try {
+            android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_VIEW,
+                android.net.Uri.parse(url));
+            i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(i);
+        } catch (Exception ignored) { /* no browser to hand it to */ }
+    }
+
+    /** The WALLET owns reminders/history — ask it, never answer for it here. */
+    private void walletCommand(String command, String url) {
+        JSObject ev = new JSObject();
+        ev.put("command", command);
+        ev.put("url", url == null ? "" : url);
+        notifyListeners("walletCommand", ev);
+    }
+
+    private void clearDappCache() {
+        try {
+            if (dappView != null) {
+                dappView.clearCache(true);
+                android.webkit.WebStorage.getInstance().deleteAllData();
+            }
+            android.widget.Toast.makeText(getContext(), "Cache cleared", android.widget.Toast.LENGTH_SHORT).show();
+        } catch (Exception ignored) { /* nothing cached, nothing cleared */ }
+    }
+
+    // Bookmarks live with the wallet (dapp-sessions/bookmarks), so the menu only
+// asks the wallet to toggle. Java cannot read the wallet's bookmark list, so
+// the star stays a neutral outline and the wallet's toast is the verdict —
+// a filled star here would claim state Java cannot see.
+private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); }
+
     private void closeTabPanel() {
         if (tabPanel != null) tabPanel.setVisibility(View.GONE);
+    }
+
+    // Site tile helpers: the leading circle on each tab card (OKX leads with the
+    // site logo; we lead with the host's initial on a stable colour).
+    private static String hostInitial(Tab t) {
+        String src = (t != null && t.url != null && !t.url.isEmpty()) ? t.url
+            : (t != null && t.title != null && !t.title.isEmpty() ? t.title : "");
+        String host = src;
+        int at = src.indexOf('@');
+        int colon = src.indexOf("://");
+        int slash = src.indexOf('/', colon >= 0 ? colon + 3 : 0);
+        if (at >= 0) host = src.substring(at + 1);
+        else if (slash >= 0) host = src.substring(colon >= 0 ? colon + 3 : 0, slash);
+        if (host.isEmpty()) return "?";
+        return host.substring(0, 1).toUpperCase(java.util.Locale.ROOT);
+    }
+
+    // Deterministic per-host colour so the same site always gets the same tile.
+    private static int tileColor(Tab t) {
+        String key = hostInitial(t) + (t != null && t.url != null ? t.url : "");
+        int h = 0;
+        for (int i = 0; i < key.length(); i++) h = h * 31 + key.charAt(i);
+        int[] palette = { 0xFF6C5CE7, 0xFF00B894, 0xFFE17055, 0xFF0984E3, 0xFFD63031, 0xFF00CEC9 };
+        return palette[Math.abs(h) % palette.length];
     }
 
     private void openTabPanel() {
@@ -630,16 +880,34 @@ public class BearDappBrowserPlugin extends Plugin {
             LinearLayout row = new LinearLayout(getContext());
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setBackgroundColor(i == activeTab ? 0xFF23233A : 0x00000000);
+            // Site tile: a coloured initial on the host, the way OKX leads each
+            // card with the site's logo. A favicon would need a synchronous
+            // image fetch per tab — the tab sheet opens on a tap, so a network
+            // round-trip there is a visible stall, and a letter tile is always
+            // instant and never a broken-image box.
+            android.widget.TextView tile = new android.widget.TextView(getContext());
+            tile.setText(hostInitial(t));
+            tile.setTextColor(0xFFFFFFFF);
+            tile.setTextSize(15);
+            tile.setGravity(android.view.Gravity.CENTER);
+            android.graphics.drawable.GradientDrawable tileBg = new android.graphics.drawable.GradientDrawable();
+            tileBg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            tileBg.setColor(tileColor(t));
+            tile.setBackground(tileBg);
+            LinearLayout.LayoutParams tileLp = new LinearLayout.LayoutParams((int) (34 * density), (int) (34 * density));
+            tileLp.gravity = android.view.Gravity.CENTER_VERTICAL;
+            tileLp.rightMargin = (int) (2 * density);
+            row.addView(tile, tileLp);
             android.widget.TextView tv = new android.widget.TextView(getContext());
             String title = (t.title != null && !t.title.isEmpty())
                 ? t.title
                 : (t.url != null && !t.url.isEmpty() ? t.url : "New tab");
-            tv.setText((i == activeTab ? "\u25CF " : "\u25CB ") + title);
+            tv.setText(title);
             tv.setTextColor(0xFFE6E6F0);
             tv.setTextSize(14);
             tv.setSingleLine(true);
             tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            tv.setPadding((int) (14 * density), 0, 0, 0);
+            tv.setPadding((int) (10 * density), 0, 0, 0);
             tv.setContentDescription("dapp-tab-row-" + i);
             tv.setOnClickListener(v -> {
                 setActiveTab(idx);
@@ -700,7 +968,13 @@ public class BearDappBrowserPlugin extends Plugin {
             addressField.setBackgroundColor(ADDRESS_IDLE);
         }
         updateNavButtons();
-        if (tabBtn != null) tabBtn.setText("\u29C9 " + tabs.size());
+        // Badge, not glyph text: "⧉ 12" would push the address bar out of a
+        // 48dp bar. Hidden at 1 — a lone tab needs no "you have one tab" chip.
+        if (tabCountBadge != null) {
+            int n = tabs.size();
+            tabCountBadge.setText(n > 99 ? "99+" : String.valueOf(n));
+            tabCountBadge.setVisibility(n > 1 ? View.VISIBLE : View.GONE);
+        }
         if (tabPanel != null && tabPanel.getVisibility() == View.VISIBLE) openTabPanel();
     }
 
@@ -915,6 +1189,7 @@ public class BearDappBrowserPlugin extends Plugin {
 
     private void hideDappView() {
         finishConfirm(false);   // a pending consent dies with the browser — never hang the wallet JS
+        closeDappMenu();
         closeTabPanel();
         if (stack != null) stack.setVisibility(View.GONE);
         if (refreshLayout != null) {
@@ -1098,6 +1373,8 @@ public class BearDappBrowserPlugin extends Plugin {
             tabs.clear();
             dappView = null;
             refreshLayout = null;
+            closeDappMenu();
+            menuRoot = null;
         });
         super.handleOnDestroy();
     }

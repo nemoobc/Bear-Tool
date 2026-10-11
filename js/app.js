@@ -605,7 +605,10 @@ function initScrollTopFab() {
   sync();
 }
 
-function switchView(view) {
+// Exported for the native ⋯ menu's "Transaction history": the wallet owns the
+// history view, and the menu is a native view that cannot reach into this
+// module's internals.
+export function switchView(view) {
   $all('.nav-item').forEach(i => i.classList.remove('active'));
   $all('.mobile-nav-item').forEach(i => i.classList.remove('active'));
   // Bridge lives behind the Swap nav button, so Swap stays highlighted there.
