@@ -3084,6 +3084,7 @@ select.input option, select.select option, .input option {
 .dapp-icon {
   font-size: 28px;
   width: 52px; height: 52px;
+  position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   border: 2px solid var(--ink); border-radius: 16px;
   background: var(--cat, var(--honey));
@@ -3100,6 +3101,18 @@ select.input option, select.select option, .input option {
   line-height: 1;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   user-select: none;
+}
+/* The real project logo painted ON TOP of the tile-mark (js/ui.js dappLogo):
+   the mark renders first and always, so a slow or missing remote icon shows the
+   tinted tile instead of a broken image. The <img> removes itself after its
+   fallback chain (apple-touch-icon → favicon.ico) is exhausted, revealing the
+   mark beneath — the tile is therefore never bare. */
+.dapp-logo-img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
 }
 .dapp-name { font-size: 12px; font-weight: 600; text-align: center; }
 .dapp-category { font-size: 10px; opacity: 0.6; }
@@ -3506,6 +3519,7 @@ select.input option, select.select option, .input option {
 .dbr-card-ic {
   font-size: 1.35rem;
   width: 40px; height: 40px;
+  position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   border: 2px solid var(--ink); border-radius: 12px;
   background: var(--cat, rgba(127, 127, 127, .14));

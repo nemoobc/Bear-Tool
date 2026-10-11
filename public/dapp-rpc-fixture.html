@@ -41,6 +41,13 @@
   // race, N = the parser did. The chain inside main() only runs once
   // window.ethereum exists, so a lost race delays; it never lies.
   function main() {
+  // Record EIP-1193 chainChanged so the E2E can prove the native network
+  // switch reached the page (the toolbar's ◆ → wallet picker → setChain fan-out).
+  try {
+    if (window.ethereum && typeof window.ethereum.on === 'function') {
+      window.ethereum.on('chainChanged', function (id) { rec('chainChanged', id); });
+    }
+  } catch (e) { /* a wallet without .on still runs the rest */ }
   // E2E truth probes — runs 38040858378/38046569239: the Java side logged
   // resolve#1->"resolved" while this page's own deadline still screamed
   // timeout, with no exception anywhere. Someone is lying; these two facts

@@ -210,6 +210,23 @@ async function connectCDP(urlMatch = null) {
   throw new Error('CDP connect failed: ' + lastErr.message);
 }
 
+// List every page target the device exposes (their URLs). Used by the tabs
+// test: two independent WebViews must show up as two targets, and closing a
+// tab must remove its target — CDP is the only eye that sees both.
+async function cdpTargetUrls() {
+  try {
+    const unix = adb('shell', 'cat /proc/net/unix');
+    const socks = [...new Set(unix.match(/webview_devtools_remote_\d+/g) || [])];
+    if (!socks.length) return [];
+    adb('forward', 'tcp:9333', `localabstract:${socks[0]}`);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const targets = await (await fetch('http://127.0.0.1:9333/json', { signal: ctrl.signal })).json();
+    clearTimeout(t);
+    return (targets || []).filter((x) => x.type === 'page').map((x) => String(x.url || ''));
+  } catch { return []; }
+}
+
 // ── page helpers ───────────────────────────────────────────────────────────
 function makePage(cdp) {
   const evaluate = async (expr) => {
@@ -342,6 +359,19 @@ async function main() {
       await page.click(`.mobile-nav-item[data-view="${view}"]`).catch(() => {});
       await sleep(1400);
       await page.shot(`05-view-${view}`);
+      // dApps list must carry a real logo per card (js/ui.js dappLogo → an
+      // <img> layered on the tile-mark). Structural, works offline: the img is
+      // in the DOM whether or not the remote icon answers — its removal only
+      // happens on the second onerror, after this count is taken.
+      if (view === 'dapps') {
+        await page.wait('#dappGrid .dapp-card', 10000).catch(() => {});
+        const counts = await page.evaluate(
+          `document.querySelectorAll('#dappGrid .dapp-card').length + '/' + document.querySelectorAll('#dappGrid .dapp-card .dapp-logo-img').length`
+        ).catch(() => '0/0');
+        report.dappLogos = counts;
+        const [cardsN, imgsN] = String(counts).split('/').map(Number);
+        if (!cardsN || imgsN !== cardsN) die('dapp logos: tiap kartu harus punya <img> logo — kartu/img = ' + counts);
+      }
     }
   }
 
@@ -636,6 +666,92 @@ async function main() {
     }
     if (!report.dapp.backToWallet) throw new Error('native back did not return the wallet to view (taps=' + report.dapp.backTaps + ')');
     await shotScreen('13-back-to-wallet');
+
+    // ── tabs: open / switch / close on a multi-WebView toolbar ─────────────
+    // The back loop hid the browser; reopen and approve the fresh connect
+    // prompt (eth_requestAccounts always asks) so the tab + network checks run
+    // against an open, connected dApp.
+    step('dapp browser: reopen for the tabs + network matrix');
+    await page.evaluate(`window.__bearE2EOpenDapp('http://10.0.2.2:8080/dapp-rpc-fixture.html')`)
+      .catch((e) => { throw new Error('reopen fixture for tabs failed: ' + e.message); });
+    for (let i = 0; i < 3; i++) {
+      const seen = await dpage.evaluate(`(async () => {
+        const t0 = Date.now();
+        while (!(location.href || '').includes('dapp-rpc-fixture') && Date.now() - t0 < 8000)
+          await new Promise((r) => setTimeout(r, 50));
+        return location.href;
+      })()`).catch((e) => ({ destroyed: /destroyed/i.test(String(e && e.message)) }));
+      if (typeof seen === 'string' && String(seen).includes('dapp-rpc-fixture')) break;
+      if (!seen || seen.destroyed !== true) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    report.dapp.tabsReopen = await dpage.evaluate('location.href').catch((e) => 'eval-failed: ' + e.message);
+    if (!String(report.dapp.tabsReopen).includes('dapp-rpc-fixture')) {
+      throw new Error('fixture never reopened for the tabs test: ' + String(report.dapp.tabsReopen));
+    }
+    await page.wait('#confirmYes', 20000);
+    await page.click('#confirmYes');
+    text = await pollOut(/done=/, 60000);
+    if (!String(text).includes('done=ok')) throw new Error('reopened fixture never finished:\n' + text);
+
+    step('dapp browser: tabs — a new tab owns its own WebView');
+    if (!(await tapNativeButton('dapp-tabs'))) throw new Error('dapp-tabs chip did not tap');
+    await sleep(800);
+    if (!(await tapNativeButton('dapp-tab-new'))) throw new Error('dapp-tab-new did not tap');
+    await sleep(1500);
+    // Give the fresh tab a real URL so its CDP target is identifiable.
+    await page.evaluate(`window.__bearE2EOpenDapp('https://example.com')`)
+      .catch((e) => { throw new Error('open in the new tab failed: ' + e.message); });
+    await sleep(3000);
+    let urls = await cdpTargetUrls();
+    report.dapp.tabs = {
+      urls,
+      hasFixture: urls.some((u) => u.includes('dapp-rpc-fixture')),
+      hasExample: urls.some((u) => u.includes('example.com')),
+    };
+    if (!(report.dapp.tabs.hasFixture && report.dapp.tabs.hasExample)) {
+      throw new Error('new tab did not create a second independent WebView: ' + JSON.stringify(report.dapp.tabs));
+    }
+    await shotScreen('14-tabs-two');
+
+    step('dapp browser: closing a tab releases its WebView');
+    if (!(await tapNativeButton('dapp-tabs'))) throw new Error('dapp-tabs chip (2nd) did not tap');
+    await sleep(800);
+    if (!(await tapNativeButton('dapp-tab-close-1'))) throw new Error('dapp-tab-close-1 did not tap');
+    let gone = false;
+    for (let i = 0; i < 8; i++) {
+      await sleep(800);
+      urls = await cdpTargetUrls();
+      if (!urls.some((u) => u.includes('example.com'))) { gone = true; break; }
+    }
+    report.dapp.tabsAfterClose = urls;
+    if (!gone) throw new Error('closing the tab did not release its WebView: ' + JSON.stringify(urls));
+
+    // ── change network: ◆ → wallet picker → chainChanged into the dApp ─────
+    step('dapp browser: ◆ opens the wallet network picker and pushes chainChanged to the dApp');
+    if (!(await tapNativeButton('dapp-network'))) throw new Error('dapp-network chip did not tap');
+    // The wallet's Networks modal renders in the WALLET webview (the dApp is
+    // flashed away while it is open) — its search field is the marker.
+    await page.wait('#netSearchInput', 15000);
+    report.dapp.netModal = true;
+    await shotScreen('15-network-picker');
+    // A DIFFERENT known mainnet (Polygon) — a real switch, never a no-op.
+    const clicked = await page.evaluate(
+      `(function () { var el = document.querySelector('[data-net="polygon"]'); if (el) el.click(); return !!el; })()`
+    ).catch(() => false);
+    if (!clicked) throw new Error('polygon row not found in the network modal');
+    await sleep(3000);
+    report.dapp.netAfter = await page.evaluate(`window.localStorage.getItem('bear.networkId')`).catch(() => '');
+    if (String(report.dapp.netAfter) !== 'polygon') {
+      throw new Error('network did not switch to polygon: ' + String(report.dapp.netAfter));
+    }
+    // The open tab must have heard EIP-1193 chainChanged 0x89 (Polygon 137).
+    const chgText = await pollOut(/chainChanged=0x/, 20000);
+    report.dapp.chainChanged = (String(chgText).match(/chainChanged=(0x[0-9a-fA-F]+)/) || [])[1] || '';
+    if (report.dapp.chainChanged !== '0x89') {
+      throw new Error('chainChanged never reached the dApp (want 0x89): ' + JSON.stringify(String(chgText)));
+    }
+    await shotScreen('16-network-switched');
     try { dapp.close(); } catch { /* target may die with the view */ }
   }
 

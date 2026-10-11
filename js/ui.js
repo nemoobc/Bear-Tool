@@ -42,6 +42,26 @@ export function dappMark(name, color, size = 40) {
   return `<span class="dapp-mark" style="--mk:${escapeHtml(color || '#94A3B8')};width:${size}px;height:${size}px;font-size:${px}px" aria-hidden="true">${escapeHtml(letter)}</span>`;
 }
 
+// Real dApp logo, layered ON TOP of the tile-mark (dappMark above), which stays
+// as the always-renders fallback underneath. The image comes from the SITE'S
+// OWN HOST — its apple-touch-icon (usually 180px, crisp at the card size) with
+// favicon.ico as a second try. Deliberately NOT an icon CDN: a third-party
+// favicon proxy would learn which dApps a wallet user browsed, which is exactly
+// the metadata a self-custody app must not leak. Loaded remotely because a
+// bundled mark is a drawing, not the project's actual logo — the user asked for
+// the real thing. On the second failure the <img> removes itself and the
+// tile-mark the caller rendered behind it is what stays, so the card is never
+// broken; `#dappGrid` cards therefore always paint something.
+export function dappLogo(url) {
+  let host = '';
+  try { host = new URL(String(url || '')).hostname; } catch { return ''; }
+  if (!host) return '';
+  const h = escapeHtml(host);
+  return `<img class="dapp-logo-img" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" `
+    + `src="https://${h}/apple-touch-icon.png" data-logo-fb="https://${h}/favicon.ico" `
+    + `onerror="if(this.dataset.logoFb){this.src=this.dataset.logoFb;delete this.dataset.logoFb;}else{this.remove();}">`;
+}
+
 // ── toast ──
 export function toast(msg, type = 'info') {
   const wrap = $('#toast-wrap');

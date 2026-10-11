@@ -14,8 +14,8 @@
 //   not silently executed on the local chain;
 // - locked wallet raises the unlock prompt and answers honestly.
 import { confirmTx, toast } from './ui.js';
-import { get, requireUnlock } from './state.js';
-import { getNetworkById } from './network.js';
+import { get, requireUnlock, on } from './state.js';
+import { getNetworkById, getNetwork } from './network.js';
 import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
 
 const USER_REJECTED = { code: 4001, message: 'User rejected the request.' };
@@ -49,6 +49,25 @@ export function isNativeDappBrowser() {
   try {
     return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
   } catch { return false; }
+}
+
+// The wallet OWNS the network list; the native toolbar only shows what the
+// wallet tells it. label = a compact symbol ("ETH", "BNB") for the ◆ chip,
+// chainId = the hex the dApp's chainChanged event carries.
+function chainHex(chainId) {
+  const n = Number(chainId);
+  return Number.isFinite(n) && n > 0 ? '0x' + n.toString(16) : '';
+}
+
+/** Push the wallet's active chain to the native toolbar. The plugin updates
+ *  its ◆ chip and fires EIP-1193 chainChanged into every open dApp tab. */
+export async function syncNativeChain() {
+  if (!plugin) return;
+  const n = getNetworkById(get('networkId'));
+  if (!n) return;
+  try {
+    await plugin.setChain({ chainId: chainHex(n.chainId), label: String(n.symbol || n.name || '') });
+  } catch { /* the dapp view may be gone — nothing to update */ }
 }
 
 function shortAddr(a) {
@@ -118,6 +137,8 @@ export async function openNativeDapp(url) {
     }
     const p = await ensurePlugin();
     await p.open({ url: trimmed, providerScript: NATIVE_PROVIDER_SCRIPT });
+    // Show the wallet's current chain on the fresh toolbar right away.
+    syncNativeChain();
   } catch (e) {
     const msg = '[dApp] open failed: ' + (e && e.message ? e.message : String(e));
     console.error(msg, e);
@@ -139,9 +160,39 @@ export function initNativeDappRpc() {
       p.addListener('rpcRequest', (ev) => {
         handleNativeRpc(ev).catch((e) => console.warn('[native-dapp]', e));
       });
+      // The native ◆ chip asks the wallet to run its own Networks picker. One
+      // listener, one boot — a second initNativeDappRpc() must not double-bind.
+      p.addListener('walletCommand', (ev) => {
+        handleWalletCommand(ev).catch((e) => console.warn('[native-dapp]', e));
+      });
+      // The wallet's chain is the single source of truth: whenever it moves
+      // (picker row, bridge source, a dApp's switch request) push it to the
+      // native toolbar, which fans chainChanged out to every open tab.
+      on('networkId', () => { syncNativeChain(); });
       return true;
     })
     .catch(() => false);
+}
+
+/** Native toolbar → wallet commands. Currently only the network picker. */
+async function handleWalletCommand(ev) {
+  const cmd = ev && ev.command;
+  if (cmd !== 'openNetworkPicker') return;
+  // The wallet's modal renders in the WALLET's webview, which the full-screen
+  // dApp overlay covers — so hide the dapp around it (askUser, depth-counted)
+  // and restore it once the modal is dismissed.
+  await askUser(async () => {
+    const { showNetworkModal } = await import('./app.js');
+    await new Promise((resolve) => {
+      const finish = () => { try { obs.disconnect(); } catch { /* already off */ } clearTimeout(timer); resolve(); };
+      const obs = new MutationObserver(() => {
+        if (!document.body.classList.contains('modal-open')) finish();
+      });
+      obs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      const timer = setTimeout(finish, 120000); // a modal left open forever must not hang the overlay
+      try { showNetworkModal(); } catch { finish(); }
+    });
+  });
 }
 
 // Flash to the wallet while a confirmation is up: confirmTx renders in the
@@ -297,6 +348,20 @@ async function handleNativeRpc({ id, origin, payload }) {
     const want = Number((msg.params || [])[0]?.chainId);
     const localNet = getNetworkById(get('networkId'));
     if (Number.isFinite(want) && localNet && Number(localNet.chainId) === want) return respond(null);
+    // A chain the wallet already knows: switch to it (MetaMask parity — no
+    // prompt for a known chain) through the ONE chokepoint activateNetwork,
+    // which fires the wallet's chainChanged AND, via on('networkId'), the
+    // native fan-out to every open tab. Unknown chain → 4902, as before.
+    const target = Number.isFinite(want) ? getNetwork(want) : null;
+    if (target) {
+      try {
+        const { activateNetwork } = await import('./app.js');
+        activateNetwork(target.id);
+        return respond(null);
+      } catch (e) {
+        return respondError({ code: 4902, message: (e && e.message) || 'Switch failed.' });
+      }
+    }
     const m = 'Switch the network inside Bear Tool, then ask the dApp again.';
     return respondError({ code: 4902, message: m });
   }

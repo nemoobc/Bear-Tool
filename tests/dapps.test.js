@@ -198,11 +198,39 @@ test('dapps: kartu pakai tile-mark deterministik, bukan emoji mentah (daftar & b
   assert.ok(!/\$\{d\.icon \|\|/.test(browserSrc),
     'd.icon tidak boleh dipasang lagi di js/dapp-browser.js');
   // …dengan helper yang benar-benar diimpor di kedua modul.
-  assert.match(dappsSrc, /import \{ escapeHtml, dappMark \} from '\.\/ui\.js'/);
-  assert.match(browserSrc, /import \{ escapeHtml, toast, dappMark \} from '\.\/ui\.js'/);
+  assert.match(dappsSrc, /import \{ escapeHtml, dappMark, dappLogo \} from '\.\/ui\.js'/);
+  assert.match(browserSrc, /import \{ escapeHtml, toast, dappMark, dappLogo \} from '\.\/ui\.js'/);
   // Dan helper itu sendiri ada + aman buat markup (nama di-escape, ada fallback).
   assert.match(uiSrc, /export function dappMark\(name, color, size = 40\)/,
     'dappMark harus tinggal di ui.js supaya dua modul pakai satu sumber');
   assert.match(uiSrc, /escapeHtml\(color \|\| '#94A3B8'\)/,
     'warna kategori harus di-escape sebelum masuk style inline');
+});
+
+test('dapps: kartu menaruh logo ASLI dari host situs di atas tile-mark (fallback)', () => {
+  // Laporan user 2026-10-11: "list daaps ada logo iconnya" — kartu harus
+  // menampilkan logo asli protocol, bukan hanya inisial. Logo diambil dari host
+  // SITUS ITU SENDIRI (apple-touch-icon → favicon.ico), tidak lewat CDN ikon
+  // pihak ketiga (privasi wallet): proxy favicon akan tahu dApp apa yang dibuka.
+  assert.match(uiSrc, /export function dappLogo\(url\)/,
+    'dappLogo harus tinggal di ui.js bersama dappMark');
+  assert.match(uiSrc, /https:\/\/\$\{h\}\/apple-touch-icon\.png/,
+    'sumber pertama = apple-touch-icon situs (biasanya 180px, tajam)');
+  assert.match(uiSrc, /data-logo-fb="https:\/\/\$\{h\}\/favicon\.ico"/,
+    'rantai fallback kedua = favicon.ico host yang sama');
+  assert.match(uiSrc, /else\{this\.remove\(\);\}/,
+    'kalau dua-duanya gagal, <img> hapus diri → tile-mark di bawahnya tampil');
+  assert.match(uiSrc, /referrerpolicy="no-referrer"/,
+    'jangan bocorkan wallet sebagai referer ke host dApp');
+  // Domain di-escape, dan kedua tampilan memasang logo itu di dalam tile.
+  assert.match(uiSrc, /host = new URL\(String\(url \|\| ''\)\)\.hostname/);
+  assert.match(uiSrc, /const h = escapeHtml\(host\)/);
+  assert.match(dappsSrc, /\$\{dappLogo\(d\.url\)\}/, 'renderDapps harus memasang dappLogo');
+  assert.match(browserSrc, /\$\{dappLogo\(d\.url\)\}/, 'cardHTML harus memasang dappLogo');
+  // …dan CSS-nya benar-benar overlay di atas mark (tile jadi relative).
+  const css = readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
+  assert.match(css, /\.dapp-logo-img\s*\{[^}]*position: absolute/, 'logo harus overlay absolut');
+  assert.match(css, /\.dapp-logo-img\s*\{[^}]*object-fit: cover/, 'logo harus object-fit: cover');
+  assert.match(css, /\.dapp-icon\s*\{[^}]*position: relative/, 'tile dApps harus jadi anchor overlay');
+  assert.match(css, /\.dbr-card-ic\s*\{[^}]*position: relative/, 'tile browser home harus jadi anchor overlay');
 });

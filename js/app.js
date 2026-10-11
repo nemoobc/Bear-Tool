@@ -1497,7 +1497,7 @@ function syncTestnetSwitches() {
   }
 }
 
-function showNetworkModal() {
+export function showNetworkModal() {
   const nets = getAllNetworks();
   const html = `
     <button class="modal-close" type="button" data-close-modal>✕</button>

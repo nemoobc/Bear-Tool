@@ -407,3 +407,96 @@ test('the driver exercises the whole matrix: scheme gate, second URL sign, real 
   assert.match(driver, /for \(let i = 0; i < 5; i\+\+\) \{/,
     'loop back dibatasi (5) — tak bisa berputar selamanya');
 });
+
+test('the native toolbar is fully OPAQUE — the wallet must not bleed through the bar', () => {
+  // User (2026-10-11, APK): "tembus soalnya". 0xCC (bar) and 0x33 (address)
+  // alphas left the bar 20%/80% see-through, so the wallet dashboard showed
+  // through the top band. Every toolbar surface is now 0xFF.
+  assert.match(java, /static final int BAR_BG = 0xFF161622/, 'bar bg wajib opaque');
+  assert.match(java, /static final int ADDRESS_IDLE = 0xFF2A2A3E/, 'address idle wajib opaque');
+  assert.match(java, /static final int ADDRESS_LOADING = 0xFF243B7A/, 'address loading wajib opaque');
+  assert.match(java, /bar\.setBackgroundColor\(BAR_BG\)/, 'bar memakai palet opaque, bukan literal transparan');
+  assert.doesNotMatch(java, /0xCC1A1A2E/, 'alpha 0xCC pada bar = tembus — dilarang kembali');
+  assert.doesNotMatch(java, /0x33222244/, 'alpha 0x33 pada address = nyaris transparan — dilarang kembali');
+});
+
+test('tabs: multi-tab lives on its own WebView and the last tab can never be closed', () => {
+  assert.match(java, /private class Tab \{/, 'tab = unit kerja (WebView + wrapper sendiri)');
+  assert.match(java, /private Tab newTab\(\)/, 'factory tab baru');
+  assert.match(java, /private void setActiveTab\(int i\)/, 'satu jalur pindah tab');
+  assert.match(java, /private void closeTab\(int i\)/, 'menutup tab lewat satu jalur');
+  assert.match(java, /if \(tabs\.size\(\) <= 1\) \{ closeTabPanel\(\); return; \}/,
+    'tab terakhir tak boleh ditutup — lantai browser');
+  assert.match(java, /private void openTabPanel\(\)/, 'sheet tab dibangun dari daftar tab');
+  // The page may only be pushed down by the bar on the ACTIVE tab; and only
+  // the active tab owns the RPC origin (a background tab must not steal it).
+  assert.match(java, /if \(view == dappView\) \{[\s\S]*currentUrl = url/,
+    'hanya tab AKTIF menulis currentUrl — origin RPC milik halaman yang terlihat');
+  // Every tab gets its own client + bridge, so RPC works from any active tab.
+  assert.match(java, /t\.view\.addJavascriptInterface\(new Bridge\(\), "BearNativeBridge"\)/,
+    'setiap tab punya bridge sendiri');
+  assert.match(java, /destroy\(\)/, 'tab yang ditutup melepas WebView-nya');
+});
+
+test('the toolbar exposes native controls the E2E (and a real user) can reach', () => {
+  assert.match(java, /\.setContentDescription\("dapp-tabs"\)/, 'tombol tabs berlabel');
+  assert.match(java, /\.setContentDescription\("dapp-tab-new"\)/, 'tombol tab baru berlabel');
+  assert.match(java, /\.setContentDescription\("dapp-tab-row-" \+ i\)/, 'baris tab berlabel per-indeks');
+  assert.match(java, /\.setContentDescription\("dapp-tab-close-" \+ i\)/, 'tutup-tab berlabel per-indeks');
+  assert.match(java, /\.setContentDescription\("dapp-network"\)/, 'chip network berlabel');
+  assert.match(java, /tabBtn\.setText\("\\u29C9 " \+ tabs\.size\(\)\)/, 'chip tabs menampilkan jumlah');
+});
+
+test('change network: the ◆ chip asks the WALLET, and setChain fans chainChanged into every tab', () => {
+  // The wallet owns the network list — the toolbar never switches by itself.
+  assert.match(java, /ev\.put\("command", "openNetworkPicker"\)/, 'chip meminta wallet membuka picker-nya');
+  assert.match(java, /@PluginMethod\s*\n\s*public void setChain\s*\(\s*PluginCall/,
+    'setChain berpasangan langsung dengan @PluginMethod (tanpa yatim)');
+  assert.match(java, /netBtn\.setText\(label\)/, 'chip ikut label chain baru');
+  // chainHex is wallet-supplied but STILL validated before entering evaluateJavascript.
+  assert.match(java, /chainHex\.matches\("0x\[0-9a-fA-F\]\+"\)/,
+    'hanya literal 0x-hex yang masuk JS — string sembarang dilarang');
+  assert.match(java, /__bearNativeNotify\(\{event:'chainChanged',data:'/, 'chainChanged adalah peristiwa yang dikirim');
+  assert.match(java, /for \(Tab t : tabs\) \{[\s\S]*evaluateJavascript/, 'fan-out ke SEMUA tab — tab latar pun dengar');
+});
+
+test('the wallet glue wires the picker + chain sync and honours a dApp switch request', () => {
+  const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.match(code, /export async function syncNativeChain\(\)/, 'push chain ke toolbar native');
+  assert.match(code, /plugin\.setChain\(\{ chainId: chainHex\(n\.chainId\), label:/, 'satu jalur push chain');
+  assert.match(code, /p\.addListener\('walletCommand'/, 'listener perintah wallet terpasang di boot');
+  assert.match(code, /async function handleWalletCommand\(ev\)/, 'handler perintah wallet');
+  assert.match(code, /cmd !== 'openNetworkPicker'/, 'hanya perintah yang dikenal yang dijalankan');
+  assert.match(code, /const \{ showNetworkModal \} = await import\('\.\/app\.js'\)/,
+    'picker wallet dipanggil lewat dynamic import (app.js tak boleh jadi siklus statis)');
+  assert.match(code, /on\('networkId', \(\) => \{ syncNativeChain\(\); \}\)/,
+    'perubahan network wallet = satu-satunya pemicu sinkronisasi chip native');
+  // A dApp asking to switch to a chain the wallet already knows now switches.
+  assert.match(code, /const target = Number\.isFinite\(want\) \? getNetwork\(want\) : null/,
+    'switch request mencari chain yang dikenal');
+  assert.match(code, /activateNetwork\(target\.id\)/, 'switch lewat satu chokepoint (activateNetwork)');
+});
+
+test('app.js exposes the network modal and the fixture records chainChanged', () => {
+  const app = readFileSync(path.join(here, '..', 'js', 'app.js'), 'utf8');
+  assert.match(app, /export function showNetworkModal\(\)/, 'showNetworkModal diekspor untuk picker native');
+  assert.match(fixture, /ethereum\.on\('chainChanged'/, 'fixture merekam chainChanged sebagai bukti E2E');
+  assert.match(fixture, /rec\('chainChanged', id\)/, 'nilai chain baru masuk #out');
+});
+
+test('the E2E driver really exercises tabs and the network picker', () => {
+  const driver = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  // Two independent WebViews must show up as two CDP page targets.
+  assert.match(driver, /async function cdpTargetUrls\(\)/, 'daftar target CDP = mata tab ganda');
+  assert.match(driver, /tapNativeButton\('dapp-tab-new'\)/, 'menambah tab lewat tombol native asli');
+  assert.match(driver, /tapNativeButton\('dapp-tab-close-1'\)/, 'menutup tab lewat tombol native asli');
+  assert.match(driver, /report\.dapp\.tabs\.hasFixture && report\.dapp\.tabs\.hasExample/,
+    'dua target (fixture + example) = bukti multi-WebView, bukan cuma klaim');
+  // Network: chip → wallet picker → a real switch → chainChanged in the page.
+  assert.match(driver, /tapNativeButton\('dapp-network'\)/, 'chip network di-tap sungguhan');
+  assert.match(driver, /await page\.wait\('#netSearchInput', 15000\)/, 'modal Networks wallet wajib terbuka');
+  assert.match(driver, /document\.querySelector\('\[data-net="polygon"\]'\)/, 'pilih chain LAIN (switch nyata)');
+  assert.match(driver, /chainChanged never reached the dApp \(want 0x89\)/, 'chainChanged wajib sampai ke halaman dApp (0x89)');
+});
+

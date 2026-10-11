@@ -41,20 +41,46 @@ import org.json.JSONObject;
  * The origin is taken from WebView.getUrl() (native side), never from the
  * page. The interface exposes no wallet state — it is a dumb pipe; every
  * answer including eth_accounts requires the user's consent in the wallet UI.
+ *
+ * Tabs + network (2026-10-11, user: "ga ada fitur tabs, change network"):
+ *   - Every tab owns its own WebView + SwipeRefreshLayout (own history, own
+ *     provider). Only the active one is visible; the ⧉ chip opens the sheet.
+ *   - The ◆ chip asks the WALLET to change its active chain: the wallet opens
+ *     its Networks picker (flash-to-wallet), then pushes the new chain back
+ *     via setChain(), which updates the chip and fires chainChanged into every
+ *     open tab — the EIP-1193 event a dApp listens for.
+ *   - The toolbar is fully opaque: 0xCC/0x33 alphas let the wallet dashboard
+ *     bleed through the bar ("tembus"), which is the bug this palette fixes.
  */
 @CapacitorPlugin(name = "BearDappBrowser")
 public class BearDappBrowserPlugin extends Plugin {
 
+    // dappView / refreshLayout always point at the ACTIVE tab, so the existing
+    // confirm/visibility plumbing (and its tests) keep one obvious target.
     private WebView dappView = null;
+    private SwipeRefreshLayout refreshLayout = null;
     private String providerScript = "";
     private ViewGroup parent = null;
-    private SwipeRefreshLayout refreshLayout = null;
     private View toolbar = null;
     private android.widget.EditText addressField = null;
     private Button backBtn = null;
     private Button forwardBtn = null;
-    private static final int ADDRESS_LOADING = 0x663355FF;  // blue tint while the page loads
-    private static final int ADDRESS_IDLE = 0x33222244;     // dim idle field
+
+    // Tabs. `stack` holds every tab's own wrapper; only one is VISIBLE.
+    private android.widget.FrameLayout stack = null;
+    private View tabPanel = null;
+    private LinearLayout tabList = null;
+    private Button tabBtn = null;
+    private Button netBtn = null;
+    private final java.util.List<Tab> tabs = new java.util.ArrayList<>();
+    private int activeTab = -1;
+
+    // Opaque toolbar palette — the whole point of the "tembus" fix: nothing
+    // behind the bar (wallet dashboard, dApp under it) may show through.
+    private static final int BAR_BG = 0xFF161622;
+    private static final int ADDRESS_LOADING = 0xFF243B7A;  // opaque blue tint while loading
+    private static final int ADDRESS_IDLE = 0xFF2A2A3E;     // opaque idle field
+    private int barH = 0;
     // The loaded URL, written on the MAIN thread (onPageStarted) and read by
     // Bridge.postMessage on the JavaBridge thread. WebView.getUrl() THROWS
     // off-thread — checkThread() — and postMessage's silent catch ate it:
@@ -64,6 +90,7 @@ public class BearDappBrowserPlugin extends Plugin {
     // prompt never appeared. A volatile field is the one source BOTH threads
     // may touch — and it stays native-side: a page can never name its own
     // origin, same trust as getUrl() (the navigation lifecycle, not the page).
+    // With tabs only the ACTIVE tab writes it (setActiveTab seeds it on switch).
     private volatile String currentUrl = "";
 
     // MetaMask caps the page→native message (BackgroundBridge MAX_MESSAGE_LENGTH)
@@ -86,106 +113,82 @@ public class BearDappBrowserPlugin extends Plugin {
         return true;
     }
 
+    /** One browser tab: its own WebView (own history, own provider) and the
+     *  SwipeRefreshLayout that wraps it. */
+    private class Tab {
+        WebView view;
+        SwipeRefreshLayout wrap;
+        String title = "";
+        String url = "";
+    }
+
+    private Tab tabOf(WebView v) {
+        for (Tab t : tabs) if (t.view == v) return t;
+        return null;
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private void createView() {
-        dappView = new WebView(getContext());
-        WebSettings settings = dappView.getSettings();
+    private void applySettings(WebView view) {
+        WebSettings settings = view.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
-        dappView.addJavascriptInterface(new Bridge(), "BearNativeBridge");
-        dappView.setWebViewClient(new WebViewClient() {
-            @Override
-            public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                currentUrl = url == null ? "" : url; // main thread — the ONLY writer the bridge thread reads
-                // Address bar follows the navigation; blue tint = loading.
-                if (addressField != null) {
-                    addressField.setText(url == null ? "" : url);
-                    addressField.setBackgroundColor(ADDRESS_LOADING);
-                }
-                updateNavButtons();
-                injectProvider(view, "start", url);
-                JSObject ev = new JSObject();
-                ev.put("event", "loadStart");
-                ev.put("url", url);
-                notifyListeners("navigation", ev);
-            }
+    }
 
-            @Override
-            public void onPageCommitVisible(WebView view, String url) {
-                // THE RACE-CLOSER (run 38047794274): onPageStarted is
-                // PRE-commit — its evaluateJavascript can execute against the
-                // OLD document (fixture parsed with window.ethereum missing
-                // while the previous run injected fine: a race, not a bug).
-                // onPageFinished is post-parser — too late for dApps that read
-                // window.ethereum at parse time. onPageCommitVisible fires once
-                // the NEW document has committed and the parser is still
-                // waiting on the network: provider lands BEFORE the dApp's own
-                // scripts, deterministically. Idempotent script makes the
-                // triple injection safe on every navigation.
-                injectProvider(view, "commit", url);
-            }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                injectProvider(view, "finish", url);
-                // Address bar settles: idle tint, live back/forward state.
-                if (addressField != null) {
-                    addressField.setText(url == null ? "" : url);
-                    addressField.setBackgroundColor(ADDRESS_IDLE);
-                }
-                updateNavButtons();
-                if (refreshLayout != null) refreshLayout.setRefreshing(false); // pull-to-refresh spinner stops once the page lands
-                JSObject ev = new JSObject();
-                ev.put("event", "loadEnd");
-                ev.put("url", url);
-                notifyListeners("navigation", ev);
-            }
-
-            @Override
-            public void onReceivedError(WebView view, android.webkit.WebResourceRequest request, android.webkit.WebResourceError error) {
-                if (!request.isForMainFrame()) return;
-                JSObject ev = new JSObject();
-                ev.put("event", "loadError");
-                ev.put("url", request.getUrl().toString());
-                ev.put("description", String.valueOf(error.getDescription()));
-                notifyListeners("navigation", ev);
-            }
-        });
-        // Pull-to-refresh: a SwipeRefreshLayout wraps the WebView. It only lets a
-        // pull begin when the WebView is scrolled to the top (canChildScrollUp), so
-        // dragging down at the top of a dApp and releasing reloads the page — the
-        // standard wallet dApp-browser gesture (MetaMask/Trust).
-        refreshLayout = new SwipeRefreshLayout(getContext());
-        refreshLayout.setColorSchemeColors(0xFF7C4DFF, 0xFF448AFF, 0xFF18FFFF);
-        refreshLayout.setOnRefreshListener(() -> {
-            if (dappView != null) dappView.reload();
-        });
-        refreshLayout.addView(dappView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        parent = (ViewGroup) getBridge().getWebView().getParent();
-        if (parent != null) {
-            parent.addView(refreshLayout, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    /** Build a fresh tab (blank WebView + swiperefresh wrapper), added to the
+     *  stack hidden. The caller decides when to make it active. */
+    @SuppressLint("SetJavaScriptEnabled")
+    private Tab newTab() {
+        Tab t = new Tab();
+        t.view = new WebView(getContext());
+        applySettings(t.view);
+        t.view.addJavascriptInterface(new Bridge(), "BearNativeBridge");
+        t.view.setWebViewClient(new BrowserClient());
+        t.wrap = new SwipeRefreshLayout(getContext());
+        t.wrap.setColorSchemeColors(0xFF7C4DFF, 0xFF448AFF, 0xFF18FFFF);
+        t.wrap.setOnRefreshListener(this::reloadActive);
+        t.wrap.addView(t.view, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        t.wrap.setPadding(0, barH, 0, 0);
+        t.wrap.setVisibility(View.GONE);
+        if (stack != null) {
+            stack.addView(t.wrap, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
-        // A native toolbar ON TOP of the dapp view: back through the dapp's
-        // own history, and close to return to the wallet. The wallet's own UI
-        // lives UNDERNEATH this overlay — openDappBrowser()'s native branch
-        // builds no UI of its own (the iframe toolbar is web-only) — so
-        // without native controls the user is trapped in the dapp forever.
-        // The contentDescription names each button for accessibility AND for
-        // the E2E driver's uiautomator tap (tests/emulator-e2e.test.js).
-        // OKX-style toolbar: [ ← ] [ → ] [ address ......... ] [ ⟳ ] [ ✕ ].
-        // Address bar navigates like a browser: Enter loads the typed URL
-        // (https:// prepended when bare), guarded by the same http/https gate
-        // as open(). Back/forward reflect the WebView history live.
+        tabs.add(t);
+        return t;
+    }
+
+    /** Swipe-to-refresh reloads the ACTIVE page (a hidden tab cannot be pulled). */
+    private void reloadActive() {
+        if (dappView != null) dappView.reload();
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private void createView() {
+        final float density = getActivity().getResources().getDisplayMetrics().density;
+        parent = (ViewGroup) getBridge().getWebView().getParent();
+        stack = new android.widget.FrameLayout(getContext());
+        if (parent != null) {
+            parent.addView(stack, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        buildToolbar(density);
+        buildTabPanel(density);
+        newTab();            // a blank tab so the toolbar always has an active view
+        setActiveTab(0);
+        stack.setVisibility(View.GONE);
+    }
+
+    // OKX-style toolbar: [ ← ] [ → ] [ address ....... ] [ ◆ net ] [ ⧉ n ] [ ⟳ ] [ ✕ ].
+    // Opaque, full-width band: the page is padded BELOW it (never under it) and
+    // the wallet dashboard can never bleed through it.
+    private void buildToolbar(final float density) {
         LinearLayout bar = new LinearLayout(getContext());
         bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setBackgroundColor(0xCC1A1A2E);
-        final float density = getActivity().getResources().getDisplayMetrics().density;
-        int navW = (int) (46 * density);
+        bar.setBackgroundColor(BAR_BG);
+        bar.setElevation(8 * density);
+        int navW = (int) (40 * density);
 
         backBtn = new Button(getContext());
         backBtn.setText("\u2190");
@@ -228,15 +231,38 @@ public class BearDappBrowserPlugin extends Plugin {
             return false;
         });
 
-        Button refreshBtn = new Button(getContext());
-        refreshBtn.setText("\u27F3");
-        refreshBtn.setContentDescription("dapp-reload");
-        refreshBtn.setAllCaps(false);
-        refreshBtn.setTextColor(0xFFFFFFFF);
-        refreshBtn.setBackgroundColor(0x00000000);
-        refreshBtn.setOnClickListener(v -> {
-            if (dappView != null) dappView.reload();
+        // ◆ Change network — the OKX/MetaMask chip. It never switches by
+        // itself: it asks the WALLET to open its own Networks picker (the
+        // wallet owns the network list). The answer comes back through
+        // setChain(), which updates this chip and tells every tab.
+        netBtn = new Button(getContext());
+        netBtn.setText("\u25C6");
+        netBtn.setContentDescription("dapp-network");
+        netBtn.setAllCaps(false);
+        netBtn.setTextColor(0xFFB9B9FF);
+        netBtn.setBackgroundColor(0x00000000);
+        netBtn.setOnClickListener(v -> {
+            JSObject ev = new JSObject();
+            ev.put("command", "openNetworkPicker");
+            notifyListeners("walletCommand", ev);
         });
+
+        // ⧉ Tabs — the count chip that opens the switcher sheet.
+        tabBtn = new Button(getContext());
+        tabBtn.setText("\u29C9 1");
+        tabBtn.setContentDescription("dapp-tabs");
+        tabBtn.setAllCaps(false);
+        tabBtn.setTextColor(0xFFFFFFFF);
+        tabBtn.setBackgroundColor(0x00000000);
+        tabBtn.setOnClickListener(v -> toggleTabPanel());
+
+        Button reloadBtn = new Button(getContext());
+        reloadBtn.setText("\u27F3");
+        reloadBtn.setContentDescription("dapp-reload");
+        reloadBtn.setAllCaps(false);
+        reloadBtn.setTextColor(0xFFFFFFFF);
+        reloadBtn.setBackgroundColor(0x00000000);
+        reloadBtn.setOnClickListener(v -> reloadActive());
 
         Button closeBtn = new Button(getContext());
         closeBtn.setText("\u2715");
@@ -247,27 +273,179 @@ public class BearDappBrowserPlugin extends Plugin {
         closeBtn.setOnClickListener(v -> doClose());
 
         int barH = (int) (48 * density); // fixed: layout math must not wait on measure timing
+        this.barH = barH;
         bar.addView(backBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         bar.addView(forwardBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         bar.addView(addressField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        bar.addView(refreshBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
+        bar.addView(netBtn, new LinearLayout.LayoutParams((int) (52 * density), ViewGroup.LayoutParams.MATCH_PARENT));
+        bar.addView(tabBtn, new LinearLayout.LayoutParams((int) (44 * density), ViewGroup.LayoutParams.MATCH_PARENT));
+        bar.addView(reloadBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         bar.addView(closeBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         toolbar = bar;
         if (parent != null) {
             parent.addView(toolbar, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barH));
         }
-        // Page content stays clear of the native overlay: shrink the WebView
-        // by the toolbar height instead of letting pages hide underneath it.
-        // Top padding — the toolbar is the top band, so the page starts BELOW it.
-        if (refreshLayout != null) refreshLayout.setPadding(0, barH, 0, 0);
         toolbar.setVisibility(View.GONE);
-        // The dApp page renders BELOW the toolbar: an overlaying bar sits on
-        // top of every dApp's own header (the fixture's title was under it in
-        // run 38032829356). Padding on refreshLayout itself — a margin through
-        // the parent's LayoutParams could be dropped whenever addView
-        // regenerates params; a view property survives re-adds.
+    }
+
+    // The tab sheet. Opaque, sits under the toolbar (padding top = barH) so the
+    // toolbar's back/close stay reachable while the user picks a tab.
+    private void buildTabPanel(final float density) {
+        LinearLayout panel = new LinearLayout(getContext());
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundColor(0xFF0E0E16);
+        panel.setPadding(0, barH, 0, 0);
+
+        android.widget.TextView h = new android.widget.TextView(getContext());
+        h.setText("Tabs");
+        h.setTextColor(0xFFFFFFFF);
+        h.setTextSize(16);
+        h.setPadding((int) (14 * density), 0, 0, 0);
+
+        Button add = new Button(getContext());
+        add.setText("+ New tab");
+        add.setAllCaps(false);
+        add.setTextColor(0xFFFFFFFF);
+        add.setBackgroundColor(0x00000000);
+        add.setContentDescription("dapp-tab-new");
+        add.setOnClickListener(v -> {
+            newTab();
+            setActiveTab(tabs.size() - 1);
+            closeTabPanel();
+        });
+
+        Button done = new Button(getContext());
+        done.setText("\u2715");
+        done.setAllCaps(false);
+        done.setTextColor(0xFFFFFFFF);
+        done.setBackgroundColor(0x00000000);
+        done.setContentDescription("dapp-tab-done");
+        done.setOnClickListener(v -> closeTabPanel());
+
+        LinearLayout head = new LinearLayout(getContext());
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.addView(h, new LinearLayout.LayoutParams(0, (int) (44 * density), 1));
+        head.addView(add, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (44 * density)));
+        head.addView(done, new LinearLayout.LayoutParams((int) (44 * density), (int) (44 * density)));
+        panel.addView(head, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (44 * density)));
+
+        tabList = new LinearLayout(getContext());
+        tabList.setOrientation(LinearLayout.VERTICAL);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(getContext());
+        scroll.addView(tabList, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        panel.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+
+        tabPanel = panel;
+        tabPanel.setVisibility(View.GONE);
+        if (parent != null) {
+            parent.addView(tabPanel, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+    }
+
+    private void toggleTabPanel() {
+        if (tabPanel == null) return;
+        if (tabPanel.getVisibility() == View.VISIBLE) closeTabPanel();
+        else openTabPanel();
+    }
+
+    private void closeTabPanel() {
+        if (tabPanel != null) tabPanel.setVisibility(View.GONE);
+    }
+
+    private void openTabPanel() {
+        if (tabPanel == null || tabList == null) return;
+        final float density = getActivity().getResources().getDisplayMetrics().density;
+        tabList.removeAllViews();
+        for (int i = 0; i < tabs.size(); i++) {
+            final int idx = i;
+            Tab t = tabs.get(i);
+            LinearLayout row = new LinearLayout(getContext());
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setBackgroundColor(i == activeTab ? 0xFF23233A : 0x00000000);
+            android.widget.TextView tv = new android.widget.TextView(getContext());
+            String title = (t.title != null && !t.title.isEmpty())
+                ? t.title
+                : (t.url != null && !t.url.isEmpty() ? t.url : "New tab");
+            tv.setText((i == activeTab ? "\u25CF " : "\u25CB ") + title);
+            tv.setTextColor(0xFFE6E6F0);
+            tv.setTextSize(14);
+            tv.setSingleLine(true);
+            tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            tv.setPadding((int) (14 * density), 0, 0, 0);
+            tv.setContentDescription("dapp-tab-row-" + i);
+            tv.setOnClickListener(v -> {
+                setActiveTab(idx);
+                closeTabPanel();
+            });
+            row.addView(tv, new LinearLayout.LayoutParams(0, (int) (52 * density), 1));
+
+            Button x = new Button(getContext());
+            x.setText("\u2715");
+            x.setAllCaps(false);
+            x.setTextColor(0xFFE6E6F0);
+            x.setBackgroundColor(0x00000000);
+            x.setContentDescription("dapp-tab-close-" + i);
+            x.setOnClickListener(v -> closeTab(idx));
+            row.addView(x, new LinearLayout.LayoutParams((int) (48 * density), (int) (52 * density)));
+
+            tabList.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (52 * density)));
+        }
+        tabPanel.setVisibility(View.VISIBLE);
+        tabPanel.bringToFront();
+        // Keep the toolbar tappable above the sheet (its own ✕ closes it too).
+        if (toolbar != null) toolbar.bringToFront();
+    }
+
+    /** Close one tab. The last tab is never closed — it is the browser's floor. */
+    private void closeTab(int i) {
+        if (i < 0 || i >= tabs.size()) return;
+        if (tabs.size() <= 1) { closeTabPanel(); return; }
+        Tab t = tabs.remove(i);
+        if (stack != null) stack.removeView(t.wrap);
+        try { t.view.destroy(); } catch (Throwable ignore) { /* already gone */ }
+        if (activeTab > i) activeTab -= 1;
+        else if (activeTab == i) activeTab = Math.min(i, tabs.size() - 1);
+        setActiveTab(activeTab);
+        openTabPanel(); // rebuild the sheet with the new set
+    }
+
+    private void setActiveTab(int i) {
+        if (i < 0 || i >= tabs.size()) return;
+        if (activeTab >= 0 && activeTab < tabs.size() && activeTab != i) {
+            tabs.get(activeTab).wrap.setVisibility(View.GONE);
+        }
+        activeTab = i;
+        Tab t = tabs.get(i);
+        dappView = t.view;
+        refreshLayout = t.wrap;
+        // Page content stays clear of the native toolbar: pad the wrapper by the
+        // bar height (a view property survives re-adds; a parent LayoutParams
+        // margin could be dropped on addView).
         refreshLayout.setPadding(0, barH, 0, 0);
-        refreshLayout.setVisibility(View.GONE);
+        refreshLayout.setVisibility(View.VISIBLE);
+        if (stack != null) refreshLayout.bringToFront();
+        currentUrl = t.url == null ? "" : t.url;   // the active tab owns the RPC origin
+        if (addressField != null) {
+            addressField.setText(t.url == null ? "" : t.url);
+            addressField.setBackgroundColor(ADDRESS_IDLE);
+        }
+        updateNavButtons();
+        if (tabBtn != null) tabBtn.setText("\u29C9 " + tabs.size());
+        if (tabPanel != null && tabPanel.getVisibility() == View.VISIBLE) openTabPanel();
+    }
+
+    /** History state on the native toolbar (main thread only). */
+    private void updateNavButtons() {
+        if (backBtn != null) {
+            boolean can = dappView != null && dappView.canGoBack();
+            backBtn.setEnabled(can);
+            backBtn.setAlpha(can ? 1f : 0.35f);
+        }
+        if (forwardBtn != null) {
+            boolean can = dappView != null && dappView.canGoForward();
+            forwardBtn.setEnabled(can);
+            forwardBtn.setAlpha(can ? 1f : 0.35f);
+        }
     }
 
     // Inject the provider on a lifecycle hook AND prove where it landed:
@@ -286,6 +464,86 @@ public class BearDappBrowserPlugin extends Plugin {
         view.evaluateJavascript(
             "(function(){try{return String(!!(window.ethereum&&window.ethereum.isBear));}catch(e){return 'ERR';}})()",
             value -> android.util.Log.d("BearDappBrowser", "inject@" + stage + "->" + value + " :: " + url));
+    }
+
+    /** Per-tab navigation lifecycle. Each tab has its own instance so the
+     *  hooks drive THAT tab's title/state, while the shared toolbar follows
+     *  only the active one. */
+    private class BrowserClient extends WebViewClient {
+        @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            Tab t = tabOf(view);
+            if (t != null) t.url = url == null ? "" : url;
+            // Only the ACTIVE tab owns the RPC origin (a background tab
+            // navigating must not rewrite the origin of the visible page).
+            if (view == dappView) {
+                currentUrl = url == null ? "" : url; // main thread — the ONLY writer the bridge thread reads
+                if (addressField != null) {
+                    addressField.setText(url == null ? "" : url);
+                    addressField.setBackgroundColor(ADDRESS_LOADING);
+                }
+                updateNavButtons();
+            }
+            injectProvider(view, "start", url);
+            JSObject ev = new JSObject();
+            ev.put("event", "loadStart");
+            ev.put("url", url);
+            notifyListeners("navigation", ev);
+        }
+
+        @Override
+        public void onPageCommitVisible(WebView view, String url) {
+            // THE RACE-CLOSER (run 38047794274): onPageStarted is
+            // PRE-commit — its evaluateJavascript can execute against the
+            // OLD document (fixture parsed with window.ethereum missing
+            // while the previous run injected fine: a race, not a bug).
+            // onPageFinished is post-parser — too late for dApps that read
+            // window.ethereum at parse time. onPageCommitVisible fires once
+            // the NEW document has committed and the parser is still
+            // waiting on the network: provider lands BEFORE the dApp's own
+            // scripts, deterministically. Idempotent script makes the
+            // triple injection safe on every navigation.
+            injectProvider(view, "commit", url);
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            Tab t = tabOf(view);
+            if (t != null) {
+                t.url = url == null ? "" : url;
+                t.title = view.getTitle() == null ? "" : view.getTitle();
+            }
+            injectProvider(view, "finish", url);
+            if (view == dappView) {
+                // Address bar settles: idle tint, live back/forward state.
+                if (addressField != null) {
+                    addressField.setText(url == null ? "" : url);
+                    addressField.setBackgroundColor(ADDRESS_IDLE);
+                }
+                updateNavButtons();
+            }
+            if (t != null && t.wrap != null) t.wrap.setRefreshing(false); // pull-to-refresh spinner stops once the page lands
+            JSObject ev = new JSObject();
+            ev.put("event", "loadEnd");
+            ev.put("url", url);
+            notifyListeners("navigation", ev);
+        }
+
+        @Override
+        public void onReceivedTitle(WebView view, String title) {
+            Tab t = tabOf(view);
+            if (t != null) t.title = title == null ? "" : title;
+        }
+
+        @Override
+        public void onReceivedError(WebView view, android.webkit.WebResourceRequest request, android.webkit.WebResourceError error) {
+            if (!request.isForMainFrame()) return;
+            JSObject ev = new JSObject();
+            ev.put("event", "loadError");
+            ev.put("url", request.getUrl().toString());
+            ev.put("description", String.valueOf(error.getDescription()));
+            notifyListeners("navigation", ev);
+        }
     }
 
     @PluginMethod
@@ -314,16 +572,25 @@ public class BearDappBrowserPlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             try {
                 if (dappView == null) createView();
-                if (parent != null && refreshLayout.getParent() == null) {
-                    parent.addView(refreshLayout, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                if (parent != null && stack != null && stack.getParent() == null) {
+                    parent.addView(stack, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
                 }
-                refreshLayout.setVisibility(View.VISIBLE);
-                refreshLayout.bringToFront();
+                if (stack != null) {
+                    stack.setVisibility(View.VISIBLE);
+                    stack.bringToFront();
+                }
+                if (refreshLayout != null) {
+                    refreshLayout.setVisibility(View.VISIBLE);
+                    refreshLayout.bringToFront();
+                }
                 if (toolbar != null) {
                     toolbar.setVisibility(View.VISIBLE);
                     toolbar.bringToFront(); // above the dapp view, always
                 }
                 dappView.setVisibility(View.VISIBLE);
+                // The ACTIVE tab is the destination — the E2E and card taps
+                // both expect one obvious view, and tabs are opened explicitly
+                // by the user ("+ New tab"), never implicitly per navigation.
                 dappView.loadUrl(url);
                 JSObject ret = new JSObject();
                 ret.put("ok", true);
@@ -379,21 +646,9 @@ public class BearDappBrowserPlugin extends Plugin {
         dappView.loadUrl(url);
     }
 
-    /** Reflect WebView history state on the native toolbar (main thread only). */
-    private void updateNavButtons() {
-        if (backBtn != null) {
-            boolean can = dappView != null && dappView.canGoBack();
-            backBtn.setEnabled(can);
-            backBtn.setAlpha(can ? 1f : 0.35f);
-        }
-        if (forwardBtn != null) {
-            boolean can = dappView != null && dappView.canGoForward();
-            forwardBtn.setEnabled(can);
-            forwardBtn.setAlpha(can ? 1f : 0.35f);
-        }
-    }
-
     private void hideDappView() {
+        closeTabPanel();
+        if (stack != null) stack.setVisibility(View.GONE);
         if (refreshLayout != null) {
             refreshLayout.setRefreshing(false);
             refreshLayout.setVisibility(View.GONE);
@@ -418,6 +673,7 @@ public class BearDappBrowserPlugin extends Plugin {
         Boolean visible = call.getBoolean("visible", false);
         getActivity().runOnUiThread(() -> {
             if (dappView != null) {
+                if (stack != null) stack.setVisibility(visible ? View.VISIBLE : View.GONE);
                 if (refreshLayout != null) {
                     refreshLayout.setVisibility(visible ? View.VISIBLE : View.GONE);
                     if (visible) refreshLayout.bringToFront();
@@ -425,6 +681,34 @@ public class BearDappBrowserPlugin extends Plugin {
                 if (toolbar != null) {
                     toolbar.setVisibility(visible ? View.VISIBLE : View.GONE);
                     if (visible) toolbar.bringToFront(); // toolbar stays topmost
+                }
+                if (!visible && tabPanel != null) tabPanel.setVisibility(View.GONE);
+            }
+            call.resolve();
+        });
+    }
+
+    /**
+     * Wallet → native: the active chain changed (the user picked a network in
+     * the wallet's picker, or a dApp switched it). Update the ◆ chip and fire
+     * EIP-1193 chainChanged into EVERY open tab, so a dApp listening on
+     * window.ethereum hears the move exactly once.
+     */
+    @PluginMethod
+    public void setChain(PluginCall call) {
+        String label = call.getString("label", "");
+        final String chainHex = call.getString("chainId", "");
+        getActivity().runOnUiThread(() -> {
+            if (netBtn != null && label != null && !label.isEmpty()) netBtn.setText(label);
+            // chainHex is wallet-supplied (trusted) but still validated before
+            // it is embedded in evaluateJavascript: only a 0x-hex literal
+            // reaches the page — never an arbitrary string.
+            if (chainHex != null && chainHex.matches("0x[0-9a-fA-F]+")) {
+                final String js = "(function(){try{if(window.__bearNativeNotify)"
+                    + "window.__bearNativeNotify({event:'chainChanged',data:'" + chainHex + "'});"
+                    + "return 'ok';}catch(e){return 'ERR';}})()";
+                for (Tab t : tabs) {
+                    try { t.view.evaluateJavascript(js, null); } catch (Throwable ignore) { /* tab gone */ }
                 }
             }
             call.resolve();
@@ -490,10 +774,15 @@ public class BearDappBrowserPlugin extends Plugin {
     @Override
     protected void handleOnDestroy() {
         getActivity().runOnUiThread(() -> {
-            if (dappView != null) {
-                dappView.destroy();
-                dappView = null;
+            for (Tab t : tabs) {
+                if (t.view != null) {
+                    t.view.destroy();
+                    t.view = null;
+                }
             }
+            tabs.clear();
+            dappView = null;
+            refreshLayout = null;
         });
         super.handleOnDestroy();
     }

@@ -5,7 +5,7 @@
 // is js/dapp-safety.js and the session/permission store is js/dapp-sessions.js.
 // ═══════════════════════════════════════════════════════════════
 
-import { escapeHtml, dappMark } from './ui.js';
+import { escapeHtml, dappMark, dappLogo } from './ui.js';
 import { openDappBrowser as openInBrowser, openDappHome, openExternalNotice, initDappBrowser } from './dapp-browser.js';
 import { classifyInput, inspectUrl, baseHost, VERDICT } from './dapp-safety.js';
 import { listBlocked, listTrusted } from './dapp-sessions.js';
@@ -131,7 +131,7 @@ export function renderDapps(container) {
          data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}"
          data-frameable="${native || d.frameable ? '1' : '0'}" data-category="${escapeHtml(d.category)}"
          aria-label="${escapeHtml(d.name)}, ${escapeHtml(d.category)}${native || d.frameable ? '' : ', opens in a new tab'}">
-      <div class="dapp-icon" style="--cat:${catStyle(d.category).color}">${dappMark(d.name, catStyle(d.category).color, 44)}</div>
+      <div class="dapp-icon" style="--cat:${catStyle(d.category).color}">${dappMark(d.name, catStyle(d.category).color, 44)}${dappLogo(d.url)}</div>
       <div class="dapp-name">${escapeHtml(d.name)}</div>
       <div class="dapp-category">${escapeHtml(d.category)}</div>
       <div class="dapp-frame-note">${native || d.frameable ? 'In-app' : '↗ New tab'}</div>
