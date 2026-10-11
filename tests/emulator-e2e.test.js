@@ -184,7 +184,15 @@ test('the driver drives the native dApp browser end to end — open, confirm, re
   // The sheet question is answered by what the SCREEN shows, not what the DOM
   // holds: a CDP click would work even behind the overlay.
   assert.match(driverSrc, /shotScreen\('06-dapp-connect-sheet'\)/, 'bukti jangkauan sheet = tangkapan layar SELURUH layar');
-  assert.match(driverSrc, /sheetVisibility !== 'visible'/, 'dApp WAJIB TETAP TERLIHAT saat sheet tampil — flash-to-wallet = bug (user report "pas connect langsung keluar")');
+  // ...and "what the screen shows" is now read from the NATIVE VIEW TREE: a
+  // gate on the page's document.visibilityState could NEVER fail — measured on
+  // run 38161736957, the dApp page still reports 'visible' with its overlay
+  // GONE (that is what hid the deep-link pair sheet from its own test).
+  assert.match(driverSrc, /sheetView = await browserState\(\)/, 'visibilitas dApp dibaca dari view tree native');
+  assert.match(driverSrc, /!report\.dapp\.sheetView \|\| report\.dapp\.sheetView\.visible !== true/,
+    'dApp WAJIB TETAP TERLIHAT saat sheet native tampil — flash-to-wallet = bug (user report "pas connect langsung keluar")');
+  assert.doesNotMatch(driverSrc, /sheetVisibility !== 'visible'/,
+    'gate lama (visibilityState halaman) = gate palsu, dilarang kembali');
   // The account row cross-check ties the sheet (native layer) to the fixture.
   assert.match(driverSrc, /accountMatchesModal/, 'akun fixture wajib cocok dengan akun yang ditampilkan sheet native');
   // Read the sheet's own "Account" row, not the first 0x… on screen: the

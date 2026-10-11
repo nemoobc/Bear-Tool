@@ -371,6 +371,19 @@ async function main() {
 
   const page = makePage(cdp);
 
+  // Can the user SEE the wallet chrome, or does the native browser own the
+  // screen? No page target can answer that — the overlay is a sibling native
+  // view. Measured 2026-10-11 (run 38161736957): the dApp page keeps reporting
+  // document.visibilityState === 'visible' even with its overlay GONE, so a
+  // gate built on that can never fail (a fake gate). The plugin's viewState()
+  // reports stack.getVisibility() — the view tree itself. Returns null-ish on
+  // a build without the probe; callers decide how hard to insist.
+  const browserState = () => page.evaluate(`(async () => {
+    const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BearDappBrowser;
+    if (!p || typeof p.viewState !== 'function') return { unsupported: true };
+    return await p.viewState({});
+  })()`).catch((e) => ({ probeFailed: String(e.message) }));
+
   try {
   step('boot: welcome screen');
   // 60s, not 30: a busy fleet boots slowly and #wCreate lagged past 30s on
@@ -551,11 +564,15 @@ async function main() {
     if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('native connect sheet never appeared');
     // The dApp must STILL be visible: the sheet renders natively above the
     // page, exactly like OKX — no flash-to-wallet (user report "pas connect
-    // langsung keluar").
+    // langsung keluar"). The witness is the native view tree; the page's own
+    // visibilityState is recorded as a cross-read only (it does NOT flip when
+    // the overlay is hidden — see browserState).
     report.dapp.sheetVisibility = await dpage.evaluate('document.visibilityState').catch(() => '?');
+    report.dapp.sheetView = await browserState();
     report.dapp.sheetTexts = await readSheetTexts();
-    if (report.dapp.sheetVisibility !== 'visible') {
-      throw new Error('dApp was hidden under the connect sheet: ' + report.dapp.sheetVisibility);
+    if (!report.dapp.sheetView || report.dapp.sheetView.visible !== true) {
+      throw new Error('dApp was hidden under the connect sheet: ' + JSON.stringify(report.dapp.sheetView)
+        + ' (page visibilityState=' + report.dapp.sheetVisibility + ')');
     }
     if (!report.dapp.sheetTexts.some((t) => /Connect/.test(t))) {
       throw new Error('native sheet has no Connect title: ' + JSON.stringify(report.dapp.sheetTexts));
@@ -656,6 +673,10 @@ async function main() {
     // the native sheet for personal_sign arrives right after the fixture asks.
     if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('sign sheet never appeared');
     report.dapp.signVisibility = await dpage.evaluate('document.visibilityState').catch(() => '?');
+    report.dapp.signView = await browserState();
+    if (!report.dapp.signView || report.dapp.signView.visible !== true) {
+      throw new Error('dApp was hidden under the sign sheet: ' + JSON.stringify(report.dapp.signView));
+    }
     await shotScreen('09-sign-sheet');
     if (!(await tapNativeButton('dapp-confirm-ok')) && !tapReportedRect('confirm-ok-rect')) throw new Error('sign confirm did not tap');
     text = await pollOut(/personalSign=0x|error=|done=/, 60000);
@@ -920,11 +941,14 @@ async function main() {
       wcSheet = await page.evaluate(`(function () {
         var i = document.getElementById('wcPairUri');
         var g = document.getElementById('wcPairGo');
-        return { present: !!(i && g), value: i ? String(i.value) : '' };
+        var ov = document.querySelector('#modalOverlay.open');
+        return { present: !!(i && g && ov), open: !!ov, value: i ? String(i.value) : '' };
       })()`).catch(() => null);
       if (!(wcSheet && wcSheet.present)) await sleep(500);
     }
     report.wcDeepLink.sheet = wcSheet;
+    // present = the sheet is IN the DOM *and* the overlay is OPEN: closeModal
+    // leaves the markup behind, so presence alone could be a leftover.
     if (!wcSheet || !wcSheet.present) throw new Error('a wc: deep link opened no pair sheet: ' + JSON.stringify(wcSheet));
     if (wcSheet.value !== wcUri) {
       throw new Error('the pair sheet opened without the URI: ' + JSON.stringify(String(wcSheet.value).slice(0, 60)));
@@ -937,11 +961,8 @@ async function main() {
     // document.visibilityState as a second, independent signal.
     step('walletconnect: the native browser steps aside for the sheet — and comes back');
     const readBrowser = async () => {
-      const native = await page.evaluate(`(async () => {
-        const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BearDappBrowser;
-        if (!p || typeof p.viewState !== 'function') return { unsupported: true };
-        return await p.viewState({});
-      })()`).catch((e) => ({ probeFailed: String(e.message) }));
+      // Diagnostic cross-read only — the page does NOT flip to 'hidden' when
+      // the overlay is GONE (measured 2026-10-11), so it is evidence, not a gate.
       let dappVisibility = 'target-gone';
       try {
         if ((await cdpTargetUrls()).some((u) => u.includes('dapp-rpc-fixture'))) {
@@ -950,7 +971,7 @@ async function main() {
           finally { try { c.close(); } catch { /* already gone */ } }
         }
       } catch (e) { dappVisibility = 'probe-failed: ' + e.message; }
-      return { native, dappVisibility };
+      return { native: await browserState(), dappVisibility };
     };
     const withSheet = await readBrowser();
     report.wcDeepLink.withSheet = withSheet;

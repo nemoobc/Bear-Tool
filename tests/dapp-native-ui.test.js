@@ -737,10 +737,14 @@ test('the E2E proves the wc: deep link the way a listing uses it: OS resolves, s
     'sheet wajib BENAR-BENAR di atas layar (plugin viewState, bukan DOM)');
   assert.match(region, /afterCancel\.native\.visible !== true/,
     'browser wajib kembali setelah sheet ditutup (restore hilang = dompet tanpa browser)');
-  assert.match(region, /viewState\(\{\}\)/,
-    'bukti visibilitas diambil dari hierarki view native, bukan dari klaim app');
+  assert.match(dcode, /const browserState = \(\) => page\.evaluate[\s\S]{0,400}viewState\(\{\}\)/,
+    'bukti visibilitas diambil dari hierarki view native (plugin.viewState), bukan dari klaim app');
+  assert.match(region, /native: await browserState\(\)/,
+    'langkah deep-link memakai probe view tree yang sama');
   assert.match(region, /document\.visibilityState/,
-    'sinyal kedua: halaman dApp sendiri melaporkan tersembunyi');
+    'pembacaan silang tetap ikut laporan — TAPI diagnostik, bukan gate (halaman tak pernah flip ke hidden)');
+  assert.match(region, /ov = document\.querySelector\('#modalOverlay\.open'\)/,
+    'sheet dianggap terbuka hanya bila overlay BENAR-BENAR open — closeModal menyisakan markup-nya');
   // The plugin method the driver calls must exist and answer from the VIEW tree.
   assert.match(java, /public void viewState\(PluginCall call\)/,
     'plugin.viewState = satu-satunya saksi visibilitas nyata');
