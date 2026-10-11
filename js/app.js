@@ -2428,11 +2428,16 @@ function nonEvmReceiveRows() {
   ];
   return meta.map(([key, name, sym, glyph]) => {
     const row = addrs[key] || {};
-    return { key, name, sym, glyph, address: row.receive || null, reason: row.unsupported || null };
+    return {
+      key, name, sym, glyph,
+      address: row.receive || null,
+      reason: row.unsupported || null,
+      destinationTag: row.destinationTag,
+    };
   });
 }
 
-function receiveAddressCard({ label, sublabel, addr, reason }) {
+function receiveAddressCard({ label, sublabel, addr, reason, tag }) {
   if (!addr) {
     return `<div class="receive-chain mb-12">
       <div class="receive-chain-head"><strong>${escapeHtml(label)}</strong></div>
@@ -2450,10 +2455,23 @@ function receiveAddressCard({ label, sublabel, addr, reason }) {
     } catch { /* QR unavailable — the address is still shown below */ }
     return '';
   })();
+  // XRP only. Most exchanges ask for "Address" and "Tag" in SEPARATE boxes and
+  // credit the wrong one (or none) — so the tag is its own labelled row with
+  // its own copy button, not a footnote under the address. It is stable for the
+  // life of the account by construction (derived from the key, not a counter).
+  const tagRow = (tag !== undefined && tag !== null && tag !== '')
+    ? `<div class="receive-tag-row">
+         <span class="receive-tag-label">Destination tag</span>
+         <span class="mono receive-tag-value">${escapeHtml(String(tag))}</span>
+         <button class="copy-btn btn btn-ghost btn-sm" data-copy="${escapeHtml(String(tag))}"
+           aria-label="Copy destination tag for ${escapeHtml(label)}">Copy tag</button>
+       </div>`
+    : '';
   return `<div class="receive-chain mb-12">
     <div class="receive-chain-head"><strong>${escapeHtml(label)}</strong>${sublabel ? `<span class="receive-chain-sub">${escapeHtml(sublabel)}</span>` : ''}</div>
     ${qr}
     <div class="mono receive-addr" style="word-break:break-all;padding:10px;border-radius:8px">${escapeHtml(addr)}</div>
+    ${tagRow}
     <button class="copy-btn btn btn-secondary btn-block" data-copy="${escapeHtml(addr)}">Copy ${escapeHtml(label)} address</button>
   </div>`;
 }
@@ -2479,7 +2497,9 @@ function showReceiveModal(address, symbol) {
   const chainsHtml = chains.length ? `
     <hr class="receive-divider" />
     <h3 class="receive-other-title">Other chains — same recovery phrase</h3>
-    ${chains.map((c) => receiveAddressCard({ label: c.name, sublabel: c.sym, addr: c.address, reason: c.reason })).join('')}
+    ${chains.map((c) => receiveAddressCard({
+      label: c.name, sublabel: c.sym, addr: c.address, reason: c.reason, tag: c.destinationTag,
+    })).join('')}
   ` : '';
 
   openModal(`

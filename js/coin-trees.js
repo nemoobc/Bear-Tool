@@ -532,6 +532,110 @@ function ed25519PublicKey(privateKey32) {
   return edEncodePoint(Pt);
 }
 
+// ── deposit memo / tag ──────────────────────────────────────────────────
+// An address alone is not always a complete deposit instruction, and getting
+// this wrong is a well-known way to lose money on arrival.
+//
+// XRP — many exchanges REQUIRE a DestinationTag (a uint32) alongside the
+//   address, because the tag is what tells them which of your deposits this
+//   is. Funds sent to an address with the wrong or missing tag are often
+//   uncredited and effectively gone. The tag MUST be stable: derive it from the
+//   account's own key material, never from a timestamp or a counter, or the tag
+//   printed yesterday stops matching today's and a deposit lands nowhere.
+//
+// Bitcoin — no memo exists on-chain. The equivalent is BIP-21: a
+//   `bitcoin:<addr>?amount=…&label=…` URI that carries the request, so a
+//   payment app can prefill it. The address on its own is still what you paste.
+//
+// Solana — there is no destination tag on Solana; deposits are routed by
+//   address alone. Some services accept an optional memo, so one is exposed,
+//   but it is NOT presented as mandatory, because on Solana it usually isn't.
+
+const TAG_SALT = utf8('bear.tool/xrp-destination-tag');
+
+/**
+ * A stable DestinationTag for an XRP account.
+ * Deterministic in (seed, index): the same account always shows the same tag,
+ * which is the entire point — a tag that moves between sessions is how funds
+ * get stranded on an exchange.
+ */
+export function xrpDestinationTag(seed, index = 0) {
+  const { accountId } = xrpAddresses(seed, index);
+  const h = ethers.getBytes(ethers.sha256(ethers.concat([
+    ethers.getBytes(accountId), TAG_SALT,
+  ])));
+  // Read a uint32 from the digest. 0 is the wire value for "no tag", and a few
+  // exchanges treat 0 as an error, so nudge it out of the way.
+  let tag = ((h[0] << 24) | (h[1] << 16) | (h[2] << 8) | h[3]) >>> 0;
+  if (tag === 0) tag = 1;
+  return tag;
+}
+
+// BIP-173/BIP-21 query values are percent-encoded; an unescaped "&" or "?" in a
+// label silently truncates the URI into a different (wrong) payment request.
+function encodeQueryComponent(value) {
+  return encodeURIComponent(String(value))
+    .replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+}
+
+/**
+ * BIP-21 payment request. `amount` is in BTC (decimal), not satoshis — the
+ * spec's amount parameter is a decimal BTC value, and passing satoshis here is
+ * a classic way to request 100000000× the intended amount.
+ */
+export function btcPaymentUri({ address, amount, label, message } = {}) {
+  if (!address) throw new Error('bitcoin: address required');
+  const params = [];
+  const hasAmount = amount !== undefined && amount !== null && amount !== '';
+  if (hasAmount) {
+    // A malformed amount used to be silently DROPPED, so a typo produced a URI
+    // with no amount at all and the payer filled in their own number — the
+    // request silently stopped meaning what was typed. Refuse instead.
+    if (!Number.isFinite(Number(amount))) {
+      throw new Error('bitcoin: amount must be a positive number of BTC');
+    }
+    params.push('amount=' + encodeQueryComponent(normaliseBtcAmount(amount)));
+  }
+  if (label) params.push('label=' + encodeQueryComponent(label));
+  if (message) params.push('message=' + encodeQueryComponent(message));
+  return 'bitcoin:' + address + (params.length ? '?' + params.join('&') : '');
+}
+
+/** Decimal BTC with no exponent and at most 8 places (1 satoshi). */
+function normaliseBtcAmount(amount) {
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) throw new Error('bitcoin: amount must be a positive number');
+  return n.toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+/**
+ * An xrpl: URI carrying the DestinationTag. Not every wallet reads it, which
+ * is exactly why the UI also shows the tag as its own copyable field — an
+ * exchange deposit form asks for "Tag" and "Address" in separate boxes.
+ */
+export function xrpPaymentUri({ address, tag, amount, memo } = {}) {
+  if (!address) throw new Error('xrp: address required');
+  const params = [];
+  if (tag !== undefined && tag !== null && tag !== '') {
+    const t = Number(tag);
+    if (!Number.isInteger(t) || t < 0 || t > 0xffffffff) {
+      throw new Error('xrp: DestinationTag must be a uint32');
+    }
+    params.push('dt=' + t);
+  }
+  if (amount !== undefined && amount !== null && amount !== '') {
+    params.push('amount=' + encodeQueryComponent(amount));
+  }
+  if (memo) params.push('memo=' + encodeQueryComponent(memo));
+  return 'xrpl:' + address + (params.length ? '?' + params.join('&') : '');
+}
+
+/** Solana: address only. A memo is optional and presented as such. */
+export function solanaMemoUri({ address, memo } = {}) {
+  if (!address) throw new Error('solana: address required');
+  return 'solana:' + address + (memo ? '?memo=' + encodeQueryComponent(memo) : '');
+}
+
 // ── one entry point for the rest of the app ─────────────────────────────
 /**
  * Every non-EVM address for one account, derived from the same seed the
@@ -544,7 +648,7 @@ export function nonEvmAddresses(seed, index = 0) {
   const sol = solanaAddress(seed, index);
   return {
     bitcoin: { receive: btc.nativeSegwit, legacy: btc.legacy, xpub: btc.xpub },
-    xrp: { receive: xrp.classic },
+    xrp: { receive: xrp.classic, destinationTag: xrpDestinationTag(seed, index) },
     solana: { receive: sol.address },
   };
 }

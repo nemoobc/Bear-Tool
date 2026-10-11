@@ -478,6 +478,27 @@ body::before {
   background: var(--cream);
   margin-bottom: 10px;
 }
+/* XRP's DestinationTag sits BESIDE the address, not under it: exchange deposit
+   forms put "Tag" in its own box, and sending without the right one is a
+   well-known way to have a deposit go uncredited. */
+.receive-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.receive-tag-label {
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+.receive-tag-value {
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--cream);
+}
 /* A chain that is not enabled yet must READ as unavailable, not as an
    empty broken card — and it must not sit next to a copy button. */
 .receive-chain-off {

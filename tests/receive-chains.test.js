@@ -70,9 +70,27 @@ test('each chain is its own card, with its own copy button and QR', () => {
     'QR diberi label yang menyebut chain-nya (a11y)');
 });
 
+test('an XRP deposit shows its DestinationTag as its own copyable field', () => {
+  // Exchanges put "Tag" in a separate box from "Address", and a deposit sent
+  // with the wrong tag is routinely uncredited. The tag must therefore be a
+  // labelled row with its OWN copy button, not a footnote — and it must come
+  // from the derivation, never be typed or counted.
+  const rows = slice('function nonEvmReceiveRows()', 'function receiveAddressCard');
+  assert.match(rows, /destinationTag: row\.destinationTag/, 'tag diteruskan ke kartu');
+  const card = slice('function receiveAddressCard', 'function showReceiveModal');
+  assert.match(card, /tag !== undefined && tag !== null && tag !== ''/, 'hanya tampil kalau ada');
+  assert.match(card, /receive-tag-label">Destination tag</, 'ada label yang menyebut "Destination tag"');
+  assert.match(card, /data-copy="\$\{escapeHtml\(String\(tag\)\)\}"/, 'tag punya tombol copy sendiri');
+  assert.match(card, /aria-label="Copy destination tag for/, 'tombol tag punya nama yang bisa dibaca screen reader');
+  // The chain map must pass the tag through, not swallow it.
+  assert.match(app, /receiveAddressCard\(\{\s*\n\s*label: c\.name, sublabel: c\.sym, addr: c\.address, reason: c\.reason, tag: c\.destinationTag,/,
+    'showReceiveModal meneruskan tag ke kartu');
+});
+
 test('the styles those cards rely on exist', () => {
   for (const sel of ['.receive-chain', '.receive-chain-head', '.receive-chain-sub',
-    '.receive-addr', '.receive-chain-off', '.receive-divider', '.receive-other-title']) {
+    '.receive-addr', '.receive-chain-off', '.receive-divider', '.receive-other-title',
+    '.receive-tag-row', '.receive-tag-label', '.receive-tag-value']) {
     assert.ok(css.includes(sel), `css/cartoon.css harus punya ${sel}`);
   }
   // Long bech32/XRP addresses must not push a copy button off a narrow phone.
