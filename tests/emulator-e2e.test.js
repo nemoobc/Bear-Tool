@@ -170,6 +170,15 @@ test('the driver drives the native dApp browser end to end — open, confirm, re
   assert.match(driverSrc, /connectCDP\('10\.0\.2\.2:8080'\)/, 'hasil fixture dibaca dari target CDP KEDUA (halaman dapp)');
   assert.match(driverSrc, /tapNativeButton\('dapp-back'\)/, 'kembali = tap tombol NATIVE asli lewat uiautomator — CDP tak melihat di luar WebView');
   assert.match(driverSrc, /hasProvider=true/, 'rantai bukti: provider ter-inject');
+  // A local page parses before any queued evaluateJavascript, so a HEALTHY
+  // late wallet records hasProvider=false then providerLate=N. Requiring the
+  // literal hasProvider=true failed run 38131950877 where connect worked
+  // perfectly (account0 + done=ok both present). The provider counts as seen
+  // either way; account0 + done=ok remain the load-bearing proof.
+  assert.match(driverSrc, /providerSeen = \/hasProvider=true\/\.test\(log\) \|\| \/providerLate=\\d\+\/\.test\(log\)/,
+    'provider yang datang terlambat tetap dihitung "ada", bukan gagal');
+  assert.match(driverSrc, /account0=0x[\s\S]{0,120}done=ok/,
+    'bukti connect yang memikulnya: akun sampai + perjalanan selesai');
   assert.match(driverSrc, /account0=0x/, 'rantai bukti: akun dari konfirmasi');
   assert.match(driverSrc, /done=ok/, 'rantai bukti: siklus penuh selesai');
   // The sheet question is answered by what the SCREEN shows, not what the DOM

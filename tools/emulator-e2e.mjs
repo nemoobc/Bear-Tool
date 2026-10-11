@@ -570,8 +570,19 @@ async function main() {
     drainDapp();
     report.dapp.log = String(text).slice(0, 500);
     report.dapp.console = dappEvents.slice(0, 20);
-    for (const key of ['hasProvider=true', 'chainId=0x', 'account0=0x', 'accountsAgain=0x', 'done=ok']) {
-      if (!String(text).includes(key)) throw new Error(`fixture log missing ${key}:\n${text}`);
+    // `hasProvider` is sampled the instant the fixture's own parser runs, which a
+    // local page beats on its way to every queued evaluateJavascript — so a
+    // healthy late wallet legitimately records `hasProvider=false` and then
+    // `providerLate=50` (the fixture waits up to 3s and RECORDS the lateness,
+    // see public/dapp-rpc-fixture.html). Demanding the literal `hasProvider=true`
+    // failed a run where the connect worked perfectly — account0 and done=ok
+    // were both there. The provider is present if it was seen at any point; the
+    // load-bearing proof that connect really worked stays `account0` + `done=ok`.
+    const log = String(text);
+    const providerSeen = /hasProvider=true/.test(log) || /providerLate=\d+/.test(log);
+    if (!providerSeen) throw new Error(`fixture never saw a provider at all:\n${log}`);
+    for (const key of ['chainId=0x', 'account0=0x', 'accountsAgain=0x', 'done=ok']) {
+      if (!log.includes(key)) throw new Error(`fixture log missing ${key}:\n${log}`);
     }
     // The account the fixture received must be the account the native sheet
     // showed (shortAddr 0x1234…abcd — read from the uiautomator dump, the only
@@ -654,8 +665,11 @@ async function main() {
     if (!/blockNumber=0x[0-9a-fA-F]+/.test(String(text))) throw new Error(`read forwarding (eth_blockNumber) failed:\n${text}`);
     text = await pollOut(/done=/, 30000);
     report.dapp.signLog = String(text).slice(0, 600);
-    for (const key of ['hasProvider=true', 'chainId=0x', 'blockNumber=0x', 'done=ok']) {
-      if (!String(text).includes(key)) throw new Error(`sign fixture log missing ${key}:\n${text}`);
+    const signLog = String(text);
+    const signProviderSeen = /hasProvider=true/.test(signLog) || /providerLate=\d+/.test(signLog);
+    if (!signProviderSeen) throw new Error(`sign fixture never saw a provider:\n${signLog}`);
+    for (const key of ['chainId=0x', 'blockNumber=0x', 'done=ok']) {
+      if (!signLog.includes(key)) throw new Error(`sign fixture log missing ${key}:\n${signLog}`);
     }
     await dpage.shot('11-sign-done').catch(() => {});
     await shotScreen('11-sign-done-screen');
