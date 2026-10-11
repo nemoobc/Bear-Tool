@@ -218,8 +218,8 @@ test('dapps: kartu menaruh logo ASLI dari host situs di atas tile-mark (fallback
     'sumber pertama = apple-touch-icon situs (biasanya 180px, tajam)');
   assert.match(uiSrc, /data-logo-fb="https:\/\/\$\{h\}\/favicon\.ico"/,
     'rantai fallback kedua = favicon.ico host yang sama');
-  assert.match(uiSrc, /else\{this\.remove\(\);\}/,
-    'kalau dua-duanya gagal, <img> hapus diri → tile-mark di bawahnya tampil');
+  assert.match(uiSrc, /else\{this\.style\.display='none';\}/,
+    'kalau dua-duanya gagal, <img> DISEMBUNYIKAN (bukan dihapus) → tile-mark di bawahnya tampil');
   assert.match(uiSrc, /referrerpolicy="no-referrer"/,
     'jangan bocorkan wallet sebagai referer ke host dApp');
   // Domain di-escape, dan kedua tampilan memasang logo itu di dalam tile.

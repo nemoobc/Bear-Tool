@@ -51,9 +51,9 @@ function httpGet(url) {
   });
 }
 
-// External APIs (KyberSwap/LI.FI/CoinGecko) rate-limit under CI load (503).
-// Retry with backoff so a transient 503 does not fail the gate; a persistent
-// 503 after all attempts is a real outage and still fails loudly.
+// External APIs (KyberSwap/LI.FI/Binance/DexScreener) rate-limit under CI load
+// (503/429). Retry with backoff so a transient 503 does not fail the gate; a
+// persistent 503 after all attempts is a real outage and still fails loudly.
 async function httpGetRetry(url, attempts = 3, delayMs = 2000) {
   let last;
   for (let i = 0; i < attempts; i++) {
@@ -143,7 +143,7 @@ test('E2E-probe: i18n toggle EN → ID changes labels', () => {
   i18n.setLang('en');
 });
 
-// ── 6. Real API probes (KyberSwap / LI.FI / CoinGecko) ──
+// ── 6. Real API probes (KyberSwap / LI.FI / Binance / DexScreener) ──
 test('E2E-probe: KyberSwap quote API returns real route (ETH→USDC, mainnet)', async (t) => {
   const url = 'https://aggregator-api.kyberswap.com/ethereum/api/v1/routes?tokenIn=0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE&tokenOut=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48&amountIn=1000000000000000000';
     const res = await httpGetRetry(url);
@@ -226,18 +226,31 @@ test('E2E-probe: the app degrades honestly when LI.FI has no route', async () =>
     'no code path may ever produce a simulated quote');
 });
 
-test('E2E-probe: CoinGecko native price API works (dashboard USD)', async (t) => {
-  const res = await httpGetRetry('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
-  // 429 is CoinGecko's rate limit, not a defect in this app. Everything else in
-  // the suite mocks CoinGecko; this probe hits the live API, so it must degrade
-  // to an honest skip instead of failing whenever a shared IP is throttled.
-  if (res.status === 429) {
-    return t.skip('CoinGecko rate limit (429) — live probe, not a code failure');
+test('E2E-probe: keyless price sources work (native + token, dashboard USD)', async (t) => {
+  // Binance spot ticker is what js/price.js asks for a native coin's price.
+  const res = await httpGetRetry('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT');
+  // 429 = rate limit, 451 = region block. Neither is a defect in this app;
+  // everything else in the suite mocks these hosts, so this live probe must
+  // degrade to an honest skip instead of failing a shared/blocked CI IP.
+  if (res.status === 429 || res.status === 451) {
+    return t.skip(`Binance ${res.status} — live probe, not a code failure`);
   }
   assert.equal(res.status, 200);
-  const json = JSON.parse(res.text);
-  assert.ok(json.ethereum?.usd > 0);
-  console.log('  CoinGecko ETH USD:', json.ethereum.usd);
+  const eth = JSON.parse(res.text);
+  assert.ok(Number(eth.price) > 0, 'ETHUSDT must be a positive number');
+  console.log('  Binance ETH/USDT:', eth.price);
+
+  // DexScreener is the token-price source: one batched request, keyless.
+  const dex = await httpGetRetry('https://api.dexscreener.com/tokens/v1/ethereum/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+  if (dex.status === 200) {
+    const pairs = JSON.parse(dex.text);
+    assert.ok(Array.isArray(pairs), 'DexScreener answers an array of pairs');
+    const priced = pairs.find((p) => Number(p?.priceUsd) > 0);
+    assert.ok(priced, 'USDC must have a priced pair');
+    console.log('  DexScreener USDC:', priced.priceUsd);
+  } else {
+    console.log(`  ⚠️  DexScreener ${dex.status} — skipped`);
+  }
 });
 
 // ── 8. Audit-fix regression contracts (source-level, deterministic) ──
@@ -547,9 +560,10 @@ test('E2E-probe: unawaited async render calls are caught (no global "Unexpected 
   assert.match(ui, /if \(!overlay \|\| !box\) return null;/, 'openModal must guard missing modal shell');
 });
 
-// NOTE: no live CoinGecko probe for fetchPriceHistory here on purpose —
-// it would consume the keyless rate limit and make the native-price probe
-// above flaky with HTTP 429. Covered by mocked tests in price.test.js.
+// NOTE: no live price-history probe here on purpose — the chart sources
+// (Binance klines for natives, GeckoTerminal for tokens) would consume the
+// keyless rate budget and make the native-price probe above flaky. Covered by
+// mocked tests in price.test.js + chart-timeframes.test.js.
 
 // ── M4: rescue pk → sponsor → safe, single binding, auto-detect badge ──
 test('M4 eip7702: one binding per dangerous button, rescue signs with the target key', async () => {

@@ -1,9 +1,14 @@
 // Bear Tool — token-logo-storm.test.js
-// The console storm, pinned: a boot whose CoinGecko lookups all fail with
+// The console storm, pinned: a boot whose logo lookups all fail with
 // CORS/network errors fired 46 paced requests anyway (live capture
-// 2026-10-08: 50 console errors, 46 of them /contract/ fetches), because
+// 2026-10-08: 50 console errors, 46 of them logo fetches), because
 // (a) nothing told the batch the endpoint was sick, and (b) the miss memory
 // lived only in the module, so every reload started the storm over.
+//
+// 2026-10-11: the lookup is now ONE batched DexScreener request for the whole
+// wallet, so "46 requests" cannot even be built. The miss memory and the
+// two-strike breaker stay — a batched outage must still not be retried on
+// every render, and both must survive a reload.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -77,22 +82,34 @@ test('a stored miss suppresses the fetch even with fresh module state', async ()
   assert.equal(calls.length, 1, 'no memory at all = a fair retry');
 });
 
-test('a healthy endpoint still serves the whole batch — the breaker is not a wall', async () => {
+test('a healthy batch serves every token at once — the breaker is not a wall', async () => {
   reset();
   const GOOD = '0x' + 'a'.repeat(40);
   globalThis.fetch = async (url) => {
     calls.push(String(url));
-    if (String(url).includes(GOOD)) {
-      return { ok: true, json: async () => ({ image: { large: 'https://assets.example/x.png' } }) };
-    }
-    return { ok: false, status: 404, json: async () => ({}) };   // plain miss, not an outage
+    const u = String(url).toLowerCase();
+    if (!u.includes('tokens/v1/')) return { ok: false, status: 404, json: async () => ({}) };
+    const pairs = [];
+    if (u.includes(GOOD)) pairs.push({ baseToken: { address: GOOD }, info: { imageUrl: 'https://cdn.example/x.png' } });
+    return { ok: true, status: 200, json: async () => pairs };
   };
   try {
     const tokens = [{ address: GOOD, symbol: 'G' }, tok(1), tok(2)];
     await ensureTokenLogos(tokens, 1);
-    assert.equal(calls.length, 3,
-      '404 misses are answers, not outages: a listed token after them still gets asked');
-    assert.equal(getCachedLogo(logoKeyFor(tokens[0])), 'https://assets.example/x.png');
+    assert.equal(calls.length, 1, 'three tokens, ONE healthy request');
+    assert.equal(getCachedLogo(logoKeyFor(tokens[0])), 'https://cdn.example/x.png');
+    // The two the batch did not answer are MISSES (an answer, not an outage):
+    // the next batch still runs — the breaker never tripped.
+    const later = { address: '0x' + 'b'.repeat(40), symbol: 'L' };
+    globalThis.fetch = async (url) => {
+      calls.push(String(url));
+      return { ok: true, status: 200, json: async () => [
+        { baseToken: { address: later.address }, info: { imageUrl: 'https://cdn.example/l.png' } },
+      ] };
+    };
+    await ensureTokenLogos([later], 1);
+    assert.equal(getCachedLogo(logoKeyFor(later)), 'https://cdn.example/l.png',
+      'a short answer must not poison the next batch');
   } finally {
     globalThis.fetch = async (url) => { calls.push(String(url)); throw new TypeError('Failed to fetch'); };
   }

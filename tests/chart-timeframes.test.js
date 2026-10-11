@@ -5,7 +5,12 @@
 // 7 → 4h, 30 → 4h, 365 → 4d — TIDAK ADA candle 5m/1h keyless, jadi tombol
 // 5m/1h/24h semuanya mengambil days=1 dan menampilkan candle identik.
 // Perbaikan: tombol = rentang yang benar-benar bisa dibedakan API, merge
-// candle tanpa membuang data, label sumbu waktu, fallback menghormati days.
+// candle tanpa membuang data, label sumbu waktu.
+//
+// 2026-10-11: CoinGecko diganti sumber keyless (Binance klines untuk native,
+// GeckoTerminal untuk token) — granularitas tetap eksplisit per rentang, dan
+// pseudo-candle "langkah tetap" sudah tidak ada karena tiap sumber asli
+// menjawab rentang yang diminta.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -53,15 +58,22 @@ test('label sumbu waktu: kiri/tengah/kanan dengan format mengikuti rentang', () 
   assert.match(fn, /days >= 365/, '1y memakai bulan+tahun');
 });
 
-test('price.js: fallback market_chart menghormati days + cache key per rentang', () => {
+test('price.js: rentang ikut ke PERMINTAAN series, bukan cuma label', () => {
   assert.match(price, /export async function fetchPriceHistory\(\{ address, chainId, days = 1 \}\)/);
   assert.match(price, /`hist:\$\{address \? `\$\{chainId\}:\$\{String\(address\)\.toLowerCase\(\)\}` : `\$\{chainId\}:native`\}:\$\{days\}`/,
     'key bawa hari — isi cache 24h tak boleh menjawab 1y');
-  const fn = price.slice(price.indexOf('export async function fetchPriceHistory'));
-  assert.ok(!/days: 1 \}\)/.test(fn.slice(0, 1600)), 'url market_chart memakai days, bukan angka mati 1');
-  assert.match(price, /fetchPriceHistory\(\{ address, chainId, days \}\)/, 'fetchOHLC fallback meneruskan days');
-  assert.match(price, /stepMs = \(days \* 86400000\) \/ prices\.length/,
-    'jarak pseudo-candle mengikuti rentang, bukan 5 menit tetap');
+  assert.match(price, /`ohlc:\$\{address \? `\$\{chainId\}:\$\{String\(address\)\.toLowerCase\(\)\}` : `\$\{chainId\}:native`\}:\$\{days\}`/,
+    'cache OHLC juga per rentang');
+  // CoinGecko hanya bisa membedakan 1/7/30/365 hari lewat satu bentuk URL.
+  // Sekarang granularitas DIMINTA eksplisit per rentang — dua sumber keyless.
+  assert.match(price, /function binanceInterval\(days\)/, 'Binance: interval per rentang');
+  assert.match(price, /if \(days <= 1\) return \{ interval: '30m', limit: 48 \};/);
+  assert.match(price, /return \{ interval: '1w', limit: 53 \};/, '1y ≠ 24 satu-hari-candle');
+  assert.match(price, /function gtTimeframe\(days\)/, 'GeckoTerminal: timeframe per rentang');
+  // Satu sumber series dipakai OHLC dan history — tak ada lagi URL market_chart.
+  assert.match(price, /marketCandles\(\{ address, chainId, days \}\)/, 'fetchOHLC memakai series ber-days');
+  assert.ok(!/market_chart/.test(price), 'CoinGecko market_chart sudah hilang');
+  assert.ok(!/stepMs = \(days \* 86400000\)/.test(price), 'pseudo-candle dari langkah tetap sudah hilang');
 });
 
 // ── perilaku fitCandles ──────────────────────────────────────────────────

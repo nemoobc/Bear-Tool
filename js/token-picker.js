@@ -17,7 +17,7 @@
 // `#swapTo.value`, and the e2e suite reads inputValue(); keeping the native
 // control authoritative means none of them had to change.
 //
-// Logos: a cached CoinGecko URL when one is known, else the app's inline SVG
+// Logos: a cached token image when one is known, else the app's inline SVG
 // marks, else a letter avatar — so a row is never bare text.
 // ═══════════════════════════════════════════════════════════════
 

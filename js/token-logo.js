@@ -7,13 +7,15 @@
 // not look like the dashboard. Extracting it means a mark looks the same
 // everywhere by construction.
 //
-// Marks are inline SVG rather than remote images on purpose: CoinGecko image
-// URLs 404 and expire, and a wallet list that shows broken icons is worse than
-// one showing a crisp generated mark. A cached CoinGecko URL is still used when
-// one exists, with an onerror fallback back to the generated mark.
+// Marks are inline SVG rather than remote images on purpose: remote image URLs
+// 404 and expire, and a wallet list that shows broken icons is worse than one
+// showing a crisp generated mark. A cached token image is still used when one
+// exists (DexScreener's own `info.imageUrl`, filed by contract), with an
+// onerror fallback back to the generated mark.
 // ═══════════════════════════════════════════════════════════════
 
 import { escapeHtml } from './ui.js';
+import { dexChainSlug, tokenPriceChunks } from './price.js';
 
 const CACHE_KEY = 'bear.logoCache';
 const TTL = 24 * 60 * 60 * 1000;
@@ -104,7 +106,7 @@ function markSvg(sym, size, opt = {}) {
   // "USDC" wearing Circle's $ disc is exactly the counterfeit-mark bug
   // (user report 2026-10-08: "deploy token malah kedetect logo lain tapi
   // ticker sama"). opt.contract suppresses the brand; the peach initial disc
-  // stands until a contract-keyed CoinGecko image proves the identity.
+  // stands until a contract-keyed image proves the identity.
   const m = opt.contract === true ? null : MARKS[s];
   const uid = nextUid();
   if (m) {
@@ -127,7 +129,7 @@ function markSvg(sym, size, opt = {}) {
  * @param {string} sym  token symbol
  * @param {number} size pixel size of the square
  * @param {object} [opt]
- * @param {boolean} [opt.remote=true] allow a cached CoinGecko image first
+ * @param {boolean} [opt.remote=true] allow a cached token image first
  */
 export function tokenLogoHTML(sym, size = 32, opt = {}) {
   const remote = opt.remote !== false;
@@ -167,86 +169,54 @@ export function guardTokenLogos(root) {
 
 export { markSvg as tokenMarkSvg };
 
-// ── CoinGecko auto-detect (fetch once per token, cache 24h) ──────────────
-// Two lookups that answer DIFFERENT identities:
+// ── token images: DexScreener, batched, keyed by CONTRACT ────────────────
+// The lookup is a security decision, not a detail. A token's identity is its
+// CONTRACT — the ticker is a label thousands of contracts share. So an image is
+// only ever filed under the contract it was returned FOR: a counterfeit "USDC"
+// can never inherit Circle's mark (live report 2026-10-08: "deploy token malah
+// kedetect logo lain tapi ticker sama").
 //
-// 1. CONTRACT lookup — `/coins/{platform}/contract/{address}` — the only
-//    correct one for a token with an address: it is keyed by the contract,
-//    so it cannot borrow another project's image. Unknown chain → no
-//    platform → no fetch (the initial disc stands).
-// 2. SYMBOL search — the old `fetchCoinGeckoLogo(sym)` — kept ONLY for native
-//    coins (no contract, ticker IS the identity). It used to run for contract
-//    tokens too: the first exact-symbol coin won, so a freshly deployed token
-//    "detected" a stranger's logo while showing its own ticker (live report
-//    2026-10-08). Never again for contracts.
-export const COINGECKO_PLATFORMS = {
-  1: 'ethereum', 56: 'bsc', 137: 'polygon-pos', 42161: 'arbitrum-one',
-  10: 'optimistic-ethereum', 8453: 'base', 43114: 'avalanche', 100: 'gnosis',
-  59144: 'linea', 534352: 'scroll', 81457: 'blast', 324: 'zksync-era',
-  42220: 'celo', 146: 'sonic', 5000: 'mantle',
-};
+// CoinGecko was removed here too (2026-10-11), the same day it left
+// js/price.js. Its per-contract lookups throttled, and the keyless tier
+// answered the throttle WITHOUT CORS headers, so a boot fired ~46 paced
+// /contract/ requests that all failed while the console filled with
+// ERR_FAILED. DexScreener takes a COMMA-SEPARATED list of addresses in ONE
+// keyless request and every pair it returns carries `info.imageUrl` — so the
+// whole wallet is a single request and there is nothing left to pace.
+//
+// A native coin has no contract, so it has no truthful network identity to
+// look up: it wears the local hand-tuned mark (MARKS above) or the generated
+// disc. No fetch for natives, ever.
 
-// Native tickers whose hand-tuned mark is already local — no fetch, ever.
-// (Moved from app.js MANUAL_LOGO_SYMS: the skip was applied to contract
-// tokens as well, which kept a counterfeit ticker wearing the brand mark.)
-const MANUAL_NATIVE_SYMS = new Set([
-  'eth', 'ether', 'usdc', 'usdt', 'dai', 'wbtc', 'link', 'uni', 'aave',
-  'reth', 'cbeth', 'wsteth', 'frax',
-]);
-
-// Distinguishes an ANSWER from an OUTAGE: {data} = the endpoint replied
-// (a 404 says "not listed"), {failed} = the network/CORS/rate-limit case
-// where no verdict about the token exists. Only failures count toward the
-// breaker below — a run of unlisted tokens must not shut the batch down.
-async function cgFetchJson(url) {
+// The endpoint answers a whole batch or it does not. A throw / 429 / 5xx is an
+// OUTAGE and counts toward the breaker below; a 200 with a short list is an
+// ANSWER (the missing tokens simply are not indexed there).
+async function fetchLogoBatch(chainId, addresses) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(
+      `https://api.dexscreener.com/tokens/v1/${chainId}/${addresses.join(',')}`,
+      { signal: controller.signal });
     if (res.status === 429 || res.status >= 500) return { failed: true };
-    if (!res.ok) return { data: null };
-    return { data: await res.json() };
+    if (!res.ok) return { pairs: [] };
+    return { pairs: await res.json() };
   } catch { return { failed: true }; }
   finally { clearTimeout(timer); }
 }
 
-async function fetchContractLogo(address, platform) {
-  const r = await cgFetchJson(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(platform)}/contract/${encodeURIComponent(address)}`);
-  return { url: r?.data?.image?.large || null, failed: Boolean(r?.failed) };
-}
-
-async function fetchSymbolLogo(sym) {
-  const r = await cgFetchJson(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(sym)}`);
-  const coins = Array.isArray(r?.data?.coins) ? r.data.coins : [];
-  const hit = coins.find(c => (c.symbol || '').toLowerCase() === String(sym).toLowerCase() && c.large);
-  return { url: hit?.large || null, failed: Boolean(r?.failed) };
-}
-
-// Fetch + cache logos for tokens not covered by a local mark.
-// Never throws — logo failures just leave the default mark in place.
+// Fetch + cache images for contract tokens with no cached image.
+// Never throws — a logo failure just leaves the generated mark in place.
 //
-// Paced, one lookup at a time with a gap: a parallel burst of a dozen
-// contract requests trips CoinGecko's rate limit. The throttled answers
-// arrive WITHOUT CORS headers (the console fills with ERR_FAILED and the
-// browser reports a policy block) and nothing gets cached — so every
-// dashboard load repeated the whole storm. A failed lookup is remembered
-// for a few minutes instead of being retried on each render.
-//
-// TWO holes closed after the 2026-10-08 boot capture (46 /contract/ errors
-// in one load):
-// 1. The memory was a module-level Map — a RELOAD dropped it and the whole
-//    storm ran again. Misses are mirrored to localStorage, which a reload
-//    keeps; the Map stays as the fast path.
-// 2. Nothing declared the endpoint sick: the batch paced through all 46
-//    tokens while every single answer was a network failure. Two
-//    CONSECUTIVE network failures (throw, or 5xx/429) open a cooldown —
-//    the rest of the batch is remembered as misses without a request. A
-//    404 is an ANSWER ("not listed"), not an outage, so it never counts.
+// The miss memory stays from the CoinGecko era (a boot capture 2026-10-08 saw
+// 46 failed lookups): a failed batch is remembered for a few minutes, and the
+// memory is mirrored to localStorage so a RELOAD does not restart it. Two
+// CONSECUTIVE outages open the cooldown; a short answer is NOT an outage.
 const LOGO_MISS_TTL = 5 * 60 * 1000;
 const LOGO_MISS_STORE = 'bear.logoMisses';
 const logoMisses = new Map();               // logo key → epoch ms of the miss
-let logoQueue = Promise.resolve();          // one paced queue for the whole app
-let cgSickUntil = 0;                        // endpoint cooldown (epoch ms)
+let logoQueue = Promise.resolve();          // one queue for the whole app
+let logoSickUntil = 0;                      // endpoint cooldown (epoch ms)
 
 function readStoredMisses() {
   try {
@@ -287,47 +257,52 @@ function missedRecently(key) {
 /** Test hook: forget the short-lived miss memory (tests reset the rest). */
 export function resetLogoMisses() {
   logoMisses.clear();
-  cgSickUntil = 0;
+  logoSickUntil = 0;
   try { localStorage.removeItem(LOGO_MISS_STORE); } catch { /* private mode */ }
 }
 
 export function ensureTokenLogos(tokens, chainId) {
-  const platform = COINGECKO_PLATFORMS[Number(chainId)] || null;
-  const missing = (tokens || []).filter((t) => t && t.symbol
+  const slug = dexChainSlug(chainId);
+  if (!slug) return Promise.resolve();       // no indexed chain → no truthful request
+  // Contract tokens only: a native coin's mark is local (MARKS/initial disc).
+  const missing = (tokens || []).filter((t) => t && t.address
     && !getCachedLogo(logoKeyFor(t)) && !missedRecently(logoKeyFor(t)));
   if (!missing.length) return Promise.resolve();
   const job = logoQueue.then(async () => {
     try {
       let consecutiveFailures = 0;
-      for (let i = 0; i < missing.length; i++) {
-        const t = missing[i];
-        // Endpoint declared sick (or still cooling down): remember the rest
-        // as misses instead of asking — the storm stop.
-        if (consecutiveFailures >= 2 || Date.now() < cgSickUntil) {
-          recordMiss(logoKeyFor(t));
+      for (const chunk of tokenPriceChunks(missing.map((t) => t.address))) {
+        // Endpoint declared sick (or still cooling down): remember the rest as
+        // misses WITHOUT asking — the storm stop the CoinGecko era needed.
+        if (consecutiveFailures >= 2 || Date.now() < logoSickUntil) {
+          for (const a of chunk) recordMiss(String(a).toLowerCase());
           continue;
         }
-        const address = String(t.address || '').trim();
-        let url = null;
-        let failed = false;
-        if (address) {
-          if (platform) { // unknown chain: no truthful lookup
-            const r = await fetchContractLogo(address, platform);
-            url = r.url; failed = r.failed;
+        const r = await fetchLogoBatch(chainId, chunk);
+        if (r.failed) {
+          if (++consecutiveFailures >= 2) logoSickUntil = Date.now() + LOGO_MISS_TTL;
+          for (const a of chunk) recordMiss(String(a).toLowerCase());
+          continue;
+        }
+        consecutiveFailures = 0;
+        const seen = new Set();
+        for (const p of Array.isArray(r.pairs) ? r.pairs : []) {
+          const addr = String(p?.baseToken?.address || '').toLowerCase();
+          const img = p?.info?.imageUrl;
+          // Only an https image may reach a src — DexScreener never sends
+          // anything else, and this keeps a hostile answer from smuggling a
+          // javascript:/data: URL into the wallet's own DOM.
+          if (addr && typeof img === 'string' && /^https:\/\//.test(img)) {
+            cacheLogo(addr, img);
+            seen.add(addr);
           }
-        } else if (!MANUAL_NATIVE_SYMS.has(String(t.symbol).toLowerCase())) {
-          const r = await fetchSymbolLogo(t.symbol);
-          url = r.url; failed = r.failed;
         }
-        const key = logoKeyFor(t);
-        if (url) { cacheLogo(key, url); logoMisses.delete(key); consecutiveFailures = 0; }
-        else {
-          recordMiss(key);
-          if (failed) {
-            if (++consecutiveFailures >= 2) cgSickUntil = Date.now() + LOGO_MISS_TTL;
-          } else consecutiveFailures = 0;   // a 404 is an answer, not an outage
+        // Anything the batch did not answer is a MISS (not an outage): the
+        // generated disc stands and the batch is not re-run on every render.
+        for (const a of chunk) {
+          const key = String(a).toLowerCase();
+          if (!seen.has(key)) recordMiss(key);
         }
-        if (i < missing.length - 1) await new Promise((r) => setTimeout(r, 350));
       }
     } catch { /* never throws — a stray storage error leaves the default mark */ }
   });

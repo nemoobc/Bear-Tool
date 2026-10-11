@@ -34,7 +34,7 @@ const { cacheLogo, getCachedLogo, tokenLogoHTML, logoKeyFor } = await import('..
 const REAL_USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 const FAKE_USDC = '0x1111111111111111111111111111111111111111';
 const OTHER_FAKE = '0x2222222222222222222222222222222222222222';
-const COINGECKO = 'https://assets.coingecko.com/coins/images/6319/usdc.png';
+const SAMPLE_URL = 'https://example.com/token-usdc.png';
 
 test('a mark is keyed by contract address, with the symbol only as a label', () => {
   assert.equal(logoKeyFor({ address: REAL_USDC, symbol: 'usdc' }), REAL_USDC.toLowerCase(),
@@ -47,8 +47,8 @@ test('a mark is keyed by contract address, with the symbol only as a label', () 
 
 test('a counterfeit contract never inherits the real project mark', () => {
   store.clear();
-  cacheLogo(logoKeyFor({ address: REAL_USDC, symbol: 'USDC' }), COINGECKO);
-  assert.equal(getCachedLogo(logoKeyFor({ address: REAL_USDC, symbol: 'USDC' })), COINGECKO,
+  cacheLogo(logoKeyFor({ address: REAL_USDC, symbol: 'USDC' }), SAMPLE_URL);
+  assert.equal(getCachedLogo(logoKeyFor({ address: REAL_USDC, symbol: 'USDC' })), SAMPLE_URL,
     'the genuine contract must still get its mark');
   assert.equal(getCachedLogo(logoKeyFor({ address: FAKE_USDC, symbol: 'USDC' })), null,
     'a fake USDC contract picked up the real USDC mark — the mark is what users scan for');
@@ -65,24 +65,24 @@ test('the legacy symbol-only cache entry is not honoured for a contract', () => 
   // A cache written by an older build keys by bare symbol. Reading it back for a
   // contract is exactly the leak being closed, so an old entry must not apply.
   store.clear();
-  store.set('bear.logoCache', JSON.stringify({ usdc: { url: COINGECKO, ts: Date.now() } }));
+  store.set('bear.logoCache', JSON.stringify({ usdc: { url: SAMPLE_URL, ts: Date.now() } }));
   assert.equal(getCachedLogo(logoKeyFor({ address: FAKE_USDC, symbol: 'USDC' })), null,
     'a symbol-keyed entry from an older build leaked the mark onto an unrelated contract');
 });
 
 test('the rendered mark follows the address it is given', () => {
   store.clear();
-  cacheLogo(logoKeyFor({ address: REAL_USDC, symbol: 'USDC' }), COINGECKO);
+  cacheLogo(logoKeyFor({ address: REAL_USDC, symbol: 'USDC' }), SAMPLE_URL);
   const real = tokenLogoHTML('USDC', 32, { address: REAL_USDC });
   const fake = tokenLogoHTML('USDC', 32, { address: FAKE_USDC });
-  assert.match(real, /<img[^>]+src="https:\/\/assets\.coingecko\.com/, 'the real contract shows the fetched mark');
-  assert.doesNotMatch(fake, /coingecko/, 'a counterfeit contract must not render the real project mark');
+  assert.match(real, /<img[^>]+src="https:\/\/example\.com/, 'the real contract shows the fetched mark');
+  assert.doesNotMatch(fake, /example\.com/, 'a counterfeit contract must not render the real project mark');
 });
 
 test('a native coin still gets a mark, since it has no contract', () => {
   store.clear();
-  cacheLogo('sym:eth', COINGECKO);
-  assert.equal(getCachedLogo(logoKeyFor({ symbol: 'ETH' })), COINGECKO);
+  cacheLogo('sym:eth', SAMPLE_URL);
+  assert.equal(getCachedLogo(logoKeyFor({ symbol: 'ETH' })), SAMPLE_URL);
   assert.match(tokenLogoHTML('ETH', 32), /<img/, 'native ETH must still resolve a mark');
 });
 

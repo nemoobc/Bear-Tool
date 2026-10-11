@@ -174,9 +174,10 @@ test.describe('Every view — phone and desktop', () => {
       }
 
       expect(problems, `at ${vp.name}:\n` + problems.join('\n')).toEqual([]);
-      // CoinGecko rate-limiting is a known, tolerated condition; anything else
-      // is a real error and is reported by name.
-      const real = errors.filter((e) => !/coingecko|api\.coingecko|Failed to load resource/.test(e));
+      // External-source rate-limiting (price hosts) is a known, tolerated
+      // condition; anything else is a real error and is reported by name.
+      const real = errors.filter((e) =>
+        !/coingecko|binance|dexscreener|coins\.llama|geckoterminal|Failed to load resource/.test(e));
       expect(real, `console errors at ${vp.name}:\n` + real.join('\n')).toEqual([]);
     });
   }

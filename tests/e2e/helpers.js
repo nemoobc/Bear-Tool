@@ -177,23 +177,28 @@ export async function proxyRpc(page, fork) {
 }
 
 export async function gotoApp(page) {
-  // CoinGecko is frequently rate-limited / CORS-blocked from CI — the app is
-  // designed to keep working with prices missing, but the blocked fetch logs
-  // a console error that the strict e2e error assertion treats as a failure.
-  // Mock the price API so e2e runs are deterministic (no app code is touched).
-  await page.route('**api.coingecko.com**', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
-  );
-  // DexScreener is mocked for the same reason, and it was missed because it only
-  // starts being called once the wallet actually holds something. The API does
-  // allow CORS — measured: `access-control-allow-origin: *` from both a GitHub
-  // Pages origin and 127.0.0.1 — so what a run sees is rate limiting after a few
-  // suites in a row, which arrives without the CORS header and lands in the
-  // browser as a CORS error. A third party's rate limit is not a product failure
-  // and must not decide whether this suite passes.
+  // The price sources are frequently rate-limited / CORS-blocked from CI —
+  // the app is designed to keep working with prices missing, but the blocked
+  // fetch logs a console error that the strict e2e error assertion treats as a
+  // failure. Mock the price hosts so e2e runs are deterministic (no app code
+  // is touched). Hosts: DexScreener (tokens + images), Binance (native price +
+  // klines), DefiLlama (fallback), GeckoTerminal (token charts).
   await page.route('**api.dexscreener.com**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
   );
+  await page.route('**api.binance.com**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+  );
+  await page.route('**coins.llama.fi**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+  );
+  await page.route('**api.geckoterminal.com**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+  );
+  // DexScreener historically rate-limited from CI; its answers arrive WITHOUT
+  // the CORS header and land in the browser as a CORS error. A third party's
+  // rate limit is not a product failure and must not decide whether this
+  // suite passes — hence the full mock above, not a live passthrough.
   // './', never '/'. A leading slash is resolved against the ORIGIN, and the
   // suite also runs against the deployed site (BEAR_BASE_URL pointing at
   // github.io/Bear-Tool/) — there '/' discards the repository path and lands

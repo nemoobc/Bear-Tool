@@ -77,7 +77,7 @@
 - Badge jelas MAINNET (merah) vs TESTNET (hijau) — warning saat transaksi mainnet
 
 ### 4.3 Dashboard / Portfolio
-- Total balance dalam USD (CoinGecko API, fallback manual)
+- Total balance dalam USD (Binance/DexScreener/DefiLlama keyless, fallback manual)
 - Daftar aset: native coin + ERC-20 (balance, USD value, 24h change)
 - NFT gallery: ERC-721 + ERC-1155 (metadata + image)
 - Grafik PnL sederhana (canvas, data dari riwayat)

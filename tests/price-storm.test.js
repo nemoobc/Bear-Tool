@@ -1,9 +1,15 @@
 // Bear Tool — price-storm.test.js
-// The browser-hidden 429, pinned. In production a rate-limited CoinGecko
-// answers WITHOUT CORS headers: the browser reports a TypeError, never
-// `status === 429`, so the original cooldown check never fired — dead code —
-// and every page load re-ran the whole failing batch (live capture
-// 2026-10-08: console full of ERR_FAILED long after the 429 logic landed).
+// The endpoint cooldown, pinned. In production a rate-limited host answers
+// WITHOUT CORS headers (or the device is simply offline): the browser reports a
+// TypeError, never `status === 429`, so a cooldown that only watches the status
+// code never fires — dead code — and every page load re-runs the whole failing
+// walk (live capture 2026-10-08: console full of ERR_FAILED long after the 429
+// logic landed).
+//
+// The capped source now is GeckoTerminal (30/min, the only keyless chart host
+// with a documented cap). DexScreener / Binance / DefiLlama / Frankfurter are
+// NOT behind this cooldown — different hosts, different budgets.
+
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchAllPrices, fetchPriceHistory, resetCgCooldown, clearPriceCache } from '../js/price.js';
@@ -16,12 +22,21 @@ globalThis.localStorage = {
 };
 
 const calls = [];
-const cgCalls = () => calls.filter(u => u.includes('coingecko')).length;
+const cappedCalls = () => calls.filter((u) => u.includes('geckoterminal')).length;
 const failNetwork = async (url) => {
   calls.push(String(url));
   throw new TypeError('Failed to fetch');   // exactly what a CORS block looks like
 };
-const ok = (body) => ({ ok: true, json: async () => body });
+const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+
+// A GeckoTerminal answer for BOTH calls of the chart walk (pools → ohlcv).
+// Order matters: the ohlcv URL also contains "/pools" (…/pools/<addr>/ohlcv/…).
+const gtRoutes = (pools, ohlcv) => async (url) => {
+  calls.push(String(url));
+  if (String(url).includes('/ohlcv/')) return ok({ data: { attributes: { ohlcv_list: ohlcv } } });
+  if (String(url).includes('/pools')) return ok({ data: [{ attributes: { address: '0xPOOL' } }] });
+  throw new TypeError('Failed to fetch');
+};
 
 beforeEach(() => {
   lsStore.clear();
@@ -32,47 +47,63 @@ beforeEach(() => {
 });
 
 test('a network-level failure opens the cooldown — one bad answer, not forty', async () => {
-  await fetchPriceHistory({ address: null, chainId: 1 }).catch(() => {});
-  const after = cgCalls();
-  assert.ok(after >= 1, 'the first call does ask');
   await fetchPriceHistory({ address: '0xfeed', chainId: 1 }).catch(() => {});
+  const after = cappedCalls();
+  assert.ok(after >= 1, 'the first call does ask');
   await fetchPriceHistory({ address: '0xbeef', chainId: 1 }).catch(() => {});
-  assert.equal(cgCalls(), after, 'cooldown active: no further CoinGecko requests');
+  await fetchPriceHistory({ address: '0xcafe', chainId: 1 }).catch(() => {});
+  assert.equal(cappedCalls(), after, 'cooldown active: no further capped-source requests');
 });
 
 test('the cooldown is written to localStorage — a reload keeps it', async () => {
-  await fetchPriceHistory({ address: null, chainId: 1 }).catch(() => {});
-  const raw = lsStore.get('bear.cgCooldownUntil');
+  await fetchPriceHistory({ address: '0xfeed', chainId: 1 }).catch(() => {});
+  const raw = lsStore.get('bear.sourceCooldownUntil');
   assert.ok(raw, 'the endpoint verdict must survive a reload, like the logo miss memory');
   assert.ok(Number(raw) > Date.now(), 'stored value is a future deadline');
 });
 
 test('a persisted cooldown suppresses the fetch with fresh module state', async () => {
   resetCgCooldown();                                   // fresh module…
-  lsStore.set('bear.cgCooldownUntil', String(Date.now() + 60_000));
-  await fetchPriceHistory({ address: null, chainId: 1 }).catch(() => {});
+  lsStore.set('bear.sourceCooldownUntil', String(Date.now() + 60_000));
+  await fetchPriceHistory({ address: '0xfeed', chainId: 1 }).catch(() => {});
   assert.equal(calls.length, 0, 'storage is the memory a reload keeps');
 });
 
 test('an expired cooldown asks again — backoff ends, verdict does not stick', async () => {
-  lsStore.set('bear.cgCooldownUntil', String(Date.now() - 1));
-  globalThis.fetch = async (url) => { calls.push(String(url)); return ok({ prices: [[1, 2], [2, 3]] }); };
-  const data = await fetchPriceHistory({ address: null, chainId: 1 });
+  lsStore.set('bear.sourceCooldownUntil', String(Date.now() - 1));
+  globalThis.fetch = gtRoutes(null, [[2, '3', '3', '3', '3', '1'], [1, '2', '2', '2', '2', '1']]);
+  const data = await fetchPriceHistory({ address: '0xfeed', chainId: 1 });
   assert.ok(calls.length >= 1, 'expired deadline is no deadline');
   assert.ok(data.length >= 2, 'and the data flows again');
 });
 
-test('DexScreener is NOT behind the CoinGecko cooldown — different host, different limit', async () => {
-  await fetchPriceHistory({ address: null, chainId: 1 }).catch(() => {});   // opens cooldown
-  const cgCalls = calls.length;
+test('DexScreener is NOT behind the capped-source cooldown — different host, different limit', async () => {
+  // Cool the capped source down first (an ERC-20 chart walk fails).
+  await fetchPriceHistory({ address: '0xfeed', chainId: 1 }).catch(() => {});
+  assert.ok(cappedCalls() > 0, 'cooldown opened');
+  const before = calls.length;
   globalThis.fetch = async (url) => {
     calls.push(String(url));
-    if (String(url).includes('dexscreener')) return ok({ tokens: [{ price: '1.5' }] });
+    if (String(url).includes('dexscreener')) {
+      return ok([{ chainId: 'ethereum', priceUsd: '1.5', liquidity: { usd: 1e6 }, baseToken: { address: '0xabc' } }]);
+    }
     return failNetwork(url);
   };
-  await fetchPriceHistory({ address: '0xabc', chainId: 1 }).catch(() => {});
-  assert.ok(calls.slice(cgCalls).some(u => u.includes('dexscreener')),
-    'the fallback host must still be tried while CoinGecko cools down');
+  const prices = await fetchAllPrices([{ address: '0xabc', symbol: 'ABC', decimals: 18 }], 1);
+  assert.equal(prices.get('0xabc'), 1.5, 'the wallet price must still flow while the chart host cools down');
+  assert.ok(calls.slice(before).some((u) => u.includes('dexscreener')), 'the other host is still tried');
+});
+
+test('a native chart (Binance) is never behind the capped-source cooldown', async () => {
+  await fetchPriceHistory({ address: '0xfeed', chainId: 1 }).catch(() => {});   // opens cooldown
+  const before = calls.length;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return ok([[1, '2', '2', '2', '2', '1'], [2, '3', '3', '3', '3', '1']]);
+  };
+  const data = await fetchPriceHistory({ address: null, chainId: 1 });
+  assert.ok(calls.slice(before).every((u) => u.includes('binance')), 'native charts go to Binance');
+  assert.ok(data.length >= 2, 'and are not blocked by an unrelated host cooling down');
 });
 
 test('backoff grows per failed probe and resets on success — no periodic storm', async () => {
@@ -82,37 +113,31 @@ test('backoff grows per failed probe and resets on success — no periodic storm
   const deadlines = [];
   for (let i = 0; i < 4; i++) {
     await fetchPriceHistory({ address: '0x' + i.toString().padStart(4, '0'), chainId: 1 }).catch(() => {});
-    deadlines.push(Number(lsStore.get('bear.cgCooldownUntil')));
+    deadlines.push(Number(lsStore.get('bear.sourceCooldownUntil')));
     // Simulate the cooldown having EXPIRED while keeping the strike count —
     // resetCgCooldown wipes both, which would flatten the ladder to 1 minute.
-    const strikes = lsStore.get('bear.cgCooldownStrikes');
+    const strikes = lsStore.get('bear.sourceCooldownStrikes');
     resetCgCooldown();
-    if (strikes) lsStore.set('bear.cgCooldownStrikes', strikes);
-    lsStore.set('bear.cgCooldownUntil', String(Date.now() - 1));
+    if (strikes) lsStore.set('bear.sourceCooldownStrikes', strikes);
+    lsStore.set('bear.sourceCooldownUntil', String(Date.now() - 1));
   }
   const gaps = deadlines.map((d, i) => d - (i ? deadlines[i - 1] : Date.now()));
-  // Probe 4 fails → its window must be wider than probe 1's (real growth).
-  assert.ok(gaps[3] > gaps[0] * 2, `ladder grows: ${gaps.map(g => Math.round(g / 1000))}s`);
-  assert.ok(deadlines.every(d => d > 0), 'every probe filed a future deadline');
+  assert.ok(gaps[3] > gaps[0] * 2, `ladder grows: ${gaps.map((g) => Math.round(g / 1000))}s`);
+  assert.ok(deadlines.every((d) => d > 0), 'every probe filed a future deadline');
 
   // A success wipes the ladder: next failure starts back at the base minute.
   resetCgCooldown();
-  globalThis.fetch = async (url) => { calls.push(String(url)); return ok({ prices: [[1, 2], [2, 3]] }); };
+  globalThis.fetch = gtRoutes(null, [[2, '3', '3', '3', '3', '1'], [1, '2', '2', '2', '2', '1']]);
   await fetchPriceHistory({ address: '0xfeed', chainId: 1 });
-  assert.equal(lsStore.get('bear.cgCooldownStrikes'), undefined, 'healthy probe forgets the strikes');
+  assert.equal(lsStore.get('bear.sourceCooldownStrikes'), undefined, 'healthy probe forgets the strikes');
 });
 
 test('a healthy endpoint is untouched by the cooldown logic', async () => {
   resetCgCooldown();
   clearPriceCache();
-  const prices = Array.from({ length: 10 }, (_, i) => [i, 100 + i]);
-  globalThis.fetch = async (url) => {
-    calls.push(String(url));
-    if (String(url).includes('coingecko')) return ok({ prices });
-    throw new TypeError('Failed to fetch');
-  };
-  const data = await fetchPriceHistory({ address: '0xfeed', chainId: 1, days: 2 });
-  assert.ok(calls.some(u => u.includes('market_chart')), 'success path still fetches');
+  globalThis.fetch = gtRoutes(null, [[2, '103', '103', '103', '103', '1'], [1, '102', '102', '102', '102', '1']]);
+  const data = await fetchPriceHistory({ address: '0xfeed', chainId: 1 });
+  assert.ok(calls.some((u) => u.includes('/ohlcv/')), 'success path still fetches');
   assert.ok(data.length >= 2, 'and serves the chart');
-  assert.equal(lsStore.get('bear.cgCooldownUntil'), undefined, 'no cooldown for a healthy endpoint');
+  assert.equal(lsStore.get('bear.sourceCooldownUntil'), undefined, 'no cooldown for a healthy endpoint');
 });

@@ -349,35 +349,48 @@ await test('fmtAmount — USDC-like 6 decimals', async () => {
 // ═══════════════════════════════════════════════════════════════
 // 11. Price APIs (best effort — may be rate limited)
 // ═══════════════════════════════════════════════════════════════
-await test('Price API — CoinGecko (best effort)', async () => {
+await test('Price API — Binance + DexScreener (best effort)', async () => {
   try {
-    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd', {
+    const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT', {
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) {
       const data = await res.json();
-      ok(data.ethereum?.usd > 0, `ETH = $${data.ethereum.usd}`);
+      ok(Number(data.price) > 0, `ETH = $${data.price}`);
     } else {
-      console.log(`  ⚠️  CoinGecko ${res.status} — skipped`);
+      console.log(`  ⚠️  Binance ${res.status} — skipped`);
     }
   } catch (e) {
-    console.log(`  ⚠️  CoinGecko unreachable — skipped`);
+    console.log(`  ⚠️  Binance unreachable — skipped`);
+  }
+  try {
+    const res = await fetch('https://api.dexscreener.com/tokens/v1/ethereum/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const pairs = await res.json();
+      ok(Array.isArray(pairs) && pairs.length > 0, `DexScreener ${pairs.length} pairs`);
+    } else {
+      console.log(`  ⚠️  DexScreener ${res.status} — skipped`);
+    }
+  } catch (e) {
+    console.log(`  ⚠️  DexScreener unreachable — skipped`);
   }
 });
 
-await test('OHLC API — CoinGecko (best effort)', async () => {
+await test('OHLC API — Binance klines (best effort)', async () => {
   try {
-    const res = await fetch('https://api.coingecko.com/api/v3/coins/ethereum/ohlc?vs_currency=usd&days=1', {
+    const res = await fetch('https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=30m&limit=48', {
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) {
       const data = await res.json();
       ok(Array.isArray(data) && data.length > 0, `${data.length} candles`);
     } else {
-      console.log(`  ⚠️  CoinGecko OHLC ${res.status} — skipped`);
+      console.log(`  ⚠️  Binance klines ${res.status} — skipped`);
     }
   } catch (e) {
-    console.log(`  ⚠️  CoinGecko OHLC unreachable — skipped`);
+    console.log(`  ⚠️  Binance klines unreachable — skipped`);
   }
 });
 

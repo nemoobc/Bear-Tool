@@ -118,8 +118,12 @@ async function readSheetTexts() {
   } catch { return []; }
 }
 
-// Console noise that is known, external, and not this app's fault.
+// Console noise that is known, external, and not this app's fault. The price
+// hosts (Binance/DexScreener/DefiLlama/GeckoTerminal) may be rate-limited or
+// CORS-blocked on the emulator's network — a block logs an ERR_FAILED that is
+// NOT a product failure, exactly like the CoinGecko era this list was born for.
 const ALLOWED_CONSOLE = [
+  /binance/i, /dexscreener/i, /coins\.llama/i, /geckoterminal/i,
   /coingecko/i, /statsig/i, /amplitude/i, /attestation/i,
   /Failed to fetch/i, /net::ERR/i, /walletconnect/i, /mixpanel/i,
   // Upstream Capacitor v8.5.2, NOT this app: SystemBars.java injects its
@@ -303,8 +307,8 @@ function makePage(cdp) {
 // Drain accumulated CDP events into the report. Splice = idempotent, so BOTH
 // paths may call it: the verdict (success) and the fatal catch — the failure
 // report of run 38034404898 carried a consoleTrail of ZERO because the fatal
-// path never ran this transfer, and the coingecko CORS errors sitting on the
-// wire were only visible from logcat.
+// path never ran this transfer, and the external-source CORS errors sitting
+// on the wire were only visible from logcat.
 function collectConsole(cdp) {
   for (const ev of cdp.events.splice(0)) {
     if (ev.method === 'Runtime.consoleAPICalled') {
@@ -386,8 +390,8 @@ async function main() {
       await page.shot(`05-view-${view}`);
       // dApps list must carry a real logo per card (js/ui.js dappLogo → an
       // <img> layered on the tile-mark). Structural, works offline: the img is
-      // in the DOM whether or not the remote icon answers — its removal only
-      // happens on the second onerror, after this count is taken.
+      // in the DOM whatever the remote icon answers — after both sources fail
+      // it is HIDDEN (display:none), never removed, so this count is stable.
       if (view === 'dapps') {
         await page.wait('#dappGrid .dapp-card', 10000).catch(() => {});
         const counts = await page.evaluate(

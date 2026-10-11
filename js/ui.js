@@ -57,9 +57,14 @@ export function dappLogo(url) {
   try { host = new URL(String(url || '')).hostname; } catch { return ''; }
   if (!host) return '';
   const h = escapeHtml(host);
+  // Two chances, then hide — never remove. A removed <img> left the card
+  // without ANY logo node, so the structural E2E gate ("every card carries a
+  // logo <img>") failed on whichever icon host refused twice that run
+  // (emulator run 38125240270: cards/img = 18/17). Hiding keeps the DOM
+  // stable and looks identical: the tile-mark sits behind the overlay.
   return `<img class="dapp-logo-img" alt="" aria-hidden="true" loading="lazy" decoding="async" referrerpolicy="no-referrer" `
     + `src="https://${h}/apple-touch-icon.png" data-logo-fb="https://${h}/favicon.ico" `
-    + `onerror="if(this.dataset.logoFb){this.src=this.dataset.logoFb;delete this.dataset.logoFb;}else{this.remove();}">`;
+    + `onerror="if(this.dataset.logoFb){this.src=this.dataset.logoFb;delete this.dataset.logoFb;}else{this.style.display='none';}">`;
 }
 
 // ── toast ──
@@ -514,7 +519,8 @@ export function fmtAmount(wei, decimals = 18, max) {
 // pushed in once by price.js, and fmtUsd converts on the way out.
 //
 // It used to print a hard "$" over whatever number it was handed, and the
-// number it was handed was whatever currency CoinGecko had been asked for.
+// number it was handed was whatever currency the price source had been asked
+// for.
 // Choosing Indonesian rupiah fetched 48,172,840 and printed "$48,172,840" — a
 // wrong number wearing the right symbol, which is worse than showing nothing at
 // all. The DexScreener fallback made it worse rather than better: that path is

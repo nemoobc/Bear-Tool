@@ -237,7 +237,7 @@ Bear-Tool/
 │   ├── wallet.js       # create/import/encrypt/decrypt/derive/sign
 │   ├── ui.js           # modal/toast/spinner/confirm/format/escape helpers
 │   ├── i18n.js         # EN/ID translations + t() + data-i18n scanning
-│   ├── price.js        # CoinGecko + DexScreener price cache
+│   ├── price.js        # keyless price cache (Binance/DexScreener/DefiLlama)
 │   ├── safetx.js       # double-submit lock + error boundary + button loading
 │   ├── send.js         # send view: preview, gas estimate, poisoning warnings
 │   ├── swap.js         # swap view: auto-route over the registry (real quotes only)

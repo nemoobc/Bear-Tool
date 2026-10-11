@@ -2078,8 +2078,9 @@ async function loadDashboard(opts = {}) {
   // that is seconds old.
   const soft = opts.soft === true;
   if (!soft) assetList.innerHTML = spinner(64, 'Loading assets...');
-  // 24h price sparkline for the native asset — CoinGecko auto-pair
-  // (native → auto chain id), cached by fetchPriceHistory. Cosmetic only.
+  // 24h price sparkline for the native asset — keyless series
+  // (Binance klines, GeckoTerminal for unlisted chains), cached by
+  // fetchPriceHistory. Cosmetic only.
   renderHeroSpark(net).catch(() => { /* cosmetic — never blocks */ });
   try {
     const provider = await getProvider(net.chainId);
@@ -2127,7 +2128,7 @@ async function loadDashboard(opts = {}) {
     // token list (and provider render) built for the OLD network.
     if (get('networkId') !== net.id) return;
     set('tokens', tokens);
-    // USD prices (CoinGecko → DexScreener → cache)
+    // USD prices (Binance native + DexScreener batch → DefiLlama → cache)
     try {
       const prices = await fetchAllPrices(tokens, net.chainId);
       tokens.forEach(t => {
@@ -2136,9 +2137,10 @@ async function loadDashboard(opts = {}) {
       });
     } catch {}
     renderAssets(tokens);
-    // Auto-detect logos from CoinGecko for tokens outside the manual map,
-    // then re-render once — but only if this is still the active token list
-    // (a network switch may have replaced it while the fetch was in flight).
+    // Auto-detect token images (DexScreener batch) for tokens outside the manual
+    // map, then re-render once — but only if this is still the active token
+    // list (a network switch may have replaced it while the fetch was in
+    // flight).
     ensureTokenLogos(tokens, net.chainId).then(() => {
       if (window._assetTokens === tokens) renderAssets(tokens);
     });
@@ -2193,7 +2195,7 @@ function holdingUsd(t) {
   return amt * t.usd;
 }
 
-// ── CoinGecko token logos (auto-detect, cached 24h) ──
+// ── token images (DexScreener batch, cached 24h) ──
 // Fetch + cache + render ALL live in js/token-logo.js (shared with the
 // Swap/Bridge pickers) since the counterfeit-mark fix (2026-10-08): a token
 // with a contract is fetched BY CONTRACT, a native coin by symbol, and a
@@ -2237,10 +2239,10 @@ function renderAssets(tokens) {
     assetList.innerHTML = '<p class="small text-center">No tokens match your search.</p>';
   }
   // The per-asset 24h sparkline was removed from the coin list: it fetched a
-  // CoinGecko history call for every row, all of which failed CORS from a plain
-  // static host, so the list rendered a column of empty boxes. The detail modal
+  // history call for every row, all of which failed CORS from a plain static
+  // host, so the list rendered a column of empty boxes. The detail modal
   // (token-chart) still draws a real chart on demand.
-  // CoinGecko images can 404/expire. guardTokenLogos does this, and it does it
+  // Remote images can 404/expire. guardTokenLogos does this, and it does it
   // with the symbol: the <img> carries data-mark-fallback, and the handler swaps
   // in the generated mark for THAT token — the hand-tuned disc for ETH, the two
   // letters for anything else. The loop this replaced passed an empty symbol, so
@@ -2309,10 +2311,10 @@ function showTokenActions(el) {
     <div class="token-modal-addr">${contractBlock}</div>
     <div class="token-modal-chart" id="tokenChart">
       <div class="chart-timeframes" id="chartTimeframes">
-        <!-- Ranges CoinGecko keyless can actually DISTINGUISH (measured
-             2026-10-06: 1d→30min, 7d→4h, 30d→4h, 365d→4d). The old 5m/1h
-             buttons all fetched days=1 → identical candles every time
-             (user: "candle nya sama semua"). -->
+        <!-- Ranges the keyless sources can actually DISTINGUISH (Binance klines
+             & GeckoTerminal timeframe, 2026-10-11: 24h→30m/1h, 7d→4h, 30d→12h,
+             1y→1w). The old fixed-granularity buttons fetched days=1 →
+             identical candles every time (user: "candle nya sama semua"). -->
         <button class="chart-tf-btn active" data-tf="24h">24h</button>
         <button class="chart-tf-btn" data-tf="7d">7d</button>
         <button class="chart-tf-btn" data-tf="30d">30d</button>
@@ -2357,7 +2359,7 @@ function showTokenActions(el) {
   window._tokenModalSymbol = symbol;
   window._tokenModalAddress = address;
 
-  // A cached CoinGecko <img> can be dead; guardTokenLogos swaps it for the
+  // A cached remote <img> can be dead; guardTokenLogos swaps it for the
   // generated mark instead of leaving a broken-image icon in the header.
   guardTokenLogos($('#modalBox'));
 
@@ -2413,7 +2415,8 @@ function showReceiveModal(address, symbol) {
 
 // ── Candlestick chart with range support ──────────────────────
 // Draws OHLC candles for the range the API can distinguish: 24h/7d/30d/1y
-// (CoinGecko keyless granularity measured 2026-10-06 — see fetchOHLC).
+// (Granularity per range: Binance klines / GeckoTerminal timeframe — see
+// marketCandles in js/price.js.)
 // Falls back to pseudo-candles from price history, range passed through.
 const CHART_TF_DAYS = { '24h': 1, '7d': 7, '30d': 30, '1y': 365 };
 
@@ -2624,9 +2627,9 @@ function bindViews() {
     set('settings', { ...s });
     saveSettings();
     // Only the RATE is currency-specific now. Prices are cached in USD, so
-    // throwing the price cache away meant re-asking CoinGecko for every token in
-    // the wallet just to change how a number was spelled. The rate is one
-    // request and the dashboard redraw is instant.
+    // throwing the price cache away meant re-asking every price host for every
+    // token in the wallet just to change how a number was spelled. The rate is
+    // one request and the dashboard redraw is instant.
     clearUsdRate();
     await ensureUsdRate();
     // Re-render the numbers in place. Without this the balance keeps showing the
@@ -3097,9 +3100,10 @@ function initAddressBook() {
 // init activity
 loadActivity();
 initAddressBook();
-// Hero sparkline — 24h native price from CoinGecko, auto-paired to the
-// chain's native coin id (no manual symbol→id map to maintain). Cosmetic:
-// an empty canvas or a missing element must never block the dashboard.
+// Hero sparkline — 24h native price, auto-paired to the chain's native
+// series (Binance klines / GeckoTerminal — no manual symbol→id map to
+// maintain). Cosmetic: an empty canvas or a missing element must never
+// block the dashboard.
 async function renderHeroSpark(net) {
   const canvas = $('#heroSpark');
   if (!canvas || !net) return;

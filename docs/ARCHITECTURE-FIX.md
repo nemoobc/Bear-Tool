@@ -106,7 +106,7 @@ Bear-Tool/
 │   ├── eip7702.js                # NEW: extract + batch/rescue/claim real implementations
 │   ├── deploy.js                 # NEW: extract + minimal bytecode templates
 │   ├── nft.js                    # NEW: on-chain ERC-721 enumeration + metadata fetch
-│   ├── price.js                  # NEW: CoinGecko/DexScreener price polling + cache
+│   ├── price.js                  # NEW: keyless price polling (Binance/DexScreener/DefiLlama) + cache
 │   ├── i18n.js                   # NEW: EN/ID translations + t() helper
 │   └── safetx.js                 # NEW: double-submit guard + error boundary + gas preview
 ├── contracts/
@@ -168,55 +168,57 @@ export function off(key, fn) {
 
 #### 3.1 `js/price.js` — Harga USD (P0)
 
-**Sumber**: CoinGecko free API (`/api/v3/simple/price`) + fallback DexScreener (`/tokens/v1/...`).
+**Sumber** (2026-10-11 — CoinGecko DIHAPUS; user: "api coingecko ganti, cari
+yang no limit unlimited". Keyless tier CoinGecko: ~10-30 call/min dan menjawab
+rate-limit TANPA header CORS → browser melaporkan polisi CORS, harga hilang.
+Semua sumber sekarang keyless dan yang native/batch tidak dilimitasi):
+- **Native**: Binance spot ticker (`/api/v3/ticker/price?symbol=ETHUSDT`) →
+  fallback DefiLlama wrapped-native (`coins.llama.fi/prices/current/{slug}:{wrapped}`)
+- **ERC-20**: DexScreener batch (`/tokens/v1/{chainId}/{a1,a2,…}`, ≤25/request,
+  1 request untuk seluruh wallet) → fallback DefiLlama coins → fallback
+  DexScreener search (hanya chain yang sama)
+- **Chart**: Binance klines (native) / GeckoTerminal pool OHLCV (token) —
+  keduanya keyless; GeckoTerminal 30/min → dibatasi breaker 2-strike
 
 **Alur**:
 ```
-loadDashboard() → fetchAllPrices(tokenAddresses) → update state.tokens[].usd
-                  ↓ (try CoinGecko first)
-                  ↓ (on failure → try DexScreener)
-                  ↓ (on failure → usd = null, render "—")
+loadDashboard() → fetchAllPrices(tokens, chainId) → Map<addr|'native', usd>
+  native:  Binance ticker → DefiLlama wrapped
+  token:   DexScreener batch → DefiLlama coins → DexScreener search
+  semua gagal → TIDAK ADA entry → render "—" (bukan 0)
 ```
 
-**CoinGecko mapping** (chain → CoinGecko platform):
-| chainId | platform_id |
-|---------|-------------|
-| 1 | ethereum |
-| 56 | binance-smart-chain |
-| 137 | polygon_pos |
-| 42161 | arbitrum-one |
-| 10 | optimistic-ethereum |
-| 8453 | base |
-
-**DexScreener fallback** (per-token): `https://api.dexscreener.com/tokens/v1/{chainId}/{tokenAddress}`
-
 **Caching**:
-- In-memory: price cache Map<address, { price, ts }>
-- TTL: 60 seconds
-- localStorage: `bear.priceCache` (survive page reload, 5-min max age)
+- In-memory: Map<key,{price,ts}> + localStorage `bear.priceCache`, TTL 5 min
+- Cache key native PER CHAIN (`native:{chainId}`) — bug 2026-10-11: dulu satu
+  slot `native` dipakai semua chain → harga gas token chain pertama bocor ke
+  chain lain
+- Chart cache per rentang (`hist:{chainId}:{addr|native}:{days}`) — isi cache
+  24h tidak boleh menjawab grafik 1y
 
 **Error handling**:
-- CoinGecko rate limit (429) → backoff 10s → try DexScreener
-- Network error → cache hit? use cache : usd = null
-- Partial failure → show known prices, unknown = "—"
+- Outage host (429/5xx/network) → breaker 2-strike per host dengan cooldown
+  persisten; jawaban pendek = MISS (ingat, jangan retry tiap render), bukan
+  outage. Hanya host berlimit yang butuh breaker (GeckoTerminal); Binance /
+  DexScreener / DefiLlama / Frankfurter tidak.
+- Network error → cache hit? pakai cache : null
+- Partial failure → harga yang ada tampil, yang tidak = "—"
 
 **API contract**:
 ```js
-// Export
-export async function fetchAllPrices(tokens, networkChainId, coinGeckoPlatform)
-// tokens: [{address, symbol, decimals}]
-// Returns: Map<address, number|null> (usd price per token)
+// Export (masing-masing dipin test)
+export async function fetchAllPrices(tokens, networkChainId)
+// tokens: [{address, symbol, decimals}] → Map<address|'native', number|null>
 
-export function getPriceFromCache(address)
+export function getPriceFromCache(address, chainId)
 // Returns: number|null (from cache, null if expired)
 
 export function clearPriceCache()
-```
 
-**CoinGecko free tier limits**: 10-30 calls/min. Strategy:
-1. Batch ETH + all known ERC-20 per chain in one call (using `vs_currencies=usd`)
-2. Known native coins: `ethereum, binancecoin, polygon-ecosystem-token` — hardcoded symbol→id map
-3. Known ERC-20: CoinGecko ID list in POPULAR_TOKENS (extend token data with `coingeckoId`)
+export async function fetchPriceHistory({ address, chainId, days })
+export function dexChainSlug(chainId)
+export function tokenPriceChunks(addresses, size = 25)
+```
 
 #### 3.2 `js/swap.js` — Swap Real (P0)
 
@@ -896,8 +898,10 @@ const doSendSafe = withErrorBoundary(doSend, 'Send');
 
 | Service | URL | Auth | Rate Limit | Fallback |
 |---------|-----|------|------------|----------|
-| CoinGecko | `api.coingecko.com/api/v3/simple/price` | None | ~30/min | DexScreener |
-| DexScreener | `api.dexscreener.com/tokens/v1/{chain}/{addr}` | None | Unknown | null |
+| Binance | `api.binance.com/api/v3/ticker/price` (klines utk chart) | None | weight-based | DefiLlama wrapped-native |
+| DexScreener | `api.dexscreener.com/tokens/v1/{chain}/{addrs,…}` | None | ~300/min | DefiLlama → search |
+| DefiLlama | `coins.llama.fi/prices/current/{slug}:{addr}` | None | generous | DexScreener search |
+| GeckoTerminal | `api.geckoterminal.com/api/v2/.../ohlcv` | None | ~30/min | Binance klines (native) |
 | 0x Swap | `api.0x.org/swap/v1/quote` | API key (optional) | Unknown | Simulated |
 | OKX DEX | `www.okx.com/api/v5/dex/swap/approve-transaction` | None | Unknown | Simulated |
 | LI.FI | `li.quest/v1/quote` | None | Unknown | Simulated |
@@ -930,12 +934,12 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
 
 **New tests**:
 
-**`tests/price.test.js`** (~6 tests):
-- `fetchAllPrices: returns price map for known tokens`
-- `fetchAllPrices: handles CoinGecko failure, tries DexScreener`
-- `fetchAllPrices: returns null prices when all APIs fail`
-- `getPriceFromCache: returns cached price within TTL`
-- `getPriceFromCache: returns null after TTL expiry`
+**`tests/price.test.js`** — sumber keyless, alur per kelas aset:
+- `the DEEPEST pool wins — a dust pool cannot set the price`
+- `the batch is ONE request for many tokens (comma-joined)`
+- `DexScreener empty → DefiLlama fallback prices the rest`
+- `native uses the Binance spot ticker for the chain`
+- `the four ranges request DIFFERENT granularity`
 - `clearPriceCache: empties the cache`
 
 **`tests/i18n.test.js`** (~5 tests):
@@ -1054,7 +1058,7 @@ GENERAL:
 | Edge Case | Where | Handling |
 |-----------|-------|----------|
 | RPC timeout/failure | All network calls | `getProvider` tries RPCs in order (already exists). Add retry with exponential backoff (3 attempts, 1s/2s/4s) |
-| CoinGecko rate limit | price.js | Backoff 10s → try DexScreener → cache fallback |
+| Price-host outage (429/5xx/CORS block) | price.js | Breaker 2-strike per host (cooldown persisten, GeckoTerminal saja berlimit) → cache fallback → "—" |
 | 0x API requires key | swap.js | Detect 401/403 → show "API key required" message → offer simulated mode |
 | LI.FI unavailable | bridge.js | Fallback to simulated with clear banner |
 | NFT tokenURI 404 | nft.js | Show placeholder image + "Metadata unavailable" |
@@ -1098,7 +1102,7 @@ GENERAL:
 | Aspect | Current | Fix | Scale Limit |
 |--------|---------|-----|-------------|
 | RPC calls | N+1 (token balance loop) | Parallel with `Promise.allSettled` | ~50 tokens max per chain (OK for now) |
-| Price fetch | Not implemented | Batched CoinGecko call | 250 tokens per CoinGecko call |
+| Price fetch | DexScreener batch ≤25/request | Batch seluruh wallet (1-2 request per chain) | ~25 token/request, seluruh wallet = 1-2 request |
 | NFT enumeration | None | Scan known contracts only | ~10 contracts × ~20 NFTs = 200 max |
 | Activity storage | localStorage (100 cap) | Keep cap, compress old entries | 100 entries = ~50KB |
 | State size | Single object | Module singleton | <1MB in memory |
@@ -1114,7 +1118,7 @@ GENERAL:
 
 | # | Asumsi | Risiko | Mitigasi |
 |---|--------|--------|----------|
-| A1 | CoinGecko free API cukup untuk price polling | Rate limit atau downtime | DexScreener fallback + cache 5min |
+| A1 | Binance+DexScreener keyless cukup untuk price polling | Rate limit (GeckoTerminal) | Breaker 2-strike + cache 5min + DefiLlama fallback |
 | A2 | 0x API v1 still works (with key) | API deprecated entirely | OKX DEX API as alt + simulated mode |
 | A3 | LI.FI API free tier still works | API requires key now | Simulated fallback |
 | A4 | ethers v6 `signAuthorization` works in browser | RPC compatibility issue | Already tested in current code |
@@ -1122,7 +1126,7 @@ GENERAL:
 | A6 | Pre-compiled bytecode works across EVM chains | Different EVM versions | Use minimal opcodes only |
 | A7 | Users have Alchemy/QuickNode for 7702 on mainnet | Public RPCs don't support type-4 | Clear error message + guidance |
 | A8 | Termux Node.js version supports all test features | node:test API differences | Test on Node 18+ |
-| A9 | CoinGecko chain ID mapping correct | Tokens don't map 1:1 | Manual mapping + manual fallback |
+| A9 | DexScreener chain slug mapping benar | Token tidak map 1:1 | Satu registry CHAINS + filter same-chain |
 | A10 | localStorage sufficient for all data | User exceeds quota | QuotaExceededError handling |
 
 ### 12. URUTAN IMPLEMENTASI (Dependency Graph)
@@ -1141,7 +1145,7 @@ FASE 1 — INFRASTRUCTURE (hari 1-2)
 └── Test: npm run verify → pass
 
 FASE 2 — CORE FEATURES P0 (hari 2-4)
-├── Create js/price.js (CoinGecko + DexScreener + cache)
+├── Create js/price.js (keyless: Binance/DexScreener/DefiLlama/GeckoTerminal + cache)
 ├── Integrate price.js ke loadDashboard()
 ├── Create js/send.js (extract + gas estimator + poisoning warning)
 ├── Create js/swap.js (0x API + simulated fallback)
@@ -1202,7 +1206,7 @@ FASE 5 — FINAL (hari 7-8)
 |------|--------|-----------|-------------|
 | `js/state.js` | CREATE | ~40 | Centralized state + pub/sub |
 | `js/safetx.js` | CREATE | ~60 | Double-submit guard + error boundary + gas preview |
-| `js/price.js` | CREATE | ~150 | CoinGecko/DexScreener polling + cache |
+| `js/price.js` | CREATE | ~150 | Keyless polling (Binance/DexScreener/DefiLlama/GeckoTerminal) + cache |
 | `js/send.js` | CREATE | ~200 | Send logic + gas estimator + poisoning warning |
 | `js/swap.js` | CREATE | ~180 | 0x API + simulated fallback |
 | `js/bridge.js` | CREATE | ~130 | LI.FI + simulated fallback |
@@ -1235,7 +1239,7 @@ FASE 5 — FINAL (hari 7-8)
 1. **spinnerDots BUG FIX**: Tambah ke import di app.js baris 10 — ReferenceError hilang seketika (1 menit)
 2. **State management**: Buat `state.js` singleton — elimina circular dependency, clear data ownership per modul
 3. **Modulasi**: app.js (998 baris) → 10 modul terpisah (~100-200 baris masing-masing) — maintainable & debuggable
-4. **Harga USD**: CoinGecko polling + DexScreener fallback + cache 60s — balance不再是 "$0.00"
+4. **Harga USD**: Binance/DexScreener/DefiLlama keyless + cache 5min — balance bukan "$0.00"
 5. **Swap real**: 0x API quote + approve + execute — dengan simulated fallback yang jujur (labeled)
 6. **Bridge real**: LI.FI quote + execute — dengan simulated fallback yang jujur
 7. **NFT real**: On-chain enumeration via `tokenOfOwnerByIndex` + `tokenURI` — dengan limitation disclosure

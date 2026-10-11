@@ -1,10 +1,22 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — price.js
-// Prices: CoinGecko + DexScreener fallback + cache.
-// Currency comes from Settings (usd/eur/idr/cny) — it used to be hardcoded to
-// USD in every request, which made the Currency picker a control that saved a
-// value nothing ever read. An optional CoinGecko key lifts the rate limit; the
-// keyless free tier is CORS-blocked in browsers and rate-limited hard.
+// Prices: DexScreener (tokens) + Binance (majors) + DefiLlama (fallback),
+// FX from Frankfurter, charts from Binance klines / GeckoTerminal.
+//
+// WHY NOT COINGECKO (replaced 2026-10-11, user: "api coingecko ganti, cari
+// yang no limit unlimited"): the keyless CoinGecko tier answers ~10-30 calls
+// a minute and, when it throttles, it answers WITHOUT CORS headers — so the
+// browser reported a CORS failure, the price was lost, and the console filled
+// with noise on every dashboard load. Every source below is KEYLESS and either
+// documents a generous limit or none at all:
+//   DexScreener   token + pair prices, ~300 req/min documented, CORS-open
+//   Binance       spot tickers/klines, weight-based (~6000/min), CORS-open
+//   DefiLlama     coins API, keyless, no documented cap, CORS-open
+//   Frankfurter   ECB FX reference rates, keyless, no cap
+//   GeckoTerminal charts for tokens Binance does not list (30/min, KEYLESS)
+//
+// Currency comes from Settings (usd/eur/idr/cny) — applied once, at the edge,
+// by fmtUsd. Every number this module hands out is USD.
 // ═══════════════════════════════════════════════════════════════
 
 import { get } from './state.js';
@@ -16,50 +28,47 @@ function currency() {
   return /^[a-z]{3}$/i.test(c || '') ? c.toLowerCase() : 'usd';
 }
 
-// Optional key from Settings → localStorage. Absent = keyless free tier.
-function cgKey() {
-  try { return localStorage.getItem('bear.coingeckoKey') || ''; } catch { return ''; }
-}
-
-function cgUrl(path, params) {
-  const u = new URL(`https://api.coingecko.com/api/v3/${path}`);
-  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
-  const key = cgKey();
-  if (key) u.searchParams.set('x_cg_demo_api_key', key);
-  return u.toString();
-}
-
-// CoinGecko platform ids per chainId (ERC-20 token_price endpoint)
-const COINGECKO_PLATFORMS = {
-  1: 'ethereum',
-  56: 'binance-smart-chain',
-  137: 'polygon-pos',
-  42161: 'arbitrum-one',
-  10: 'optimistic-ethereum',
-  8453: 'base'
+// ── chain registry ────────────────────────────────────────────────────────
+// ONE row per bundled network: every source's id, the Binance symbol for the
+// native gas token (null = not listed there), and the chain's wrapped-native
+// contract — the honest proxy for "the native coin's price/chart" on sources
+// that only speak contracts.
+const CHAINS = {
+  1:      { dex: 'ethereum', llama: 'ethereum', gt: 'eth',          binance: 'ETHUSDT',  wrapped: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' },
+  56:     { dex: 'bsc',      llama: 'bsc',      gt: 'bsc',          binance: 'BNBUSDT',  wrapped: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c' },
+  137:    { dex: 'polygon',  llama: 'polygon',  gt: 'polygon_pos',  binance: 'POLUSDT',  wrapped: '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270' },
+  42161:  { dex: 'arbitrum', llama: 'arbitrum', gt: 'arbitrum',     binance: 'ETHUSDT',  wrapped: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1' },
+  10:     { dex: 'optimism', llama: 'optimism', gt: 'optimism',     binance: 'ETHUSDT',  wrapped: '0x4200000000000000000000000000000000000006' },
+  8453:   { dex: 'base',     llama: 'base',     gt: 'base',         binance: 'ETHUSDT',  wrapped: '0x4200000000000000000000000000000000000006' },
+  43114:  { dex: 'avalanche',llama: 'avax',     gt: 'avax',         binance: 'AVAXUSDT', wrapped: '0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7' },
+  100:    { dex: 'gnosis',   llama: 'xdai',     gt: 'xdai',         binance: null,       wrapped: '0xe91d153e0b41518a2ce8dd3d7944fa863463a97d' },
+  59144:  { dex: 'linea',    llama: 'linea',    gt: 'linea',        binance: 'ETHUSDT',  wrapped: '0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f' },
+  534352: { dex: 'scroll',   llama: 'scroll',   gt: 'scroll',       binance: 'ETHUSDT',  wrapped: '0x5300000000000000000000000000000000000004' },
+  81457:  { dex: 'blast',    llama: 'blast',    gt: 'blast',        binance: 'ETHUSDT',  wrapped: '0x4300000000000000000000000000000000000004' },
+  324:    { dex: 'zksync',   llama: 'era',      gt: 'zksync',       binance: 'ETHUSDT',  wrapped: '0x5aea5775959fbc2557cc8789bc1bf90a239d9a91' },
+  42220:  { dex: 'celo',     llama: 'celo',     gt: 'celo',         binance: 'CELOUSDT', wrapped: '0x471ece3750da237f93b8e339c536989b8978a438' },
+  146:    { dex: 'sonic',    llama: 'sonic',    gt: 'sonic',        binance: null,       wrapped: '0x039e2fb66102314ce7b64ce5ce3e5183bc94ad38' },
+  5000:   { dex: 'mantle',   llama: 'mantle',   gt: 'mantle',       binance: 'MNTUSDT',  wrapped: '0x78c1b0c915c4faa5fffa6cabf0219da63d7f4cb8' }
 };
 
-// CoinGecko coin ids for native gas tokens
-const NATIVE_COIN_IDS = {
-  1: 'ethereum',
-  56: 'binancecoin',
-  137: 'matic-network',
-  42161: 'ethereum',
-  10: 'ethereum',
-  8453: 'ethereum'
-};
+const chainMeta = (chainId) => CHAINS[Number(chainId)] || null;
+
+/**
+ * The DexScreener chain slug for a chain id, or null for a chain DexScreener
+ * does not index. Exported because the token-image lookup (js/token-logo.js)
+ * speaks to the same host: one registry, not a second copy that drifts.
+ */
+export function dexChainSlug(chainId) {
+  const meta = chainMeta(chainId);
+  return meta ? meta.dex : null;
+}
 
 // ── the rate between the canonical unit and the one on screen ──
 //
-// Every price this module fetches, caches or returns is USD. That is the whole
-// point: CoinGecko will quote any currency you ask for, and DexScreener will
-// only ever quote USD, so asking each for the display currency produced a list
-// where the top row was in the chosen currency and the rest were in dollars.
-// The conversion happens once, here, and nowhere else.
-//
-// The rate comes out of a request the app was making anyway — one id, two
-// vs_currencies — so it costs no extra quota and cannot be the reason a price
-// fails. USD is 1:1 and is never fetched.
+// Every price this module fetches, caches or returns is USD. The conversion
+// happens once, here, and nowhere else — asking each source for the display
+// currency produced a list whose top row was in rupiah and whose rest were in
+// dollars. USD is 1:1 and is never fetched.
 const RATE_KEY = 'bear.usdRate';
 const RATE_TTL = 30 * 60_000;
 
@@ -82,6 +91,26 @@ function saveRate(cur, rate) {
   catch { /* private mode */ }
 }
 
+// Frankfurter publishes the ECB's reference rates: keyless, no cap, CORS-open.
+// open.er-api.com is the fallback — another keyless, cap-free host.
+async function fetchUsdRateFromFrankfurter(cur) {
+  const res = await fetchWithTimeout(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=${cur.toUpperCase()}`, 8000);
+  if (!res.ok) throw new Error('frankfurter ' + res.status);
+  const d = await res.json();
+  const rate = Number(d?.rates?.[cur.toUpperCase()]);
+  if (!(Number.isFinite(rate) && rate > 0)) throw new Error('frankfurter rate missing');
+  return rate;
+}
+
+async function fetchUsdRateFromErApi(cur) {
+  const res = await fetchWithTimeout('https://open.er-api.com/v6/latest/USD', 8000);
+  if (!res.ok) throw new Error('er-api ' + res.status);
+  const d = await res.json();
+  const rate = Number(d?.rates?.[cur.toUpperCase()]);
+  if (!(Number.isFinite(rate) && rate > 0)) throw new Error('er-api rate missing');
+  return rate;
+}
+
 /**
  * Make sure the formatter knows how to turn USD into the selected currency.
  * Never throws and never blocks: a failed lookup leaves 1:1, which shows the
@@ -92,23 +121,16 @@ export async function ensureUsdRate() {
   if (cur === 'usd') { publishRate('usd', 1); return 1; }
   const hit = cachedRate(cur);
   if (hit !== null) { publishRate(cur, hit); return hit; }
-  try {
-    const res = await cgFetch(cgUrl('simple/price', {
-      ids: 'ethereum', vs_currencies: `usd,${cur}`,
-    }));
-    if (!res.ok) throw new Error('rate ' + res.status);
-    const d = await res.json();
-    const usd = d?.ethereum?.usd;
-    const other = d?.ethereum?.[cur];
-    if (!(Number.isFinite(usd) && usd > 0) || !Number.isFinite(other)) throw new Error('rate missing');
-    const rate = other / usd;
-    saveRate(cur, rate);
-    publishRate(cur, rate);
-    return rate;
-  } catch {
-    publishRate(cur, 1);
-    return 1;
+  for (const source of [fetchUsdRateFromFrankfurter, fetchUsdRateFromErApi]) {
+    try {
+      const rate = await source(cur);
+      saveRate(cur, rate);
+      publishRate(cur, rate);
+      return rate;
+    } catch { /* try the next keyless host */ }
   }
+  publishRate(cur, 1);
+  return 1;
 }
 
 /** Drop the cached rate, so the next read fetches the one now wanted. */
@@ -121,7 +143,7 @@ const MEM_TTL = 60_000;          // in-memory TTL
 const LS_MAX_AGE = 5 * 60_000;   // localStorage max age
 
 const memCache = new Map(); // key -> { price, ts }
-const historyCache = new Map(); // key -> { data, ts } (24h chart history)
+const historyCache = new Map(); // key -> { data, ts } (chart data)
 
 function loadLsCache() {
   try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}'); }
@@ -134,10 +156,17 @@ function saveLsCache(cache) {
 
 // Address keys are case-INSENSITIVE (0xAbC === 0xabc on-chain): one address
 // written in checksum case and read in lower case must hit the same entry.
-function cacheKey(address) { return address ? String(address).toLowerCase() : 'native'; }
+// The native coin has NO address, and its price differs per chain (BNB is not
+// ETH) — so the native entry is namespaced by chainId. It used to be a single
+// "native" slot, which meant the first chain to answer priced every other
+// chain's gas token.
+function cacheKey(address, chainId) {
+  if (address) return String(address).toLowerCase();
+  return `native:${Number(chainId) || 0}`;
+}
 
-export function getPriceFromCache(address) {
-  const key = cacheKey(address);
+export function getPriceFromCache(address, chainId) {
+  const key = cacheKey(address, chainId);
   const mem = memCache.get(key);
   if (mem && Date.now() - mem.ts < MEM_TTL) return mem.price;
   const ls = loadLsCache();
@@ -155,8 +184,8 @@ export function clearPriceCache() {
   try { localStorage.removeItem(CACHE_KEY); } catch {}
 }
 
-function cachePrice(address, price) {
-  const key = cacheKey(address);
+function cachePrice(address, price, chainId) {
+  const key = cacheKey(address, chainId);
   const entry = { price, ts: Date.now() };
   memCache.set(key, entry);
   const ls = loadLsCache();
@@ -178,29 +207,21 @@ async function fetchWithTimeout(url, timeoutMs = 10000) {
   }
 }
 
-// ── CoinGecko rate limit (HTTP 429) ───────────────────────────
-// The keyless free tier answers 429 under load — proven by probe 2026-10-04:
-// binancecoin/ohlc → {"status":{"error_code":429,"error_message":"You've
-// exceeded the Rate Limit"}}. One 429 used to poison every follow-up: the
-// pseudo-candle fallback calls the SAME host and dies the same way, so the
-// chart collapsed to [] and the modal claimed "No 24h data" about a token
-// that may well have a chart.
-//
-// Now a 429 opens a short cooldown: CoinGecko calls inside it fail fast with
-// a NAMED error instead of hammering the API (which only deepens the
-// penalty), and the caller can tell "rate-limited" apart from "no data" and
-// say so on screen. DexScreener calls keep plain fetchWithTimeout — they are
-// a different host with a different limit.
-const CG_COOLDOWN_MS = 60_000;
-const CG_COOLDOWN_MAX_MS = 15 * 60_000;
-const CG_COOLDOWN_STORE = 'bear.cgCooldownUntil';
-const CG_COOLDOWN_STRIKES_STORE = 'bear.cgCooldownStrikes';
-let cgCooldownUntil = 0;
-let cgStrikes = 0;   // consecutive failed probes; grows the backoff
+// ── source cooldown (HTTP 429) ───────────────────────────────────────────
+// GeckoTerminal is the only KEYLESS source here with a documented cap
+// (30 calls/min). A 429 must not poison the next request — and it must stay
+// distinguishable from "this token has no chart", or the modal lies about
+// someone's coin exactly when the data does exist.
+const COOLDOWN_MS = 60_000;
+const COOLDOWN_MAX_MS = 15 * 60_000;
+const COOLDOWN_STORE = 'bear.sourceCooldownUntil';
+const COOLDOWN_STRIKES_STORE = 'bear.sourceCooldownStrikes';
+let cooldownUntil = 0;
+let strikes = 0;   // consecutive failed probes; grows the backoff
 
 /** The one error that means "the limit, not the token". */
 export function rateLimitError() {
-  return new Error('CoinGecko rate-limited (HTTP 429) — cooldown active');
+  return new Error('Price source rate-limited (HTTP 429) — cooldown active');
 }
 
 export function isRateLimit(e) {
@@ -209,110 +230,133 @@ export function isRateLimit(e) {
 
 // The cooldown check reads PERSISTED state too: a reload drops the module
 // variable, and without this the very next boot re-ran the whole failing
-// batch (console capture 2026-10-08: 4 CORS errors after the logo fix, all
-// from this path). A cooldown survives a reload the same way the logo miss
-// memory does — for the same reason: it is a fact about the endpoint, not
-// about the page.
-//
-// The backoff GROWS per failed probe (1m → 2m → … → 15m cap) because a flat
-// 60s still produced a periodic storm: capture at t=367s shows the cooldown
-// expiring and three fresh errors landing the same minute. A probe that
+// batch. A cooldown is a fact about the ENDPOINT, not about the page.
+// The backoff GROWS per failed probe (1m → 2m → … → 15m cap): a probe that
 // fails twice in a row is unlikely to succeed a minute later; a probe that
-// SUCCEEDS resets the ladder (see cgFetch).
-function cgCooldownActive() {
-  if (Date.now() < cgCooldownUntil) return true;
+// SUCCEEDS resets the ladder.
+function cooldownActive() {
+  if (Date.now() < cooldownUntil) return true;
   try {
-    const until = Number(localStorage.getItem(CG_COOLDOWN_STORE) || 0);
-    if (until > Date.now()) { cgCooldownUntil = until; return true; }
+    const until = Number(localStorage.getItem(COOLDOWN_STORE) || 0);
+    if (until > Date.now()) { cooldownUntil = until; return true; }
   } catch { /* private mode — in-memory only */ }
   return false;
 }
 
-function openCgCooldown() {
-  cgStrikes += 1;
-  const step = Math.min(CG_COOLDOWN_MAX_MS, CG_COOLDOWN_MS * (2 ** (cgStrikes - 1)));
-  cgCooldownUntil = Date.now() + step;
+function openCooldown() {
+  strikes += 1;
+  const step = Math.min(COOLDOWN_MAX_MS, COOLDOWN_MS * (2 ** (strikes - 1)));
+  cooldownUntil = Date.now() + step;
   try {
-    localStorage.setItem(CG_COOLDOWN_STORE, String(cgCooldownUntil));
-    localStorage.setItem(CG_COOLDOWN_STRIKES_STORE, String(cgStrikes));
+    localStorage.setItem(COOLDOWN_STORE, String(cooldownUntil));
+    localStorage.setItem(COOLDOWN_STRIKES_STORE, String(strikes));
   } catch { /* private mode — in-memory still covers this session */ }
 }
 
-function noteCgSuccess() {
-  if (!cgStrikes) return;
-  cgStrikes = 0;                     // healthy again: the ladder starts over
-  try { localStorage.removeItem(CG_COOLDOWN_STRIKES_STORE); } catch { /* private mode */ }
+function noteSuccess() {
+  if (!strikes) return;
+  strikes = 0;                     // healthy again: the ladder starts over
+  try { localStorage.removeItem(COOLDOWN_STRIKES_STORE); } catch { /* private mode */ }
 }
 
 // Strikes must survive a reload too, or every boot restarts at 1 minute.
-function cgStrikeCount() {
-  if (cgStrikes) return cgStrikes;
+function strikeCount() {
+  if (strikes) return strikes;
   try {
-    const n = Number(localStorage.getItem(CG_COOLDOWN_STRIKES_STORE) || 0);
-    if (Number.isFinite(n) && n > 0) cgStrikes = n;
+    const n = Number(localStorage.getItem(COOLDOWN_STRIKES_STORE) || 0);
+    if (Number.isFinite(n) && n > 0) strikes = n;
   } catch { /* private mode */ }
-  return cgStrikes;
+  return strikes;
 }
 
 /** Test hook: forget the endpoint cooldown (tests reset between cases). */
 export function resetCgCooldown() {
-  cgCooldownUntil = 0;
-  cgStrikes = 0;
+  cooldownUntil = 0;
+  strikes = 0;
   try {
-    localStorage.removeItem(CG_COOLDOWN_STORE);
-    localStorage.removeItem(CG_COOLDOWN_STRIKES_STORE);
+    localStorage.removeItem(COOLDOWN_STORE);
+    localStorage.removeItem(COOLDOWN_STRIKES_STORE);
   } catch { /* private mode */ }
 }
 
-async function cgFetch(url, timeoutMs = 10000) {
-  if (cgCooldownActive()) throw rateLimitError();
-  cgStrikeCount();                   // hydrate the persisted ladder before judging
+/** A capped source (GeckoTerminal): honours the cooldown and opens one on 429. */
+async function cappedFetch(url, timeoutMs = 10000) {
+  if (cooldownActive()) throw rateLimitError();
+  strikeCount();                     // hydrate the persisted ladder before judging
   let res;
   try {
     res = await fetchWithTimeout(url, timeoutMs);
   } catch (e) {
-    // In a browser a rate-limited CoinGecko answers WITHOUT CORS headers, so
-    // the 429 status is invisible — the fetch just throws a TypeError and the
-    // `status === 429` check below never fires. That is why the cooldown was
-    // dead code in production while the console kept filling up. An endpoint
-    // that cannot deliver a response is the same verdict as one that answers
-    // 429: back off.
-    openCgCooldown();
+    openCooldown();
     throw e;
   }
   if (res.status === 429) {
-    openCgCooldown();
+    openCooldown();
     throw rateLimitError();
   }
-  noteCgSuccess();
+  noteSuccess();
   return res;
 }
 
-async function fetchCoinGeckoNative(chainId) {
-  const id = NATIVE_COIN_IDS[chainId];
-  if (!id) return null;
-  // usd, always. See the rate block above — the display currency is applied once,
-  // at the edge, by fmtUsd.
-  const res = await cgFetch(cgUrl('simple/price', { ids: id, vs_currencies: 'usd' }));
-  if (!res.ok) throw new Error('CoinGecko ' + res.status);
-  const data = await res.json();
-  return data[id]?.usd ?? null;
+// ── native gas token ────────────────────────────────────────────────────
+// Binance quotes every major in USDT (≈USD) in ONE batch request; DefiLlama's
+// coins API prices the chain's wrapped-native contract when Binance does not
+// list the coin (or refuses the caller's region: api.binance.com answers 451
+// in some countries).
+async function fetchNativeFromBinance(symbol) {
+  const url = `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(symbol)}`;
+  const res = await fetchWithTimeout(url, 8000);
+  if (!res.ok) throw new Error('Binance ' + res.status);
+  const d = await res.json();
+  const p = Number(d?.price);
+  return Number.isFinite(p) && p > 0 ? p : null;
 }
 
-// CoinGecko's public tier allows exactly ONE contract address per
-// /simple/token_price request. Sending the wallet's whole token list in one
-// call returned 400 with error_code 10012 ("Number of contract addresses in
-// the request exceeds the allowed limit of 1"), which is a hard failure, not a
-// rate limit — so every price in the list was lost. Verified live, one address
-// answers 200 and eight answer 400.
-//
-// Kept as a named constant because it is a fact about the free tier, not a
-// tuning knob: if it is ever wrong the app degrades to a 400 again, and the
-// test below pins the chunking so that failure cannot come back silently.
-export const CG_MAX_ADDRESSES = 1;
+async function fetchFromDefiLlama(keys) {
+  if (!keys.length) return {};
+  // The colon is the API's own separator ("ethereum:0xabc") — it must stay
+  // literal in the path. Encoding the whole key turned it into %3A, which the
+  // documented shape does not use.
+  const path = keys.map((k) => String(k).split(':').map(encodeURIComponent).join(':')).join(',');
+  const url = `https://coins.llama.fi/prices/current/${path}`;
+  const res = await fetchWithTimeout(url, 8000);
+  if (!res.ok) throw new Error('DefiLlama ' + res.status);
+  const d = await res.json();
+  const out = {};
+  for (const [id, v] of Object.entries(d?.coins || {})) {
+    const p = Number(v?.price);
+    if (Number.isFinite(p) && p > 0) out[id] = p;
+  }
+  return out;
+}
+
+async function fetchNativePrice(chainId) {
+  const meta = chainMeta(chainId);
+  if (!meta) return null;
+  if (meta.binance) {
+    try {
+      const p = await fetchNativeFromBinance(meta.binance);
+      if (p !== null) return p;
+    } catch { /* Binance blocked/absent — the keyless fallback is next */ }
+  }
+  try {
+    const llama = await fetchFromDefiLlama([`${meta.llama}:${meta.wrapped}`]);
+    return llama[`${meta.llama}:${meta.wrapped}`] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ── ERC-20 token prices ─────────────────────────────────────────────────
+// DexScreener's /tokens/v1/{chainId}/{addresses} takes a COMMA-SEPARATED list
+// (up to 30) and answers every pair for those tokens — one request for the
+// whole wallet instead of one per token. Each pair carries priceUsd and
+// liquidity; the deepest pool is the honest price (a dust pool can be
+// manipulated to any number).
+export const TOKEN_PRICE_BATCH = 25;   // DexScreener documents up to 30; 25 keeps the URL sane
 
 /** Split addresses into request-sized chunks, de-duplicated and lower-cased. */
-export function cgTokenPriceChunks(addresses, size = CG_MAX_ADDRESSES) {
+export function tokenPriceChunks(addresses, size = TOKEN_PRICE_BATCH) {
   const n = Math.max(1, Number(size) || 1);
   // Filter BEFORE stringifying. String(null) is "null" and String(undefined) is
   // "undefined" — both truthy, so a post-map filter would happily request a
@@ -327,73 +371,77 @@ export function cgTokenPriceChunks(addresses, size = CG_MAX_ADDRESSES) {
   return out;
 }
 
-async function fetchCoinGeckoTokens(chainId, addresses) {
-  const platform = COINGECKO_PLATFORMS[chainId];
-  if (!platform || !addresses?.length) return {};
-  const chunks = cgTokenPriceChunks(addresses);
+// Pick the best pair per token: the deepest pool wins. `tokens/v1` answers
+// newest-first, which is NOT the same thing as "the real market".
+function bestPricesFromPairs(pairs, chainId) {
+  const meta = chainMeta(chainId);
   const out = {};
-
-  // Sequential on purpose, with a circuit breaker. One request per token means
-  // a wallet holding twenty tokens asks twenty questions of a free tier, and the
-  // limiter answers some of them with an error page that carries no CORS
-  // headers — which the console then reports as a CORS failure, burying the
-  // real cause. Two consecutive failures is enough to conclude the endpoint is
-  // unhappy right now; the rest are left to DexScreener, which is one call per
-  // token anyway and does not share this quota.
-  let consecutiveFailures = 0;
-  for (const chunk of chunks) {
-    try {
-      const res = await cgFetch(cgUrl(`simple/token_price/${platform}`,
-        { contract_addresses: chunk.join(','), vs_currencies: 'usd' }));
-      if (!res.ok) {
-        if (++consecutiveFailures >= 2) break;
-        continue;
-      }
-      const data = await res.json();
-      consecutiveFailures = 0;
-      for (const [addr, v] of Object.entries(data || {})) {
-        const p = v?.usd;
-        if (typeof p === 'number' && Number.isFinite(p)) out[addr] = p;
-      }
-    } catch {
-      if (++consecutiveFailures >= 2) break;
-    }
+  for (const p of Array.isArray(pairs) ? pairs : []) {
+    const addr = String(p?.baseToken?.address || '').toLowerCase();
+    const price = Number(p?.priceUsd);
+    if (!addr || !Number.isFinite(price) || price <= 0) continue;
+    if (meta && p?.chainId && String(p.chainId) !== meta.dex) continue;   // same chain only
+    const liq = Number(p?.liquidity?.usd) || 0;
+    const prev = out[addr];
+    if (!prev || liq > prev.liq) out[addr] = { price, liq };
   }
-  return out;
+  const flat = {};
+  for (const [addr, v] of Object.entries(out)) flat[addr] = v.price;
+  return flat;
 }
 
-// DexScreener chainId slugs per numeric chainId (search endpoint uses slugs)
-const DEXSCREENER_CHAINS = {
-  1: 'ethereum',
-  56: 'bsc',
-  137: 'polygon',
-  42161: 'arbitrum',
-  10: 'optimism',
-  8453: 'base'
-};
+async function fetchDexScreenerBatch(chainId, addresses) {
+  const meta = chainMeta(chainId);
+  if (!meta || !addresses.length) return {};
+  const url = `https://api.dexscreener.com/tokens/v1/${chainId}/${addresses.join(',')}`;
+  const res = await fetchWithTimeout(url, 10000);
+  if (!res.ok) throw new Error('DexScreener ' + res.status);
+  const data = await res.json();
+  return bestPricesFromPairs(data, chainId);
+}
 
-// Fallback for tokens whose /tokens/v1 pair list is empty (new / not yet indexed):
-// search endpoint returns { pairs: [...] } — take first pair with priceUsd on same chain.
+// Fallback for tokens whose /tokens/v1 pair list is empty (new / not yet
+// indexed): search returns { pairs: [...] } — take the deepest pair on chain.
 async function fetchDexScreenerSearch(chainId, address) {
   const url = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(address)}`;
   const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error('DexScreener search ' + res.status);
   const data = await res.json();
   const pairs = Array.isArray(data?.pairs) ? data.pairs : [];
-  const slug = DEXSCREENER_CHAINS[chainId];
-  const pair = pairs.find(p => p?.priceUsd && (!slug || p.chainId === slug));
-  return pair?.priceUsd ? parseFloat(pair.priceUsd) : null;
+  const meta = chainMeta(chainId);
+  const hit = pairs
+    .filter((p) => p && p.priceUsd && (!meta || p.chainId === meta.dex))
+    .sort((a, b) => (Number(b?.liquidity?.usd) || 0) - (Number(a?.liquidity?.usd) || 0))[0];
+  const p = Number(hit?.priceUsd);
+  return Number.isFinite(p) && p > 0 ? p : null;
 }
 
-async function fetchDexScreener(chainId, address) {
-  const url = `https://api.dexscreener.com/tokens/v1/${chainId}/${address}`;
-  const res = await fetchWithTimeout(url);
-  if (!res.ok) throw new Error('DexScreener ' + res.status);
-  const data = await res.json();
-  const pair = Array.isArray(data) ? data[0] : null;
-  if (pair?.priceUsd) return parseFloat(pair.priceUsd);
-  // Empty/null pair list → try search endpoint before giving up honestly.
-  return fetchDexScreenerSearch(chainId, address);
+async function fetchTokenPrices(chainId, addresses) {
+  const meta = chainMeta(chainId);
+  if (!meta || !addresses.length) return {};
+  const out = {};
+  for (const chunk of tokenPriceChunks(addresses)) {
+    try {
+      const prices = await fetchDexScreenerBatch(chainId, chunk);
+      for (const [addr, price] of Object.entries(prices)) out[addr] = price;
+    } catch { /* this chunk goes to the DefiLlama retry below */ }
+  }
+  const missing = addresses
+    .map((a) => String(a).toLowerCase())
+    .filter((a) => out[a] === undefined);
+  // DefiLlama is a different host with its own (uncapped) budget — worth one
+  // batched shot for everything DexScreener did not price.
+  if (missing.length) {
+    try {
+      const keys = missing.map((a) => `${meta.llama}:${a}`);
+      const llama = await fetchFromDefiLlama(keys);
+      for (const a of missing) {
+        const p = llama[`${meta.llama}:${a}`];
+        if (p !== undefined) out[a] = p;
+      }
+    } catch { /* honest nulls below */ }
+  }
+  return out;
 }
 
 // tokens: [{address, symbol, decimals}] — address null = native
@@ -408,50 +456,43 @@ export async function fetchAllPrices(tokens, chainId) {
 
   // native gas token
   if (native) {
-    const cached = getPriceFromCache(null);
+    const cached = getPriceFromCache(null, chainId);
     if (cached !== null) {
       result.set('native', cached);
     } else {
       try {
-        const p = await fetchCoinGeckoNative(chainId);
-        if (p !== null) { result.set('native', p); cachePrice(null, p); }
+        const p = await fetchNativePrice(chainId);
+        if (p !== null) { result.set('native', p); cachePrice(null, p, chainId); }
       } catch { /* fall through — usd stays null */ }
     }
   }
 
-  // ERC-20: cache first, then CoinGecko batch, then DexScreener per token
+  // ERC-20: cache first, then the batched sources
   const missing = [];
   for (const t of erc20s) {
-    const cached = getPriceFromCache(t.address);
+    const cached = getPriceFromCache(t.address, chainId);
     if (cached !== null) result.set(t.address, cached);
     else missing.push(t);
   }
 
   if (missing.length) {
-    try {
-      const prices = await fetchCoinGeckoTokens(chainId, missing.map(t => t.address));
-      for (const t of missing) {
-        // fetchCoinGeckoTokens returns a FLAT map addr → number (it already
-        // unwraps v.usd and filters non-finite values). Reading `.usd` here
-        // always yielded undefined, so every CoinGecko-listed token fell
-        // through to DexScreener — whose /tokens/v1 answers [] for the majors
-        // — and rendered "—" even when CoinGecko had the price.
-        const raw = prices[t.address.toLowerCase()];
-        const p = typeof raw === 'number' ? raw : raw?.usd;
-        if (p !== undefined && p !== null && Number.isFinite(Number(p))) {
-          const n = Number(p);
-          result.set(t.address, n);
-          cachePrice(t.address, n);
-        }
+    const prices = await fetchTokenPrices(chainId, missing.map(t => t.address));
+    for (const t of missing) {
+      const p = prices[String(t.address).toLowerCase()];
+      if (typeof p === 'number' && Number.isFinite(p)) {
+        result.set(t.address, p);
+        cachePrice(t.address, p, chainId);
       }
-    } catch { /* fall through to DexScreener */ }
+    }
   }
 
+  // Still nothing: the search endpoint, one token at a time (a new token can
+  // be absent from the batched pair list while its pool is already indexed).
   const stillMissing = erc20s.filter(t => !result.has(t.address));
   await Promise.allSettled(stillMissing.map(async (t) => {
     try {
-      const p = await fetchDexScreener(chainId, t.address);
-      if (p !== null) { result.set(t.address, p); cachePrice(t.address, p); }
+      const p = await fetchDexScreenerSearch(chainId, t.address);
+      if (p !== null) { result.set(t.address, p); cachePrice(t.address, p, chainId); }
     } catch { /* keep null */ }
   }));
 
@@ -485,131 +526,126 @@ export function fitCandles(candles, max = 60) {
   return list;
 }
 
-// ── OHLC candlestick data for token chart ───────────────────
-// CoinGecko keyless granularity — MEASURED 2026-10-06 (ETH/BTC/DOGE):
-// days=1 → 30min (n=48), 7 → 4h (n=42), 30 → 4h (n=180), 90/365 → 4d
-// (n=23/92). There is no keyless 5m/1h series: the old 5m/1h buttons all
-// fetched days=1 and showed identical candles (user, 2026-10-06: "chart
-// time itu ga akurat candle nya sama semua"). The wizard now offers the
-// ranges the API can actually distinguish.
-// Returns [{ time, open, high, low, close }] or [] when unavailable.
-export async function fetchOHLC({ address, chainId, days = 1 }) {
-  await ensureUsdRate();
-  const platform = COINGECKO_PLATFORMS[chainId];
-  const nativeId = NATIVE_COIN_IDS[chainId];
-  const key = `ohlc:${address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`}:${days}`;
+// ── chart series ────────────────────────────────────────────────────────
+// Two keyless sources, both able to distinguish the four ranges the chart
+// offers (24h / 7d / 30d / 1y):
+//   Binance klines    native gas tokens (ETH/BNB/POL/AVAX/MNT/CELO…)
+//   GeckoTerminal     tokens Binance does not list, by pool
+// The old CoinGecko series could not tell 5m from 1h (all four buttons fetched
+// days=1 — user, 2026-10-06: "chart time itu ga akurat candle nya sama
+// semua"), so the ranges here are chosen to differ by construction.
+const HISTORY_TTL = 5 * 60_000;
 
-  const hit = historyCache.get(key);
-  if (hit && Date.now() - hit.ts < HISTORY_TTL) return hit.data;
+// 24h→30m, 7d→4h, 30d→12h, 1y→1w: same shape the chart had before, but the
+// granularity is now requested explicitly instead of inferred from a cliff.
+function binanceInterval(days) {
+  if (days <= 1) return { interval: '30m', limit: 48 };
+  if (days <= 7) return { interval: '4h', limit: 48 };
+  if (days <= 30) return { interval: '12h', limit: 60 };
+  return { interval: '1w', limit: 53 };
+}
 
-  let url = null;
-  if (address && platform) {
-    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/ohlc`, { vs_currency: 'usd', days });
-  } else if (!address && nativeId) {
-    url = cgUrl(`coins/${nativeId}/ohlc`, { vs_currency: 'usd', days });
+function gtTimeframe(days) {
+  if (days <= 1) return { timeframe: 'hour', limit: 24 };
+  if (days <= 7) return { timeframe: 'hour', limit: 168 };
+  if (days <= 30) return { timeframe: 'day', limit: 30 };
+  return { timeframe: 'day', limit: 365 };
+}
+
+async function binanceKlines(symbol, days) {
+  const { interval, limit } = binanceInterval(days);
+  const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`;
+  const res = await fetchWithTimeout(url, 12000);
+  if (!res.ok) throw new Error('Binance klines ' + res.status);
+  const data = await res.json();
+  return (Array.isArray(data) ? data : [])
+    .map((k) => ({ time: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]) }))
+    .filter((c) => [c.open, c.high, c.low, c.close].every((v) => Number.isFinite(v) && v > 0));
+}
+
+// GeckoTerminal needs a POOL id for OHLCV, so a token lookup is two calls:
+// /tokens/{address}/pools (deepest first) then /pools/{pool}/ohlcv. Both
+// keyless; only the capped one (ohlcv) rides the cooldown.
+async function geckoTerminalKlines(chainId, address, days) {
+  const meta = chainMeta(chainId);
+  if (!meta || !address) return [];
+  // BOTH GeckoTerminal calls ride the capped path: the whole host is limited
+  // (30/min), and a network failure here must open the cooldown or every
+  // page load re-runs the failing walk (the storm this module was built for).
+  const poolsRes = await cappedFetch(
+    `https://api.geckoterminal.com/api/v2/networks/${meta.gt}/tokens/${encodeURIComponent(String(address).toLowerCase())}/pools?page=1`, 10000);
+  if (!poolsRes.ok) throw new Error('GeckoTerminal pools ' + poolsRes.status);
+  const poolsJson = await poolsRes.json();
+  const pool = (poolsJson?.data || [])[0];
+  const poolAddress = pool?.attributes?.address || String(pool?.id || '').split('_').slice(1).join('_');
+  if (!poolAddress) return [];
+  const { timeframe, limit } = gtTimeframe(days);
+  const ohlcvRes = await cappedFetch(
+    `https://api.geckoterminal.com/api/v2/networks/${meta.gt}/pools/${encodeURIComponent(poolAddress)}/ohlcv/${timeframe}?aggregate=1&limit=${limit}&currency=usd&token=base`, 12000);
+  if (!ohlcvRes.ok) throw new Error('GeckoTerminal ohlcv ' + ohlcvRes.status);
+  const ohlcvJson = await ohlcvRes.json();
+  const list = ohlcvJson?.data?.attributes?.ohlcv_list;
+  // GeckoTerminal answers NEWEST FIRST — the chart reads oldest → newest.
+  return (Array.isArray(list) ? list : [])
+    .map((k) => ({ time: Number(k[0]) * 1000, open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]) }))
+    .filter((c) => [c.open, c.high, c.low, c.close].every((v) => Number.isFinite(v) && v > 0))
+    .reverse();
+}
+
+// USD candles for a native coin or a token. [] = honest "no chart here".
+async function marketCandles({ address, chainId, days = 1 }) {
+  const meta = chainMeta(chainId);
+  if (!meta) return [];
+  if (!address) {
+    if (!meta.binance) return [];
+    try { return await binanceKlines(meta.binance, days); } catch { return []; }
   }
-  if (!url) return [];
-
-  try {
-    const res = await cgFetch(url, 12000);
-    if (!res.ok) throw new Error('CoinGecko OHLC ' + res.status);
-    const data = await res.json();
-    // CoinGecko OHLC format: [[timestamp, open, high, low, close], ...]
-    const candles = (Array.isArray(data) ? data : [])
-      .map(d => ({ time: d[0], open: d[1], high: d[2], low: d[3], close: d[4] }))
-      .filter(c => [c.open, c.high, c.low, c.close].every(v => typeof v === 'number' && Number.isFinite(v)));
-    if (candles.length < 2) throw new Error('No OHLC data');
-    // Chart axes are plain numbers with no symbol, so the conversion has to
-    // happen here or the chart would read in dollars while the balance beside it
-    // reads in rupiah — two true numbers on one screen meaning different things.
-    const shown = candles.map((c) => ({ ...c, open: usdToDisplay(c.open), high: usdToDisplay(c.high), low: usdToDisplay(c.low), close: usdToDisplay(c.close) }));
-    historyCache.set(key, { data: shown, ts: Date.now() });
-    return shown;
-  } catch (e) {
-    // Rate-limited: the pseudo-candle fallback below calls the SAME host and
-    // the cooldown would just fail it again — surface the named error now so
-    // the modal can say "rate-limited" instead of "this coin has no data".
-    if (isRateLimit(e)) throw rateLimitError();
-    // Fallback: convert price history to pseudo-candles
-    try {
-      const prices = await fetchPriceHistory({ address, chainId, days });
-      if (prices.length < 2) return [];
-      // prices is already in display currency (fetchPriceHistory converts), so
-      // these pseudo-candles must not be scaled a second time. Spacing follows
-      // the REQUESTED range — a hardcoded 5-min step drew every 7d/1y series
-      // as a wall of tiny steps on a wrong timeline.
-      const stepMs = (days * 86400000) / prices.length;
-      const candles = prices.map((p, i) => {
-        const next = prices[i + 1] || p;
-        return { time: Date.now() - (prices.length - i) * stepMs, open: p, high: Math.max(p, next), low: Math.min(p, next), close: next };
-      });
-      return candles.slice(0, -1);
-    } catch (e2) {
-      if (isRateLimit(e2)) throw rateLimitError();
-      return [];
-    }
+  try { return await geckoTerminalKlines(chainId, address, days); } catch (e) {
+    if (isRateLimit(e)) throw e;      // the caller says "rate-limited", not "no data"
+    return [];
   }
 }
 
-// ── 24h price history for the token mini-chart ──────────────────
-// CoinGecko keyless market_chart, cached 5 min. Returns a number[]
-// (oldest → newest, downsampled to ~30 points) or [] when unavailable.
-// Replaces the old random-walk chart, which looked different on every open.
-const HISTORY_TTL = 5 * 60_000;
-
-export async function fetchPriceHistory({ address, chainId, days = 1 }) {
+// ── OHLC candlestick data for the token chart ───────────────────────────
+// Returns [{ time, open, high, low, close }] in the DISPLAY currency, or [].
+export async function fetchOHLC({ address, chainId, days = 1 }) {
   await ensureUsdRate();
-  const platform = COINGECKO_PLATFORMS[chainId];
-  const nativeId = NATIVE_COIN_IDS[chainId];
-  // Range in the cache key: a 24h hit must never answer a 1y request (the
-  // old key had no range, so the first fill poisoned every other button).
-  const key = `hist:${address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`}:${days}`;
-
+  const key = `ohlc:${address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`}:${days}`;
   const hit = historyCache.get(key);
   if (hit && Date.now() - hit.ts < HISTORY_TTL) return hit.data;
 
-  let url = null;
-  if (address && platform) {
-    url = cgUrl(`coins/${platform}/contract/${String(address).toLowerCase()}/market_chart`, { vs_currency: 'usd', days });
-  } else if (!address && nativeId) {
-    url = cgUrl(`coins/${nativeId}/market_chart`, { vs_currency: 'usd', days });
-  }
-  if (!url) return [];
+  const raw = await marketCandles({ address, chainId, days });
+  if (raw.length < 2) return [];
+  // Chart axes are plain numbers with no symbol, so the conversion has to
+  // happen here or the chart would read in dollars while the balance beside it
+  // reads in rupiah — two true numbers on one screen meaning different things.
+  const shown = raw.map((c) => ({
+    ...c,
+    open: usdToDisplay(c.open),
+    high: usdToDisplay(c.high),
+    low: usdToDisplay(c.low),
+    close: usdToDisplay(c.close)
+  }));
+  historyCache.set(key, { data: shown, ts: Date.now() });
+  return shown;
+}
 
-  try {
-    const res = await cgFetch(url, 12000);
-    if (!res.ok) throw new Error('CoinGecko ' + res.status);
-    const data = await res.json();
-    const raw = (data.prices || [])
-      .map(p => p[1])
-      .filter(v => typeof v === 'number' && Number.isFinite(v));
-    if (raw.length < 2) throw new Error('No data');
-    // evenly spaced sample (~30 points), always keeping first + latest
-    const target = Math.min(30, raw.length);
-    const sampled = Array.from({ length: target }, (_, k) => usdToDisplay(raw[Math.round(k * (raw.length - 1) / (target - 1))]));
-    historyCache.set(key, { data: sampled, ts: Date.now() });
-    return sampled;
-  } catch (e) {
-    // DexScreener fallback for chart data — a DIFFERENT host, so it is still
-    // worth one shot even while CoinGecko is cooling down.
-    try {
-      if (address) {
-        const dsUrl = `https://api.dexscreener.com/tokens/v1/${chainId}/${address}`;
-        const dsRes = await fetchWithTimeout(dsUrl, 8000);
-        if (dsRes.ok) {
-          const dsData = await dsRes.json();
-          const pair = Array.isArray(dsData) ? dsData[0] : dsData;
-          const history = pair?.priceHistory || pair?.h24 || [];
-          if (Array.isArray(history) && history.length >= 2) {
-            const sampled = Array.from({ length: Math.min(30, history.length) }, (_, k) => history[Math.round(k * (history.length - 1) / (Math.min(30, history.length) - 1))]);
-            historyCache.set(key, { data: sampled, ts: Date.now() });
-            return sampled;
-          }
-        }
-      }
-    } catch { /* fallback failed */ }
-    // The limit was the cause → say so; a genuine gap in the data stays [].
-    if (isRateLimit(e)) throw rateLimitError();
-    return [];
-  }
+// ── price history for the mini-chart ────────────────────────────────────
+// The closes of the same keyless series, downsampled to ~30 points. Returns a
+// number[] (oldest → newest) already in the display currency, or [].
+export async function fetchPriceHistory({ address, chainId, days = 1 }) {
+  await ensureUsdRate();
+  const key = `hist:${address ? `${chainId}:${String(address).toLowerCase()}` : `${chainId}:native`}:${days}`;
+  const hit = historyCache.get(key);
+  if (hit && Date.now() - hit.ts < HISTORY_TTL) return hit.data;
+
+  const raw = await marketCandles({ address, chainId, days });
+  const closes = raw.map((c) => c.close).filter((v) => Number.isFinite(v) && v > 0);
+  if (closes.length < 2) return [];
+  // evenly spaced sample (~30 points), always keeping first + latest
+  const target = Math.min(30, closes.length);
+  const sampled = Array.from({ length: target }, (_, k) =>
+    usdToDisplay(closes[Math.round(k * (closes.length - 1) / (target - 1))]));
+  historyCache.set(key, { data: sampled, ts: Date.now() });
+  return sampled;
 }
