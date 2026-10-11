@@ -24,7 +24,7 @@ const VIEWPORTS = [
 async function qrGeometry(page) {
   return page.evaluate(() => {
     const box = document.querySelector('#modalBox');
-    const svg = document.querySelector('.receive-qr svg');
+    const svg = document.querySelector('#modalBox > .receive-qr svg');
     if (!box || !svg) return null;
     const cs = getComputedStyle(box);
     const br = box.getBoundingClientRect();
@@ -51,7 +51,7 @@ async function openReceive(page) {
   await skipIntro(page);
   await createWallet(page);
   await page.locator('#quickReceive').click();
-  await page.waitForSelector('.receive-qr svg', { timeout: 10_000 });
+  await page.waitForSelector('#modalBox > .receive-qr svg', { timeout: 10_000 });
   // Let layout settle before measuring.
   await page.waitForTimeout(300);
 }
@@ -84,15 +84,15 @@ test.describe('Receive modal content', () => {
 
   test('address, copy button and QR are all present', async ({ page }) => {
     await openReceive(page);
-    await expect(page.locator('.receive-qr svg')).toBeVisible();
-    await expect(page.locator('.copy-btn[data-copy]')).toBeVisible();
-    const addr = await page.locator('.copy-btn[data-copy]').getAttribute('data-copy');
+    await expect(page.locator('#modalBox > .receive-qr svg')).toBeVisible();
+    await expect(page.locator('#modalBox > .copy-btn[data-copy]')).toBeVisible();
+    const addr = await page.locator('#modalBox > .copy-btn[data-copy]').getAttribute('data-copy');
     expect(addr, 'the copy button must carry the wallet address').toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 
   test('the QR actually encodes the wallet address', async ({ page }) => {
     await openReceive(page);
-    const addr = await page.locator('.copy-btn[data-copy]').getAttribute('data-copy');
+    const addr = await page.locator('#modalBox > .copy-btn[data-copy]').getAttribute('data-copy');
     // Regenerate the same QR in-page and compare its module count + data, so a
     // blank or wrong-code placeholder cannot pass.
     const decoded = await page.evaluate((expected) => {
@@ -105,4 +105,17 @@ test.describe('Receive modal content', () => {
     expect(decoded.error).toBeUndefined();
     expect(decoded.moduleCount, 'a 42-char address must produce a real QR').toBeGreaterThan(20);
   });
+});
+
+// The EVM address is the primary card, so it is a DIRECT child of #modalBox —
+// the per-chain cards are nested inside .receive-chain. Scoping the locators to
+// the modal box (rather than a bare '.receive-qr') is what keeps these tests
+// strict-mode-clean now that Receive lists EVM + Bitcoin + Solana + XRP.
+test('every chain from the same seed is listed below the EVM address', async ({ page }) => {
+  await openReceive(page);
+  await expect(page.locator('.receive-other-title')).toHaveText(/same recovery phrase/i);
+  const cards = page.locator('.receive-chain');
+  await expect(cards).toHaveCount(3);
+  const heads = await cards.locator('.receive-chain-head strong').allTextContents();
+  expect(heads, 'one card per non-EVM chain, in a stable order').toEqual(['Bitcoin', 'Solana', 'XRP']);
 });
