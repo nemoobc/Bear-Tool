@@ -187,6 +187,13 @@ test('the driver drives the native dApp browser end to end — open, confirm, re
   assert.match(driverSrc, /sheetVisibility !== 'visible'/, 'dApp WAJIB TETAP TERLIHAT saat sheet tampil — flash-to-wallet = bug (user report "pas connect langsung keluar")');
   // The account row cross-check ties the sheet (native layer) to the fixture.
   assert.match(driverSrc, /accountMatchesModal/, 'akun fixture wajib cocok dengan akun yang ditampilkan sheet native');
+  // Read the sheet's own "Account" row, not the first 0x… on screen: the
+  // accessibility dump spans the whole window, so the wallet dashboard behind
+  // the modal contributes dozens of token addresses. "First 0x match" picked
+  // USDT's 0xdAC1…1ec7 and failed a connect that had worked (run 38135917949).
+  assert.match(driverSrc, /texts\.indexOf\('Account'\)/, 'ambil nilai baris "Account" milik sheet');
+  assert.match(driverSrc, /rowAt \+ 1/, 'nilainya adalah teks tepat sesudah label');
+  assert.match(driverSrc, /native sheet has no Account row/, 'baris Account hilang = gagal keras');
   assert.match(driverSrc, /did not return the wallet to view/, 'back palsu (tombol ketuk tapi layar tak pulih) wajib gagal');
 });
 

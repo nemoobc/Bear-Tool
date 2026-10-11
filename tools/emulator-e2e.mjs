@@ -589,8 +589,17 @@ async function main() {
     // eye into the native layer).
     const acc = (String(text).match(/account0=(0x[0-9a-fA-F]{40})/) || [])[1] || '';
     if (acc) {
-      const short = (report.dapp.sheetTexts || []).find((t) => t.startsWith('0x') && t.includes('…')) || '';
-      if (!short) throw new Error(`native sheet has no short account to cross-check ${acc} against: ${JSON.stringify(report.dapp.sheetTexts)}`);
+      // Take the value of the sheet's own "Account" row, NOT the first 0x… on
+      // screen. The accessibility dump spans the whole window, so the wallet
+      // dashboard behind the modal contributes dozens of token addresses
+      // (0xdAC1…1ec7 for USDT, 0xA0b8…eB48 for USDC, …) and "first 0x match"
+      // picked a TOKEN, not the account being connected — run 38135917949
+      // failed a perfectly correct connect on exactly that.
+      const texts = report.dapp.sheetTexts || [];
+      const rowAt = texts.indexOf('Account');
+      const short = (rowAt >= 0 ? texts[rowAt + 1] : '')
+        || texts.find((t) => t.startsWith('0x') && t.includes('…')) || '';
+      if (!short) throw new Error(`native sheet has no Account row to cross-check ${acc} against: ${JSON.stringify(texts)}`);
       const head = short.slice(0, 6), tail = short.slice(-4);
       if (!acc.toLowerCase().startsWith(head.toLowerCase().replace('…', '')) || !acc.toLowerCase().endsWith(tail.toLowerCase())) {
         throw new Error(`sheet account ${short} does not match fixture account ${acc}`);
