@@ -95,6 +95,39 @@ export async function waitForReceipt(tx, { timeoutMs = CONFIRM_TIMEOUT_MS, label
   }
 }
 
+// Turn a waitForReceipt result into a verdict that cannot be misread.
+//
+// A transaction can be REPLACED in flight — a speed-up, a drop-and-replace, or a
+// cancel with the same nonce. There is then NO receipt for the hash the caller
+// holds, only the replacement's hash, and waitForReceipt reports that honestly
+// as `receipt: null`. The shape every caller used next,
+// `receipt.status === 1 ? 'success' : 'failed'`, then threw
+// "Cannot read properties of null (reading 'status')": send, swap, bridge and
+// all five eip7702 flows did exactly that, losing the replacement hash and
+// leaving their history row stranded on "pending".
+//
+// This is the ONE place the null-receipt case is handled, so a caller cannot
+// reach `receipt.status` without a receipt.
+//
+//   kind: 'success' | 'failed' | 'pending' | 'replaced'
+//     'pending'  — not confirmed in time; the hash is still worth tracking
+//     'replaced' — a DIFFERENT hash landed; this hash did not
+//     'success'  — mined, status 1
+//     'failed'   — mined, status 0 (a revert is an on-chain outcome)
+export function receiptVerdict(result) {
+  const r = result || {};
+  if (r.replaced) {
+    return { kind: 'replaced', hash: r.hash || null, replacement: r.replacement || null, receipt: null };
+  }
+  if (r.timedOut || !r.receipt) {
+    return { kind: 'pending', hash: r.hash || null, replacement: null, receipt: null };
+  }
+  return {
+    kind: r.receipt.status === 1 ? 'success' : 'failed',
+    hash: r.hash || null, replacement: null, receipt: r.receipt,
+  };
+}
+
 // double-submit guard: blocks re-entry while a tx with the same key runs
 export async function safeSend(key, fn) {
   if (pending.has(key)) {

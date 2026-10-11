@@ -10,7 +10,7 @@ const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 
 import { $, toast, confirmTx, escapeHtml, spinnerDots, fmtAmount } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx, waitForReceipt, withTimeout } from './safetx.js';
+import { runTx, waitForReceipt, receiptVerdict, withTimeout } from './safetx.js';
 import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import { SWAP_ROUTERS, getSwapRoutersForChain, getBestSwapRouter, getRouterAddress, getQuoterAddress, CHAIN_NAMES } from './routers.js';
 import { initTokenPicker, initOptionPicker } from './token-picker.js';
@@ -735,15 +735,21 @@ export async function doSwap() {
     }
     toast('Swap tx sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'swap', status: 'pending', ts: Date.now(), detail: `${amt} ${dispSym(from)} → ${dispSym(to)}`, symbols: [from, to] });
-    const { receipt, timedOut } = await waitForReceipt(tx);
-    if (timedOut) {
+    const v = receiptVerdict(await waitForReceipt(tx));
+    if (v.kind === 'pending') {
       // Sent but not confirmed in time. The pending activity entry is left as
       // "pending" (honest) and the button is released — never spin forever.
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'swap', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${amt} ${dispSym(from)} → ${dispSym(to)}`, symbols: [from, to] });
-    toast(receipt.status === 1 ? 'Swap confirmed! 🎉' : 'Swap failed!', receipt.status === 1 ? 'success' : 'error');
+    if (v.kind === 'replaced') {
+      // Speed-up / drop-and-replace: a different hash landed, so neither
+      // 'success' nor 'failed' is true for the hash the user holds.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… was replaced in flight${v.replacement ? ` by ${String(v.replacement).slice(0, 10)}…` : ''} — track that one on the explorer.`, 'info');
+      return;
+    }
+    addActivity({ hash: tx.hash, type: 'swap', status: v.kind, ts: Date.now(), detail: `${amt} ${dispSym(from)} → ${dispSym(to)}`, symbols: [from, to] });
+    toast(v.kind === 'success' ? 'Swap confirmed! 🎉' : 'Swap failed!', v.kind === 'success' ? 'success' : 'error');
     emit('refresh');
   });
 }

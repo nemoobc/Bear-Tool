@@ -8,7 +8,7 @@ const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 
 import { $, toast, confirmTx, escapeHtml, setBtnDots, promptPassword } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx, waitForReceipt, withTimeout } from './safetx.js';
+import { runTx, waitForReceipt, receiptVerdict, withTimeout } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
 import * as wallet from './wallet.js';
 import { saveDeployed, findDeployed, listDeployed, removeDeployed } from './registry.js';
@@ -122,11 +122,17 @@ async function deployContract(signer, abi, bytecode, constructorArgs = []) {
   const factory = new ethers.ContractFactory(abi, bytecode, signer);
   const contract = await factory.deploy(...constructorArgs);
   const tx = contract.deploymentTransaction();
-  const { receipt, timedOut } = await waitForReceipt(tx);
-  if (timedOut) {
+  const v = receiptVerdict(await waitForReceipt(tx));
+  if (v.kind === 'pending') {
     throw new Error(`Helper deploy TX ${String(tx?.hash || '').slice(0, 12)}… is still unconfirmed. Check the explorer before retrying.`);
   }
-  if (receipt && receipt.status !== 1) throw new Error('Helper contract deploy reverted');
+  if (v.kind === 'replaced') {
+    // A replaced deploy did not land THIS hash — returning the contract would
+    // hand back one whose address may have no code, and every later call would
+    // fail with something unrelated.
+    throw new Error(`Helper deploy TX ${String(tx?.hash || '').slice(0, 12)}… was replaced in flight — check the replacement before retrying.`);
+  }
+  if (v.kind === 'failed') throw new Error('Helper contract deploy reverted');
   return contract;
 }
 
@@ -406,13 +412,17 @@ async function executeBatch() {
       );
       addActivity({ hash: txD.hash, type: 'eip7702-batch', status: 'pending', ts: Date.now(), detail: `delegate → ${wallet.shortAddress(batchAddr)}` });
       toast('Delegation tx sent…', 'info');
-      const dRes = await waitForReceipt(txD);
-      if (dRes.timedOut) {
+      const dv = receiptVerdict(await waitForReceipt(txD));
+      if (dv.kind === 'pending') {
         toast(`Delegation ${String(txD.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
         return;
       }
-      addActivity({ hash: txD.hash, type: 'eip7702-batch', status: dRes.receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `delegate → ${wallet.shortAddress(batchAddr)}` });
-      if (dRes.receipt.status !== 1) {
+      if (dv.kind === 'replaced') {
+        toast(`Delegation ${String(txD.hash).slice(0, 10)}… was replaced in flight${dv.replacement ? ` by ${String(dv.replacement).slice(0, 10)}…` : ''} — re-check the delegation before batch executing.`, 'info');
+        return;
+      }
+      addActivity({ hash: txD.hash, type: 'eip7702-batch', status: dv.kind, ts: Date.now(), detail: `delegate → ${wallet.shortAddress(batchAddr)}` });
+      if (dv.kind !== 'success') {
         toast('Delegation transaction FAILED — batch not executed.', 'error');
         return;
       }
@@ -430,15 +440,19 @@ async function executeBatch() {
 
     addActivity({ hash: tx.hash, type: 'eip7702-batch', status: 'pending', ts: Date.now(), detail: `${valid.length} calls via batch` });
     toast('Batch execute tx sent! ⚡', 'info');
-    const { receipt, timedOut } = await waitForReceipt(tx);
-    if (timedOut) {
+    const v = receiptVerdict(await waitForReceipt(tx));
+    if (v.kind === 'pending') {
       // Sent but not confirmed in time. The pending activity entry is left as
       // "pending" (honest) and the button is released — never spin forever.
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'eip7702-batch', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${valid.length} calls` });
-    toast(receipt.status === 1 ? 'Batch executed! 🎉' : 'Batch failed!', receipt.status === 1 ? 'success' : 'error');
+    if (v.kind === 'replaced') {
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… was replaced in flight${v.replacement ? ` by ${String(v.replacement).slice(0, 10)}…` : ''} — track that one on the explorer.`, 'info');
+      return;
+    }
+    addActivity({ hash: tx.hash, type: 'eip7702-batch', status: v.kind, ts: Date.now(), detail: `${valid.length} calls` });
+    toast(v.kind === 'success' ? 'Batch executed! 🎉' : 'Batch failed!', v.kind === 'success' ? 'success' : 'error');
     renderDeployedRegistry();
     emit('refresh');
   });
@@ -748,11 +762,15 @@ async function executeRescue() {
 
     addActivity({ hash: tx.hash, type: 'eip7702-rescue', status: 'pending', ts: Date.now(), detail: `Rescue ${type} → ${wallet.shortAddress(safe)}` });
     toast('Rescue tx sent! ⚡', 'info');
-    const { receipt, timedOut } = await waitForReceipt(tx);
-    if (timedOut) {
+    const v = receiptVerdict(await waitForReceipt(tx));
+    if (v.kind === 'pending') {
       // Sent but not confirmed in time. The pending activity entry is left as
       // "pending" (honest) and the button is released — never spin forever.
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
+    if (v.kind === 'replaced') {
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… was replaced in flight${v.replacement ? ` by ${String(v.replacement).slice(0, 10)}…` : ''} — re-check the delegation before assuming anything moved.`, 'info');
       return;
     }
     // A mined receipt is NOT proof the assets moved: a skipped authorization
@@ -761,9 +779,9 @@ async function executeRescue() {
     let landed = null;
     try { landed = await getDelegation(provider, target); } catch { /* RPC hiccup → honest unknown */ }
     const delegated = !!landed && landed.toLowerCase() === rescueAddr.toLowerCase();
-    const rescued = receipt.status === 1 && delegated;
+    const rescued = v.kind === 'success' && delegated;
     addActivity({ hash: tx.hash, type: 'eip7702-rescue', status: rescued ? 'success' : 'failed', ts: Date.now(), detail: `Rescue ${type}` });
-    if (receipt.status === 1 && !delegated) {
+    if (v.kind === 'success' && !delegated) {
       toast('Tx mined but the delegation did NOT apply — assets were NOT moved.', 'error');
     } else {
       toast(rescued ? 'Assets rescued! 🎉' : 'Rescue failed!', rescued ? 'success' : 'error');
@@ -910,11 +928,15 @@ async function executeClaim() {
 
     addActivity({ hash: tx.hash, type: 'eip7702-claim', status: 'pending', ts: Date.now(), detail: `Claim airdrop → ${wallet.shortAddress(safe)}` });
     toast('Claim tx sent! ⚡', 'info');
-    const { receipt, timedOut } = await waitForReceipt(tx);
-    if (timedOut) {
+    const v = receiptVerdict(await waitForReceipt(tx));
+    if (v.kind === 'pending') {
       // Sent but not confirmed in time. The pending activity entry is left as
       // "pending" (honest) and the button is released — never spin forever.
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
+    if (v.kind === 'replaced') {
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… was replaced in flight${v.replacement ? ` by ${String(v.replacement).slice(0, 10)}…` : ''} — track that one on the explorer.`, 'info');
       return;
     }
     // The numbers are the proof: re-read both balances and show them side by
@@ -937,8 +959,8 @@ async function executeClaim() {
         (delta != null ? ` (${delta >= 0n ? '+' : ''}${fmt(delta)})` : '') + '</div>' +
         `<div class="small">EOA: ${fmt(eoaBefore)} → ${fmt(eoaAfter)}</div>`;
     }
-    addActivity({ hash: tx.hash, type: 'eip7702-claim', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: 'Airdrop claim' });
-    toast(receipt.status === 1 ? 'Airdrop claimed + forwarded! 🎉' : 'Claim failed!', receipt.status === 1 ? 'success' : 'error');
+    addActivity({ hash: tx.hash, type: 'eip7702-claim', status: v.kind, ts: Date.now(), detail: 'Airdrop claim' });
+    toast(v.kind === 'success' ? 'Airdrop claimed + forwarded! 🎉' : 'Claim failed!', v.kind === 'success' ? 'success' : 'error');
     renderDeployedRegistry();
     emit('refresh');
   });
@@ -1377,7 +1399,7 @@ export async function revokeDelegation() {
     const tx = await withTimeout(sponsorSigner.sendTransaction({
       // MUST be explicit: ethers v6 otherwise infers an EIP-1559 type-2 tx from
       // the fee fields and SILENTLY DROPS the authorizationList. The tx then
-      // mines fine, receipt.status === 1, the UI reports "Delegation revoked!"
+      // mines fine, status 1, the UI reports "Delegation revoked!"
       // — and the delegation is still live on-chain.
       type: 4,
       to: target,
@@ -1387,9 +1409,13 @@ export async function revokeDelegation() {
     }), BROADCAST_TIMEOUT_MS, 'revoke broadcast');
     addActivity({ hash: tx.hash, type: 'eip7702-revoke', status: 'pending', ts: Date.now(), detail: `revoke → ${target}` });
     toast('Revoke tx sent! ⚡', 'info');
-    const { receipt, timedOut } = await waitForReceipt(tx);
-    if (timedOut) {
+    const v = receiptVerdict(await waitForReceipt(tx));
+    if (v.kind === 'pending') {
       toast(`Tx ${tx.hash.slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
+      return;
+    }
+    if (v.kind === 'replaced') {
+      toast(`Tx ${tx.hash.slice(0, 10)}… was replaced in flight${v.replacement ? ` by ${String(v.replacement).slice(0, 10)}…` : ''} — re-check the delegation before assuming it was revoked.`, 'info');
       return;
     }
     // A mined receipt is NOT proof the delegation was removed: a type-2 tx that
@@ -1399,12 +1425,12 @@ export async function revokeDelegation() {
     try {
       stillDelegated = await getDelegation(provider, target);
     } catch { /* RPC hiccup — fall through to the receipt verdict */ }
-    const revoked = receipt.status === 1 && !stillDelegated;
+    const revoked = v.kind === 'success' && !stillDelegated;
     addActivity({
       hash: tx.hash, type: 'eip7702-revoke',
       status: revoked ? 'success' : 'failed', ts: Date.now(), detail: `revoke → ${target}`
     });
-    if (receipt.status === 1 && stillDelegated) {
+    if (v.kind === 'success' && stillDelegated) {
       toast('Revoke tx mined but the delegation is STILL ACTIVE on-chain — the authorization did not apply.', 'error');
     } else {
       toast(revoked ? 'Delegation revoked! ✅' : 'Revoke failed!', revoked ? 'success' : 'error');

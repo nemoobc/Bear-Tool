@@ -6,7 +6,7 @@
 
 import { $, toast, confirmTx, fmtAmount, escapeHtml } from './ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx, waitForReceipt, withTimeout, RPC_TIMEOUT_MS } from './safetx.js';
+import { runTx, waitForReceipt, receiptVerdict, withTimeout, RPC_TIMEOUT_MS } from './safetx.js';
 import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
 import * as wallet from './wallet.js';
 import { resolveMax, verifySpendable } from './max-ui.js';
@@ -444,15 +444,22 @@ export async function doSend() {
     }
     toast('Transaction sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'send', status: 'pending', ts: Date.now(), detail: `${amt} ${t.symbol} → ${wallet.shortAddress(to)}`, to, symbol: t.symbol, value: amt });
-    const { receipt, timedOut } = await waitForReceipt(tx);
-    if (timedOut) {
+    const v = receiptVerdict(await waitForReceipt(tx));
+    if (v.kind === 'pending') {
       // Sent but not confirmed in time. The pending activity entry is left as
       // "pending" (honest) and the button is released — never spin forever.
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'send', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${amt} ${t.symbol} → ${wallet.shortAddress(to)}`, to, symbol: t.symbol, value: amt });
-    toast(receipt.status === 1 ? 'Transaction confirmed! 🎉' : 'Transaction failed!', receipt.status === 1 ? 'success' : 'error');
+    if (v.kind === 'replaced') {
+      // A speed-up / drop-and-replace landed under a DIFFERENT hash. This hash
+      // did not, so it is neither success nor failure — say so, and keep the
+      // replacement trackable instead of crashing on a missing receipt.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… was replaced in flight${v.replacement ? ` by ${String(v.replacement).slice(0, 10)}…` : ''} — track that one on the explorer.`, 'info');
+      return;
+    }
+    addActivity({ hash: tx.hash, type: 'send', status: v.kind, ts: Date.now(), detail: `${amt} ${t.symbol} → ${wallet.shortAddress(to)}`, to, symbol: t.symbol, value: amt });
+    toast(v.kind === 'success' ? 'Transaction confirmed! 🎉' : 'Transaction failed!', v.kind === 'success' ? 'success' : 'error');
     emit('refresh');
   });
 }

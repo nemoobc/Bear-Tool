@@ -268,8 +268,8 @@ export async function reconcileActivity(provider, { concurrency = 4 } = {}) {
     const batch = stuck.slice(i, i + concurrency);
     await Promise.all(batch.map(async (row) => {
       try {
-        const receipt = await provider.getTransactionReceipt(row.hash);
-        if (!receipt) {
+        const mined = await provider.getTransactionReceipt(row.hash);
+        if (!mined) {
           // No receipt. That is two different situations and they must not be
           // reported the same way:
           //   - the transaction EXISTS and has no receipt yet -> still in flight
@@ -286,7 +286,7 @@ export async function reconcileActivity(provider, { concurrency = 4 } = {}) {
           return;
         }
         // A transaction that was mined but reverted is 'failed', not 'success'.
-        const status = receipt.status === 1 ? 'success' : 'failed';
+        const status = mined.status === 1 ? 'success' : 'failed';
         addActivity({ hash: row.hash, status, ts: row.ts, detail: row.detail });
         if (status === 'success') summary.settled++; else summary.failed++;
       } catch {

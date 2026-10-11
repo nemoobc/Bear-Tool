@@ -3028,7 +3028,7 @@ async function showActivityDetail(a) {
     const chain = [
       receipt ? row('Block', val(receipt.blockNumber)) : '',
       blk?.timestamp ? row('Confirmed at', val(fmtTime(blk.timestamp * 1000))) : '',
-      receipt ? row('Status', receipt.status === 1 ? '✅ Success' : '❌ Reverted') : '',
+      receipt ? row('Status', receipt?.status === 1 ? '✅ Success' : '❌ Reverted') : '',
       row('From', copyable(tx?.from)),
       row('To', copyable(tx?.to)),
       tx ? row('Value', escapeHtml(ethers.formatEther(tx.value)) + ' ' + escapeHtml(sym)) : '',

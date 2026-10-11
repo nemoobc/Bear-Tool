@@ -35,7 +35,7 @@
 import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
 import { resolveMax } from './max-ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
-import { runTx, waitForReceipt, withTimeout } from './safetx.js';
+import { runTx, waitForReceipt, receiptVerdict, withTimeout } from './safetx.js';
 const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 
 import { getAllNetworks, getNetworkById, POPULAR_TOKENS } from './network.js';
@@ -908,15 +908,21 @@ async function doBridgeExecInner() {
       BROADCAST_TIMEOUT_MS, 'bridge broadcast');
     toast('Bridge tx sent! ⏳', 'info');
     addActivity({ hash: tx.hash, type: 'bridge', status: 'pending', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}`, symbol: context.tokenSymbol });
-    const { receipt, timedOut } = await waitForReceipt(tx);
-    if (timedOut) {
+    const v = receiptVerdict(await waitForReceipt(tx));
+    if (v.kind === 'pending') {
       // Sent but not confirmed in time. The pending activity entry is left as
       // "pending" (honest) and the button is released — never spin forever.
       toast(`Tx ${String(tx.hash).slice(0, 10)}… sent but still unconfirmed. Track it on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'bridge', status: receipt.status === 1 ? 'success' : 'failed', ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}`, symbol: context.tokenSymbol });
-    toast(receipt.status === 1 ? 'Bridge confirmed! 🎉' : 'Bridge failed!', receipt.status === 1 ? 'success' : 'error');
+    if (v.kind === 'replaced') {
+      // Speed-up / drop-and-replace: the bridge hash the user holds did not
+      // land; the replacement did. Report it rather than crash on receipt null.
+      toast(`Tx ${String(tx.hash).slice(0, 10)}… was replaced in flight${v.replacement ? ` by ${String(v.replacement).slice(0, 10)}…` : ''} — track that one on the explorer.`, 'info');
+      return;
+    }
+    addActivity({ hash: tx.hash, type: 'bridge', status: v.kind, ts: Date.now(), detail: `${context.tokenSymbol} ${context.amount} · chain ${context.fromChainId} → ${context.toChainId}`, symbol: context.tokenSymbol });
+    toast(v.kind === 'success' ? 'Bridge confirmed! 🎉' : 'Bridge failed!', v.kind === 'success' ? 'success' : 'error');
     emit('refresh');
   });
 }
