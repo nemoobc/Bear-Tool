@@ -36,13 +36,18 @@ test('the four consent prompts prefer the NATIVE sheet and keep the wallet-modal
     'sheet native dipanggil lewat plugin.confirm (Java menggambar di atas overlay)');
   assert.match(code, /return askUser\(\(\) => confirmTx\(\{ title, rows, confirmText \}\)/,
     'fallback tetap lewat askUser — web/plugin lama tak boleh menggantung');
-  // askUser masih hidup untuk network picker — kedalaman harus tetap dijaga.
-  assert.match(code, /let confirmDepth = 0;/);
-  assert.match(code, /confirmDepth \+= 1;/);
-  assert.match(code, /confirmDepth -= 1;/);
-  assert.match(code, /confirmDepth === 0/, 'restore hanya saat semua konfirmasi selesai');
-  assert.match(code, /p\.setVisible\(\{ visible: false \}\)/);
-  assert.match(code, /p\.setVisible\(\{ visible: true \}\)/);
+  // askUser masih hidup untuk network picker + fallback web — tapi penjaganya
+  // STATE, bukan counter: openModal menyala lagi saat sheet sudah terbuka (pair
+  // sheet → prompt unlock) dan counter akan melenceng, meninggalkan browser
+  // tersembunyi selamanya (tanpa cara membukanya kembali).
+  assert.match(code, /let confirmCount = 0;/);
+  assert.match(code, /let modalOpen = false;/);
+  assert.match(code, /const aside = modalOpen \|\| confirmCount > 0;/,
+    'dua alasan menyembunyikan browser: konfirmasi RPC DAN modal wallet apa pun (pair sheet deep-link)');
+  assert.match(code, /if \(aside === browserAside\) return;/,
+    'idempoten: panggilan berulang tak boleh menggeser visibilitas');
+  assert.match(code, /p\.setVisible\(\{ visible: !aside \}\)/,
+    'satu jalur visibilitas — bukan dua yang bisa berperang');
 });
 
 test('the E2E hook can only open a URL, and only on native', () => {
@@ -673,5 +678,75 @@ test('BrowserClient overrides only real WebViewClient methods (no WebChromeClien
   for (const name of overrides) {
     assert.ok(allowed.has(name), `@Override tak dikenal bisa gagal compile: ${name}`);
   }
+});
+
+test('ui.js reports modal visibility, and native-dapp.js is the one that acts on it', () => {
+  // The missing half of the flash-to-wallet story: askUser covered confirmTx
+  // and the ◆ picker, but the WalletConnect PAIR SHEET — reachable by a `wc:`
+  // deep link from a browser, or ?wc= on web — opens its modal directly, so the
+  // sheet landed UNDER the native browser: the user tapped "Bear Tool" and saw
+  // the dApp (nothing to pair with, nothing to click). ui.js owns the two
+  // choke points (openModal/closeModal); native-dapp.js owns setVisible.
+  const uiSrc = readFileSync(path.join(here, '..', 'js', 'ui.js'), 'utf8');
+  const uiCode = uiSrc.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.match(uiCode, /export function setModalVisibilityHook\(fn\)/,
+    'ui.js menyediakan hook-nya (bebas jembatan: native-dapp.js yang tahu caranya)');
+  assert.match(uiCode, /notifyModalVisibility\(true\);[\s\S]*?\n/,
+    'openModal melaporkan sheet tampil');
+  assert.match(uiCode, /notifyModalVisibility\(false\);/,
+    'closeModal melaporkan sheet hilang');
+  // swallow: a visibility hint must never be why a money-path modal fails
+  assert.match(uiCode, /try \{ modalVisibilityHook\?\.\(open\); \} catch \{/,
+    'hook meledak = modal tetap jalan (try/catch wajib)');
+  // the hook is STATE (a boolean from the caller), not a counter ui.js keeps
+  assert.match(uiCode, /let modalVisibilityHook = null;/);
+  assert.match(code, /setModalVisibilityHook\(\(open\) => \{[\s\S]{0,120}modalOpen = !!open;/,
+    'native-dapp.js mendaftarkan hook dan menyimpannya sebagai state boolean');
+  assert.match(code, /applyBrowserVisibility\(\);\s*\n\s*\}\);/,
+    'setiap laporan langsung diterapkan ke plugin (setVisible)');
+});
+
+test('the E2E proves the wc: deep link the way a listing uses it: OS resolves, sheet fills, browser steps aside', () => {
+  // What a WalletConnect-registry listing hands users is a link that ends as a
+  // bare `wc:…` URI (docs/WC-REGISTRY-LISTING.md). The redirect half is covered
+  // by the live /wc page + tests/wc-registry-listing.test.js; only an emulator
+  // can prove the OS→app half, and it must run WITHOUT -n so the manifest's
+  // intent-filter is what resolves it (a listing that dead-ends on "no app
+  // found" is the whole failure mode).
+  const driverSrc = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8');
+  const dcode = driverSrc.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.match(dcode, /step\('walletconnect: a bare wc: URI resolves to Bear Tool and fills the pair sheet'\)/,
+    'langkah deep-link ada di journey emulator');
+  const region = dcode.slice(
+    dcode.indexOf("step('walletconnect: a bare wc: URI"),
+    dcode.indexOf("step('native bridge diagnostics')"),
+  );
+  // The pairing URI the OS is handed: 64-hex topic + @2 + relay + 64-hex symKey.
+  assert.match(region, /const wcUri = 'wc:' \+ 'ab12cd34'\.repeat\(8\) \+ '@2\?relay-protocol=irn&symKey=' \+ 'ef56ab78'\.repeat\(8\);/,
+    'URI berbentuk wc:<64hex>@2?relay-protocol=irn&symKey=<64hex> — bentuk yang sama dengan yang dihasilkan dApp');
+  assert.match(region, /am', 'start', '-W', '-a', 'android\.intent\.action\.VIEW', '-d', `'\$\{wcUri\}'`/,
+    'am start memakai -W (tunggu aktivitas) dan mengutip URI (device shell memakan & tanpa kutip)');
+  assert.doesNotMatch(region, /'-n'/,
+    'TANPA -n: resolusi wajib kerja manifest, bukan eksplisit ke paket kita');
+  assert.match(region, /unable to resolve/,
+    'resolusi gagal = uji gagal keras, bukan lolos');
+  assert.match(region, /if \(wcSheet\.value !== wcUri\)/,
+    'URI wajib sudah terisi di sheet (itu inti deep link — tanpa clipboard)');
+  // Present ≠ seen: the sheet lives in the wallet webview under the native view.
+  assert.match(region, /withSheet\.native\.visible !== false/,
+    'sheet wajib BENAR-BENAR di atas layar (plugin viewState, bukan DOM)');
+  assert.match(region, /afterCancel\.native\.visible !== true/,
+    'browser wajib kembali setelah sheet ditutup (restore hilang = dompet tanpa browser)');
+  assert.match(region, /viewState\(\{\}\)/,
+    'bukti visibilitas diambil dari hierarki view native, bukan dari klaim app');
+  assert.match(region, /document\.visibilityState/,
+    'sinyal kedua: halaman dApp sendiri melaporkan tersembunyi');
+  // The plugin method the driver calls must exist and answer from the VIEW tree.
+  assert.match(java, /public void viewState\(PluginCall call\)/,
+    'plugin.viewState = satu-satunya saksi visibilitas nyata');
+  assert.match(java, /out\.put\("visible", dappView != null && stack != null && stack\.getVisibility\(\) == View\.VISIBLE\)/,
+    'visible dibaca dari getVisibility() — bukan flag yang ditulis app');
+  assert.match(java, /out\.put\("open", dappView != null\)/,
+    'open = ada sesi browser (sesi bertahan walau overlay tersembunyi)');
 });
 

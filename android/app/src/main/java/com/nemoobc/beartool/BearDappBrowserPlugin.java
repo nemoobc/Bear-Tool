@@ -1211,15 +1211,16 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
     }
 
     /**
-     * Flash to the wallet while a confirmation is up.
+     * Flash to the wallet while a wallet-side sheet is up.
      *
-     * handleNativeRpc's confirmTx renders in the WALLET's webview — which this
-     * full-screen overlay covers. Without this the Connect/Sign/Send prompt is
-     * drawn underneath the dapp: invisible, unclickable, every confirmation-
-     * bound RPC hanging forever on a tap nobody can make. The wallet JS hides
-     * the dapp around each confirm and restores it after (depth-counted, so
-     * two simultaneous requests cannot restore under the first prompt).
-     * A no-op when the browser was never opened.
+     * confirmTx renders in the WALLET's webview — which this full-screen
+     * overlay covers. Without this the Connect/Sign/Send prompt is drawn
+     * underneath the dapp: invisible, unclickable, every confirmation-bound RPC
+     * hanging forever on a tap nobody can make. Same for a pairing sheet opened
+     * from a `wc:` deep link. The wallet JS hides the dapp around each of them
+     * and restores it after (state-based, so two simultaneous requests cannot
+     * restore under the first prompt). A no-op when the browser was never
+     * opened; `viewState` reports the actual result.
      */
     @PluginMethod
     public void setVisible(PluginCall call) {
@@ -1238,6 +1239,24 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
                 if (!visible && tabPanel != null) tabPanel.setVisibility(View.GONE);
             }
             call.resolve();
+        });
+    }
+
+    /**
+     * Wallet/E2E → native: what the browser overlay is ACTUALLY doing right
+     * now. The wallet can ask to hide it; only the view hierarchy knows whether
+     * that happened. A DOM query can never answer this: a wallet sheet drawn
+     * UNDER this overlay still passes document.getElementById, so "the pairing
+     * sheet exists" is not "the user can see it". `open` = a session exists,
+     * `visible` = the overlay is on screen.
+     */
+    @PluginMethod
+    public void viewState(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            JSObject out = new JSObject();
+            out.put("open", dappView != null);
+            out.put("visible", dappView != null && stack != null && stack.getVisibility() == View.VISIBLE);
+            call.resolve(out);
         });
     }
 

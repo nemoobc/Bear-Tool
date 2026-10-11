@@ -13,7 +13,7 @@
 // - typed-data chain mismatch and sendTransaction chain mismatch are REFUSED,
 //   not silently executed on the local chain;
 // - locked wallet raises the unlock prompt and answers honestly.
-import { confirmTx, toast } from './ui.js';
+import { confirmTx, toast, setModalVisibilityHook } from './ui.js';
 import { get, requireUnlock, on } from './state.js';
 import { getNetworkById, getNetwork } from './network.js';
 import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
@@ -182,6 +182,15 @@ export function initNativeDappRpc() {
   if (!isNativeDappBrowser()) return Promise.resolve(false);
   return ensurePlugin()
     .then((p) => {
+      // Every wallet modal this webview draws must be SEEN. ui.js reports each
+      // openModal/closeModal through this hook; with the native browser up, the
+      // sheet would otherwise render underneath it (invisible, unclickable) —
+      // exactly what a `wc:` deep link used to do. Registered before any sheet
+      // can open, and idempotent (see applyBrowserVisibility).
+      setModalVisibilityHook((open) => {
+        modalOpen = !!open;
+        applyBrowserVisibility();
+      });
       p.addListener('rpcRequest', (ev) => {
         handleNativeRpc(ev).catch((e) => console.warn('[native-dapp]', e));
       });
@@ -222,8 +231,8 @@ async function handleWalletCommand(ev) {
   }
   if (cmd !== 'openNetworkPicker') return;
   // The wallet's modal renders in the WALLET's webview, which the full-screen
-  // dApp overlay covers — so hide the dapp around it (askUser, depth-counted)
-  // and restore it once the modal is dismissed.
+  // dApp overlay covers — so hide the dapp around it (askUser here, plus the
+  // ui.js modal hook) and restore it once the modal is dismissed.
   await askUser(async () => {
     const { showNetworkModal } = await import('./app.js');
     await new Promise((resolve) => {
@@ -252,19 +261,39 @@ async function handleWalletCommand(ev) {
 // WALLET's webview, and the native dapp view covers the whole screen — a
 // prompt drawn underneath that overlay is invisible and unclickable, so every
 // confirmation-bound RPC (connect, sign, send) would hang forever on a tap
-// nobody can make. Depth-counted: two dapp requests confirming at once must
-// not restore the view under the first prompt. No dapp open → the plugin's
-// setVisible is a no-op, so normal wallet confirms pass straight through.
-let confirmDepth = 0;
-async function askUser(fn) {
+// nobody can make.
+//
+// Two independent reasons to move the browser aside, one output:
+//   confirmCount — dapp RPC confirmations in flight (askUser, below);
+//   modalOpen    — ANY wallet modal on screen, reported by ui.js's hook. The
+//                  ◆ network picker predates the hook and wraps askUser; the
+//                  WC pair sheet reached by a `wc:` deep link (or the ?wc= web
+//                  link) never did — the user tapped "Bear Tool" in a browser
+//                  and got the dApp in front of an invisible pairing sheet.
+// Idempotent by STATE, not by count: openModal can fire again while a sheet is
+// already up (pair sheet → unlock prompt) and a counter would drift, leaving
+// the browser hidden for good. No dapp open → the plugin's setVisible is a
+// no-op, so plain wallet modals pass straight through.
+let confirmCount = 0;
+let modalOpen = false;
+let browserAside = false;
+async function applyBrowserVisibility() {
   const p = plugin;
-  confirmDepth += 1;
-  if (p) { try { await p.setVisible({ visible: false }); } catch { /* view never opened */ } }
+  if (!p) return;
+  const aside = modalOpen || confirmCount > 0;
+  if (aside === browserAside) return;
+  browserAside = aside;
+  try { await p.setVisible({ visible: !aside }); } catch { /* view never opened */ }
+}
+
+async function askUser(fn) {
+  confirmCount += 1;
+  await applyBrowserVisibility();
   try {
     return await fn();
   } finally {
-    confirmDepth -= 1;
-    if (p && confirmDepth === 0) { try { await p.setVisible({ visible: true }); } catch { /* view gone */ } }
+    confirmCount -= 1;
+    await applyBrowserVisibility();
   }
 }
 

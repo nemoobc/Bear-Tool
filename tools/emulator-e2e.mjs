@@ -889,6 +889,88 @@ async function main() {
     if (!report.dapp.walletTabsReopened) throw new Error('reopening from the wallet did not show the browser');
     await shotScreen('18-wallet-tabs-reopened');
     try { dapp.close(); } catch { /* target may die with the view */ }
+
+    // ── WalletConnect deep link: the OS must hand a bare wc: URI to Bear Tool ─
+    // The listing hands users a link that ends as a plain `wc:…` URI
+    // (docs/WC-REGISTRY-LISTING.md, mobile.universal → /wc) and the manifest's
+    // intent-filter is what turns that click into "the wallet opens with the
+    // pairing URI already filled". No browser is installed on this AOSP image,
+    // so the redirect HALF is covered elsewhere (the live /wc page + tests/
+    // wc-registry-listing.test.js); the OS→app half is only provable here, and
+    // `am start` deliberately carries NO -n: the resolution must be the
+    // manifest's job, or a listing could dead-end on "no app found".
+    //
+    // The browser is UP at this point (the step above reopened it), which is
+    // the state that used to swallow the sheet: a modal renders in the WALLET's
+    // webview while the native overlay covers the screen.
+    step('walletconnect: a bare wc: URI resolves to Bear Tool and fills the pair sheet');
+    const wcUri = 'wc:' + 'ab12cd34'.repeat(8) + '@2?relay-protocol=irn&symKey=' + 'ef56ab78'.repeat(8);
+    report.wcDeepLink = { uri: wcUri.slice(0, 24) + '…' };
+    // The device shell parses the -d value: single-quote it (the URI carries
+    // ? and &, and an unquoted & would split the command on the device side).
+    const started = adb('shell', 'am', 'start', '-W', '-a', 'android.intent.action.VIEW', '-d', `'${wcUri}'`).trim();
+    report.wcDeepLink.amStart = started.slice(0, 240);
+    if (/unable to resolve|Error:/i.test(started)) throw new Error('no app resolved a wc: URI: ' + started);
+
+    // The sheet is a WEB modal in the wallet page — poll the DOM (presence
+    // only; visibility is settled below) and demand the URI is ALREADY filled:
+    // that hand-off is the whole point of the deep link (no clipboard trip).
+    let wcSheet = null;
+    for (let i = 0; i < 30 && !(wcSheet && wcSheet.present); i++) {
+      wcSheet = await page.evaluate(`(function () {
+        var i = document.getElementById('wcPairUri');
+        var g = document.getElementById('wcPairGo');
+        return { present: !!(i && g), value: i ? String(i.value) : '' };
+      })()`).catch(() => null);
+      if (!(wcSheet && wcSheet.present)) await sleep(500);
+    }
+    report.wcDeepLink.sheet = wcSheet;
+    if (!wcSheet || !wcSheet.present) throw new Error('a wc: deep link opened no pair sheet: ' + JSON.stringify(wcSheet));
+    if (wcSheet.value !== wcUri) {
+      throw new Error('the pair sheet opened without the URI: ' + JSON.stringify(String(wcSheet.value).slice(0, 60)));
+    }
+    await shotScreen('19-wc-deeplink-sheet');
+
+    // PRESENT vs SEEN: the sheet exists in the wallet's DOM, but the native
+    // browser owned the screen. The view hierarchy is the only witness — ask
+    // the plugin (viewState) and cross-read the dApp page's own
+    // document.visibilityState as a second, independent signal.
+    step('walletconnect: the native browser steps aside for the sheet — and comes back');
+    const readBrowser = async () => {
+      const native = await page.evaluate(`(async () => {
+        const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BearDappBrowser;
+        if (!p || typeof p.viewState !== 'function') return { unsupported: true };
+        return await p.viewState({});
+      })()`).catch((e) => ({ probeFailed: String(e.message) }));
+      let dappVisibility = 'target-gone';
+      try {
+        if ((await cdpTargetUrls()).some((u) => u.includes('dapp-rpc-fixture'))) {
+          const c = await connectCDP('dapp-rpc-fixture');
+          try { dappVisibility = String(await makePage(c).evaluate('document.visibilityState')); }
+          finally { try { c.close(); } catch { /* already gone */ } }
+        }
+      } catch (e) { dappVisibility = 'probe-failed: ' + e.message; }
+      return { native, dappVisibility };
+    };
+    const withSheet = await readBrowser();
+    report.wcDeepLink.withSheet = withSheet;
+    if (!withSheet.native || withSheet.native.visible !== false) {
+      throw new Error('the sheet is UNDER the native browser — the user cannot see it: '
+        + JSON.stringify(report.wcDeepLink.withSheet));
+    }
+    // Cancel: the sheet closes, the browser must come straight back (a lost
+    // restore would leave a wallet with no browser and no way to reopen it).
+    await page.click('#modalBox [data-close-modal]').catch(() => { throw new Error('pair sheet has no cancel'); });
+    await sleep(1500);
+    const afterCancel = await readBrowser();
+    report.wcDeepLink.afterCancel = {
+      sheetGone: await page.evaluate('!document.getElementById(\'wcPairUri\')').catch(() => null),
+      ...afterCancel,
+    };
+    if (!afterCancel.native || afterCancel.native.visible !== true) {
+      throw new Error('the browser never came back after the sheet closed: '
+        + JSON.stringify(report.wcDeepLink.afterCancel));
+    }
   }
 
   // ── native bridge diagnostics (permanent, CDP-side) ─────────────────────

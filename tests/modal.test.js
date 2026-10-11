@@ -48,7 +48,7 @@ globalThis.document = {
 globalThis.matchMedia = () => ({ matches: false });
 globalThis.performance = { now: () => 0 };
 
-const { openModal, closeModal } = await import('../js/ui.js');
+const { openModal, closeModal, setModalVisibilityHook } = await import('../js/ui.js');
 
 test('modal: normal open adds no welcome-screen anywhere', () => {
   openModal('<h2>Hi</h2>');
@@ -98,8 +98,38 @@ test('modal: legacy close (bypasses closeModal) still cannot leak fullscreen', (
   closeModal();
 });
 
-test('css: fullscreen uses explicit class, dynamic viewport height, no overlay padding', () => {
-  const css = readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
+test('modal: every open/close reports to the native-browser visibility hook', () => {
+  // A wallet sheet renders in THIS webview, while the native dApp browser is a
+  // sibling native view drawn over it (BearDappBrowserPlugin stacks its webview
+  // on the activity root). A sheet opened while a dApp is browsing therefore
+  // renders underneath: invisible and unclickable — exactly what a `wc:` deep
+  // link did (the user tapped "Bear Tool" in a browser and saw the dApp).
+  // native-dapp.js registers here; ui.js owes it both edges.
+  const seen = [];
+  setModalVisibilityHook((open) => seen.push(open));
+  openModal('<h2>Pair</h2>');
+  assert.deepEqual(seen, [true], 'open melaporkan true');
+  // openModal can fire again while a sheet is already up (the pair sheet hands
+  // off to the unlock prompt). The hook is told every time and the consumer
+  // decides — a MISSING edge is what would strand the browser hidden.
+  openModal('<h2>Unlock</h2>');
+  assert.deepEqual(seen, [true, true], 'open kedua tetap melapor (state, bukan counter)');
+  closeModal();
+  assert.deepEqual(seen, [true, true, false], 'close melaporkan false');
+  // A hook that throws must never be the reason a modal fails: the sheet is on
+  // the money path (send/sign/pair) and a wallet with no dialog is a dead end.
+  setModalVisibilityHook(() => { throw new Error('boom'); });
+  openModal('<h2>Still fine</h2>');
+  assert.equal(overlay.classList.contains('open'), true, 'modal tetap terbuka saat hook meledak');
+  closeModal();
+  assert.equal(overlay.classList.contains('open'), false, 'dan tetap bisa ditutup');
+  setModalVisibilityHook(null);
+  openModal('<h2>Hook removed</h2>');
+  assert.equal(overlay.classList.contains('open'), true, 'hook dilepas = modal tetap jalan');
+  closeModal();
+});
+
+test('css: fullscreen uses explicit class, dynamic viewport height, no overlay padding', () => {  const css = readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
   assert.ok(css.includes('.modal.welcome-screen'), 'box rule must use explicit .welcome-screen');
   assert.ok(css.includes('.modal-overlay.welcome-screen {'), 'overlay rule must exist');
   assert.ok(!css.includes('.modal:has(.welcome-full)'), ':has() dependency must be gone');

@@ -103,6 +103,24 @@ function getFocusable(box) {
     .filter(el => el.offsetParent !== null && !el.classList.contains('modal-close'));
 }
 
+// A wallet modal renders in THIS webview. The native dApp browser, when open,
+// is a sibling native view drawn OVER it (BearDappBrowserPlugin stacks its
+// WebView on the activity root), so a modal opened while a dApp is browsing
+// sits underneath: invisible and unclickable. Whoever knows how to move that
+// browser aside registers here — native-dapp.js does exactly that, and ui.js
+// stays bridge-free (inert on the plain web build, where there is no overlay).
+// STATE, not a counter: openModal fires again while a sheet is already up (the
+// WC pair sheet hands off to the unlock prompt), and a counter would drift and
+// leave the browser hidden for good.
+let modalVisibilityHook = null;
+export function setModalVisibilityHook(fn) {
+  modalVisibilityHook = typeof fn === 'function' ? fn : null;
+}
+function notifyModalVisibility(open) {
+  // A visibility hint must never be the reason a modal fails to open or close.
+  try { modalVisibilityHook?.(open); } catch { /* hook is best-effort */ }
+}
+
 export function openModal(html, { fullscreen = false, wide = false, dismissible = true } = {}) {
   const overlay = $('#modalOverlay');
   const box = $('#modalBox');
@@ -132,6 +150,9 @@ export function openModal(html, { fullscreen = false, wide = false, dismissible 
     box.setAttribute('aria-modal', 'true');
   }
   overlay.classList.add('open');
+  // The sheet is now on screen — if a native dApp browser covers this webview,
+  // it must step aside (see setModalVisibilityHook).
+  notifyModalVisibility(true);
   // scroll lock
   document.body.style.overflow = 'hidden';
   // move focus inside the dialog
@@ -155,6 +176,9 @@ export function closeModal() {
   const overlay = $('#modalOverlay');
   if (!overlay) return;
   overlay.classList.remove('open', 'welcome-screen');
+  // Nothing wallet-side is on screen any more: let the native browser come back
+  // (a no-op when none was ever opened — see setModalVisibilityHook).
+  notifyModalVisibility(false);
   document.body?.classList?.remove('modal-open');
   $('#modalBox')?.classList.remove('welcome-screen', 'modal-wide');
   document.body.style.overflow = '';
