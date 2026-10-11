@@ -30,6 +30,7 @@ import { cancelOrder, fulfillBasicOrder, getOrderStatusOnChain } from './opensea
 import { t, setLang, applyTranslations } from './i18n.js';
 import { renderDapps, POPULAR_DAPPS } from './dapps.js';
 import { dappBrowserOnLock } from './dapp-browser.js';
+import { nonEvmAddresses } from './coin-trees.js';
 import { renderSecurityCenter } from './security-center.js';
 import { renderDiscord, bindDiscordPanel, finishOAuthRedirect } from './discord.js';
 // scanTransaction finally has a caller. It has been written and tested since
@@ -2405,8 +2406,62 @@ function showTokenActions(el) {
   $('#tokenHistory').onclick = () => { closeModal(); switchView('activity'); };
 }
 
+// Derive the non-EVM receive addresses for the active account. These come from
+// the SAME seed as the EVM address (see js/coin-trees.js), so one recovery
+// phrase restores every chain. Chains whose derivation is not yet proven against
+// published vectors (Solana, XRP) come back with `receive: null` and an
+// `unsupported` reason — shown as such, never a fabricated address.
+function nonEvmReceiveRows() {
+  const secret = wallet.getSession();
+  if (!secret) return [];
+  let addrs;
+  try {
+    addrs = nonEvmAddresses(secret, Number(wallet.getActiveAccountIndex() || 0));
+  } catch (e) {
+    console.warn('[receive] non-EVM derivation failed', e);
+    return [];
+  }
+  const meta = [
+    ['bitcoin', 'Bitcoin', 'BTC', '₿'],
+    ['solana', 'Solana', 'SOL', '◎'],
+    ['xrp', 'XRP', 'XRP', '✕'],
+  ];
+  return meta.map(([key, name, sym, glyph]) => {
+    const row = addrs[key] || {};
+    return { key, name, sym, glyph, address: row.receive || null, reason: row.unsupported || null };
+  });
+}
+
+function receiveAddressCard({ label, sublabel, addr, reason }) {
+  if (!addr) {
+    return `<div class="receive-chain mb-12">
+      <div class="receive-chain-head"><strong>${escapeHtml(label)}</strong></div>
+      <div class="receive-chain-off" role="note">Not available yet — ${escapeHtml(reason || 'coming soon')}</div>
+    </div>`;
+  }
+  const qr = (() => {
+    try {
+      if (typeof qrcode === 'function') {
+        const q = qrcode(0, 'M');
+        q.addData(addr);
+        q.make();
+        return `<div class="receive-qr text-center" role="img" aria-label="QR code for ${escapeHtml(label)}">${q.createSvgTag(4, 8)}</div>`;
+      }
+    } catch { /* QR unavailable — the address is still shown below */ }
+    return '';
+  })();
+  return `<div class="receive-chain mb-12">
+    <div class="receive-chain-head"><strong>${escapeHtml(label)}</strong>${sublabel ? `<span class="receive-chain-sub">${escapeHtml(sublabel)}</span>` : ''}</div>
+    ${qr}
+    <div class="mono receive-addr" style="word-break:break-all;padding:10px;border-radius:8px">${escapeHtml(addr)}</div>
+    <button class="copy-btn btn btn-secondary btn-block" data-copy="${escapeHtml(addr)}">Copy ${escapeHtml(label)} address</button>
+  </div>`;
+}
+
 function showReceiveModal(address, symbol) {
   const addr = address || get('address');
+  const net = getNetworkById(get('networkId'));
+  const evmLabel = net?.symbol || symbol || 'EVM';
   let qrSvg = '';
   try {
     if (typeof qrcode === 'function') {
@@ -2416,14 +2471,26 @@ function showReceiveModal(address, symbol) {
       qrSvg = qr.createSvgTag(4, 8);
     }
   } catch { /* QR unavailable — address is still shown below */ }
+
+  // Non-EVM chains from the same seed. Rendered BELOW the EVM address so the
+  // common case (tap Receive on an EVM token) is unchanged, and the other
+  // chains are one scroll away rather than a second tap.
+  const chains = nonEvmReceiveRows();
+  const chainsHtml = chains.length ? `
+    <hr class="receive-divider" />
+    <h3 class="receive-other-title">Other chains — same recovery phrase</h3>
+    ${chains.map((c) => receiveAddressCard({ label: c.name, sublabel: c.sym, addr: c.address, reason: c.reason })).join('')}
+  ` : '';
+
   openModal(`
     <button class="modal-close" type="button" data-close-modal>✕</button>
-    <h2>Receive ${escapeHtml(symbol)}</h2>
-    ${qrSvg ? `<div class="receive-qr text-center mb-16" role="img" aria-label="QR code for ${escapeHtml(symbol)}">${qrSvg}</div>` : ''}
+    <h2>Receive ${escapeHtml(evmLabel)}</h2>
+    ${qrSvg ? `<div class="receive-qr text-center mb-16" role="img" aria-label="QR code for ${escapeHtml(evmLabel)}">${qrSvg}</div>` : ''}
     <div class="text-center mb-16">
       <div class="mono" style="font-size:0.85rem;word-break:break-all;padding:12px;background:var(--cream);border-radius:10px;border:2px solid var(--ink)">${escapeHtml(addr)}</div>
     </div>
     <button class="copy-btn btn btn-primary btn-block" data-copy="${escapeHtml(addr)}">Copy Address</button>
+    ${chainsHtml}
   `);
 }
 

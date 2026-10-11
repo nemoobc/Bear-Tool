@@ -440,6 +440,53 @@ body::before {
   margin: 0 auto;
 }
 
+/* ── Receive: non-EVM chains from the same seed ───────────────────────
+   One recovery phrase now backs every chain, so the receive modal lists
+   the other chains under the primary (EVM) address. Each chain is its own
+   bordered card so a long bech32/xpub address never runs into its
+   neighbour's copy button on a narrow phone. */
+.receive-divider {
+  margin: 20px 0 14px;
+  border: none;
+  border-top: 2px dashed var(--ink);
+  opacity: 0.35;
+}
+.receive-other-title {
+  font-size: 0.9rem;
+  margin: 0 0 12px;
+  opacity: 0.75;
+}
+.receive-chain {
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--white);
+}
+.receive-chain-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.receive-chain-sub {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  letter-spacing: 0.04em;
+}
+.receive-addr {
+  font-size: 0.78rem;
+  background: var(--cream);
+  margin-bottom: 10px;
+}
+/* A chain that is not enabled yet must READ as unavailable, not as an
+   empty broken card — and it must not sit next to a copy button. */
+.receive-chain-off {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  font-style: italic;
+  padding: 6px 0 2px;
+}
+
 /* CoinGecko auto-detected token logos (asset list) */
 .token-logo-img {
   width: 32px;
