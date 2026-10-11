@@ -471,6 +471,16 @@ test('the wallet glue wires the picker + chain sync and honours a dApp switch re
     'picker wallet dipanggil lewat dynamic import (app.js tak boleh jadi siklus statis)');
   assert.match(code, /on\('networkId', \(\) => \{ syncNativeChain\(\); \}\)/,
     'perubahan network wallet = satu-satunya pemicu sinkronisasi chip native');
+  // The dapp overlay is restored when the WALLET modal closes — the modal
+  // mounts into #modalOverlay (ui.js openModal adds "open"). Body's
+  // "modal-open" class is only ever removed here, so observing IT never fired
+  // and the overlay stayed hidden for the full ceiling. Pin the overlay watch.
+  assert.match(code, /document\.getElementById\('modalOverlay'\)/,
+    'handler harus mengamati #modalOverlay, bukan body.modal-open yang tak pernah ditambah');
+  assert.match(code, /overlay\.classList\.contains\('open'\)/,
+    'modal dianggap tertutup saat #modalOverlay kehilangan class "open"');
+  assert.ok(!/document\.body\.classList\.contains\('modal-open'\)/.test(code),
+    'jangan kembali ke penjaga body.modal-open — itu bug (tak pernah dipasang)');
   // A dApp asking to switch to a chain the wallet already knows now switches.
   assert.match(code, /const target = Number\.isFinite\(want\) \? getNetwork\(want\) : null/,
     'switch request mencari chain yang dikenal');

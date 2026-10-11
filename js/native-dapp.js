@@ -184,13 +184,23 @@ async function handleWalletCommand(ev) {
   await askUser(async () => {
     const { showNetworkModal } = await import('./app.js');
     await new Promise((resolve) => {
-      const finish = () => { try { obs.disconnect(); } catch { /* already off */ } clearTimeout(timer); resolve(); };
-      const obs = new MutationObserver(() => {
-        if (!document.body.classList.contains('modal-open')) finish();
-      });
-      obs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      // The wallet modal mounts into the single #modalOverlay node: ui.js
+      // openModal adds class "open", closeModal removes it. Body's "modal-open"
+      // class is only ever REMOVED in this codebase (never added), so a body
+      // mutation NEVER fired and the dapp overlay stayed hidden for the full
+      // 120s ceiling after the picker closed. Watch the overlay's own class.
+      const overlay = document.getElementById('modalOverlay');
+      const isOpen = () => !!(overlay && overlay.classList.contains('open'));
+      let obs = null;
+      const finish = () => { try { if (obs) obs.disconnect(); } catch { /* already off */ } clearTimeout(timer); resolve(); };
+      obs = new MutationObserver(() => { if (!isOpen()) finish(); });
+      if (overlay) obs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
       const timer = setTimeout(finish, 120000); // a modal left open forever must not hang the overlay
       try { showNetworkModal(); } catch { finish(); }
+      // showNetworkModal() opens the overlay synchronously; if it did not (or
+      // the overlay node is missing), resolve now instead of waiting on a
+      // mutation that will never come.
+      if (!isOpen()) finish();
     });
   });
 }
