@@ -500,3 +500,24 @@ test('the E2E driver really exercises tabs and the network picker', () => {
   assert.match(driver, /chainChanged never reached the dApp \(want 0x89\)/, 'chainChanged wajib sampai ke halaman dApp (0x89)');
 });
 
+test('BrowserClient overrides only real WebViewClient methods (no WebChromeClient callback)', () => {
+  // 2026-10-11: a stray @Override on onReceivedTitle — a WebChromeClient
+  // callback, NOT a WebViewClient one — made :app:compileDebugJavaWithJavac
+  // fail with "does not override or implement a method from a supertype", and
+  // that one Java error took down BOTH CI jobs (APK 38119662698 + emulator
+  // 38119666755) before a single emulator boot. The dapp view deliberately has
+  // NO WebChromeClient, so the title is read from onPageFinished's getTitle();
+  // onReceivedTitle must never be re-declared here — it can only break the
+  // build, never compile.
+  assert.ok(!/onReceivedTitle\s*\(/.test(java),
+    'BrowserClient tidak boleh declare onReceivedTitle (itu callback WebChromeClient → gagal compile)');
+  assert.match(java, /t\.title = view\.getTitle\(\)/, 'judul tab dibaca dari onPageFinished getTitle()');
+  // Guard against the exact CI failure class: every @Override in this file must
+  // name a method that actually exists as an override target.
+  const overrides = [...java.matchAll(/@Override\s+[^\n]*?(?:public|protected)\s+[^\n]*?\b(\w+)\s*\(/g)].map((m) => m[1]);
+  const allowed = new Set(['onPageStarted', 'onPageCommitVisible', 'onPageFinished', 'onReceivedError', 'handleOnDestroy', 'onCreate', 'onDestroy', 'onStart', 'onStop']);
+  for (const name of overrides) {
+    assert.ok(allowed.has(name), `@Override tak dikenal bisa gagal compile: ${name}`);
+  }
+});
+

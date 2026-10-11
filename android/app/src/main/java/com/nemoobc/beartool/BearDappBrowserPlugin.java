@@ -512,8 +512,7 @@ public class BearDappBrowserPlugin extends Plugin {
             if (t != null) {
                 t.url = url == null ? "" : url;
                 t.title = view.getTitle() == null ? "" : view.getTitle();
-            }
-            injectProvider(view, "finish", url);
+            }            injectProvider(view, "finish", url);
             if (view == dappView) {
                 // Address bar settles: idle tint, live back/forward state.
                 if (addressField != null) {
@@ -527,12 +526,6 @@ public class BearDappBrowserPlugin extends Plugin {
             ev.put("event", "loadEnd");
             ev.put("url", url);
             notifyListeners("navigation", ev);
-        }
-
-        @Override
-        public void onReceivedTitle(WebView view, String title) {
-            Tab t = tabOf(view);
-            if (t != null) t.title = title == null ? "" : title;
         }
 
         @Override
