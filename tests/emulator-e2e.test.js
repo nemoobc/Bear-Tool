@@ -419,3 +419,24 @@ test('a dead emulator can no longer end the run GREEN — the report is the verd
   const uploadIdx = yml.indexOf('Upload diag artifacts');
   assert.ok(assertIdx > 0 && uploadIdx > assertIdx, 'asersi harus sebelum upload artifact');
 });
+
+test('the chainChanged verdict reads the LAST event, not the one from connect', () => {
+  // Run 38156823295: the native switch to Polygon WORKED — localStorage read
+  // "polygon" and the fixture's own log ended with `chainChanged=0x89` — yet the
+  // job went red. The provider announces the chain the dApp connected ON (0x1)
+  // BEFORE the picker's switch, so the polled dump holds `chainChanged=0x1`
+  // first and `chainChanged=0x89` last; the check took the FIRST match and
+  // demanded 0x1. "Did the switch reach the page?" must read the LAST recorded
+  // value. Pin both halves: the wrong shape is gone and the wait-for-0x89 loop
+  // is present.
+  assert.doesNotMatch(driverSrc,
+    /report\.dapp\.chainChanged = \(String\(chgText\)\.match\(\/chainChanged=/,
+    'tidak boleh ambil match PERTAMA chainChanged (0x1 dari connect menutupi 0x89)');
+  assert.match(driverSrc,
+    /const all = String\(chgText\)\.match\(\/chainChanged=\(0x\[0-9a-fA-F\]\+\)\/g\) \|\| \[\]/,
+    'kumpulkan SEMUA chainChanged');
+  assert.match(driverSrc, /all\[all\.length - 1\]\.replace\(\/\^chainChanged=\/, ''\)/,
+    'ambil kejadian TERAKHIR');
+  assert.match(driverSrc, /chgLast === '0x89' \|\| Date\.now\(\) > chgDeadline/,
+    'tunggu sampai 0x89 (atau deadline) sebelum menuduh');
+});

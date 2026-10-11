@@ -833,9 +833,26 @@ async function main() {
       throw new Error('network did not switch to polygon: ' + String(report.dapp.netAfter));
     }
     // The open tab must have heard EIP-1193 chainChanged 0x89 (Polygon 137).
-    const chgText = await pollOut(/chainChanged=0x/, 20000);
-    report.dapp.chainChanged = (String(chgText).match(/chainChanged=(0x[0-9a-fA-F]+)/) || [])[1] || '';
-    if (report.dapp.chainChanged !== '0x89') {
+    // Careful: the fixture records EVERY chainChanged its provider emits, and
+    // that provider announces the chain the dApp connected ON (0x1) before the
+    // picker's switch — so the dump reads `chainChanged=0x1` FIRST and
+    // `chainChanged=0x89` LAST. Reading the first match demanded 0x1 and failed
+    // a switch that plainly worked (localStorage=polygon and 0x89 both present;
+    // run 38156823295). Wait for the LAST recorded value to become 0x89.
+    let chgText = '';
+    let chgLast = '';
+    const chgDeadline = Date.now() + 20000;
+    for (;;) {
+      chgText = await dpage.evaluate(
+        'document.getElementById("out") ? document.getElementById("out").textContent : ""'
+      ).catch(() => chgText);
+      const all = String(chgText).match(/chainChanged=(0x[0-9a-fA-F]+)/g) || [];
+      chgLast = all.length ? all[all.length - 1].replace(/^chainChanged=/, '') : '';
+      if (chgLast === '0x89' || Date.now() > chgDeadline) break;
+      await sleep(500);
+    }
+    report.dapp.chainChanged = chgLast;
+    if (chgLast !== '0x89') {
       throw new Error('chainChanged never reached the dApp (want 0x89): ' + JSON.stringify(String(chgText)));
     }
     await shotScreen('16-network-switched');
