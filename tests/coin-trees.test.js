@@ -78,19 +78,37 @@ test('bitcoin: the address never leaks the private key', () => {
   }
 });
 
-test('xrp: is GATED OFF, not faked — no plausible-but-wrong address', () => {
-  // XRPL base58 checksum is not sha256d / sha512-half / ripemd160 (all tried
-  // against rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh, none reproduce it). Until it
-  // is implemented from rippled's encodeBase58Token, xrpAddresses MUST refuse
-  // loudly rather than return an r… string that routes funds nowhere.
-  assert.throws(() => xrpAddresses(SEED, 0), /XRP: not enabled yet/,
-    'xrp harus melempar, bukan mengembalikan alamat yang salah');
-  const all = nonEvmAddresses(SEED, 0);
-  assert.equal(all.xrp.receive, null, 'xrp receive = null saat belum didukung');
-  assert.match(all.xrp.unsupported, /not enabled yet/, 'alasannya ikut dikembalikan');
-  // Bitcoin tetap hidup dan benar — gating dua chain lain bukan mematikan satu.
-  assert.match(all.bitcoin.receive, /^bc1q/);
-  assert.match(all.bitcoin.legacy, /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/);
+test('xrp: derives classic r… addresses — round-tripped against two real ones', () => {
+  // The encoder is verified by rebuilding two LIVE reference addresses from
+  // their own AccountIDs: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh and
+  // rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH. That catches the XRP alphabet (which
+  // is NOT Bitcoin's — 'r' is index 0) and the checksum in one shot.
+  const XRP58 = 'rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz';
+  const decodeXrp = (s) => {
+    let zeros = 0;
+    while (zeros < s.length && s[zeros] === 'r') zeros += 1;
+    const bytes = [0];
+    for (let i = zeros; i < s.length; i += 1) {
+      let carry = XRP58.indexOf(s[i]);
+      for (let j = 0; j < bytes.length; j += 1) { carry += bytes[j] * 58; bytes[j] = carry & 0xff; carry >>= 8; }
+      while (carry > 0) { bytes.push(carry & 0xff); carry >>= 8; }
+    }
+    return Uint8Array.from([...new Array(zeros).fill(0), ...bytes.reverse()]);
+  };
+  for (const addr of ['rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh', 'rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH']) {
+    const raw = decodeXrp(addr);
+    assert.equal(raw.length, 25, 'XRP address = 0x00 ‖ 20-byte id ‖ 4-byte checksum');
+    assert.equal(raw[0], 0x00, 'AccountID type prefix');
+    const rebuilt = __internals.xrpBase58Encode(raw);
+    assert.equal(rebuilt, addr, `round-trip ${addr}`);
+  }
+
+  // And a derived one is well-formed.
+  const a = xrpAddresses(SEED, 0);
+  assert.match(a.classic, /^r[0-9A-HJ-NP-Za-km-z]{24,34}$/, 'starts with r');
+  assert.ok(a.classic.length >= 25 && a.classic.length <= 35);
+  assert.equal(xrpAddresses(SEED, 0).classic, a.classic, 'deterministic');
+  assert.notEqual(xrpAddresses(SEED, 1).classic, a.classic, 'per-account index');
 });
 
 test('ed25519 point arithmetic reproduces all three RFC 8032 public keys', () => {
@@ -226,14 +244,17 @@ test('base58: encode/decode round-trips and the checksum rejects tampering', () 
   assert.notDeepEqual(Array.from(d1), Array.from(d2));
 });
 
-test('nonEvmAddresses returns every chain that is proven, and says why XRP is not', () => {
+test('nonEvmAddresses returns all three chains, all proven', () => {
   const a = nonEvmAddresses(SEED, 0);
   assert.match(a.bitcoin.receive, /^bc1q/);
   assert.match(a.bitcoin.legacy, /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/);
-  assert.match(a.solana.receive, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Solana is live now');
-  // XRP stays visible-but-absent with its reason, never silently dropped.
-  assert.equal(a.xrp.receive, null);
-  assert.ok(a.xrp.unsupported);
+  assert.match(a.solana.receive, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  assert.match(a.xrp.receive, /^r[0-9A-HJ-NP-Za-km-z]{24,34}$/);
+  // No chain may quietly carry an `unsupported` marker any more.
+  for (const k of ['bitcoin', 'solana', 'xrp']) {
+    assert.equal(a[k].unsupported, undefined, `${k} should be live`);
+    assert.ok(a[k].receive, `${k} must have an address`);
+  }
 });
 
 test('nothing in the public API returns a private key or the seed', () => {

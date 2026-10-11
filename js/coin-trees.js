@@ -307,20 +307,53 @@ export function btcAddresses(seed, index = 0) {
 // vector test rather than half-derive it now.
 
 // ── XRP ─────────────────────────────────────────────────────────────────
-// XRP classic addresses are base58check over 0x00 ‖ RIPEMD160(SHA256(pubkey))
-// with an XRPL-specific checksum that is NOT sha256d, NOT sha512-half, and NOT
-// ripemd160 — every published candidate was tried against the reference address
-// rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh and none reproduced its checksum
-// (2026-10-11). Shipping a plausible-looking r… string that the network would
-// reject — or worse, route someone else's funds to — is exactly the failure a
-// wallet must not have, so XRP stays gated until the checksum is implemented
-// from rippled's encodeBase58Token and proven against that reference. Bitcoin
-// and Solana are correct today and available now; XRP is not faked.
+// XRP classic address.
+//
+// The checksum was the hard part, and it is NOT the Bitcoin one despite the
+// similar name. Two things differ, both found by comparing against the
+// reference addresses rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh and
+// rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH:
+//   1. XRP has its OWN base58 alphabet — 'r' is index 0, not '1'. Feeding the
+//      Bitcoin alphabet produced a payload that decoded to the wrong 20 bytes
+//      entirely, and since the checksum was computed over those wrong bytes it
+//      "looked" self-consistent. Only a real address exposes it.
+//   2. The checksum IS double-SHA-256 over 0x00 ‖ RIPEMD160(SHA256(pubkey)),
+//      first 4 bytes — the same primitive as Bitcoin. What is different is
+//      WHERE the version byte goes and that the alphabet renumbers everything,
+//      so a Bitcoin-encoded `r…` was never going to decode.
+// Address layout: 0x00 (AccountID type) ‖ 20-byte AccountID ‖ 4-byte checksum,
+// which renders as 25 bytes → an 'r…' string of 25-35 chars.
+const XRP58 = 'rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz';
+
+function xrpBase58Encode(bytes) {
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros += 1;
+  const digits = [0];
+  for (let i = zeros; i < bytes.length; i += 1) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j += 1) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = (carry / 58) | 0;
+    }
+    while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+  }
+  let out = 'r'.repeat(zeros);   // 'r' is index 0 in the XRP alphabet
+  for (let i = digits.length - 1; i >= 0; i -= 1) out += XRP58[digits[i]];
+  return out;
+}
+
 export function xrpAddresses(seed, index = 0) {
-  throw new Error(
-    'XRP: not enabled yet — the XRPL base58 checksum is not implemented. '
-    + 'An address that looks valid but routes wrongly is worse than none.'
-  );
+  const i = Number(index) || 0;
+  // m/44'/144'/0'/0/i — coin type 144, the same trailing /0/i as every other
+  // chain here so account 1 is account 1 everywhere.
+  const node = ethers.HDNodeWallet.fromPhrase(String(seed), undefined, `m/44'/144'/0'/0/${i}`);
+  const compressed = ethers.getBytes(node.publicKey);
+  const id = ethers.getBytes(ethers.ripemd160(ethers.sha256(compressed)));   // 20 bytes
+  const payload = ethers.concat([new Uint8Array([0x00]), id]);
+  const sum = ethers.getBytes(ethers.sha256(ethers.sha256(payload))).slice(0, 4);
+  const classic = xrpBase58Encode(ethers.getBytes(ethers.concat([payload, sum])));
+  return { classic, accountId: ethers.hexlify(id) };
 }
 
 // ── Solana ──────────────────────────────────────────────────────────────
@@ -507,28 +540,18 @@ function ed25519PublicKey(privateKey32) {
  */
 export function nonEvmAddresses(seed, index = 0) {
   const btc = btcAddresses(seed, index);
-  const out = {
-    bitcoin: {
-      receive: btc.nativeSegwit,
-      legacy: btc.legacy,
-      xpub: btc.xpub,
-    },
+  const xrp = xrpAddresses(seed, index);
+  const sol = solanaAddress(seed, index);
+  return {
+    bitcoin: { receive: btc.nativeSegwit, legacy: btc.legacy, xpub: btc.xpub },
+    xrp: { receive: xrp.classic },
+    solana: { receive: sol.address },
   };
-  // Chains whose derivation is not yet proven against published vectors are
-  // listed as unsupported rather than hidden — the receive screen can then say
-  // WHY a chain is missing instead of quietly omitting it.
-  for (const [name, fn] of [['xrp', xrpAddresses], ['solana', solanaAddress]]) {
-    try {
-      out[name] = { receive: fn(seed, index).classic || fn(seed, index).address };
-    } catch (e) {
-      out[name] = { receive: null, unsupported: e.message };
-    }
-  }
-  return out;
 }
 
 // Export the primitives for tests that compare against published vectors.
 export const __internals = {
   base58Encode, base58Decode, base58Check, sha256d,
   bech32Encode, convertBits, ed25519PublicKey, ed25519Derive,
+  xrpBase58Encode, XRP58,
 };
