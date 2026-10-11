@@ -386,7 +386,9 @@ function bestPricesFromPairs(pairs, chainId) {
     if (!prev || liq > prev.liq) out[addr] = { price, liq };
   }
   const flat = {};
-  for (const [addr, v] of Object.entries(out)) flat[addr] = v.price;
+  // Not `[addr, …]`: that shadows the loop's `addr` above, and a shadowed name
+  // is one rename away from the wrong variable being read.
+  for (const [key, v] of Object.entries(out)) flat[key] = v.price;
   return flat;
 }
 

@@ -84,6 +84,37 @@ test('the native confirm sheet exists, draws above the dapp, and cannot hang the
   assert.match(java, /finishConfirm\(false\);[\s\S]*super\.handleOnDestroy\(\)/, 'destroy juga membatalkan pending');
 });
 
+test('the connect sheet names the account it is exposing, and makes the page behind it inert', () => {
+  // 1) The sheet must SAY which key the site is about to see. "Site" + "Gets"
+  // alone leaves a multi-account wallet user approving a blind request — and the
+  // E2E cross-check (accountMatchesModal) has nothing honest to compare against,
+  // because it used to "pass" only by scraping unrelated wallet token addresses
+  // out of the same accessibility dump.
+  const app = readFileSync(path.join(here, '..', 'js', 'app.js'), 'utf8');
+  const consent = app.slice(app.indexOf("title: '🔗 Connect this site?'"));
+  assert.match(consent, /k: 'Account', v: wallet\.shortAddress\(get\('address'\)\)/,
+    'sheet connect wajib menampilkan alamat akun yang diekspos (format 0x1234…5678)');
+  // 2) A consent sheet is a MODAL: what is behind it must stop being reachable
+  // for a screen reader exactly as it stops being touchable behind the scrim.
+  assert.match(java, /private void setBackgroundA11yInert\(boolean inert\)/, 'satu helper untuk mode inert/aktif');
+  assert.match(java, /IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS/, 'halaman belakang = NO_HIDE_DESCENDANTS saat modal tampil');
+  assert.match(java, /IMPORTANT_FOR_ACCESSIBILITY_AUTO/, 'dan dikembalikan AUTO saat modal ditutup');
+  assert.match(java, /setBackgroundA11yInert\(true\);/, 'sheet tampil = halaman belakang jadi inert');
+  assert.match(java, /setBackgroundA11yInert\(false\);/, 'sheet ditutup = halaman bisa dibaca lagi (a11y tak boleh rusak permanen)');
+  // Both live WebViews are behind the sheet — the wallet AND the dApp page.
+  assert.match(java, /getBridge\(\)\.getWebView\(\)[\s\S]{0,200}setImportantForAccessibility\(mode\)/,
+    'wallet WebView ikut inert');
+  assert.match(java, /if \(dappView != null\) dappView\.setImportantForAccessibility\(mode\)/,
+    'dApp WebView ikut inert');
+  // 3) The button reports its real rect for a driver whose platform dumper keeps
+  // crashing — a diagnostic, and the only honest way to learn where the app
+  // actually drew the control from the outside.
+  assert.match(java, /android\.util\.Log\.i\("BearToolE2E", "confirm-ok-rect "/,
+    'sheet meng-log rect tombol OK (tag BearToolE2E)');
+  assert.match(java, /ok\.post\(\(\) -> \{[\s\S]{0,400}getLocationOnScreen\(loc\)/,
+    'rect diambil setelah layout (post), bukan sebelum');
+});
+
 test('a visible load bar exists and every page state controls it', () => {
   assert.match(java, /progressBar = new android\.widget\.ProgressBar\(getContext\(\), null, android\.R\.attr\.progressBarStyleHorizontal\)/,
     'bar progres horizontal (indeterminate) = indikator loading web (report "loading web ga ada")');

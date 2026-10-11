@@ -767,6 +767,10 @@ function makeBearProvider(origin) {
           title: '🔗 Connect this site?',
           rows: [
             { k: 'Site', v: origin },
+            // Which account the site is about to see. Without this the sheet
+            // names the site and the method but not the address being exposed —
+            // and a multi-account wallet must show WHICH key it is handing over.
+            { k: 'Account', v: wallet.shortAddress(get('address')) },
             { k: 'Gets', v: method === 'eth_requestAccounts' ? 'your address (read-only)' : String(method) },
           ],
           confirmText: 'Connect',

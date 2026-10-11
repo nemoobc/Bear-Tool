@@ -39,7 +39,7 @@ test('token modal: the header logo comes from the list renderer (tokenLogoHTML)'
 });
 
 test('token modal: the generated mark fallback is guarded (dead remote image → mark)', () => {
-  // tokenLogoHTML can emit a cached CoinGecko <img>; without guardTokenLogos a
+  // tokenLogoHTML can emit a cached remote <img>; without guardTokenLogos a
   // stale URL degrades to a broken-image icon inside the modal.
   assert.match(modalBlock, /guardTokenLogos\(/,
     'the modal must attach the onerror guard to its rendered logos');
@@ -50,10 +50,10 @@ test('app.js: getLogoSVG is gone — one renderer for list and modal', () => {
     'a second logo map is exactly how list and modal drifted apart');
 });
 
-test('chart: a 429 enters a cooldown instead of hammering CoinGecko', () => {
+test('chart: a 429 enters a cooldown instead of hammering the price host', () => {
   assert.match(price, /status === 429/,
     'fetch must detect the rate limit');
-  assert.match(price, /cgCooldownUntil|rateLimitedUntil/,
+  assert.match(price, /cooldownUntil/,
     'a hard 429 must start a cooldown so retries do not deepen the penalty');
   assert.match(price, /429 retry|retry once|Rate-limited|rate-limited/i,
     'the rate limit must be named in the thrown error so callers can tell it apart');
@@ -63,13 +63,16 @@ test('chart: fetchOHLC surfaces a rate limit instead of swallowing it to []', ()
   // Returning [] silently is what made the modal say "No data" about a token
   // that may well have a chart — the wrong claim about someone's coin.
   assert.match(price, /export async function fetchOHLC/);
-  assert.doesNotMatch(
-    price.slice(price.indexOf('export async function fetchOHLC'), price.indexOf('export async function fetchPriceHistory')),
-    /catch \{\s*\n\s*return \[\];/,
-    'fetchOHLC must not collapse a rate limit into an empty result');
-  assert.match(price.slice(price.indexOf('export async function fetchOHLC')),
-    /throw rateLimitError\(\)|throw new Error\('CoinGecko rate-limited/,
-    'the rate limit must reach the caller as a named error');
+  const fn = price.slice(price.indexOf('export async function fetchOHLC'),
+    price.indexOf('export async function fetchPriceHistory'));
+  assert.ok(!/catch\s*\(?\w*\)?\s*\{/.test(fn),
+    'fetchOHLC must not swallow the error');
+  // The rate-limit distinction lives in marketCandles: it RETHROWS the named
+  // error and only returns [] for a genuine "no chart here".
+  assert.match(price, /if \(isRateLimit\(e\)\) throw e;/,
+    'a rate limit is rethrown, not collapsed into an empty chart');
+  assert.match(price, /throw rateLimitError\(\)/,
+    'and the named error is what reaches the caller');
 });
 
 test('chart: drawMiniChart says rate-limited, not "no data", when that is the cause', () => {

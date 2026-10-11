@@ -73,21 +73,37 @@ async function shotScreen(name) {
   return false;
 }
 
+// uiautomator dump, hardened against a CRASHED dumper. The platform tool walks
+// the whole accessibility tree and can die mid-walk on this app — run 38127365427
+// captured a NullPointerException inside AccessibilityNodeInfoDumper.childNafCheck
+// (SIG 9, then "Bad file descriptor" while reporting the crash). A crashed dump
+// leaves the PREVIOUS /sdcard/uidump.xml sitting on the device, so the old code
+// happily searched a stale file and "could not find" a button that was plainly on
+// screen — then blamed the button. Delete first, and accept ONLY a fresh, complete
+// hierarchy, so a crash reads as "retry" instead of "not there".
+function dumpUi() {
+  try { adb('shell', 'rm', '-f', '/sdcard/uidump.xml'); } catch { /* nothing to delete yet */ }
+  try {
+    adb('shell', 'uiautomator', 'dump', '/sdcard/uidump.xml');
+    const xml = String(adb('shell', 'cat', '/sdcard/uidump.xml'));
+    return xml.includes('<hierarchy') ? xml : '';
+  } catch { return ''; }
+}
+
 // Tap a native control by accessibility label: uiautomator is the only eye
 // that sees OUTSIDE the WebView (the plugin's toolbar buttons on top of the
 // dApp), and a real tap is the only honest click a native overlay admits.
 async function tapNativeButton(desc) {
   for (let i = 0; i < 12; i++) {
-    try {
-      adb('shell', 'uiautomator', 'dump', '/sdcard/uidump.xml');
-      const xml = adb('shell', 'cat', '/sdcard/uidump.xml');
+    const xml = dumpUi();
+    if (xml) {
       const node = xml.match(new RegExp('content-desc="' + desc + '"[^>]*bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"'));
       if (node) {
         const x1 = +node[1], y1 = +node[2], x2 = +node[3], y2 = +node[4];
         adb('shell', 'input', 'tap', String((x1 + x2) >> 1), String((y1 + y2) >> 1));
         return true;
       }
-    } catch { /* dump races the UI — retry */ }
+    }
     await sleep(1000);
   }
   return false;
@@ -97,25 +113,40 @@ async function tapNativeButton(desc) {
 // sheet's buttons appear asynchronously after the RPC lands.
 async function waitNativeButton(desc, tries = 20) {
   for (let i = 0; i < tries; i++) {
-    try {
-      adb('shell', 'uiautomator', 'dump', '/sdcard/uidump.xml');
-      const xml = adb('shell', 'cat', '/sdcard/uidump.xml');
-      if (xml.includes('content-desc="' + desc + '"')) return true;
-    } catch { /* dump races the UI — retry */ }
+    const xml = dumpUi();
+    if (xml && xml.includes('content-desc="' + desc + '"')) return true;
     await sleep(1000);
   }
   return false;
+}
+
+// Press the confirm button by the rect the APP ITSELF reported (log tag
+// BearToolE2E, written in showNativeConfirm once the sheet is laid out). This is
+// the fallback for the one thing the driver cannot do from outside: read a
+// native button when the platform dumper keeps dying on this screen. It is the
+// same button the label path presses — the app is reporting where IT drew it,
+// not the driver inventing a hitbox. Used only AFTER the label path failed, and
+// never as proof that the sheet appeared (a log line is not a screen).
+function tapReportedRect(tag) {
+  try {
+    const out = String(adb('shell', 'logcat', '-d', '-s', 'BearToolE2E:I'));
+    const m = [...out.matchAll(new RegExp(tag + ' (-?\\d+),(-?\\d+),(\\d+),(\\d+)', 'g'))].pop();
+    if (!m) return false;
+    const w = +m[3], h = +m[4];
+    const x = +m[1] + (w >> 1), y = +m[2] + (h >> 1);
+    if (w <= 0 || h <= 0 || x <= 0 || y <= 0) return false;
+    adb('shell', 'input', 'tap', String(x), String(y));
+    return true;
+  } catch { return false; }
 }
 
 // All TEXT the native layer currently shows (uiautomator dump). The confirm
 // sheet is native — its rows exist here, not in any WebView DOM — so this is
 // the only place the E2E can cross-check what the user sees.
 async function readSheetTexts() {
-  try {
-    adb('shell', 'uiautomator', 'dump', '/sdcard/uidump.xml');
-    const xml = adb('shell', 'cat', '/sdcard/uidump.xml');
-    return (xml.match(/text="([^"]*)"/g) || []).map((m) => m.slice(6, -1)).filter((t) => t.trim());
-  } catch { return []; }
+  const xml = dumpUi();
+  if (!xml) return [];
+  return (xml.match(/text="([^"]*)"/g) || []).map((m) => m.slice(6, -1)).filter((t) => t.trim());
 }
 
 // Console noise that is known, external, and not this app's fault. The price
@@ -532,7 +563,7 @@ async function main() {
     // Whole screen, not the DOM: the bottom sheet + the fixture page behind it
     // (the proof the browser did NOT vanish).
     await shotScreen('06-dapp-connect-sheet');
-    if (!(await tapNativeButton('dapp-confirm-ok'))) throw new Error('dapp-confirm-ok did not tap');
+    if (!(await tapNativeButton('dapp-confirm-ok')) && !tapReportedRect('confirm-ok-rect')) throw new Error('dapp-confirm-ok did not tap');
 
     step('dapp browser: fixture reads accounts over its own CDP target');
     text = await pollOut(/done=/, 60000);
@@ -606,14 +637,14 @@ async function main() {
     if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('sign sheet never appeared');
     report.dapp.signVisibility = await dpage.evaluate('document.visibilityState').catch(() => '?');
     await shotScreen('09-sign-sheet');
-    if (!(await tapNativeButton('dapp-confirm-ok'))) throw new Error('sign confirm did not tap');
+    if (!(await tapNativeButton('dapp-confirm-ok')) && !tapReportedRect('confirm-ok-rect')) throw new Error('sign confirm did not tap');
     text = await pollOut(/personalSign=0x|error=|done=/, 60000);
     if (!/personalSign=0x[0-9a-fA-F]{130}/.test(String(text))) throw new Error(`personal_sign failed:\n${text}`);
     report.dapp.personalSign = true;
     // Second sheet: eth_signTypedData_v4.
     if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('typed-data sheet never appeared');
     await shotScreen('10-typeddata-sheet');
-    if (!(await tapNativeButton('dapp-confirm-ok'))) throw new Error('typed-data confirm did not tap');
+    if (!(await tapNativeButton('dapp-confirm-ok')) && !tapReportedRect('confirm-ok-rect')) throw new Error('typed-data confirm did not tap');
     text = await pollOut(/typedSign=0x|error=|done=/, 60000);
     if (!/typedSign=0x[0-9a-fA-F]{130}/.test(String(text))) throw new Error(`typed-data sign failed:\n${text}`);
     report.dapp.typedSign = true;
@@ -723,7 +754,7 @@ async function main() {
       throw new Error('fixture never reopened for the tabs test: ' + String(report.dapp.tabsReopen));
     }
     if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('reopen connect sheet never appeared');
-    if (!(await tapNativeButton('dapp-confirm-ok'))) throw new Error('reopen connect confirm did not tap');
+    if (!(await tapNativeButton('dapp-confirm-ok')) && !tapReportedRect('confirm-ok-rect')) throw new Error('reopen connect confirm did not tap');
     text = await pollOut(/done=/, 60000);
     if (!String(text).includes('done=ok')) throw new Error('reopened fixture never finished:\n' + text);
 

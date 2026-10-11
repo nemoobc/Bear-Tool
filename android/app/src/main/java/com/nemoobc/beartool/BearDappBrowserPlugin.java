@@ -340,6 +340,22 @@ public class BearDappBrowserPlugin extends Plugin {
         if (parent != null) {
             parent.addView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             root.bringToFront();
+            setBackgroundA11yInert(true);   // modal: the page behind is inert now
+            // Diagnostic, not behaviour: on some emulators `uiautomator dump`
+            // dies while walking this app's WebView tree (platform bug —
+            // AccessibilityNodeInfoDumper.childNafCheck dereferences a null
+            // child) and leaves a STALE /sdcard/uidump.xml, so a host-side E2E
+            // cannot always find this button by label. Reporting the button's
+            // real on-screen rect lets the driver press what it verified instead
+            // of guessing coordinates (live capture 2026-10-11, run 38127365427).
+            ok.post(() -> {
+                try {
+                    int[] loc = new int[2];
+                    ok.getLocationOnScreen(loc);
+                    android.util.Log.i("BearToolE2E", "confirm-ok-rect "
+                        + loc[0] + "," + loc[1] + "," + ok.getWidth() + "," + ok.getHeight());
+                } catch (Exception ignored) { /* never break the sheet for a log */ }
+            });
         } else {
             finishConfirm(false);   // nowhere to draw: refuse rather than hang
         }
@@ -379,11 +395,35 @@ public class BearDappBrowserPlugin extends Plugin {
         }
         confirmTitleView = null;
         confirmRowsBox = null;
+        setBackgroundA11yInert(false);   // the modal is gone — the page is reachable again
         if (c != null) {
             JSObject r = new JSObject();
             r.put("ok", ok);
             c.resolve(r);
         }
+    }
+
+    // A consent sheet is a MODAL: the page behind it stops being touchable
+    // behind the scrim, so it must stop being readable too. Marking the live
+    // WebViews NO_HIDE_DESCENDANTS makes the accessibility tree match what the
+    // user can actually act on — a screen reader reads the sheet, not the wallet
+    // underneath. It also keeps the platform dumper alive: `uiautomator dump`
+    // walks every node and calls AccessibilityNodeInfoDumper.childNafCheck,
+    // which dereferences a nullable child, so the huge WebView tree can kill the
+    // dump process mid-walk and leave a stale file. With the WebViews out of the
+    // tree, only the small native sheet is left to walk. AUTO on teardown puts
+    // the page back for the next screen reader that asks.
+    private void setBackgroundA11yInert(boolean inert) {
+        final int mode = inert
+            ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            : View.IMPORTANT_FOR_ACCESSIBILITY_AUTO;
+        try {
+            WebView wallet = getBridge().getWebView();
+            if (wallet != null) wallet.setImportantForAccessibility(mode);
+        } catch (Exception ignored) { /* bridge not ready — nothing to hide */ }
+        try {
+            if (dappView != null) dappView.setImportantForAccessibility(mode);
+        } catch (Exception ignored) { /* no browser open — nothing to hide */ }
     }
 
     /** Swipe-to-refresh reloads the ACTIVE page (a hidden tab cannot be pulled). */

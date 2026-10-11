@@ -181,6 +181,43 @@ test('the driver drives the native dApp browser end to end — open, confirm, re
   assert.match(driverSrc, /did not return the wallet to view/, 'back palsu (tombol ketuk tapi layar tak pulih) wajib gagal');
 });
 
+test('a crashed uiautomator dump must never be read as a stale "button is gone"', () => {
+  // Run 38127365427 captured the real failure: the platform dumper threw a
+  // NullPointerException inside AccessibilityNodeInfoDumper.childNafCheck and
+  // was SIGKILLed, leaving the PREVIOUS /sdcard/uidump.xml on the device. The
+  // old helpers dumped and cat'd without deleting first, so they happily
+  // searched that stale file and reported "confirm sheet never appeared" for a
+  // sheet that was plainly on screen. The fix deletes before dumping and only
+  // accepts a fresh, complete hierarchy.
+  assert.match(driverSrc, /function dumpUi\(\)/, 'satu helper dump, dipakai semua pemakai uiautomator');
+  assert.match(driverSrc, /rm', '-f', '\/sdcard\/uidump\.xml'/, 'file dump lama DIHAPUS dulu — file basi = sumber salah-taps');
+  assert.match(driverSrc, /xml\.includes\('<hierarchy'\)/, 'hanya dump lengkap yang diterima; crash = kosong = retry, bukan "tak ada"');
+  // Every uiautomator read must go through the guard, not the raw adb pair.
+  const rawDumps = (driverSrc.match(/uiautomator', 'dump'/g) || []).length;
+  assert.equal(rawDumps, 1, 'uiautomator dump hanya boleh dipanggil di dumpUi() — satu pintu, satu guard');
+  const rawCats = (driverSrc.match(/cat', '\/sdcard\/uidump\.xml'/g) || []).length;
+  assert.equal(rawCats, 1, 'file dump hanya dibaca sekali, di dalam dumpUi() — tak ada pemakai yang bisa baca basi');
+});
+
+test('the confirm button has a tap fallback when the platform dumper is dead', () => {
+  // The sheet's OK button is native; uiautomator is the only outside eye, and
+  // that eye is crash-prone on this app. The app logs the button's real
+  // on-screen rect (tag BearToolE2E) when the sheet is laid out, so the driver
+  // can press exactly where the app says it drew the button instead of giving
+  // up or guessing coordinates. Same button, real tap — not a JS shortcut.
+  assert.match(driverSrc, /function tapReportedRect\(tag\)/, 'fallback tekan-tombol berbasis rect milik app');
+  assert.match(driverSrc, /logcat', '-d', '-s', 'BearToolE2E:I'/, 'rect dibaca dari log tag yang ditulis app');
+  // The fallback must use the SAME real `input tap` primitive — never a JS
+  // evaluate shortcut, which would bypass the native control it is meant to
+  // prove reachable.
+  const fn = driverSrc.slice(driverSrc.indexOf('function tapReportedRect'), driverSrc.indexOf('function tapReportedRect') + 700);
+  assert.match(fn, /input', 'tap'/, 'fallback menekan lewat `input tap` asli, bukan evaluate JS');
+  // The fallback must sit BEHIND the label attempt at every confirm tap.
+  const confirmTaps = driverSrc.match(/!tapReportedRect\('confirm-ok-rect'\)/g) || [];
+  assert.ok(confirmTaps.length >= 4,
+    'tiap tap confirm (connect / sign / typed-data / reopen) punya fallback rect');
+});
+
 test('the wallet can walk back into a hidden browser through its own Tabs door', () => {
   assert.match(driverSrc, /tapNativeButton\('dapp-close'\)/, 'browser ditutup lewat ✕ native');
   assert.match(driverSrc, /dappTabsBtn/, 'view dApps punya entry Browser (tabs)');

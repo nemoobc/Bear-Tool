@@ -74,16 +74,24 @@ test('an unknown currency still renders, it does not go blank', () => {
 
 test('every price request is USD, so the cache means one thing', () => {
   // Not "requests the display currency" — that WAS the bug. If any request still
-  // asks for vs_currencies: currency(), that row would come back in rupiah and
-  // be stored beside dollar rows from DexScreener.
-  assert.equal(price.includes('vs_currencies: cur'), false,
-    'no request may ask CoinGecko for the display currency any more');
-  assert.equal(price.includes('vs_currency: currency()'), false,
-    'nor the chart endpoints');
-  assert.equal((price.match(/vs_currencies: 'usd'/g) || []).length, 2,
-    'both CoinGecko price calls must ask for usd');
-  assert.match(price, /vs_currencies: `usd,\$\{cur\}`/,
-    'and the rate comes from a request the app was making anyway, not a new quota');
+  // asked a source for the display currency, that row would come back in rupiah
+  // and be stored beside dollar rows from the sources that quote USD.
+  assert.equal(price.includes('vs_currencies'), false,
+    'CoinGecko is gone — nothing may ask a source for vs_currencies any more');
+  assert.equal(price.includes('vs_currency'), false, 'nor the old chart endpoints');
+  // Each source names USD (or a USD stable) explicitly, so a cached number means
+  // one thing no matter which source answered.
+  assert.match(price, /priceUsd/, 'DexScreener prices are quoted in USD');
+  assert.match(price, /currency=usd/, 'GeckoTerminal candles are asked in USD');
+  assert.match(price, /binance: 'ETHUSDT'/, 'Binance majors are quoted in USDT (≈USD)');
+  assert.match(price, /coins\.llama\.fi\/prices\/current/, 'DefiLlama coins API answers USD');
+  // The display currency must never reach a request URL — it is applied to the
+  // number at render time, on top of a USD value.
+  const urls = [...price.matchAll(/`https:\/\/[^`]*`/g)].map((m) => m[0]);
+  for (const u of urls) {
+    assert.ok(!/\$\{cur\}|\$\{currency\(\)\}/.test(u),
+      `a request URL must not carry the display currency: ${u}`);
+  }
 });
 
 test('the rate is published to the formatter from exactly one place', () => {
@@ -111,7 +119,8 @@ test('the rate is published to the formatter from exactly one place', () => {
 
 test('changing the currency drops the rate, not the price cache', () => {
   // Prices are USD now, so they survive a currency change. Clearing them meant
-  // re-asking CoinGecko for every token in the wallet just to respell a number.
+  // re-asking every price host for every token in the wallet just to respell a
+  // number.
   // Cut the block at its own closing "\n  });" — indexOf('});') lands on
   // `set('settings', { ...s });` and truncates the handler before the part
   // under test, which is how the first version of this test reported a missing
@@ -132,9 +141,11 @@ test('the chart reads in the same currency as the balance beside it', () => {
   // fetch time. Miss this and one screen shows two true numbers in two
   // currencies, side by side, with nothing to say so.
   assert.match(price, /usdToDisplay\(c\.open\)/, 'OHLC candles are converted');
-  assert.match(price, /usdToDisplay\(raw\[/, 'history points are converted');
+  assert.match(price, /usdToDisplay\(closes\[/, 'history points are converted');
   assert.equal((price.match(/usdToDisplay\(/g) || []).length, 5,
-    'four conversions plus the definition import — the pseudo-candle fallback must NOT convert twice');
-  assert.match(price, /already in display currency[\s\S]{0,120}must not be scaled a second time/,
-    'and the fallback that builds candles from history says why it is exempt');
+    'four candle fields + the sampled history — nothing is converted twice');
+  // The old pseudo-candle fallback (candles built FROM an already-converted
+  // history) is gone with CoinGecko: every source now answers real USD candles.
+  assert.ok(!/pseudo-candle|market_chart/.test(price),
+    'no fallback may re-convert an already-converted series');
 });
