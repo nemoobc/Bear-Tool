@@ -25,12 +25,19 @@ const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n'
 const java = readFileSync(path.join(here, '..', 'android', 'app', 'src', 'main', 'java', 'com', 'nemoobc', 'beartool', 'BearDappBrowserPlugin.java'), 'utf8');
 const fixture = readFileSync(path.join(here, '..', 'public', 'dapp-rpc-fixture.html'), 'utf8');
 
-test('every confirmTx in the dapp RPC path flashes to the wallet — all four, no naked one', () => {
-  assert.equal((code.match(/askUser\(\(\) => confirmTx\(\{/g) || []).length, 4,
-    'keempat konfirmasi native (connect/sign/typed/send) wajib lewat askUser — satu telanjang = modal terkubur di bawah overlay');
+test('the four consent prompts prefer the NATIVE sheet and keep the wallet-modal fallback', () => {
+  assert.equal((code.match(/await askConfirm\(\{/g) || []).length, 4,
+    'keempat konfirmasi native (connect/sign/typed/send) wajib lewat askConfirm — sheet native di ATAS dApp, dApp tidak boleh hilang');
   assert.equal((code.match(/await confirmTx\(\{/g) || []).length, 0,
-    'confirmTx tanpa askUser = prompt digambar di bawah dapp view: tak terlihat, tak bisa diklik, RPC hang selamanya');
-  assert.match(code, /let confirmDepth = 0;/, 'kedalaman wajib dihitung — dua konfirmasi paralel tak boleh menampilkan overlay di bawah prompt pertama');
+    'confirmTx telanjang = prompt digambar di bawah dapp view: tak terlihat, tak bisa diklik, RPC hang selamanya');
+  assert.match(code, /async function askConfirm\(\{ title, rows, confirmText \}\)/,
+    'helper ada: sheet native dulu, modal wallet tinggal fallback');
+  assert.match(code, /await p\.confirm\(\{ title, rows: safe, confirmText/,
+    'sheet native dipanggil lewat plugin.confirm (Java menggambar di atas overlay)');
+  assert.match(code, /return askUser\(\(\) => confirmTx\(\{ title, rows, confirmText \}\)/,
+    'fallback tetap lewat askUser — web/plugin lama tak boleh menggantung');
+  // askUser masih hidup untuk network picker — kedalaman harus tetap dijaga.
+  assert.match(code, /let confirmDepth = 0;/);
   assert.match(code, /confirmDepth \+= 1;/);
   assert.match(code, /confirmDepth -= 1;/);
   assert.match(code, /confirmDepth === 0/, 'restore hanya saat semua konfirmasi selesai');
@@ -61,6 +68,44 @@ test('the plugin restores the overlay and carries native controls the user can r
   // The visible flag must guard on an open view, or it resurrects a closed browser.
   assert.match(java, /if \(dappView != null\) \{[\s\S]*refreshLayout\.setVisibility\(visible \? View\.VISIBLE : View\.GONE\)/,
     'setVisible wajib no-op saat browser belum pernah dibuka');
+});
+
+test('the native confirm sheet exists, draws above the dapp, and cannot hang the wallet', () => {
+  assert.match(java, /public void confirm\(PluginCall call\)/, 'plugin.confirm = sheet native untuk connect/sign/send');
+  assert.match(java, /showNativeConfirm\(call, title, rows, confirmText, cancelText\)/,
+    'jalur confirm() → showNativeConfirm() di UI thread');
+  assert.match(java, /setBackgroundColor\(0x99000000\)/, 'scrim redup: dApp TETAP kelihatan di belakang (gaya OKX, bukan flash-to-wallet)');
+  assert.match(java, /root\.addView\(sheet, new android\.widget\.FrameLayout\.LayoutParams\([\s\S]*Gravity\.BOTTOM\)/,
+    'sheet = bottom-sheet di atas overlay');
+  assert.match(java, /setContentDescription\("dapp-confirm-ok"\)/, 'tombol confirm berlabel — a11y + pilihan E2E');
+  assert.match(java, /setContentDescription\("dapp-confirm-cancel"\)/);
+  assert.match(java, /removeView\(confirmRoot\)[\s\S]*c\.resolve\(r\)/, 'teardown melepas view + resolve pending — tidak ada promise menggantung');
+  assert.match(java, /finishConfirm\(false\);[\s\S]*closeTabPanel\(\)/, 'menutup browser membatalkan prompt yang sedang tampil');
+  assert.match(java, /finishConfirm\(false\);[\s\S]*super\.handleOnDestroy\(\)/, 'destroy juga membatalkan pending');
+});
+
+test('a visible load bar exists and every page state controls it', () => {
+  assert.match(java, /progressBar = new android\.widget\.ProgressBar\(getContext\(\), null, android\.R\.attr\.progressBarStyleHorizontal\)/,
+    'bar progres horizontal (indeterminate) = indikator loading web (report "loading web ga ada")');
+  assert.match(java, /lp\.topMargin = barH/, 'bar dipasang TEPAT di bawah toolbar');
+  assert.match(java, /showLoadingBar\(\);/, 'onPageStarted menyalakan bar');
+  assert.match(java, /addressField\.setBackgroundColor\(ADDRESS_IDLE\);[\s\S]{0,120}hideLoadingBar\(\);/,
+    'onPageFinished memadamkan bar (saat bar alamat kembali idle)');
+  assert.match(java, /if \(view == dappView\) hideLoadingBar\(\);/,
+    'halaman error juga memadamkan bar — load mati tak boleh meninggalkan spinner abadi');
+  assert.match(java, /hideLoadingBar\(\);   \/\/ a tab switch/, 'ganti tab memadamkan bar tab sebelumnya');
+});
+
+test('the wallet can reopen any open tab from its own DApps page', () => {
+  assert.match(java, /public void getTabs\(PluginCall call\)/, 'getTabs = daftar tab hidup untuk tombol Tabs wallet');
+  assert.match(java, /ret\.put\("open", dappView != null\)/, 'status open = ada browser (sesi bertahan walau overlay tersembunyi)');
+  assert.match(java, /public void selectTab\(PluginCall call\)/, 'selectTab = aktifkan tab + tampilkan browser');
+  assert.match(code, /export async function nativeTabs\(\)/, 'helper wallet → nativeTabs ada');
+  assert.match(code, /export async function openNativeTab\(index\)/, 'helper wallet → openNativeTab ada');
+  const dapps = readFileSync(path.join(here, '..', 'js', 'dapps.js'), 'utf8');
+  assert.match(dapps, /renderTabsEntry\(container\)/, 'view dApps memanggil renderTabsEntry');
+  assert.match(dapps, /dappTabsBtn/, 'entry "Browser" punya tombol berlabel');
+  assert.match(dapps, /openNativeTab\(Number\(row\.dataset\.i\) \|\| 0\)/, 'klik row → selectTab native');
 });
 
 test('the fixture page can never hang the journey — every request races a deadline', () => {
@@ -123,8 +168,20 @@ test('Bridge.postMessage never touches the WebView — origin comes from a main-
 });
 
 test('the dApp page renders BELOW the toolbar — never underneath its own header band', () => {
-  assert.match(java, /refreshLayout\.setPadding\(0, barH, 0, 0\)/,
-    'padding di refreshLayout sendiri: margin lewat LayoutParams parent bisa hilang saat addView me-regenerate params');
+  // A top MARGIN, not a padding: SwipeRefreshLayout paints its pull-to-refresh
+  // spinner at the top of its OWN bounds, and with a top padding that strip sat
+  // under the z-topmost toolbar — the user's spinner was invisible
+  // (report 2026-10-11). The margin keeps the whole band below the bar.
+  assert.match(java, /lp\.topMargin = barH/,
+    'margin atas = tinggi bar: spinner pull-to-refresh tampil DI BAWAH toolbar');
+  assert.match(java, /stack\.addView\(t\.wrap, barInsetParams\(\)\)/,
+    'wrapper masuk stack dengan inset bar (margin), bukan padding');
+  assert.match(java, /applyBarInset\(refreshLayout\)/,
+    'inset di-assert ulang di setActiveTab (params bisa di-regenerate)');
+  assert.doesNotMatch(java, /refreshLayout\.setPadding\(0, barH/,
+    'padding lama mengubur spinner di bawah toolbar — dilarang kembali');
+  assert.match(java, /stack\.setBackgroundColor\(PAGE_BG\)/,
+    'band halaman opaque: dashboard cartoon tak boleh tembus saat dApp loading');
   assert.match(java, /MATCH_PARENT, barH\)/, 'tinggi toolbar tetap (48dp * density) — jarak halaman = tinggi bar, tanpa menunggu measure');
   assert.match(java, /int barH = \(int\) \(48 \* density\)/,
     'ukuran dp-density lewat getResources aktivitas — Plugin Capacitor tak mengekspos getResources() (compile error run 38033857612)');

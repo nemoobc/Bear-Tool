@@ -5,11 +5,11 @@
 // is js/dapp-safety.js and the session/permission store is js/dapp-sessions.js.
 // ═══════════════════════════════════════════════════════════════
 
-import { escapeHtml, dappMark, dappLogo } from './ui.js';
+import { escapeHtml, dappMark, dappLogo, openModal, closeModal } from './ui.js';
 import { openDappBrowser as openInBrowser, openDappHome, openExternalNotice, initDappBrowser } from './dapp-browser.js';
 import { classifyInput, inspectUrl, baseHost, VERDICT } from './dapp-safety.js';
 import { listBlocked, listTrusted } from './dapp-sessions.js';
-import { isNativeDappBrowser } from './native-dapp.js';
+import { isNativeDappBrowser, nativeTabs, openNativeTab } from './native-dapp.js';
 
 // frameable:false → the site ships clickjacking protection (X-Frame-Options or
 // frame-ancestors), so NO in-app browser can embed it. Re-probed live against
@@ -116,6 +116,51 @@ export function looksLikeUrl(v) {
   // no localhost, no IDN rule — so `localhost:8123` was an address to the
   // address bar and a filter to the Open button, and Enter did nothing.
   return classifyInput(v).kind === 'url';
+}
+
+/**
+ * Native only: a live "Browser" entry above the dApp grid showing how many tabs
+ * the in-app browser still holds, and letting the user reopen it on any of
+ * them. The browser keeps its session while the overlay is hidden, so without
+ * this door back the only way in was another dApp card (which reloaded).
+ */
+async function renderTabsEntry(container) {
+  const bar = container.querySelector('.dapps-browser');
+  if (!bar) return;
+  const info = await nativeTabs();          // null on web, or with no session
+  const tabs = (info && info.tabs) || [];
+  if (!tabs.length) return;
+  const label = (t) => t.title || t.url || 'New tab';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'dappTabsBtn';
+  btn.className = 'dapp-tabs-entry';
+  btn.setAttribute('aria-label', 'Open the in-app browser tabs');
+  btn.innerHTML = `<span class="dapp-tabs-ic" aria-hidden="true">\u29C9</span>
+    <span class="dapp-tabs-lb">Browser</span>
+    <span class="dapp-tabs-n" aria-hidden="true">${tabs.length}</span>`;
+  btn.addEventListener('click', async () => {
+    const fresh = await nativeTabs();
+    const list = (fresh && fresh.tabs) || [];
+    if (!list.length) return;
+    openModal(`
+      <h3>Browser tabs</h3>
+      <p class="small">The in-app browser still has ${list.length} tab${list.length === 1 ? '' : 's'} open. Pick one to go back.</p>
+      <div class="dapp-tabs-list" role="list">
+        ${list.map((t, i) => `<button type="button" class="dapp-tabs-row" role="listitem" data-i="${i}">
+          <span class="dapp-tabs-row-t">${escapeHtml(label(t))}</span>
+          <span class="dapp-tabs-row-u">${escapeHtml(t.url || '')}</span>
+        </button>`).join('')}
+      </div>`, { wide: true });
+    const box = document.getElementById('modalBox');
+    box?.querySelectorAll('.dapp-tabs-row').forEach((row) => {
+      row.addEventListener('click', async () => {
+        closeModal();
+        await openNativeTab(Number(row.dataset.i) || 0);
+      });
+    });
+  });
+  bar.insertBefore(btn, bar.firstChild);
 }
 
 export function renderDapps(container) {
@@ -227,6 +272,9 @@ export function renderDapps(container) {
       if (looksLikeUrl((search.value || '').trim())) go();
     }
   });
+
+  // Native: the door back into a browser that was hidden but still has tabs.
+  if (native) renderTabsEntry(container);
 }
 
 export { POPULAR_DAPPS };

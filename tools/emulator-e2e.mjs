@@ -93,6 +93,31 @@ async function tapNativeButton(desc) {
   return false;
 }
 
+// Wait for a native control (by accessibility label) to EXIST — the confirm
+// sheet's buttons appear asynchronously after the RPC lands.
+async function waitNativeButton(desc, tries = 20) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      adb('shell', 'uiautomator', 'dump', '/sdcard/uidump.xml');
+      const xml = adb('shell', 'cat', '/sdcard/uidump.xml');
+      if (xml.includes('content-desc="' + desc + '"')) return true;
+    } catch { /* dump races the UI — retry */ }
+    await sleep(1000);
+  }
+  return false;
+}
+
+// All TEXT the native layer currently shows (uiautomator dump). The confirm
+// sheet is native — its rows exist here, not in any WebView DOM — so this is
+// the only place the E2E can cross-check what the user sees.
+async function readSheetTexts() {
+  try {
+    adb('shell', 'uiautomator', 'dump', '/sdcard/uidump.xml');
+    const xml = adb('shell', 'cat', '/sdcard/uidump.xml');
+    return (xml.match(/text="([^"]*)"/g) || []).map((m) => m.slice(6, -1)).filter((t) => t.trim());
+  } catch { return []; }
+}
+
 // Console noise that is known, external, and not this app's fault.
 const ALLOWED_CONSOLE = [
   /coingecko/i, /statsig/i, /amplitude/i, /attestation/i,
@@ -487,18 +512,23 @@ async function main() {
         + ' dappConsole=' + JSON.stringify(report.dapp.console));
     }
 
-    step('dapp browser: connect prompt — flashed to the wallet');
-    await page.wait('#confirmYes', 20000);
-    report.dapp.askTitle = await page.evaluate(
-      'document.querySelector(".question") ? document.querySelector(".question").textContent : ""'
-    ).catch(() => '');
-    report.dapp.askRows = await page.evaluate(
-      `Array.from(document.querySelectorAll('.tx-detail .row')).map((r) => (r.querySelector('.k') ? r.querySelector('.k').textContent : '') + '=' + (r.querySelector('.v') ? r.querySelector('.v').textContent : ''))`
-    ).catch(() => []);
-    // Whole screen, not the DOM: if flash-to-wallet works, this shot shows the
-    // wallet's modal — not the fixture page still open underneath it.
-    await shotScreen('06-dapp-connect-modal');
-    await page.click('#confirmYes');
+    step('dapp browser: connect prompt — native sheet above the LIVE dApp');
+    if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('native connect sheet never appeared');
+    // The dApp must STILL be visible: the sheet renders natively above the
+    // page, exactly like OKX — no flash-to-wallet (user report "pas connect
+    // langsung keluar").
+    report.dapp.sheetVisibility = await dpage.evaluate('document.visibilityState').catch(() => '?');
+    report.dapp.sheetTexts = await readSheetTexts();
+    if (report.dapp.sheetVisibility !== 'visible') {
+      throw new Error('dApp was hidden under the connect sheet: ' + report.dapp.sheetVisibility);
+    }
+    if (!report.dapp.sheetTexts.some((t) => /Connect/.test(t))) {
+      throw new Error('native sheet has no Connect title: ' + JSON.stringify(report.dapp.sheetTexts));
+    }
+    // Whole screen, not the DOM: the bottom sheet + the fixture page behind it
+    // (the proof the browser did NOT vanish).
+    await shotScreen('06-dapp-connect-sheet');
+    if (!(await tapNativeButton('dapp-confirm-ok'))) throw new Error('dapp-confirm-ok did not tap');
 
     step('dapp browser: fixture reads accounts over its own CDP target');
     text = await pollOut(/done=/, 60000);
@@ -508,15 +538,16 @@ async function main() {
     for (const key of ['hasProvider=true', 'chainId=0x', 'account0=0x', 'accountsAgain=0x', 'done=ok']) {
       if (!String(text).includes(key)) throw new Error(`fixture log missing ${key}:\n${text}`);
     }
-    // The account the fixture received must be the account the modal named.
+    // The account the fixture received must be the account the native sheet
+    // showed (shortAddr 0x1234…abcd — read from the uiautomator dump, the only
+    // eye into the native layer).
     const acc = (String(text).match(/account0=(0x[0-9a-fA-F]{40})/) || [])[1] || '';
-    const shown = (report.dapp.askRows || []).find((r) => r.startsWith('Account=')) || '';
-    if (acc && !shown) throw new Error(`modal has no Account row to cross-check ${acc} against: ${JSON.stringify(report.dapp.askRows)}`);
-    if (acc && shown) {
-      const short = shown.slice('Account='.length); // shortAddr: 0x1234…abcd
+    if (acc) {
+      const short = (report.dapp.sheetTexts || []).find((t) => t.startsWith('0x') && t.includes('…')) || '';
+      if (!short) throw new Error(`native sheet has no short account to cross-check ${acc} against: ${JSON.stringify(report.dapp.sheetTexts)}`);
       const head = short.slice(0, 6), tail = short.slice(-4);
       if (!acc.toLowerCase().startsWith(head.toLowerCase().replace('…', '')) || !acc.toLowerCase().endsWith(tail.toLowerCase())) {
-        throw new Error(`modal account ${short} does not match fixture account ${acc}`);
+        throw new Error(`sheet account ${short} does not match fixture account ${acc}`);
       }
       report.dapp.accountMatchesModal = true;
     }
@@ -567,20 +598,18 @@ async function main() {
       throw new Error('fixture #2 never committed: href=' + String(report.dapp.href2));
     }
     // ChainId first (proves the provider re-injected into the NEW document);
-    // the wallet modal for personal_sign arrives right after the fixture asks.
-    await page.wait('#confirmYes', 20000);
-    report.dapp.signAskTitle = await page.evaluate(
-      'document.querySelector(".question") ? document.querySelector(".question").textContent : ""'
-    ).catch(() => '');
-    await shotScreen('09-sign-modal');
-    await page.click('#confirmYes');
+    // the native sheet for personal_sign arrives right after the fixture asks.
+    if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('sign sheet never appeared');
+    report.dapp.signVisibility = await dpage.evaluate('document.visibilityState').catch(() => '?');
+    await shotScreen('09-sign-sheet');
+    if (!(await tapNativeButton('dapp-confirm-ok'))) throw new Error('sign confirm did not tap');
     text = await pollOut(/personalSign=0x|error=|done=/, 60000);
     if (!/personalSign=0x[0-9a-fA-F]{130}/.test(String(text))) throw new Error(`personal_sign failed:\n${text}`);
     report.dapp.personalSign = true;
-    // Second modal: eth_signTypedData_v4.
-    await page.wait('#confirmYes', 20000);
-    await shotScreen('10-typeddata-modal');
-    await page.click('#confirmYes');
+    // Second sheet: eth_signTypedData_v4.
+    if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('typed-data sheet never appeared');
+    await shotScreen('10-typeddata-sheet');
+    if (!(await tapNativeButton('dapp-confirm-ok'))) throw new Error('typed-data confirm did not tap');
     text = await pollOut(/typedSign=0x|error=|done=/, 60000);
     if (!/typedSign=0x[0-9a-fA-F]{130}/.test(String(text))) throw new Error(`typed-data sign failed:\n${text}`);
     report.dapp.typedSign = true;
@@ -689,8 +718,8 @@ async function main() {
     if (!String(report.dapp.tabsReopen).includes('dapp-rpc-fixture')) {
       throw new Error('fixture never reopened for the tabs test: ' + String(report.dapp.tabsReopen));
     }
-    await page.wait('#confirmYes', 20000);
-    await page.click('#confirmYes');
+    if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('reopen connect sheet never appeared');
+    if (!(await tapNativeButton('dapp-confirm-ok'))) throw new Error('reopen connect confirm did not tap');
     text = await pollOut(/done=/, 60000);
     if (!String(text).includes('done=ok')) throw new Error('reopened fixture never finished:\n' + text);
 
@@ -752,6 +781,38 @@ async function main() {
       throw new Error('chainChanged never reached the dApp (want 0x89): ' + JSON.stringify(String(chgText)));
     }
     await shotScreen('16-network-switched');
+
+    // ── the wallet's own "Tabs" door (user: "diluar daaps ga ada tabs") ─────
+    // Hide the browser with ✕ (the session SURVIVES a hide — no about:blank
+    // wipe), reopen the wallet's DApps view, and walk back in through the new
+    // Browser entry.
+    step('dapp browser: the wallet DApps page can reopen a hidden browser');
+    if (!(await tapNativeButton('dapp-close'))) throw new Error('dapp-close did not tap');
+    await sleep(1500);
+    await page.click('.mobile-nav-item[data-view="dapps"]').catch(() => { throw new Error('dapps nav missing'); });
+    await sleep(1600);
+    const entry = await page.evaluate(
+      `(function () { var b = document.getElementById('dappTabsBtn'); return b ? b.textContent.replace(/\\s+/g, ' ').trim() : ''; })()`
+    ).catch(() => '');
+    report.dapp.walletTabsEntry = String(entry);
+    if (!/Browser/.test(entry)) throw new Error('wallet DApps page has no Browser tabs entry: ' + JSON.stringify(String(entry)));
+    // The fixture target still alive with its URL PROVES the session survived
+    // the hide — a tabs entry without live tabs would be a lie.
+    if (!(await cdpTargetUrls()).some((u) => u.includes('dapp-rpc-fixture'))) {
+      throw new Error('hiding the browser killed the tab session (Browser entry with no live tabs)');
+    }
+    await page.click('#dappTabsBtn').catch(() => { throw new Error('dappTabsBtn not clickable'); });
+    await sleep(1200);
+    const rowsN = await page.evaluate(`document.querySelectorAll('.dapp-tabs-row').length`).catch(() => 0);
+    report.dapp.walletTabsRows = rowsN;
+    if (!rowsN) throw new Error('wallet tabs chooser listed no rows');
+    await shotScreen('17-wallet-tabs');
+    await page.click('.dapp-tabs-row').catch(() => { throw new Error('no tabs row to click'); });
+    await sleep(2500);
+    // Back on the dApp: the browser overlay is up again, same live session.
+    report.dapp.walletTabsReopened = (await cdpTargetUrls()).some((u) => u.includes('dapp-rpc-fixture'));
+    if (!report.dapp.walletTabsReopened) throw new Error('reopening from the wallet did not show the browser');
+    await shotScreen('18-wallet-tabs-reopened');
     try { dapp.close(); } catch { /* target may die with the view */ }
   }
 

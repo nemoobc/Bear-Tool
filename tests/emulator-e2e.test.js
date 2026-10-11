@@ -165,18 +165,28 @@ test('the workflow serves the dApp fixture to the emulator and keeps its server 
 
 test('the driver drives the native dApp browser end to end — open, confirm, read, back', () => {
   assert.match(driverSrc, /__bearE2EOpenDapp/, 'jalur pembukaan = hook native (kartu katalog menunjuk eksternal)');
-  assert.match(driverSrc, /#confirmYes/, 'konfirmasi connect diklik di HALAMAN WALLET');
+  assert.match(driverSrc, /waitNativeButton\('dapp-confirm-ok'/, 'konfirmasi = SHEET NATIVE (plugin.confirm), bukan modal wallet #confirmYes');
+  assert.match(driverSrc, /tapNativeButton\('dapp-confirm-ok'\)/, 'persetujuan = tap tombol native asli lewat uiautomator');
   assert.match(driverSrc, /connectCDP\('10\.0\.2\.2:8080'\)/, 'hasil fixture dibaca dari target CDP KEDUA (halaman dapp)');
   assert.match(driverSrc, /tapNativeButton\('dapp-back'\)/, 'kembali = tap tombol NATIVE asli lewat uiautomator — CDP tak melihat di luar WebView');
   assert.match(driverSrc, /hasProvider=true/, 'rantai bukti: provider ter-inject');
   assert.match(driverSrc, /account0=0x/, 'rantai bukti: akun dari konfirmasi');
   assert.match(driverSrc, /done=ok/, 'rantai bukti: siklus penuh selesai');
-  // The flash-to-wallet question is answered by what the SCREEN shows, not
-  // what the DOM holds: a CDP click would work even behind the overlay.
-  assert.match(driverSrc, /shotScreen\('06-dapp-connect-modal'\)/, 'bukti jangkauan modal = tangkapan layar SELURUH layar');
-  // The account row cross-check ties the two WebViews together.
-  assert.match(driverSrc, /accountMatchesModal/, 'akun fixture wajib cocok dengan akun yang dimodalkan wallet');
+  // The sheet question is answered by what the SCREEN shows, not what the DOM
+  // holds: a CDP click would work even behind the overlay.
+  assert.match(driverSrc, /shotScreen\('06-dapp-connect-sheet'\)/, 'bukti jangkauan sheet = tangkapan layar SELURUH layar');
+  assert.match(driverSrc, /sheetVisibility !== 'visible'/, 'dApp WAJIB TETAP TERLIHAT saat sheet tampil — flash-to-wallet = bug (user report "pas connect langsung keluar")');
+  // The account row cross-check ties the sheet (native layer) to the fixture.
+  assert.match(driverSrc, /accountMatchesModal/, 'akun fixture wajib cocok dengan akun yang ditampilkan sheet native');
   assert.match(driverSrc, /did not return the wallet to view/, 'back palsu (tombol ketuk tapi layar tak pulih) wajib gagal');
+});
+
+test('the wallet can walk back into a hidden browser through its own Tabs door', () => {
+  assert.match(driverSrc, /tapNativeButton\('dapp-close'\)/, 'browser ditutup lewat ✕ native');
+  assert.match(driverSrc, /dappTabsBtn/, 'view dApps punya entry Browser (tabs)');
+  assert.match(driverSrc, /hiding the browser killed the tab session/, 'sesi WAJIB hidup setelah hide — blanking membunuh door tabs');
+  assert.match(driverSrc, /.dapp-tabs-row./, 'chooser tab dirender di modal wallet');
+  assert.match(driverSrc, /walletTabsReopened/, 'reopen dari wallet dibuktikan lewat target CDP yang masih live');
 });
 
 test('the dapp block is a truth machine — CDP polls the DOM and the page keeps its own voice', () => {

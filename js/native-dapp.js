@@ -149,6 +149,31 @@ export async function openNativeDapp(url) {
 
 
 /**
+ * Wallet DApps page → native: the browser's live tab list, or null when there
+ * is no session (or we are on plain web). The wallet surfaces this as its own
+ * "Tabs" entry, so a browser that was hidden — but still holds open tabs — is
+ * reachable without going back through a dApp card (user report 2026-10-11:
+ * "diluar daaps ga ada tabs").
+ */
+export async function nativeTabs() {
+  if (!isNativeDappBrowser()) return null;
+  try {
+    const p = await ensurePlugin();
+    const r = await p.getTabs();
+    return r && r.open && Array.isArray(r.tabs) ? r : null;
+  } catch { return null; }   // older build without getTabs — no entry, no crash
+}
+
+/** Wallet DApps page → native: reopen the in-app browser on tab <index>. */
+export async function openNativeTab(index) {
+  try {
+    const p = await ensurePlugin();
+    await p.selectTab({ index: Number(index) || 0 });
+    return true;
+  } catch { return false; }
+}
+
+/**
  * Boot the RPC listener. Returns true when running natively (Capacitor), false
  * on plain web — where the iframe browser stays in charge and this module is
  * dead weight the bundler can tree-shake around.
@@ -225,6 +250,24 @@ async function askUser(fn) {
   }
 }
 
+/**
+ * Consent prompt for the native browser. Prefers the plugin's OWN confirm sheet
+ * (draws above the dApp — the page never leaves the screen, OKX/MetaMask
+ * parity); falls back to the wallet modal on web or on a build whose plugin
+ * predates confirm(). Same rows contract as confirmTx.
+ */
+async function askConfirm({ title, rows, confirmText }) {
+  const p = plugin;
+  if (p) {
+    try {
+      const safe = (rows || []).map((r) => ({ k: String(r.k), v: String(r.v) }));
+      const r = await p.confirm({ title, rows: safe, confirmText: confirmText || 'Confirm' });
+      if (r && typeof r.ok === 'boolean') return r.ok;
+    } catch { /* no native sheet on this build — fall through to the wallet modal */ }
+  }
+  return askUser(() => confirmTx({ title, rows, confirmText }));
+}
+
 async function handleNativeRpc({ id, origin, payload }) {
   if (!plugin) return;
   let msg = {};
@@ -259,7 +302,7 @@ async function handleNativeRpc({ id, origin, payload }) {
   }
 
   if (method === 'eth_requestAccounts') {
-    const ok = await askUser(() => confirmTx({
+    const ok = await askConfirm({
       title: 'Connect "' + site + '" to Bear Tool?',
       rows: [
         { k: 'Site', v: site },
@@ -267,7 +310,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: 'Can request', v: 'accounts, sign, send transactions' },
       ],
       confirmText: 'Connect',
-    }));
+    });
     if (!ok) return respondError(USER_REJECTED);
     connectedOrigins.add(site);
     return respond([signer.address]);
@@ -275,7 +318,7 @@ async function handleNativeRpc({ id, origin, payload }) {
 
   if (method === 'personal_sign') {
     const [hex] = msg.params || [];
-    const ok = await askUser(() => confirmTx({
+    const ok = await askConfirm({
       title: 'Sign message?',
       rows: [
         { k: 'Chain', v: chainId },
@@ -284,7 +327,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: 'Message', v: String(hexToBytes(hex)).slice(0, 80) },
       ],
       confirmText: 'Sign',
-    }));
+    });
     if (!ok) return respondError(USER_REJECTED);
     return respond(await signer.signMessage(hexToBytes(hex)));
   }
@@ -303,7 +346,7 @@ async function handleNativeRpc({ id, origin, payload }) {
       toast(m, 'error');
       return respondError({ code: -32000, message: m });
     }
-    const ok = await askUser(() => confirmTx({
+    const ok = await askConfirm({
       title: 'Sign typed data?',
       rows: [
         { k: 'Chain', v: chainId },
@@ -313,7 +356,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: 'Account', v: shortAddr(signer.address) },
       ],
       confirmText: 'Confirm',
-    }));
+    });
     if (!ok) return respondError(USER_REJECTED);
     const types = { ...(parsed.types || {}) };
     delete types.EIP712Domain;
@@ -331,7 +374,7 @@ async function handleNativeRpc({ id, origin, payload }) {
     }
     const provider = get('provider');
     if (!provider) return respondError({ code: -32000, message: 'No provider for the current network.' });
-    const ok = await askUser(() => confirmTx({
+    const ok = await askConfirm({
       title: 'Send transaction?',
       rows: [
         { k: 'Chain', v: chainId },
@@ -341,7 +384,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: 'Data', v: txReq.data && txReq.data !== '0x' ? (String(txReq.data).length / 2 - 1) + ' bytes' : 'none' },
       ],
       confirmText: 'Confirm',
-    }));
+    });
     if (!ok) return respondError(USER_REJECTED);
     // Keystore signers are plain ethers.Wallet instances with NO provider —
     // broadcasting without .connect(provider) dies with "missing provider"

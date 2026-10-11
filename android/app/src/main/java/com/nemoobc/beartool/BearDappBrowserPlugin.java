@@ -13,6 +13,7 @@ import android.widget.LinearLayout;
 
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -80,7 +81,29 @@ public class BearDappBrowserPlugin extends Plugin {
     private static final int BAR_BG = 0xFF161622;
     private static final int ADDRESS_LOADING = 0xFF243B7A;  // opaque blue tint while loading
     private static final int ADDRESS_IDLE = 0xFF2A2A3E;     // opaque idle field
+    // The page band under the toolbar is opaque as well: until a page paints,
+    // the wallet's cartoon dashboard used to show through the browser (user
+    // report 2026-10-11: "ui dalem dapp cartoon"). One dark surface = one load.
+    private static final int PAGE_BG = 0xFF0E0E16;
+    // OKX-parity dark chrome: one surface family for the toolbar, the tab sheet
+    // and the confirm sheet (user: "semua chrome gelap bersih gaya OKX").
+    private static final int SHEET_BG = 0xFF161622;
+    private static final int SHEET_KEY = 0xFF8E93A8;
+    private static final int SHEET_VAL = 0xFFE6E6F0;
+    private static final int ACCENT = 0xFF7C4DFF;
     private int barH = 0;
+
+    // A 3dp indeterminate bar pinned just below the toolbar: page loads had no
+    // visible progress at all (user report 2026-10-11: "loading web ga ada").
+    private android.widget.ProgressBar progressBar = null;
+
+    // Native confirm sheet (Connect / Sign / Send). It is drawn ON TOP of the
+    // dapp WebView, so the page stays visible behind a dim scrim and the wallet
+    // never has to hide the browser around a prompt.
+    private android.view.View confirmRoot = null;
+    private android.widget.TextView confirmTitleView = null;
+    private android.widget.LinearLayout confirmRowsBox = null;
+    private PluginCall pendingConfirm = null;
     // The loaded URL, written on the MAIN thread (onPageStarted) and read by
     // Bridge.postMessage on the JavaBridge thread. WebView.getUrl() THROWS
     // off-thread — checkThread() — and postMessage's silent catch ate it:
@@ -151,13 +174,216 @@ public class BearDappBrowserPlugin extends Plugin {
         t.wrap.setColorSchemeColors(0xFF7C4DFF, 0xFF448AFF, 0xFF18FFFF);
         t.wrap.setOnRefreshListener(this::reloadActive);
         t.wrap.addView(t.view, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        t.wrap.setPadding(0, barH, 0, 0);
+        t.view.setBackgroundColor(PAGE_BG); // no white/see-through flash before the first paint
         t.wrap.setVisibility(View.GONE);
         if (stack != null) {
-            stack.addView(t.wrap, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            stack.addView(t.wrap, barInsetParams());
         }
         tabs.add(t);
         return t;
+    }
+
+    /** LayoutParams for a tab's SwipeRefreshLayout: a top MARGIN equal to the
+     *  toolbar height, so the whole page band starts BELOW the bar. This is a
+     *  margin and NOT padding on purpose: SwipeRefreshLayout paints its
+     *  pull-to-refresh spinner at the top of its own bounds, and with a top
+     *  PADDING that strip sits under the (z-topmost) toolbar — the spinner was
+     *  invisible (user report 2026-10-11). A margin set here survives the
+     *  setVisibility() toggles; setActiveTab re-asserts it (idempotent). */
+    private android.widget.FrameLayout.LayoutParams barInsetParams() {
+        android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        lp.topMargin = barH;
+        return lp;
+    }
+
+    /** Re-assert the toolbar inset on a wrapper whose LayoutParams an addView
+     *  may have regenerated (the old padding version existed for this reason;
+     *  the margin is simply re-applied instead of trusted). */
+    private void applyBarInset(View v) {
+        if (v == null || barH <= 0) return;
+        ViewGroup.LayoutParams p = v.getLayoutParams();
+        if (p instanceof android.widget.FrameLayout.LayoutParams
+                && ((android.widget.FrameLayout.LayoutParams) p).topMargin != barH) {
+            android.widget.FrameLayout.LayoutParams lp =
+                new android.widget.FrameLayout.LayoutParams(p.width, p.height);
+            lp.topMargin = barH;
+            v.setLayoutParams(lp);
+        }
+    }
+
+    /** 3dp indeterminate bar under the toolbar — a visible load cue for every
+     *  navigation (the address-bar tint alone was too subtle: user report
+     *  2026-10-11 "loading web ga ada"). */
+    private void buildProgressBar(final float density) {
+        progressBar = new android.widget.ProgressBar(getContext(), null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setIndeterminate(true);
+        progressBar.setVisibility(View.GONE);
+        android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, (int) (3 * density));
+        lp.topMargin = barH;
+        if (stack != null) stack.addView(progressBar, lp);
+    }
+
+    private void showLoadingBar() {
+        if (progressBar == null) return;
+        progressBar.setVisibility(View.VISIBLE);
+        progressBar.bringToFront(); // above the tab wrappers, which are re-added per tab
+    }
+
+    private void hideLoadingBar() {
+        if (progressBar != null) progressBar.setVisibility(View.GONE);
+    }
+
+    /**
+     * Wallet → native: show the Connect / Sign / Send consent sheet ABOVE the
+     * dapp. The wallet's own confirm modal lives in the wallet webview, which
+     * this full-screen overlay covers — so before this the browser had to be
+     * hidden around every prompt and a tap on the dApp's "Connect" looked like
+     * being kicked out of the browser (user report 2026-10-11). OKX/MetaMask
+     * draw the prompt over the page; now so do we. Resolves {ok:boolean}.
+     */
+    @PluginMethod
+    public void confirm(PluginCall call) {
+        final String title = call.getString("title", "Confirm");
+        final String confirmText = call.getString("confirmText", "Confirm");
+        final String cancelText = call.getString("cancelText", "Cancel");
+        final JSArray rows = call.getArray("rows");
+        getActivity().runOnUiThread(() -> {
+            if (dappView == null) {          // no browser open: nothing to sit above
+                JSObject r = new JSObject();
+                r.put("ok", false);
+                call.resolve(r);
+                return;
+            }
+            showNativeConfirm(call, title, rows, confirmText, cancelText);
+        });
+    }
+
+    private void showNativeConfirm(PluginCall call, String title, JSArray rows, String confirmText, String cancelText) {
+        final float density = getActivity().getResources().getDisplayMetrics().density;
+        // A second prompt can only replace the first: resolve the old one as a
+        // refusal, or the wallet JS would wait forever on a sheet that is gone.
+        finishConfirm(false);
+
+        android.widget.FrameLayout root = new android.widget.FrameLayout(getContext());
+        root.setBackgroundColor(0x99000000); // dim scrim — the dapp shows through
+        root.setOnClickListener(v -> finishConfirm(false)); // tap outside = cancel
+
+        LinearLayout sheet = new LinearLayout(getContext());
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setClickable(true);            // taps on the sheet body do not dismiss
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(SHEET_BG);
+        float r = 18 * density;
+        bg.setCornerRadii(new float[]{ r, r, r, r, 0f, 0f, 0f, 0f });
+        sheet.setBackground(bg);
+        int pad = (int) (18 * density);
+        sheet.setPadding(pad, pad, pad, pad);
+
+        confirmTitleView = new android.widget.TextView(getContext());
+        confirmTitleView.setText(title == null ? "" : title);
+        confirmTitleView.setTextColor(0xFFFFFFFF);
+        confirmTitleView.setTextSize(17);
+        confirmTitleView.setPadding(0, 0, 0, (int) (12 * density));
+        sheet.addView(confirmTitleView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        confirmRowsBox = new LinearLayout(getContext());
+        confirmRowsBox.setOrientation(LinearLayout.VERTICAL);
+        if (rows != null) {
+            for (int i = 0; i < rows.length(); i++) {
+                org.json.JSONObject o = rows.optJSONObject(i);
+                if (o == null) continue;
+                addSheetRow(confirmRowsBox, o.optString("k", ""), o.optString("v", ""), density);
+            }
+        }
+        sheet.addView(confirmRowsBox, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout btns = new LinearLayout(getContext());
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        btns.setPadding(0, (int) (18 * density), 0, 0);
+
+        android.widget.TextView cancel = new android.widget.TextView(getContext());
+        cancel.setText(cancelText == null ? "Cancel" : cancelText);
+        cancel.setTextColor(SHEET_VAL);
+        cancel.setTextSize(15);
+        cancel.setGravity(android.view.Gravity.CENTER);
+        cancel.setPadding(0, (int) (12 * density), 0, (int) (12 * density));
+        cancel.setContentDescription("dapp-confirm-cancel");
+        cancel.setOnClickListener(v -> finishConfirm(false));
+
+        android.widget.TextView ok = new android.widget.TextView(getContext());
+        ok.setText(confirmText == null ? "Confirm" : confirmText);
+        ok.setTextColor(0xFFFFFFFF);
+        ok.setTextSize(15);
+        ok.setGravity(android.view.Gravity.CENTER);
+        ok.setTypeface(ok.getTypeface(), android.graphics.Typeface.BOLD);
+        ok.setPadding(0, (int) (12 * density), 0, (int) (12 * density));
+        ok.setContentDescription("dapp-confirm-ok");
+        android.graphics.drawable.GradientDrawable okBg = new android.graphics.drawable.GradientDrawable();
+        okBg.setColor(ACCENT);
+        okBg.setCornerRadius(12 * density);
+        ok.setBackground(okBg);
+        ok.setOnClickListener(v -> finishConfirm(true));
+
+        btns.addView(cancel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.Space sp = new android.widget.Space(getContext());
+        btns.addView(sp, new LinearLayout.LayoutParams((int) (12 * density), 1));
+        btns.addView(ok, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        sheet.addView(btns, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        root.addView(sheet, new android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM));
+
+        confirmRoot = root;
+        pendingConfirm = call;
+        if (parent != null) {
+            parent.addView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            root.bringToFront();
+        } else {
+            finishConfirm(false);   // nowhere to draw: refuse rather than hang
+        }
+    }
+
+    private void addSheetRow(LinearLayout box, String k, String v, float density) {
+        LinearLayout row = new LinearLayout(getContext());
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, (int) (6 * density), 0, (int) (6 * density));
+
+        android.widget.TextView kv = new android.widget.TextView(getContext());
+        kv.setText(k);
+        kv.setTextColor(SHEET_KEY);
+        kv.setTextSize(13);
+
+        android.widget.TextView vv = new android.widget.TextView(getContext());
+        vv.setText(v);
+        vv.setTextColor(SHEET_VAL);
+        vv.setTextSize(13);
+        vv.setGravity(android.view.Gravity.END);
+        vv.setSingleLine(true);
+        vv.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+
+        row.addView(kv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.addView(vv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+    }
+
+    /** Resolve + tear down the sheet. Safe to call when nothing is pending. */
+    private void finishConfirm(boolean ok) {
+        PluginCall c = pendingConfirm;
+        pendingConfirm = null;
+        if (confirmRoot != null) {
+            ViewGroup pp = (ViewGroup) confirmRoot.getParent();
+            if (pp != null) pp.removeView(confirmRoot);
+            confirmRoot = null;
+        }
+        confirmTitleView = null;
+        confirmRowsBox = null;
+        if (c != null) {
+            JSObject r = new JSObject();
+            r.put("ok", ok);
+            c.resolve(r);
+        }
     }
 
     /** Swipe-to-refresh reloads the ACTIVE page (a hidden tab cannot be pulled). */
@@ -170,12 +396,14 @@ public class BearDappBrowserPlugin extends Plugin {
         final float density = getActivity().getResources().getDisplayMetrics().density;
         parent = (ViewGroup) getBridge().getWebView().getParent();
         stack = new android.widget.FrameLayout(getContext());
+        stack.setBackgroundColor(PAGE_BG); // opaque: the wallet never shows through the page band
         if (parent != null) {
             parent.addView(stack, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
         buildToolbar(density);
         buildTabPanel(density);
         newTab();            // a blank tab so the toolbar always has an active view
+        buildProgressBar(density);
         setActiveTab(0);
         stack.setVisibility(View.GONE);
     }
@@ -418,10 +646,12 @@ public class BearDappBrowserPlugin extends Plugin {
         Tab t = tabs.get(i);
         dappView = t.view;
         refreshLayout = t.wrap;
-        // Page content stays clear of the native toolbar: pad the wrapper by the
-        // bar height (a view property survives re-adds; a parent LayoutParams
-        // margin could be dropped on addView).
-        refreshLayout.setPadding(0, barH, 0, 0);
+        hideLoadingBar();   // a tab switch settles any bar left by the previous tab
+        // Page content stays clear of the native toolbar: a top margin on the
+        // wrapper (set once at addView, re-asserted here). A margin — not the
+        // padding this used to be — keeps the pull-to-refresh spinner in the
+        // band BELOW the bar instead of hidden underneath it.
+        applyBarInset(refreshLayout);
         refreshLayout.setVisibility(View.VISIBLE);
         if (stack != null) refreshLayout.bringToFront();
         currentUrl = t.url == null ? "" : t.url;   // the active tab owns the RPC origin
@@ -482,6 +712,7 @@ public class BearDappBrowserPlugin extends Plugin {
                     addressField.setText(url == null ? "" : url);
                     addressField.setBackgroundColor(ADDRESS_LOADING);
                 }
+                showLoadingBar();   // visible progress while the page loads
                 updateNavButtons();
             }
             injectProvider(view, "start", url);
@@ -512,13 +743,15 @@ public class BearDappBrowserPlugin extends Plugin {
             if (t != null) {
                 t.url = url == null ? "" : url;
                 t.title = view.getTitle() == null ? "" : view.getTitle();
-            }            injectProvider(view, "finish", url);
+            }
+            injectProvider(view, "finish", url);
             if (view == dappView) {
                 // Address bar settles: idle tint, live back/forward state.
                 if (addressField != null) {
                     addressField.setText(url == null ? "" : url);
                     addressField.setBackgroundColor(ADDRESS_IDLE);
                 }
+                hideLoadingBar();
                 updateNavButtons();
             }
             if (t != null && t.wrap != null) t.wrap.setRefreshing(false); // pull-to-refresh spinner stops once the page lands
@@ -531,6 +764,7 @@ public class BearDappBrowserPlugin extends Plugin {
         @Override
         public void onReceivedError(WebView view, android.webkit.WebResourceRequest request, android.webkit.WebResourceError error) {
             if (!request.isForMainFrame()) return;
+            if (view == dappView) hideLoadingBar();  // a dead load must not leave the bar spinning
             JSObject ev = new JSObject();
             ev.put("event", "loadError");
             ev.put("url", request.getUrl().toString());
@@ -640,6 +874,7 @@ public class BearDappBrowserPlugin extends Plugin {
     }
 
     private void hideDappView() {
+        finishConfirm(false);   // a pending consent dies with the browser — never hang the wallet JS
         closeTabPanel();
         if (stack != null) stack.setVisibility(View.GONE);
         if (refreshLayout != null) {
@@ -647,7 +882,12 @@ public class BearDappBrowserPlugin extends Plugin {
             refreshLayout.setVisibility(View.GONE);
         }
         if (toolbar != null) toolbar.setVisibility(View.GONE);
-        if (dappView != null) dappView.loadUrl("about:blank");
+        // The tab SESSION survives a hide on purpose: closing the browser must
+        // not kill the pages the user left open — they can reopen any tab from
+        // the wallet's DApps view ("diluar daaps ga ada tabs", report
+        // 2026-10-11). Background tabs were never blanked; the active tab is
+        // now consistent with them. destroy() in handleOnDestroy still tears
+        // everything down.
     }
 
     /**
@@ -676,6 +916,47 @@ public class BearDappBrowserPlugin extends Plugin {
                     if (visible) toolbar.bringToFront(); // toolbar stays topmost
                 }
                 if (!visible && tabPanel != null) tabPanel.setVisibility(View.GONE);
+            }
+            call.resolve();
+        });
+    }
+
+    /**
+     * Wallet → native: the open tabs, so the wallet's own DApps page can offer
+     * a "Tabs" entry and reopen the browser on any of them (user report
+     * 2026-10-11: "diluar daaps ga ada tabs" — tabs were only reachable from
+     * inside the browser). The session survives while the overlay is hidden.
+     */
+    @PluginMethod
+    public void getTabs(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            JSObject ret = new JSObject();
+            ret.put("open", dappView != null);
+            ret.put("active", activeTab);
+            JSArray arr = new JSArray();
+            for (int i = 0; i < tabs.size(); i++) {
+                Tab t = tabs.get(i);
+                JSObject o = new JSObject();
+                String title = (t.title == null || t.title.isEmpty()) ? (t.url == null ? "" : t.url) : t.title;
+                o.put("title", title);
+                o.put("url", t.url == null ? "" : t.url);
+                arr.put(o);
+            }
+            ret.put("tabs", arr);
+            call.resolve(ret);
+        });
+    }
+
+    /** Wallet → native: bring tab <index> to the front and show the browser. */
+    @PluginMethod
+    public void selectTab(PluginCall call) {
+        Integer idx = call.getInt("index");
+        getActivity().runOnUiThread(() -> {
+            if (idx != null && idx >= 0 && idx < tabs.size()) setActiveTab(idx);
+            if (dappView != null) {
+                if (stack != null) stack.setVisibility(View.VISIBLE);
+                if (refreshLayout != null) { refreshLayout.setVisibility(View.VISIBLE); refreshLayout.bringToFront(); }
+                if (toolbar != null) { toolbar.setVisibility(View.VISIBLE); toolbar.bringToFront(); }
             }
             call.resolve();
         });
@@ -767,6 +1048,7 @@ public class BearDappBrowserPlugin extends Plugin {
     @Override
     protected void handleOnDestroy() {
         getActivity().runOnUiThread(() -> {
+            finishConfirm(false);   // destroy must not leave a wallet-side promise hanging
             for (Tab t : tabs) {
                 if (t.view != null) {
                     t.view.destroy();

@@ -198,7 +198,7 @@ test('dapps: kartu pakai tile-mark deterministik, bukan emoji mentah (daftar & b
   assert.ok(!/\$\{d\.icon \|\|/.test(browserSrc),
     'd.icon tidak boleh dipasang lagi di js/dapp-browser.js');
   // …dengan helper yang benar-benar diimpor di kedua modul.
-  assert.match(dappsSrc, /import \{ escapeHtml, dappMark, dappLogo \} from '\.\/ui\.js'/);
+  assert.match(dappsSrc, /import \{ escapeHtml, dappMark, dappLogo[^}]*\} from '\.\/ui\.js'/);
   assert.match(browserSrc, /import \{ escapeHtml, toast, dappMark, dappLogo \} from '\.\/ui\.js'/);
   // Dan helper itu sendiri ada + aman buat markup (nama di-escape, ada fallback).
   assert.match(uiSrc, /export function dappMark\(name, color, size = 40\)/,

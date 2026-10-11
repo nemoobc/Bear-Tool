@@ -3066,6 +3066,20 @@ select.input option, select.select option, .input option {
    only if it is allowed to. */
 .dapps-omni-input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: 8px; border: 2px solid var(--border, #ddd); font-size: 13px; background: var(--bg, #fff); color: var(--text, #333); }
 .dapp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+/* Native only: the door back into the in-app browser (its session survives
+   while the full-screen overlay is hidden). */
+.dapp-tabs-entry { display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 12px; padding: 10px 12px; border-radius: 12px; cursor: pointer; background: var(--bg-card, #f5f5f0); border: 2px solid var(--border, #ddd); color: var(--text, #333); font-size: 13px; font-weight: 800; text-align: left; }
+.dapp-tabs-entry:hover { border-color: var(--primary, #FF6B35); }
+.dapp-tabs-entry:focus-visible { outline: 3px solid var(--ink, #222); outline-offset: 2px; }
+.dapp-tabs-ic { font-size: 15px; }
+.dapp-tabs-lb { flex: 1; min-width: 0; }
+.dapp-tabs-n { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--primary, #FF6B35); color: #fff; font-size: 11px; font-weight: 800; }
+.dapp-tabs-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.dapp-tabs-row { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 10px 12px; border-radius: 10px; cursor: pointer; background: var(--bg-card, #f5f5f0); border: 2px solid var(--border, #ddd); text-align: left; color: var(--text, #333); }
+.dapp-tabs-row:hover { border-color: var(--primary, #FF6B35); }
+.dapp-tabs-row:focus-visible { outline: 3px solid var(--ink, #222); outline-offset: 2px; }
+.dapp-tabs-row-t { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dapp-tabs-row-u { font-size: 11px; color: var(--text-secondary, #777); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Two sections inside the one grid: what opens here first, what needs a tab.
    Each section restates the parent's column track so its cards land on the
    same grid lines; the header spans all of it. */
