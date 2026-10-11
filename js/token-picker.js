@@ -23,6 +23,7 @@
 
 import { $, escapeHtml, fmtAmount, fmtUsd, titleCase } from './ui.js';
 import { tokenLogoHTML, guardTokenLogos, readLogoCache as readCache, getNetworkLogo } from './token-logo.js';
+import { isBundledContract } from './network.js';
 
 let OPEN = null;
 
@@ -67,7 +68,9 @@ function openPanel(picker) {
 function logoHtml(token, size = 22) {
   // The address travels with the symbol: marks are cached per contract, so a
   // counterfeit ticker in this picker does not inherit the real project's mark.
-  return tokenLogoHTML(token.symbol || '', size, { address: token.address });
+  // `bundled` only for the wallet's own curated registry — this picker lists
+  // get('tokens') too, which includes tokens the user added.
+  return tokenLogoHTML(token.symbol || '', size, { address: token.address, bundled: isBundledContract(token.address) });
 }
 
 function readLogoCache() {

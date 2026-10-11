@@ -113,3 +113,48 @@ test('a dead remote image falls back to the non-branded disc for a contract', ()
   assert.match(html, /data-mark-contract="1"/, 'the renderer tells the guard this mark belongs to a contract');
   assert.match(html, /data-mark-fallback="LINK"/, 'and which ticker the generated fallback should draw');
 });
+
+// ── the bundled-registry exception (report 2026-10-11 "logo list coin ga ada") ──
+// Every CURATED token in js/network.js is a contract, so the counterfeit guard
+// above stripped EVERY dashboard token down to the flat peach disc until a
+// DexScreener image arrived — offline that never happened, and the list read as
+// "no logos". The guard exists for tokens the USER adds; the wallet's own
+// registry cannot be counterfeited, and the caller says so with bundled:true.
+test('a bundled registry token wears its brand offline; a user-added one keeps the guard', () => {
+  store.clear();
+  const bundled = tokenLogoHTML('USDT', 32, { address: REAL_USDC, bundled: true });
+  assert.match(bundled, /26A17B/, 'the curated USDT contract renders its brand mark with no network');
+  const userAdded = tokenLogoHTML('USDT', 32, { address: FAKE_USDC });
+  assert.doesNotMatch(userAdded, /26A17B/, 'a user-added contract still gets the counterfeit guard');
+});
+
+test('the marks bundling needs exist: chain natives + the popular curated tickers', () => {
+  store.clear();
+  for (const sym of ['BTC', 'SOL', 'XRP']) {
+    assert.match(tokenLogoHTML(sym, 24, { remote: false }), /url\(#/,
+      `${sym} native needs its own mark (receive cards wear it)`);
+  }
+  for (const sym of ['SHIB', 'ARB', 'OP', 'PEPE', 'CRV', 'SNX', 'SUSHI', 'COMP', 'MKR', 'LDO', 'WETH']) {
+    assert.match(tokenLogoHTML(sym, 24, { remote: false, bundled: true }), /url\(#/,
+      `bundled ${sym} needs a brand mark, not the peach disc`);
+  }
+});
+
+test('the bundled flag comes from the registry check, never a blind true', async () => {
+  // A blind `bundled: true` at a call site that ALSO receives user tokens would
+  // hand a counterfeit ticker the real project's mark — the exact hole this
+  // module exists to close (the asset list carries the user's own added
+  // tokens; so does the send/swap picker). The flag must be the registry check.
+  const { readFileSync } = await import('node:fs');
+  const { isBundledContract } = await import('../js/network.js');
+  assert.equal(isBundledContract(null), true, 'a native coin is bundled (nothing to counterfeit)');
+  assert.equal(isBundledContract(REAL_USDC), true, 'the curated USDC address is bundled');
+  assert.equal(isBundledContract(FAKE_USDC), false, 'a user-added contract is NOT bundled');
+  const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const picker = readFileSync(new URL('../js/token-picker.js', import.meta.url), 'utf8');
+  assert.match(app, /bundled: isBundledContract\(t\.address\)/, 'asset list checks the registry per token');
+  assert.match(app, /bundled: isBundledContract\(address\)/, 'token modal checks the registry');
+  assert.match(picker, /bundled: isBundledContract\(token\.address\)/, 'token picker checks the registry');
+  assert.doesNotMatch(app, /bundled: true/, 'no blind bundled:true left in app.js');
+  assert.doesNotMatch(picker, /bundled: true/, 'no blind bundled:true left in the picker');
+});

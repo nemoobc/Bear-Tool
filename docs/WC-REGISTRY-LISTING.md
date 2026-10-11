@@ -89,8 +89,20 @@ testnet. Testnets are deliberately not advertised.
 
 ## 7. What only you can do
 
-1. Create/log into the WalletConnect Cloud dashboard.
-2. Add the listing using the values in section 5 and upload the logo.
+Verified 2026-10-11: the PR route is dead, the dashboard route is live.
+
+- `gh api repos/WalletConnect/walletconnect-registry --jq .archived` → `true`
+  (the repo is read-only; a PR cannot be opened against it).
+- Dashboard path (from their own docs, Explorer Submission): sign in at
+  `https://dashboard.walletconnect.com` → **New Project** → open the project →
+  **Explorer** tab → **Submit your wallet** → fill the section 5 fields → Submit.
+
+Steps, in order:
+
+1. Create/log into the WalletConnect Cloud dashboard (only you can — it needs
+   your account).
+2. Add the listing using the values in section 5 and upload the logo
+   (`assets/bear-512.png`, public copy `https://nemoobc.github.io/Bear-Tool/assets/bear-512.png`).
 3. Wait for their review (their schedule, not ours — commonly 1–3 weeks).
 
 Optional follow-up: register a custom scheme (`beartool://`) and parse

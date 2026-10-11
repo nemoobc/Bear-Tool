@@ -992,6 +992,47 @@ async function main() {
       throw new Error('the browser never came back after the sheet closed: '
         + JSON.stringify(report.wcDeepLink.afterCancel));
     }
+
+    // ── A closed browser must STAY closed ─────────────────────────────────
+    // The session survives a hide (proved above), so the dismissal needs its
+    // own bit. Without it the wallet's next sheet-restore (setVisible(true))
+    // resurrected the browser: the user closed it, opened another feature, and
+    // landed back inside the dApp at the page they left (report 2026-10-11:
+    // "keluar nyoba fitur lain keluar malah langsung balik di dalam web daapsnya
+    // dalamnya"). This drives the exact wallet-side call that caused it, then
+    // proves the real door still reopens.
+    step('dapp browser: a closed browser does not resurrect on a wallet restore call');
+    if (!(await tapNativeButton('dapp-close'))) throw new Error('dapp-close did not tap');
+    await sleep(1300);
+    const closedState = await browserState();
+    report.dapp.closedState = closedState;
+    if (!closedState || closedState.visible !== false || closedState.closed !== true) {
+      throw new Error('closing the browser did not record the dismissal: ' + JSON.stringify(closedState));
+    }
+    const resurrectAttempt = await page.evaluate(`(async () => {
+      const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BearDappBrowser;
+      if (!p) return { unsupported: true };
+      await p.setVisible({ visible: true });
+      return await p.viewState({});
+    })()`).catch((e) => ({ probeFailed: String(e.message) }));
+    report.dapp.resurrectAttempt = resurrectAttempt;
+    if (!resurrectAttempt || resurrectAttempt.visible !== false) {
+      throw new Error('a closed browser CAME BACK on the wallet restore call: ' + JSON.stringify(resurrectAttempt));
+    }
+    await shotScreen('19b-closed-no-resurrect');
+    // And the guard must not brick reopening: the wallet's own Tabs door.
+    await page.click('.mobile-nav-item[data-view="dapps"]').catch(() => { throw new Error('dapps nav missing after close'); });
+    await sleep(1500);
+    await page.click('#dappTabsBtn').catch(() => { throw new Error('dappTabsBtn missing after close'); });
+    await sleep(1100);
+    await page.click('.dapp-tabs-row').catch(() => { throw new Error('no tabs row to reopen after close'); });
+    await sleep(2400);
+    const reopened = await browserState();
+    report.dapp.reopenedAfterGuard = reopened;
+    if (!reopened || reopened.visible !== true) {
+      throw new Error('the wallet could not reopen a closed browser: ' + JSON.stringify(reopened));
+    }
+    await shotScreen('19c-reopened-after-guard');
   }
 
   // ── native bridge diagnostics (permanent, CDP-side) ─────────────────────

@@ -51,6 +51,30 @@ const MARKS = {
   celo:   ['#FCFF52', '#D4E04A', 'C',  12],
   s:      ['#F2A72B', '#FFB13C', 'S',  13],
   mnt:    ['#65B3AE', '#8CD8D2', 'M',  13],
+  // Non-EVM natives — the Receive cards' marks (BTC/SOL/XRP are in the
+  // network list as receive-only chains from the SAME seed). User report
+  // 2026-10-11: "itu receive kok nyatu btc xrp sama solana? harusnya ada di
+  // list network" — each chain now has its own mark next to its own card.
+  btc:    ['#F7931A', '#FFB457', '₿',  14],
+  sol:    ['#14F195', '#9945FF', '◎',  14],
+  xrp:    ['#233A55', '#3D5A8C', '✕',  15],
+  // Bundled popular tokens (js/network.js everyTokens). A contract token with
+  // NO cached image used to wear the flat peach disc — every non-bundled
+  // ticker on the dashboard looked like a placeholder (user report
+  // 2026-10-11: "logo list coin ga ada ... fix juga beberapa ga ada logonya").
+  // These wear their own mark because these addresses are the wallet's own
+  // curated registry — see tokenLogoHTML({ bundled: true }).
+  weth:   ['#627EEA', '#8B9FE8', 'W',  12],
+  shib:   ['#FF6B35', '#FFA24D', 'SH', 10],
+  arb:    ['#12AAFF', '#6CCBFF', 'A',  13],
+  op:     ['#FF0420', '#FF5F6D', 'OP', 10],
+  pepe:   ['#4CAF50', '#7DDB85', 'P',  13],
+  crv:    ['#FF1F5C', '#FF7A9E', 'C',  13],
+  snx:    ['#00D4FF', '#66E5FF', 'S',  13],
+  sushi:  ['#FA52A0', '#FF8AC2', 'S',  13],
+  comp:   ['#00D395', '#4EF0BB', 'C',  13],
+  mkr:    ['#1AAB9B', '#58D6C8', 'M',  13],
+  ldo:    ['#F5A623', '#FFC966', 'L',  13],
 };
 
 export function readLogoCache() {
@@ -134,6 +158,12 @@ function markSvg(sym, size, opt = {}) {
 export function tokenLogoHTML(sym, size = 32, opt = {}) {
   const remote = opt.remote !== false;
   const address = String(opt.address || '').trim();
+  // The wallet's OWN curated registry (js/network.js everyTokens) is safe by
+  // construction — those addresses are not user input, so a counterfeit cannot
+  // hide there. A bundled token may wear its branded mark even without a
+  // network image; a user-added contract keeps the full guard (generic disc
+  // until a contract-keyed image proves its identity).
+  const bundled = opt.bundled === true;
   if (remote) {
     // Looked up by CONTRACT when one is given, so a counterfeit ticker cannot
     // reach the real project's mark. The symbol is still what the generated
@@ -144,14 +174,16 @@ export function tokenLogoHTML(sym, size = 32, opt = {}) {
       // stale URL degrades instead of showing a broken-image icon.
       return `<img class="token-logo-img token-mark" data-mark-fallback="${escapeHtml(sym || '')}" `
         + (address ? `data-mark-contract="1" ` : '')
+        + (bundled ? `data-mark-bundled="1" ` : '')
         + `src="${escapeHtml(url)}" `
         + `alt="" width="${size}" height="${size}" loading="lazy" decoding="async">`;
     }
   }
   // No cache: a contract token must not reach the branded MARKS either (see
   // markSvg) — an own/deployed token whose ticker matches a listed project
-  // used to render that project's brand right here, no network needed.
-  return markSvg(sym, size, { contract: Boolean(address) });
+  // used to render that project's brand right here, no network needed. The
+  // bundled registry is the one named exception.
+  return markSvg(sym, size, { contract: Boolean(address) && !bundled });
 }
 
 /** Attach the onerror fallback to every rendered logo inside a root. */
@@ -162,7 +194,7 @@ export function guardTokenLogos(root) {
     img.dataset.guarded = '1';
     img.addEventListener('error', () => {
       img.outerHTML = markSvg(img.dataset.markFallback || '', Number(img.getAttribute('width')) || 24,
-        { contract: img.dataset.markContract === '1' });
+        { contract: img.dataset.markContract === '1' && img.dataset.markBundled !== '1' });
     }, { once: true });
   });
 }

@@ -468,6 +468,23 @@ body::before {
   justify-content: space-between;
   margin-bottom: 8px;
 }
+/* The chain wears its own mark before its name — the same logo language as the
+   network list (user report 2026-10-11: "logo list coin ga ada … receive kok
+   nyatu btc xrp sama solana"). */
+.receive-chain-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.receive-chain-logo {
+  display: inline-flex;
+  align-items: center;
+}
+.receive-chain-logo .token-mark,
+.receive-chain-logo img.token-logo-img {
+  width: 30px;
+  height: 30px;
+}
 .receive-chain-sub {
   font-size: 0.75rem;
   opacity: 0.6;

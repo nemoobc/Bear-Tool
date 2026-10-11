@@ -31,9 +31,10 @@ const modalBlock = app.slice(
 );
 
 test('token modal: the header logo comes from the list renderer (tokenLogoHTML)', () => {
-  assert.match(modalBlock, /token-modal-icon[^>]*>\$\{tokenLogoHTML\(symbol, 48, \{ address \}\)\}/,
-    'the modal must render the logo through tokenLogoHTML with the contract, ' +
-    'so it shows the same mark (cached image / MARKS entry) the list showed');
+  assert.match(modalBlock, /token-modal-icon[^>]*>\$\{tokenLogoHTML\(symbol, 48, \{ address, bundled: isBundledContract\(address\) \}\)\}/,
+    'the modal must render the logo through tokenLogoHTML with the contract (and the ' +
+    'registry-checked bundled flag — only the wallet\'s own curated tokens may wear a ' +
+    'brand offline), so it shows the same mark the list showed');
   assert.ok(!modalBlock.includes('getLogoSVG('),
     'the modal must not render through a second, private logo map');
 });

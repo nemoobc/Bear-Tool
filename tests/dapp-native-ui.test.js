@@ -513,16 +513,68 @@ test('the driver exercises the whole matrix: scheme gate, second URL sign, real 
     'loop back dibatasi (5) — tak bisa berputar selamanya');
 });
 
-test('the native toolbar is fully OPAQUE — the wallet must not bleed through the bar', () => {
-  // User (2026-10-11, APK): "tembus soalnya". 0xCC (bar) and 0x33 (address)
-  // alphas left the bar 20%/80% see-through, so the wallet dashboard showed
-  // through the top band. Every toolbar surface is now 0xFF.
-  assert.match(java, /static final int BAR_BG = 0xFF161622/, 'bar bg wajib opaque');
-  assert.match(java, /static final int ADDRESS_IDLE = 0xFF2A2A3E/, 'address idle wajib opaque');
-  assert.match(java, /static final int ADDRESS_LOADING = 0xFF243B7A/, 'address loading wajib opaque');
+test('the native toolbar is fully OPAQUE, cartoon-styled — no bleed-through, no dark island', () => {
+  // Two user reports, one fix each direction:
+  //   2026-10-11 "tembus soalnya"        → every surface 0xFF opaque (0xCC/0x33
+  //     alphas showed the dashboard through the bar).
+  //   2026-10-11 "tampilan dalam daaps kayak luar daaps jadi iconnya cartoon
+  //     warnanya jangan gelap"           → the chrome is now the wallet's own
+  //     cartoon palette (cream bar, ink text, honey accents), never the dark
+  //     OKX island — while STAYING 0xFF opaque.
+  assert.match(java, /static final int BAR_BG = CREAM/, 'bar bg = cream kartun, opaque (0xFFFFF8E7)');
+  assert.match(java, /static final int ADDRESS_IDLE = 0xFFFFFFFF/, 'address idle = putih opaque');
+  assert.match(java, /static final int ADDRESS_LOADING = 0xFFFFE7A8/, 'address loading = tint honey opaque');
   assert.match(java, /bar\.setBackgroundColor\(BAR_BG\)/, 'bar memakai palet opaque, bukan literal transparan');
   assert.doesNotMatch(java, /0xCC1A1A2E/, 'alpha 0xCC pada bar = tembus — dilarang kembali');
   assert.doesNotMatch(java, /0x33222244/, 'alpha 0x33 pada address = nyaris transparan — dilarang kembali');
+  assert.doesNotMatch(java, /0xFF161622/, 'chrome gelap OKX-lama tidak boleh kembali');
+  assert.doesNotMatch(java, /0xFF0E0E16/, 'page band gelap tidak boleh kembali');
+});
+
+test('cartoon chrome: emoji icons, cream surfaces, ink text, honey accent (user 2026-10-11)', () => {
+  // Toolbar icons are colour emoji — the literal "cartoon" the user asked for.
+  assert.match(java, /backBtn\.setText\("\\u2B05\\uFE0F"\)/, 'back → ⬅️');
+  assert.match(java, /forwardBtn\.setText\("\\u27A1\\uFE0F"\)/, 'forward → ➡️');
+  assert.match(java, /netBtn\.setText\("\\uD83C\\uDF10"\)/, 'network → 🌐');
+  assert.match(java, /tabBtn\.setText\("\\uD83D\\uDCD1"\)/, 'tabs → 📑');
+  assert.match(java, /reloadBtn\.setText\("\\uD83D\\uDD04"\)/, 'reload → 🔄');
+  assert.match(java, /closeBtn\.setText\("\\u274C"\)/, 'close → ❌');
+  assert.match(java, /menuBtn\.setText\("\\uD83D\\uDC3E"\)/, 'menu → 🐾 (bear paw, on-brand)');
+  // Surfaces ride the wallet palette.
+  assert.match(java, /private static final int CREAM = 0xFFFFF8E7/, 'cream = --cream');
+  assert.match(java, /private static final int INK = 0xFF2D2A32/, 'ink = --ink');
+  assert.match(java, /private static final int INK_SOFT = 0xFF6B6478/, 'ink-soft = --ink-soft');
+  assert.match(java, /private static final int ACCENT = HONEY/, 'tombol OK = honey (teks ink di atasnya)');
+  assert.match(java, /ok\.setTextColor\(INK\)/, 'teks OK = ink di atas honey (kontras ~10:1)');
+  assert.match(java, /okBg\.setColor\(ACCENT\)/, 'fill OK = ACCENT (honey)');
+  assert.match(java, /confirmTitleView\.setTextColor\(INK\)/, 'judul sheet = ink');
+  assert.match(java, /bg\.setStroke\(\(int\) \(2 \* density\), INK\)/, 'sheet kartun: stroke ink di tepi');
+  assert.match(java, /panel\.setBackgroundColor\(CREAM\)/, 'panel tab = cream');
+  assert.match(java, /row\.setBackgroundColor\(i == activeTab \? HONEY : 0x00000000\)/, 'tab aktif = honey tile');
+  assert.match(java, /badgeBg\.setColor\(HONEY\)/, 'badge tab = honey');
+  assert.match(java, /t\.wrap\.setColorSchemeColors\(HONEY, ORANGE, BERRY\)/, 'progress bar = palet kartun');
+  assert.match(java, /int\[\] palette = \{ HONEY, MINT, BERRY, SKY, ORANGE, GRAPE \}/,
+    'warna tile situs = palet kartun, bukan ungu-gelap OKX');
+  assert.match(java, /ib\.setColor\(tileColorForGlyph\(glyph\)\)/, 'tile ikon menu = warna kartun per-glyph');
+});
+
+test('a user-closed native browser must not resurrect when a wallet sheet closes', () => {
+  // The tab session SURVIVES a hide on purpose (the wallet's Tabs entry reopens
+  // it). That is exactly why the dismissal needs its own bit: without it the
+  // wallet's sheet-restore call (setVisible(true)) woke a browser the user had
+  // closed — "keluar nyoba fitur lain keluar malah langsung balik di dalam web
+  // daapsnya dalamnya" (report 2026-10-11).
+  assert.match(java, /private boolean userClosed = false;/,
+    'flag dismissal hidup di plugin');
+  assert.match(java, /userClosed = true;/,
+    'doClose()/doBack() menandai browser sudah ditinggalkan user');
+  assert.match(java, /userClosed = false;/,
+    'open()/selectTab() membersihkan flag — buka ulang eksplisit tetap boleh');
+  assert.match(java,
+    /if \(dappView != null && Boolean\.TRUE\.equals\(visible\) && userClosed\) \{\s*\n\s*call\.resolve\(\);\s*\n\s*return;/,
+    'setVisible(true) DIABAIKAN setelah user menutup browser — resolve tetap, overlay tidak hidup lagi');
+  assert.match(java, /out\.put\("closed", userClosed\)/,
+    'viewState melaporkan dismissal, jadi gate E2E bisa membedakan tertutup vs di balik sheet');
 });
 
 test('tabs: multi-tab lives on its own WebView and the last tab can never be closed', () => {

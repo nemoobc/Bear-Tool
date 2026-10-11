@@ -87,6 +87,24 @@ test('an XRP deposit shows its DestinationTag as its own copyable field', () => 
     'showReceiveModal meneruskan tag ke kartu');
 });
 
+test('the receive-only chains also live in the Network list, each with its mark', () => {
+  // "harusnya ada di list network" (report 2026-10-11): BTC/SOL/XRP are no
+  // longer only a blob under the EVM address — the Network list carries them as
+  // their own logo rows that open Receive focused on that chain.
+  assert.match(app, /function nonEvmNetSection\(\)/, 'ada section receive-only di modal jaringan');
+  assert.match(app, /\$\{nonEvmNetSection\(\)\}/, 'dan benar-benar dipasang di daftar');
+  assert.match(app, /data-net-non-evm="\$\{escapeHtml\(c\.key\)\}"/, 'tiap baris punya key chain-nya');
+  assert.match(app, /tokenLogoHTML\(c\.sym, 32, \{ remote: false \}\)/, 'tiap baris memakai mark chain-nya');
+  assert.match(app, /const focusNonEvm = \['BTC', 'SOL', 'XRP'\]\.includes\(requested\) \? requested : null;/,
+    'membuka Receive dari baris non-EVM memberi judul chain itu, bukan chain EVM aktif');
+  assert.doesNotMatch(app, /data-net="\$\{escapeHtml\(c\.key\)\}"/, 'baris receive-only BUKAN network switch');
+  // The receive cards themselves wear the chain mark.
+  const card = slice('function receiveAddressCard', 'function showReceiveModal');
+  assert.match(card, /tokenLogoHTML\(sublabel, 30, \{ remote: false \}\)/, 'kartu receive pakai logo chain');
+  assert.match(css, /\.receive-chain-logo\s*\{/, 'dan CSS-nya ada');
+  assert.ok(css.includes('.receive-chain-name'), 'nama+logo dibungkus flex');
+});
+
 test('the styles those cards rely on exist', () => {
   for (const sel of ['.receive-chain', '.receive-chain-head', '.receive-chain-sub',
     '.receive-addr', '.receive-chain-off', '.receive-divider', '.receive-other-title',

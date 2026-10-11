@@ -8,7 +8,7 @@
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider, getDelegation,
          addCustomNetwork, removeCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
-         applyRpcOverrides, providerEndpoint, detectNetworkType } from './network.js';
+         applyRpcOverrides, providerEndpoint, detectNetworkType, isBundledContract } from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
@@ -1512,6 +1512,32 @@ function syncTestnetSwitches() {
   }
 }
 
+// The Receive-only chains live IN the network list (user report 2026-10-11:
+// "itu receive kok nyatu btc xrp sama solana? harusnya ada di list network").
+// Same row shape as a network — logo, name, one line of truth — but they never
+// switch the active EVM chain: tapping one opens Receive focused on that chain.
+// Deliberately NOT `data-net`, so the network search and the switcher skip them.
+function nonEvmNetSection() {
+  let rows = [];
+  try { rows = nonEvmReceiveRows(); } catch { return ''; }
+  if (!rows.length) return '';
+  return `
+    <div id="netListNonEvm">
+      <div class="mb-8 mt-16"><span class="badge badge-testnet">RECEIVE-ONLY · SAME SEED</span></div>
+      ${rows.map((c) => `<div class="asset-row" data-net-non-evm="${escapeHtml(c.key)}" role="button" tabindex="0"
+          aria-label="Receive on ${escapeHtml(c.name)}${c.address ? '' : ' — not available yet'}">
+        <div class="net-logo">${tokenLogoHTML(c.sym, 32, { remote: false })}</div>
+        <div class="asset-info">
+          <div class="asset-name">${escapeHtml(c.name)}</div>
+          <div class="asset-symbol">${c.address
+            ? escapeHtml(c.address.slice(0, 10) + '…' + c.address.slice(-6))
+            : escapeHtml(c.reason || 'coming soon')} · receive only</div>
+        </div>
+        <span class="badge badge-${c.address ? 'mainnet' : 'testnet'}">${c.address ? 'Receive' : 'Soon'}</span>
+      </div>`).join('')}
+    </div>`;
+}
+
 export function showNetworkModal() {
   const nets = getAllNetworks();
   const html = `
@@ -1534,6 +1560,7 @@ export function showNetworkModal() {
            flip it in Settings and reopen this picker. -->
       ${nets.filter(n => n.type === 'testnet').map(n => netRow(n)).join('')}
     </div>
+    ${nonEvmNetSection()}
     <hr class="mt-16 mb-16">
     <button class="btn btn-secondary btn-block" id="addNetBtn">+ Add Custom Network</button>
   `;
@@ -1589,6 +1616,21 @@ export function showNetworkModal() {
     }
     activateNetwork(el.dataset.net);
   }));
+  // Receive-only chains sitting in the same list: tapping one does NOT switch
+  // the EVM chain (there is nothing to switch to) — it opens Receive focused on
+  // that chain. Keyboard-reachable like every other row.
+  $all('[data-net-non-evm]').forEach((el) => {
+    const open = () => {
+      const key = (el.dataset.netNonEvm || '').toLowerCase();
+      const sym = key === 'bitcoin' ? 'BTC' : key === 'solana' ? 'SOL' : 'XRP';
+      closeModal();
+      showReceiveModal(get('address'), sym);
+    };
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  });
   // Bridge source chain decides WHERE the tx runs, so picking one switches
   // the wallet with it (user, 2026-10-06: "aku ganti jaringan di bridge, ga
   // auto ganti jaringan, jadi harus ganti manual"). The select node itself
@@ -2231,8 +2273,11 @@ function renderAssets(tokens) {
   // Show search if > 3 tokens
   $('#assetSearch').style.display = tokens.length > 3 ? '' : 'none';
   // Takes the whole token, not the ticker: the mark is filed under the contract
-  // so a counterfeit ticker cannot pick up the real project's logo.
-  const getLogo = (t) => tokenLogoHTML(t.symbol, 32, { address: t.address });
+  // so a counterfeit ticker cannot pick up the real project's logo. `bundled`
+  // is not a blind true — this list also carries tokens the USER added, and
+  // only the wallet's own curated registry may wear a brand with no network
+  // image (isBundledContract).
+  const getLogo = (t) => tokenLogoHTML(t.symbol, 32, { address: t.address, bundled: isBundledContract(t.address) });
   // Store tokens for filtering
   window._assetTokens = tokens;
   const filter = ($('#tokenSearchInput')?.value || '').toLowerCase();
@@ -2315,7 +2360,7 @@ function showTokenActions(el) {
   // contract so a cached mark cannot be reached through a counterfeit ticker.
   openModal(`
     <div class="token-modal-header">
-      <div class="token-modal-icon">${tokenLogoHTML(symbol, 48, { address })}</div>
+      <div class="token-modal-icon">${tokenLogoHTML(symbol, 48, { address, bundled: isBundledContract(address) })}</div>
       <div class="token-modal-info">
         <div class="token-modal-symbol">${escapeHtml(symbol)}</div>
         <div class="token-modal-balance">${escapeHtml(fmtAmount(balance, decimals))} ${escapeHtml(symbol)}</div>
@@ -2440,7 +2485,12 @@ function nonEvmReceiveRows() {
 function receiveAddressCard({ label, sublabel, addr, reason, tag }) {
   if (!addr) {
     return `<div class="receive-chain mb-12">
-      <div class="receive-chain-head"><strong>${escapeHtml(label)}</strong></div>
+      <div class="receive-chain-head">
+        <span class="receive-chain-name">
+          ${sublabel ? `<span class="receive-chain-logo" aria-hidden="true">${tokenLogoHTML(sublabel, 30, { remote: false })}</span>` : ''}
+          <strong>${escapeHtml(label)}</strong>
+        </span>
+      </div>
       <div class="receive-chain-off" role="note">Not available yet — ${escapeHtml(reason || 'coming soon')}</div>
     </div>`;
   }
@@ -2468,7 +2518,13 @@ function receiveAddressCard({ label, sublabel, addr, reason, tag }) {
        </div>`
     : '';
   return `<div class="receive-chain mb-12">
-    <div class="receive-chain-head"><strong>${escapeHtml(label)}</strong>${sublabel ? `<span class="receive-chain-sub">${escapeHtml(sublabel)}</span>` : ''}</div>
+    <div class="receive-chain-head">
+      <span class="receive-chain-name">
+        ${sublabel ? `<span class="receive-chain-logo" aria-hidden="true">${tokenLogoHTML(sublabel, 30, { remote: false })}</span>` : ''}
+        <strong>${escapeHtml(label)}</strong>
+      </span>
+      ${sublabel ? `<span class="receive-chain-sub">${escapeHtml(sublabel)}</span>` : ''}
+    </div>
     ${qr}
     <div class="mono receive-addr" style="word-break:break-all;padding:10px;border-radius:8px">${escapeHtml(addr)}</div>
     ${tagRow}
@@ -2479,7 +2535,12 @@ function receiveAddressCard({ label, sublabel, addr, reason, tag }) {
 function showReceiveModal(address, symbol) {
   const addr = address || get('address');
   const net = getNetworkById(get('networkId'));
-  const evmLabel = net?.symbol || symbol || 'EVM';
+  // A non-EVM chain opened from the wallet's Network list (BTC/SOL/XRP sit there
+  // as receive-only entries) titles the sheet after THAT chain, not the active
+  // EVM network — the user tapped Bitcoin, the sheet says "Receive BTC".
+  const requested = String(symbol || '').toUpperCase();
+  const focusNonEvm = ['BTC', 'SOL', 'XRP'].includes(requested) ? requested : null;
+  const evmLabel = focusNonEvm || net?.symbol || symbol || 'EVM';
   let qrSvg = '';
   try {
     if (typeof qrcode === 'function') {

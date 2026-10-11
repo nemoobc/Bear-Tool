@@ -416,6 +416,24 @@ export const POPULAR_TOKENS = {
   ]
 };
 
+// Is this contract part of the wallet's OWN curated registry (POPULAR_TOKENS)?
+// A NATIVE coin (no address) has nothing to counterfeit, so it counts as
+// bundled. This is the flag tokenLogoHTML({ bundled: true }) turns on, and it
+// must be the ONE gate callers consult: a blind `bundled: true` on the asset
+// list (which also carries user-added tokens) would hand a counterfeit USDT the
+// real project's mark — the exact hole js/token-logo.js exists to close.
+let _bundledAddresses = null;
+export function isBundledContract(address) {
+  if (!address) return true; // native coin
+  if (!_bundledAddresses) {
+    _bundledAddresses = new Set();
+    for (const list of Object.values(POPULAR_TOKENS)) {
+      for (const t of list) _bundledAddresses.add(String(t.address || '').toLowerCase());
+    }
+  }
+  return _bundledAddresses.has(String(address).toLowerCase());
+}
+
 // ERC-20 ABI (minimal)
 export const ERC20_ABI = [
   'function name() view returns (string)',

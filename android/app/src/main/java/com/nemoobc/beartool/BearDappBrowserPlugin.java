@@ -59,6 +59,15 @@ public class BearDappBrowserPlugin extends Plugin {
     // dappView / refreshLayout always point at the ACTIVE tab, so the existing
     // confirm/visibility plumbing (and its tests) keep one obvious target.
     private WebView dappView = null;
+    // Did the USER dismiss the browser (❌ / back with no history), as opposed
+    // to a wallet sheet merely moving it aside? The tab session deliberately
+    // survives a hide, so without this flag a later modal round-trip called
+    // setVisible(true) and RESURRECTED a browser the user had closed — they
+    // closed it, opened any wallet sheet, and landed back inside the dApp at
+    // the page they left (user report 2026-10-11: "keluar nyoba fitur lain
+    // keluar malah langsung balik di dalam web daapsnya dalamnya").
+    // Only an explicit open()/selectTab() clears it.
+    private boolean userClosed = false;
     private SwipeRefreshLayout refreshLayout = null;
     private String providerScript = "";
     private ViewGroup parent = null;
@@ -82,21 +91,37 @@ public class BearDappBrowserPlugin extends Plugin {
     private final java.util.List<Tab> tabs = new java.util.ArrayList<>();
     private int activeTab = -1;
 
-    // Opaque toolbar palette — the whole point of the "tembus" fix: nothing
-    // behind the bar (wallet dashboard, dApp under it) may show through.
-    private static final int BAR_BG = 0xFF161622;
-    private static final int ADDRESS_LOADING = 0xFF243B7A;  // opaque blue tint while loading
-    private static final int ADDRESS_IDLE = 0xFF2A2A3E;     // opaque idle field
+    // Cartoon toolbar palette — the WALLET's own surfaces (css/cartoon.css
+    // :root: --cream, --ink, --ink-soft, --honey, --orange, --sky, --berry,
+    // --mint, --grape). The browser chrome is a wall of the wallet, not a dark
+    // island (user 2026-10-11, APK: "ui ux tampilan dalam daaps kayak luar
+    // daaps jadi iconnya cartoon warnanya jangan gelap, sesuaikan ya").
+    private static final int CREAM = 0xFFFFF8E7;    // --cream (bar & page band)
+    private static final int INK = 0xFF2D2A32;      // --ink (text/glyphs)
+    private static final int INK_SOFT = 0xFF6B6478; // --ink-soft (secondary text)
+    private static final int HONEY = 0xFFFFC93C;    // --honey
+    private static final int ORANGE = 0xFFFF8A3D;   // --orange
+    private static final int SKY = 0xFF4ECDC4;      // --sky
+    private static final int BERRY = 0xFFFF6B6B;    // --berry
+    private static final int MINT = 0xFF06D6A0;     // --mint
+    private static final int GRAPE = 0xFF9B5DE5;    // --grape
+    private static final int WHITE = 0xFFFFFFFF;
+    // Opaque still — the whole point of the "tembus" fix: nothing behind the
+    // bar (wallet dashboard, dApp under it) may show through. 0xFF alpha on
+    // every surface.
+    private static final int BAR_BG = CREAM;
+    private static final int ADDRESS_LOADING = 0xFFFFE7A8;  // opaque honey tint while loading
+    private static final int ADDRESS_IDLE = 0xFFFFFFFF;     // opaque idle field
     // The page band under the toolbar is opaque as well: until a page paints,
-    // the wallet's cartoon dashboard used to show through the browser (user
-    // report 2026-10-11: "ui dalem dapp cartoon"). One dark surface = one load.
-    private static final int PAGE_BG = 0xFF0E0E16;
-    // OKX-parity dark chrome: one surface family for the toolbar, the tab sheet
-    // and the confirm sheet (user: "semua chrome gelap bersih gaya OKX").
-    private static final int SHEET_BG = 0xFF161622;
-    private static final int SHEET_KEY = 0xFF8E93A8;
-    private static final int SHEET_VAL = 0xFFE6E6F0;
-    private static final int ACCENT = 0xFF7C4DFF;
+    // the wallet's cartoon dashboard used to show through the browser. One
+    // cream surface = one load, and no dark flash (user: "warnanya jangan gelap").
+    private static final int PAGE_BG = CREAM;
+    // Cartoon sheets: light surface + ink strokes + ink text. One family for
+    // the tab sheet, the ⋯ sheet and the confirm sheet.
+    private static final int SHEET_BG = 0xFFFFFFFF;
+    private static final int SHEET_KEY = INK_SOFT;
+    private static final int SHEET_VAL = INK;
+    private static final int ACCENT = HONEY;   // primary fill — ink text on top (~10:1)
     private int barH = 0;
 
     // A 3dp indeterminate bar pinned just below the toolbar: page loads had no
@@ -177,7 +202,7 @@ public class BearDappBrowserPlugin extends Plugin {
         t.view.addJavascriptInterface(new Bridge(), "BearNativeBridge");
         t.view.setWebViewClient(new BrowserClient());
         t.wrap = new SwipeRefreshLayout(getContext());
-        t.wrap.setColorSchemeColors(0xFF7C4DFF, 0xFF448AFF, 0xFF18FFFF);
+        t.wrap.setColorSchemeColors(HONEY, ORANGE, BERRY);
         t.wrap.setOnRefreshListener(this::reloadActive);
         t.wrap.addView(t.view, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         t.view.setBackgroundColor(PAGE_BG); // no white/see-through flash before the first paint
@@ -283,13 +308,14 @@ public class BearDappBrowserPlugin extends Plugin {
         bg.setColor(SHEET_BG);
         float r = 18 * density;
         bg.setCornerRadii(new float[]{ r, r, r, r, 0f, 0f, 0f, 0f });
+        bg.setStroke((int) (2 * density), INK);   // cartoon edge on the cream sheet
         sheet.setBackground(bg);
         int pad = (int) (18 * density);
         sheet.setPadding(pad, pad, pad, pad);
 
         confirmTitleView = new android.widget.TextView(getContext());
         confirmTitleView.setText(title == null ? "" : title);
-        confirmTitleView.setTextColor(0xFFFFFFFF);
+        confirmTitleView.setTextColor(INK);
         confirmTitleView.setTextSize(17);
         confirmTitleView.setPadding(0, 0, 0, (int) (12 * density));
         sheet.addView(confirmTitleView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -325,7 +351,7 @@ public class BearDappBrowserPlugin extends Plugin {
 
         android.widget.TextView ok = new android.widget.TextView(getContext());
         ok.setText(confirmText == null ? "Confirm" : confirmText);
-        ok.setTextColor(0xFFFFFFFF);
+        ok.setTextColor(INK);
         ok.setTextSize(15);
         ok.setGravity(android.view.Gravity.CENTER);
         ok.setTypeface(ok.getTypeface(), android.graphics.Typeface.BOLD);
@@ -459,7 +485,7 @@ public class BearDappBrowserPlugin extends Plugin {
         stack.setVisibility(View.GONE);
     }
 
-    // OKX-style toolbar: [ ← ] [ → ] [ address ....... ] [ ◆ net ] [ ⧉ n ] [ ⟳ ] [ ✕ ].
+    // Cartoon toolbar: [ ⬅️ ] [ ➡️ ] [ address ....... ] [ 🌐 net ] [ 📑 n ] [ 🔄 ] [ 🐾 ] [ ❌ ].
     // Opaque, full-width band: the page is padded BELOW it (never under it) and
     // the wallet dashboard can never bleed through it.
     private void buildToolbar(final float density) {
@@ -470,19 +496,19 @@ public class BearDappBrowserPlugin extends Plugin {
         int navW = (int) (40 * density);
 
         backBtn = new Button(getContext());
-        backBtn.setText("\u2190");
+        backBtn.setText("\u2B05\uFE0F");
         backBtn.setContentDescription("dapp-back");
         backBtn.setAllCaps(false);
-        backBtn.setTextColor(0xFFFFFFFF);
+        backBtn.setTextColor(INK);
         backBtn.setBackgroundColor(0x00000000);
         backBtn.setEnabled(false);
         backBtn.setOnClickListener(v -> doBack());
 
         forwardBtn = new Button(getContext());
-        forwardBtn.setText("\u2192");
+        forwardBtn.setText("\u27A1\uFE0F");
         forwardBtn.setContentDescription("dapp-forward");
         forwardBtn.setAllCaps(false);
-        forwardBtn.setTextColor(0xFFFFFFFF);
+        forwardBtn.setTextColor(INK);
         forwardBtn.setBackgroundColor(0x00000000);
         forwardBtn.setEnabled(false);
         forwardBtn.setOnClickListener(v -> {
@@ -494,8 +520,8 @@ public class BearDappBrowserPlugin extends Plugin {
         addressField.setSingleLine(true);
         addressField.setInputType(android.text.InputType.TYPE_TEXT_VARIATION_URI);
         addressField.setHint("Search or enter address");
-        addressField.setHintTextColor(0x99FFFFFF);
-        addressField.setTextColor(0xFFFFFFFF);
+        addressField.setHintTextColor(INK_SOFT);
+        addressField.setTextColor(INK);
         addressField.setTextSize(14);
         addressField.setBackgroundColor(ADDRESS_IDLE);
         addressField.setPadding((int) (10 * density), 0, (int) (10 * density), 0);
@@ -515,10 +541,10 @@ public class BearDappBrowserPlugin extends Plugin {
         // wallet owns the network list). The answer comes back through
         // setChain(), which updates this chip and tells every tab.
         netBtn = new Button(getContext());
-        netBtn.setText("\u25C6");
+        netBtn.setText("\uD83C\uDF10");
         netBtn.setContentDescription("dapp-network");
         netBtn.setAllCaps(false);
-        netBtn.setTextColor(0xFFB9B9FF);
+        netBtn.setTextColor(INK);
         netBtn.setBackgroundColor(0x00000000);
         netBtn.setOnClickListener(v -> {
             JSObject ev = new JSObject();
@@ -530,47 +556,48 @@ public class BearDappBrowserPlugin extends Plugin {
         // icon's top-right (OKX's "2"), not text jammed into the glyph: a
         // multi-digit count would otherwise squeeze the bar.
         tabBtn = new Button(getContext());
-        tabBtn.setText("\u29C9");
+        tabBtn.setText("\uD83D\uDCD1");
         tabBtn.setContentDescription("dapp-tabs");
         tabBtn.setAllCaps(false);
-        tabBtn.setTextColor(0xFFFFFFFF);
+        tabBtn.setTextColor(INK);
         tabBtn.setBackgroundColor(0x00000000);
         tabBtn.setOnClickListener(v -> toggleTabPanel());
         tabCountBadge = new android.widget.TextView(getContext());
-        tabCountBadge.setTextColor(0xFFFFFFFF);
+        tabCountBadge.setTextColor(INK);
         tabCountBadge.setTextSize(9);
         tabCountBadge.setGravity(android.view.Gravity.CENTER);
         android.graphics.drawable.GradientDrawable badgeBg = new android.graphics.drawable.GradientDrawable();
         badgeBg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        badgeBg.setColor(0xFF6C5CE7);
+        badgeBg.setColor(HONEY);
         tabCountBadge.setBackground(badgeBg);
         tabCountBadge.setContentDescription("dapp-tabs-count");
 
         Button reloadBtn = new Button(getContext());
-        reloadBtn.setText("\u27F3");
+        reloadBtn.setText("\uD83D\uDD04");
         reloadBtn.setContentDescription("dapp-reload");
         reloadBtn.setAllCaps(false);
-        reloadBtn.setTextColor(0xFFFFFFFF);
+        reloadBtn.setTextColor(INK);
         reloadBtn.setBackgroundColor(0x00000000);
         reloadBtn.setOnClickListener(v -> reloadActive());
 
         Button closeBtn = new Button(getContext());
-        closeBtn.setText("\u2715");
+        closeBtn.setText("\u274C");
         closeBtn.setContentDescription("dapp-close");
         closeBtn.setAllCaps(false);
-        closeBtn.setTextColor(0xFFFFFFFF);
+        closeBtn.setTextColor(INK);
         closeBtn.setBackgroundColor(0x00000000);
         closeBtn.setOnClickListener(v -> doClose());
 
-        // ⋯ Menu — the OKX overflow. Everything that is NOT a one-tap
+        // 🐾 Menu — the OKX overflow. Everything that is NOT a one-tap
         // navigation action lives here instead of crowding the 48dp bar:
         // copy/share/favorite, plus the page-level tools (reminder, desktop
-        // mode, this site's transactions, cache).
+        // mode, this site's transactions, cache). The bear paw is the Bear
+        // Tool brand mark as the cartoon chrome the user asked for.
         menuBtn = new Button(getContext());
-        menuBtn.setText("\u22EF");
+        menuBtn.setText("\uD83D\uDC3E");
         menuBtn.setContentDescription("dapp-menu");
         menuBtn.setAllCaps(false);
-        menuBtn.setTextColor(0xFFFFFFFF);
+        menuBtn.setTextColor(INK);
         menuBtn.setBackgroundColor(0x00000000);
         menuBtn.setOnClickListener(v -> showDappMenu());
 
@@ -604,19 +631,19 @@ public class BearDappBrowserPlugin extends Plugin {
     private void buildTabPanel(final float density) {
         LinearLayout panel = new LinearLayout(getContext());
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackgroundColor(0xFF0E0E16);
+        panel.setBackgroundColor(CREAM);
         panel.setPadding(0, barH, 0, 0);
 
         android.widget.TextView h = new android.widget.TextView(getContext());
         h.setText("Tabs");
-        h.setTextColor(0xFFFFFFFF);
+        h.setTextColor(INK);
         h.setTextSize(16);
         h.setPadding((int) (14 * density), 0, 0, 0);
 
         Button add = new Button(getContext());
         add.setText("+ New tab");
         add.setAllCaps(false);
-        add.setTextColor(0xFFFFFFFF);
+        add.setTextColor(INK);
         add.setBackgroundColor(0x00000000);
         add.setContentDescription("dapp-tab-new");
         add.setOnClickListener(v -> {
@@ -628,7 +655,7 @@ public class BearDappBrowserPlugin extends Plugin {
         Button done = new Button(getContext());
         done.setText("\u2715");
         done.setAllCaps(false);
-        done.setTextColor(0xFFFFFFFF);
+        done.setTextColor(INK);
         done.setBackgroundColor(0x00000000);
         done.setContentDescription("dapp-tab-done");
         done.setOnClickListener(v -> closeTabPanel());
@@ -681,6 +708,7 @@ public class BearDappBrowserPlugin extends Plugin {
         bg.setColor(SHEET_BG);
         float r = 18 * density;
         bg.setCornerRadii(new float[]{ r, r, r, r, 0f, 0f, 0f, 0f });
+        bg.setStroke((int) (2 * density), INK);   // cartoon edge on the ⋯ sheet
         sheet.setBackground(bg);
         int pad = (int) (18 * density);
         sheet.setPadding(pad, pad, pad, pad);
@@ -688,7 +716,7 @@ public class BearDappBrowserPlugin extends Plugin {
         // Drag handle — the sheet says "pull me down" the way OKX's does.
         android.view.View handle = new android.view.View(getContext());
         android.graphics.drawable.GradientDrawable hg = new android.graphics.drawable.GradientDrawable();
-        hg.setColor(0x55FFFFFF);
+        hg.setColor(INK_SOFT);
         hg.setCornerRadius(3 * density);
         handle.setBackground(hg);
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams((int) (40 * density), (int) (4 * density));
@@ -696,17 +724,17 @@ public class BearDappBrowserPlugin extends Plugin {
         hlp.bottomMargin = (int) (14 * density);
         sheet.addView(handle, hlp);
 
-        // Icon row: Copy URL / Favorite / Refresh / Share.
+        // Icon row: Copy URL / Favorite / Refresh / Share — colour-emoji cartoon marks.
         LinearLayout icons = new LinearLayout(getContext());
         icons.setOrientation(LinearLayout.HORIZONTAL);
         icons.setGravity(android.view.Gravity.CENTER);
-        icons.addView(menuIconTile(density, "\u29C9", "Copy URL", "dapp-menu-copy",
+        icons.addView(menuIconTile(density, "\uD83D\uDCCB", "Copy URL", "dapp-menu-copy",
             v -> { copyToClipboard(getContext(), url); closeDappMenu(); }));
-        icons.addView(menuIconTile(density, "\u2606", "Favourite", "dapp-menu-fav",
+        icons.addView(menuIconTile(density, "\u2B50", "Favourite", "dapp-menu-fav",
             v -> { toggleBookmark(url); closeDappMenu(); }));
-        icons.addView(menuIconTile(density, "\u27F3", "Refresh", "dapp-menu-refresh",
+        icons.addView(menuIconTile(density, "\uD83D\uDD04", "Refresh", "dapp-menu-refresh",
             v -> { closeDappMenu(); reloadActive(); }));
-        icons.addView(menuIconTile(density, "\u2197", "Share", "dapp-menu-share",
+        icons.addView(menuIconTile(density, "\uD83D\uDCE4", "Share", "dapp-menu-share",
             v -> { shareUrl(url); closeDappMenu(); }));
         sheet.addView(icons, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -716,7 +744,7 @@ public class BearDappBrowserPlugin extends Plugin {
         // that looks alive and does nothing.
         sheet.addView(menuRow(density, "\uD83D\uDCDD", "Switch to desktop mode", "dapp-menu-desktop",
             v -> { openExternally(url); closeDappMenu(); }));
-        sheet.addView(menuRow(density, "\u21C9", "Transaction history", "dapp-menu-history",
+        sheet.addView(menuRow(density, "\uD83E\uDDFE", "Transaction history", "dapp-menu-history",
             v -> { walletCommand("openActivity", url); closeDappMenu(); }));
         sheet.addView(menuRow(density, "\uD83D\uDDD1", "Clear cache", "dapp-menu-clearcache",
             v -> { clearDappCache(); closeDappMenu(); }));
@@ -741,18 +769,18 @@ public class BearDappBrowserPlugin extends Plugin {
         tile.setOnClickListener(onClick);
         android.widget.TextView icon = new android.widget.TextView(getContext());
         icon.setText(glyph);
-        icon.setTextColor(0xFFFFFFFF);
+        icon.setTextColor(INK);
         icon.setTextSize(20);
         icon.setGravity(android.view.Gravity.CENTER);
         android.graphics.drawable.GradientDrawable ib = new android.graphics.drawable.GradientDrawable();
-        ib.setColor(0xFF2A2A3A);
+        ib.setColor(tileColorForGlyph(glyph));
         ib.setCornerRadius(14 * density);
         icon.setBackground(ib);
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams((int) (52 * density), (int) (52 * density));
         tile.addView(icon, ip);
         android.widget.TextView cap = new android.widget.TextView(getContext());
         cap.setText(label);
-        cap.setTextColor(0xFFB9B9C9);
+        cap.setTextColor(INK_SOFT);
         cap.setTextSize(11);
         cap.setGravity(android.view.Gravity.CENTER);
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -774,12 +802,12 @@ public class BearDappBrowserPlugin extends Plugin {
         row.setOnClickListener(onClick);
         android.widget.TextView icon = new android.widget.TextView(getContext());
         icon.setText(glyph);
-        icon.setTextColor(0xFFE6E6F0);
+        icon.setTextColor(INK);
         icon.setTextSize(16);
         row.addView(icon, new LinearLayout.LayoutParams((int) (30 * density), (int) (44 * density)));
         android.widget.TextView tv = new android.widget.TextView(getContext());
         tv.setText(label);
-        tv.setTextColor(0xFFFFFFFF);
+        tv.setTextColor(INK);
         tv.setTextSize(15);
         row.addView(tv, new LinearLayout.LayoutParams(0, (int) (44 * density), 1));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (44 * density));
@@ -871,7 +899,16 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         String key = hostInitial(t) + (t != null && t.url != null ? t.url : "");
         int h = 0;
         for (int i = 0; i < key.length(); i++) h = h * 31 + key.charAt(i);
-        int[] palette = { 0xFF6C5CE7, 0xFF00B894, 0xFFE17055, 0xFF0984E3, 0xFFD63031, 0xFF00CEC9 };
+        int[] palette = { HONEY, MINT, BERRY, SKY, ORANGE, GRAPE };
+        return palette[Math.abs(h) % palette.length];
+    }
+
+    // Deterministic per-glyph colour for the ⋯ sheet icon tiles: same glyph,
+    // same tile, every open (cartoon palette — bright, never dark).
+    private static int tileColorForGlyph(String glyph) {
+        int h = 0;
+        for (int i = 0; i < glyph.length(); i++) h = h * 31 + glyph.charAt(i);
+        int[] palette = { HONEY, MINT, SKY, BERRY, ORANGE, GRAPE };
         return palette[Math.abs(h) % palette.length];
     }
 
@@ -884,7 +921,7 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
             Tab t = tabs.get(i);
             LinearLayout row = new LinearLayout(getContext());
             row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setBackgroundColor(i == activeTab ? 0xFF23233A : 0x00000000);
+            row.setBackgroundColor(i == activeTab ? HONEY : 0x00000000);
             // Site tile: a coloured initial on the host, the way OKX leads each
             // card with the site's logo. A favicon would need a synchronous
             // image fetch per tab — the tab sheet opens on a tap, so a network
@@ -892,7 +929,7 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
             // instant and never a broken-image box.
             android.widget.TextView tile = new android.widget.TextView(getContext());
             tile.setText(hostInitial(t));
-            tile.setTextColor(0xFFFFFFFF);
+            tile.setTextColor(WHITE);
             tile.setTextSize(15);
             tile.setGravity(android.view.Gravity.CENTER);
             android.graphics.drawable.GradientDrawable tileBg = new android.graphics.drawable.GradientDrawable();
@@ -908,7 +945,7 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
                 ? t.title
                 : (t.url != null && !t.url.isEmpty() ? t.url : "New tab");
             tv.setText(title);
-            tv.setTextColor(0xFFE6E6F0);
+            tv.setTextColor(INK);
             tv.setTextSize(14);
             tv.setSingleLine(true);
             tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -923,7 +960,7 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
             Button x = new Button(getContext());
             x.setText("\u2715");
             x.setAllCaps(false);
-            x.setTextColor(0xFFE6E6F0);
+            x.setTextColor(INK);
             x.setBackgroundColor(0x00000000);
             x.setContentDescription("dapp-tab-close-" + i);
             x.setOnClickListener(v -> closeTab(idx));
@@ -1133,6 +1170,10 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
                     toolbar.setVisibility(View.VISIBLE);
                     toolbar.bringToFront(); // above the dapp view, always
                 }
+                // A fresh user-initiated open clears the dismissal: the browser
+                // is being shown on purpose, so wallet sheets may move it aside
+                // and restore it again from here on.
+                userClosed = false;
                 dappView.setVisibility(View.VISIBLE);
                 // The ACTIVE tab is the destination — the E2E and card taps
                 // both expect one obvious view, and tabs are opened explicitly
@@ -1159,6 +1200,9 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         if (dappView != null) {
             dappView.stopLoading();
             hideDappView();
+            // The user said "leave". A wallet sheet closing later must NOT bring
+            // this back (the pages stay in the tab session by design).
+            userClosed = true;
         }
     }
 
@@ -1178,6 +1222,9 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
             return true;
         }
         hideDappView();
+        // Back with nothing to go back to IS leaving the browser — same rule as
+        // the ❌: a later sheet must not resurrect it.
+        userClosed = true;
         return false;
     }
 
@@ -1226,6 +1273,15 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
     public void setVisible(PluginCall call) {
         Boolean visible = call.getBoolean("visible", false);
         getActivity().runOnUiThread(() -> {
+            // A wallet sheet closing asks for visible=true to put the browser
+            // back. That is right while the browser IS the screen behind the
+            // sheet — and wrong after the user dismissed it (❌/back). Honor
+            // the dismissal: never resurrect a closed browser. Hiding (false)
+            // is always safe and still applied.
+            if (dappView != null && Boolean.TRUE.equals(visible) && userClosed) {
+                call.resolve();
+                return;
+            }
             if (dappView != null) {
                 if (stack != null) stack.setVisibility(visible ? View.VISIBLE : View.GONE);
                 if (refreshLayout != null) {
@@ -1256,6 +1312,9 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
             JSObject out = new JSObject();
             out.put("open", dappView != null);
             out.put("visible", dappView != null && stack != null && stack.getVisibility() == View.VISIBLE);
+            // The dismissal bit, so the wallet (and the E2E) can tell "behind a
+            // sheet" apart from "the user closed it" without guessing.
+            out.put("closed", userClosed);
             call.resolve(out);
         });
     }
@@ -1293,6 +1352,9 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         getActivity().runOnUiThread(() -> {
             if (idx != null && idx >= 0 && idx < tabs.size()) setActiveTab(idx);
             if (dappView != null) {
+                // The wallet's own "Tabs" entry is an explicit reopen — clear
+                // the dismissal so sheets can move it aside again.
+                userClosed = false;
                 if (stack != null) stack.setVisibility(View.VISIBLE);
                 if (refreshLayout != null) { refreshLayout.setVisibility(View.VISIBLE); refreshLayout.bringToFront(); }
                 if (toolbar != null) { toolbar.setVisibility(View.VISIBLE); toolbar.bringToFront(); }
