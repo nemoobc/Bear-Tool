@@ -1046,6 +1046,13 @@ function bindOpenSeaPanel() {
   }
 
   // List NFT
+  //
+  // The listed order is remembered so "Cancel listing" has something real to
+  // cancel. Seaport `cancel` needs the full OrderComponents (it re-derives the
+  // hash and bumps the counter) — it cannot be reconstructed from contract +
+  // tokenId alone, so a cancel with no remembered order is refused honestly
+  // instead of being sent a zero hash.
+  let lastListedOrder = null;
   $('#btnOpenSeaList')?.addEventListener('click', async () => {
     const s = status(); if (!s) return;
     const contract = $('#openSeaContract')?.value?.trim();
@@ -1055,20 +1062,20 @@ function bindOpenSeaPanel() {
     s.textContent = 'Listing...';
     try {
       const net = getNetworkById(get('networkId'));
-      await listNft({ contractAddress: contract, tokenId, price, chainId: net?.chainId || 1 });
+      const res = await listNft({ contractAddress: contract, tokenId, price, chainId: net?.chainId || 1 });
+      lastListedOrder = res.order || null;
       s.textContent = '✅ Listing submitted!';
     } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'Listing'); }
   });
   // Cancel listing
   $('#btnOpenSeaCancel')?.addEventListener('click', async () => {
     const s = status(); if (!s) return;
-    const contract = $('#openSeaContract')?.value?.trim();
-    const tokenId = $('#openSeaTokenId')?.value?.trim();
-    if (!contract || !tokenId) return s.textContent = 'Fill contract and token ID to cancel.';
+    if (!lastListedOrder) return s.textContent = '⚠️ No listing from this session to cancel — list here first.';
     s.textContent = 'Cancelling...';
     try {
       const net = getNetworkById(get('networkId'));
-      await cancelListing({ contractAddress: contract, tokenId, chainId: net?.chainId || 1 });
+      await cancelListing({ order: lastListedOrder, chainId: net?.chainId || 1 });
+      lastListedOrder = null;
       s.textContent = '✅ Listing cancelled!';
     } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'Cancelling the listing'); }
   });

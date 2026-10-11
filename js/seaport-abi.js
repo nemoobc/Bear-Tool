@@ -30,9 +30,30 @@ export const SEAPORT_BY_CHAIN = {
 
 // Minimal Seaport ABI — only functions Bear Tool actually calls.
 // 1.5 functions; every one is a real Seaport entry point (no fake).
+// Minimal Seaport ABI — only functions Bear Tool actually calls.
+// OrderComponents is spelled out IN FULL, with NAMED fields, for two reasons:
+//   1. `cancel(array orders)` / `fulfillBasicOrder(tuple parameters)` were not
+//      valid human-readable ABI at all. ethers silently drops an unparseable
+//      fragment (a `[Warning]`, not an error), so `seaport.cancel` was
+//      `undefined` and the call died with "seaport.cancel is not a function".
+//      Proved 2026-10-11 against the deployed Seaport 1.5 (typeof
+//      seaport.cancel === undefined before this fix, a function after).
+//   2. Seaport 1.5 `cancel`/`validate` take OrderComponents STRUCTS, not
+//      bytes32 hashes (cancelling a raw hash was the other half of the broken
+//      cancel path). NAMED components so a JS order object can be passed
+//      straight through without reshaping it into nested arrays.
+// Layout verified against the deployed contract: `cancel([order])` reaches the
+// contract on a mainnet fork (a bogus selector reverts differently).
+export const ORDER_COMPONENTS_TUPLE =
+  '(address offerer,address zone,'
+  + '(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount)[] offer,'
+  + '(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount,address recipient)[] consideration,'
+  + 'uint8 orderType,uint256 startTime,uint256 endTime,bytes32 zoneHash,uint256 salt,bytes32 conduitKey,uint256 counter)';
+
 export const SEAPORT_ABI = [
   'function getOrderStatus(bytes32 orderHash) view returns (bool isValidated, bool isCancelled, uint256 totalFilled, uint256 totalSize)',
   'function getCounter(address offerer) view returns (uint256)',
-  'function cancel(array orders)',
-  'function fulfillBasicOrder(tuple parameters) payable returns (bool fulfilled)',
+  'function validate(' + ORDER_COMPONENTS_TUPLE + ' order) returns (bytes4 magicValue)',
+  'function validate(' + ORDER_COMPONENTS_TUPLE + ' order, bytes signature) returns (bytes4 magicValue)',
+  'function cancel(' + ORDER_COMPONENTS_TUPLE + '[] orders) returns (bool)',
 ];

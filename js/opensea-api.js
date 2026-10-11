@@ -190,10 +190,13 @@ export async function getHighestOffer({ contract, tokenId }) {
 }
 
 // ── Cancel Listing (on-chain via Seaport) ─────────────────
-export async function cancelListing({ contract, tokenId, signer, chainId }) {
+export async function cancelListing({ order, chainId }) {
+  // The order STRUCT, not a hash. Seaport 1.5 `cancel` re-derives the hash from
+  // the components; it cannot be handed a bare bytes32. This used to pass a
+  // hardcoded all-zero hash, which would have cancelled nothing even if the ABI
+  // had been valid. The caller (app.js) now carries the listed order.
   const { cancelOrder } = await import('./opensea.js');
-  const orderHash = '0x' + '00'.repeat(32);
-  return cancelOrder(signer, [orderHash], chainId);
+  return cancelOrder(order, order, chainId);
 }
 
 // ── Accept Offer (on-chain via Seaport fulfillBasicOrder) ─
@@ -204,8 +207,12 @@ export async function acceptOffer({ contract, tokenId, signer, chainId }) {
   const parameters = {
     offerer: offer.maker,
     zone: '0x0000000000000000000000000000000000000000',
+    // The NFT is what the offerer GIVES (their offer side), not the price.
     offer: [{ itemType: 2, token: contract, identifierOrCriteria: tokenId, startAmount: 1, endAmount: 1 }],
-    consideration: [{ itemType: 0, token: '0x0000000000000000000000000000000000000000', identifierOrCriteria: 0, startAmount: BigInt(Math.floor(offer.price * 1e18)).toString(), endAmount: BigInt(Math.floor(offer.price * 1e18)).toString(), recipient: signer.address || signer }],
+    // The price the fulfiller PAYS goes to the OFFERER — this used to send it
+    // to `signer` (the fulfiller themself), which would have refunded the very
+    // person accepting the offer.
+    consideration: [{ itemType: 0, token: '0x0000000000000000000000000000000000000000', identifierOrCriteria: 0, startAmount: BigInt(Math.floor(offer.price * 1e18)).toString(), endAmount: BigInt(Math.floor(offer.price * 1e18)).toString(), recipient: offer.maker }],
     orderType: 0,
     startTime: Math.floor(Date.now() / 1000),
     endTime: Math.floor(Date.now() / 1000) + 86400
@@ -213,22 +220,47 @@ export async function acceptOffer({ contract, tokenId, signer, chainId }) {
   return fulfillBasicOrder(signer, parameters, chainId);
 }
 
-// ── List NFT (stub — creates Seaport listing order) ──
+// ── List NFT (builds a Seaport listing order and PUBLISHES it) ──
 export async function listNft({ contractAddress, tokenId, price, chainId }) {
   if (!contractAddress || !tokenId || !price) throw new Error('Missing contract, tokenId, or price');
   const signer = globalThis.__get?.('signer') || null;
   if (!signer) throw new Error('Unlock wallet to list NFT');
-  const { buildOrderHash } = await import('./opensea.js');
+  const { buildOrderHash, ORDER_TYPES, seaportDomain } = await import('./opensea.js');
+  const { ethers } = globalThis;
+  const offerer = await signer.getAddress();
   const priceWei = BigInt(Math.floor(parseFloat(price) * 1e18));
-  const orderHash = buildOrderHash({
-    offerer: signer.address,
+  const domain = seaportDomain(chainId);
+  const now = Math.floor(Date.now() / 1000);
+
+  const order = {
+    offerer,
     zone: '0x0000000000000000000000000000000000000000',
-    offer: [{ itemType: 2, token: contractAddress, identifierOrCriteria: tokenId, startAmount: priceWei.toString(), endAmount: priceWei.toString() }],
-    consideration: [{ itemType: 0, token: '0x0000000000000000000000000000000000000000', identifierOrCriteria: 0, startAmount: priceWei.toString(), endAmount: priceWei.toString(), recipient: signer.address }],
+    // An ERC-721 offer is the TOKEN itself, amount 1. The price belongs in the
+    // consideration side (what the buyer pays) — this used to put the price into
+    // the offer's start/end amount, which describes "how many NFTs", not money.
+    offer: [{ itemType: 2, token: contractAddress, identifierOrCriteria: tokenId, startAmount: 1, endAmount: 1 }],
+    consideration: [{ itemType: 0, token: '0x0000000000000000000000000000000000000000', identifierOrCriteria: 0, startAmount: priceWei.toString(), endAmount: priceWei.toString(), recipient: offerer }],
     orderType: 0,
-    startTime: Math.floor(Date.now() / 1000),
-    endTime: Math.floor(Date.now() / 1000) + 86400 * 7,
-    chainId
-  });
-  return { orderHash, status: 'listing_created' };
+    startTime: now,
+    endTime: now + 86400 * 7,
+    zoneHash: '0x' + '00'.repeat(32),
+    salt: BigInt(now),
+    conduitKey: '0x' + '00'.repeat(32),
+    counter: 0n,
+  };
+
+  // Sign the listing over EIP-712(domain, OrderComponents) — the exact digest
+  // Seaport derives in _deriveOrderHash / _deriveEIP712Digest. Without a valid
+  // signature `validate` reverts (proved against the real contract on a mainnet
+  // fork, 2026-10-11: signing a different digest also reverts with require(false)).
+  const signature = await signer.signTypedData(domain, ORDER_TYPES, order);
+  const orderHash = buildOrderHash(order, chainId);
+
+  // Publish it: this used to stop at computing the hash and return
+  // "listing_created", so the UI told the user "Listing submitted!" while
+  // NOTHING reached the chain. A listing that no one can see is not a listing.
+  const { validateOrder } = await import('./opensea.js');
+  await validateOrder(signer, order, signature, chainId);
+
+  return { orderHash, order, status: 'listing_created' };
 }

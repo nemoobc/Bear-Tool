@@ -90,22 +90,42 @@ export function buildOrderHash(order, chainId) {
     counter: order.counter ?? 0,
   };
 
-  const fullTypes = {
-    EIP712Domain: [
-      { name: 'name', type: 'string' },
-      { name: 'version', type: 'string' },
-      { name: 'chainId', type: 'uint256' },
-      { name: 'verifyingContract', type: 'address' },
-    ],
-    ...ORDER_TYPES,
-  };
-
-  return ethers.TypedDataEncoder.hash(domain, fullTypes, orderComponents);
+  // NO `EIP712Domain` entry here. ethers derives the domain type from the
+  // `domain` object it was given, so declaring it again makes the type set
+  // ambiguous and every call dies with "ambiguous primary types or unused
+  // types: EIP712Domain, OrderComponents" (probe 2026-10-11 against the real
+  // Seaport 1.5 on a mainnet fork). OrderComponents alone is the struct Seaport
+  // hashes in _deriveOrderHash.
+  return ethers.TypedDataEncoder.hash(domain, { ...ORDER_TYPES }, orderComponents);
 }
 
 // ── On-chain actions (real transactions — uniform dots via runTx,
 //    consistent with send/swap/bridge — HUKUM 1, HUKUM 9). ──
 
+
+/**
+ * Publish a signed order to Seaport (`validate`) — this is what makes a listing
+ * real and visible to buyers. Until it is sent, a computed orderHash is just a
+ * number: nothing on the chain knows the order exists. The signature must be
+ * over EIP-712(domain, OrderComponents) — the digest Seaport re-derives in
+ * _verifySignature.
+ * Real transaction via runTx (uniform dots).
+ */
+export async function validateOrder(btn, order, signature, chainId) {
+  const seaportAddr = SEAPORT_BY_CHAIN[chainId];
+  if (!seaportAddr) throw new Error('OpenSea: Seaport 1.5 not deployed on this chain');
+  if (!get('unlocked')) { requireUnlock(); return; }
+  const signer = get('signer');
+  if (!signer) throw new Error('OpenSea: wallet locked');
+  if (!order || !order.offerer) throw new Error('OpenSea: order is missing its offerer');
+  if (!signature) throw new Error('OpenSea: order must be signed before it can be published');
+
+  return runTx('opensea-validate', btn, async () => {
+    const connected = typeof signer.connect === 'function' ? signer.connect(get('provider')) : signer;
+    const seaport = new ethers.Contract(seaportAddr, SEAPORT_ABI, connected);
+    return await seaport.validate(order, signature);
+  }, { loadingLabel: 'Publishing listing…' });
+}
 
 /**
  * eth_call to Seaport.getOrderStatus(orderHash) — honest view.
@@ -139,11 +159,16 @@ function statusLabel({ isValidated, isCancelled, totalFilled, totalSize }) {
 }
 
 /**
- * Cancel one or more Seaport orders (by order hash) — real transaction
- * via runTx (uniform dots). Honest: throws when the order isn't ours
- * (Seaport.cancel only works for orders with counter set by the offerer).
+ * Cancel one or more Seaport orders. Seaport 1.5 `cancel` takes the full
+ * OrderComponents STRUCTS (it re-derives each hash and bumps the offerer's
+ * counter) — passing bare bytes32 hashes, which is what this used to do, cannot
+ * even encode against the ABI. The order objects therefore carry everything
+ * Seaport needs; only the offerer's own orders can be cancelled (Seaport
+ * enforces it, and we surface that failure rather than swallow it).
+ * Real transaction via runTx (uniform dots). Honest: throws when Seaport has no
+ * code on this chain.
  */
-export async function cancelOrder(btn, orderHashes, chainId) {
+export async function cancelOrder(btn, orders, chainId) {
   const seaportAddr = SEAPORT_BY_CHAIN[chainId];
   if (!seaportAddr) throw new Error('OpenSea: Seaport 1.5 not deployed on this chain');
   // Item 12: locked wallet → raise the password prompt instead of throwing a
@@ -151,12 +176,15 @@ export async function cancelOrder(btn, orderHashes, chainId) {
   if (!get('unlocked')) { requireUnlock(); return; }
   const signer = get('signer');
   if (!signer) throw new Error('OpenSea: wallet locked');
+  const list = Array.isArray(orders) ? orders : [orders];
+  if (!list.length || list.some((o) => !o || !o.offerer)) {
+    throw new Error('OpenSea: nothing to cancel — the order is missing its offerer');
+  }
 
   return runTx('opensea-cancel', btn, async () => {
     const connected = typeof signer.connect === 'function' ? signer.connect(get('provider')) : signer;
     const seaport = new ethers.Contract(seaportAddr, SEAPORT_ABI, connected);
-    // cancel(bytes32[] orderHashes) — Seaport 1.5 takes an array of hashes.
-    const tx = await seaport.cancel(orderHashes);
+    const tx = await seaport.cancel(list);
     return tx;
   }, { loadingLabel: 'Cancelling…' });
 }
