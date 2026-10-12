@@ -1035,6 +1035,231 @@ async function main() {
     await shotScreen('19c-reopened-after-guard');
   }
 
+  // ── feature sweep: every view + the paths the journey never touched ──────
+  // The journey above proves first-run, the bottom nav, the native dApp
+  // browser and WalletConnect. Every OTHER view — Send, Bridge, Deploy, NFT,
+  // Discord, and the modals behind Receive / Settings / the network pill —
+  // was never opened, so a view that threw on render, or a button that opened
+  // onto nothing, could still ship green. This sweep opens each one and drives
+  // the parts that need no funds. Money paths that DO need funds stay in the
+  // Playwright suite, which funds the wallet from an anvil fork; here the
+  // wallet is empty by design, so the send step proves the guard rails ANSWER
+  // (a confirm sheet, or a named refusal) instead of going silent.
+  //
+  // Nothing is ever broadcast: the EVM flow stops at #confirmNo, the non-EVM
+  // panel is filled and read but never submitted.
+  const jsClick = (sel) => page.evaluate(
+    `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return false; el.click(); return true; })()`,
+  ).catch(() => false);
+
+  const viewActive = (view) => page.evaluate(
+    `document.querySelector('#view-${view}')?.classList.contains('active') === true`,
+  ).catch(() => false);
+
+  // Whichever affordance this viewport exposes. The bottom bar is the only nav
+  // on a phone (the sidebar is display:none), but both live in the DOM and a
+  // JS .click() works on a hidden node — so try the bar, then the sidebar, then
+  // the dashboard quick action.
+  const openView = async (view) => {
+    if (await viewActive(view)) return true;
+    for (const sel of [
+      `#mobileNav .mobile-nav-item[data-view="${view}"]`,
+      `.sidebar .nav-item[data-view="${view}"]`,
+      `.quick-action-btn[data-view="${view}"]`,
+    ]) {
+      if (!(await jsClick(sel))) continue;
+      for (let i = 0; i < 25; i++) {
+        if (await viewActive(view)) { await sleep(500); return true; }
+        await sleep(250);
+      }
+    }
+    return false;
+  };
+
+  const closeModal = async () => {
+    if (await jsClick('#modalBox .modal-close')) { await sleep(400); return; }
+    await jsClick('#modalOverlay');
+    await sleep(400);
+  };
+
+  const sweep = {};
+  report.sweep = sweep;
+
+  step('feature sweep: every view opens');
+  for (const view of ['dashboard', 'activity', 'swap', 'send', 'dapps', 'deploy', 'nft', 'discord', 'settings']) {
+    if (!(await openView(view))) throw new Error(`feature sweep: view "${view}" did not open`);
+    await sleep(800);
+    await page.shot(`30-view-${view}`);
+  }
+
+  // Bridge has no nav item of its own — it lives behind the Swap chooser, and
+  // the chooser TOGGLES, so press until the view is actually there.
+  step('feature sweep: bridge opens through the swap chooser');
+  let bridgeOpen = false;
+  for (let i = 0; i < 3 && !bridgeOpen; i++) {
+    await openView('swap');
+    await jsClick('#chooseBridge');
+    await sleep(900);
+    bridgeOpen = await viewActive('bridge');
+  }
+  if (!bridgeOpen) throw new Error('feature sweep: the Swap chooser never opened the Bridge view');
+  sweep.bridge = true;
+  await page.shot('30-view-bridge');
+
+  // Receive: the QR must render, be square, and clear the close button — the
+  // same geometry the browser suite checks, now on the real Android renderer.
+  step('feature sweep: receive modal renders a usable QR');
+  await openView('dashboard');
+  if (!(await jsClick('#quickReceive'))) throw new Error('feature sweep: #quickReceive missing');
+  await page.wait('#modalBox > .receive-qr svg', 15000);
+  await sleep(600);
+  await page.shot('31-receive-qr');
+  sweep.receive = await page.evaluate(`(() => {
+    const svg = document.querySelector('#modalBox > .receive-qr svg');
+    const close = document.querySelector('#modalBox .modal-close');
+    if (!svg) return { qr: false };
+    const s = svg.getBoundingClientRect();
+    const c = close && close.getBoundingClientRect();
+    return {
+      qr: true,
+      square: Math.abs(s.width - s.height) <= 1.5,
+      w: Math.round(s.width), h: Math.round(s.height),
+      overlapsClose: c ? !(s.right <= c.left || s.left >= c.right || s.bottom <= c.top || s.top >= c.bottom) : null,
+    };
+  })()`);
+  if (!sweep.receive.qr) throw new Error('feature sweep: the receive QR never rendered');
+  if (!sweep.receive.square) throw new Error('feature sweep: the receive QR is not square: ' + JSON.stringify(sweep.receive));
+  if (sweep.receive.overlapsClose) throw new Error('feature sweep: the receive QR sits under the close button');
+  await closeModal();
+
+  // Send (EVM): the fields must exist and the LIVE preview must react to input.
+  // Pressing Send on an empty wallet must answer with a sheet or a named
+  // refusal — never silence. The flow stops at #confirmNo; #confirmYes is
+  // never touched here.
+  step('feature sweep: send view + guard rails (nothing broadcast)');
+  if (!(await openView('send'))) throw new Error('feature sweep: the Send view did not open');
+  await page.wait('#sendTo', 15000);
+  await page.wait('#sendAmount', 15000);
+  await page.type('#sendTo', '0x000000000000000000000000000000000000dEaD');
+  await page.type('#sendAmount', '0.0001');
+  await sleep(1500);
+  sweep.sendPreview = await page.evaluate(`(() => {
+    const box = document.querySelector('#sendPreview');
+    if (!box) return { present: false };
+    return { present: true, hidden: box.classList.contains('hidden'), text: (box.textContent || '').trim().slice(0, 200) };
+  })()`);
+  await page.shot('32-send-filled');
+  if (!sweep.sendPreview.present) throw new Error('feature sweep: #sendPreview missing from the Send view');
+  await jsClick('#btnSend');
+  await sleep(2500);
+  sweep.sendGuard = await page.evaluate(`(() => {
+    const visible = (el) => !!el && !!el.offsetParent && getComputedStyle(el).display !== 'none';
+    const confirm = document.querySelector('#confirmYes');
+    const toastEl = document.querySelector('.toast-wrap, .toast, #toast');
+    return {
+      sheet: !!(confirm && visible(confirm)),
+      toast: toastEl ? (toastEl.textContent || '').trim().slice(0, 200) : '',
+      note: (document.querySelector('#sendPreview')?.textContent || '').trim().slice(0, 200),
+    };
+  })()`);
+  await page.shot('32-send-guard');
+  if (!sweep.sendGuard.sheet && !sweep.sendGuard.toast && !sweep.sendGuard.note) {
+    throw new Error('feature sweep: pressing Send on an empty wallet answered with silence — ' + JSON.stringify(sweep.sendGuard));
+  }
+  await jsClick('#confirmNo');
+  await closeModal();
+
+  // Settings + the language switch, both ways (localStorage is the contract).
+  step('feature sweep: settings + language switch persists');
+  if (!(await openView('settings'))) throw new Error('feature sweep: the Settings view did not open');
+  await page.wait('#setLang', 15000);
+  const setLang = async (lang) => {
+    await page.evaluate(`(() => {
+      const el = document.querySelector('#setLang');
+      if (!el) return false;
+      el.value = ${JSON.stringify(lang)};
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+    await sleep(1400);
+    return page.evaluate(`localStorage.getItem('bear.lang')`);
+  };
+  sweep.langId = await setLang('id');
+  await page.shot('33-settings-id');
+  sweep.langEn = await setLang('en');
+  if (sweep.langId !== 'id') throw new Error('feature sweep: the language did not switch to Indonesian: ' + JSON.stringify(sweep));
+  if (sweep.langEn !== 'en') throw new Error('feature sweep: the language did not switch back to English: ' + JSON.stringify(sweep));
+
+  // The network picker must actually LIST the chains — an empty catalogue is
+  // the product failing, not the environment.
+  step('feature sweep: the network picker lists chains');
+  if (!(await jsClick('#networkPill'))) throw new Error('feature sweep: #networkPill missing');
+  await page.wait('#netSearchInput', 15000);
+  await sleep(800);
+  await page.shot('34-network-picker');
+  sweep.networks = await page.evaluate(`(() => ({
+    rows: document.querySelectorAll('#netListMainnet [data-net], #netListMainnet [data-net-non-evm]').length,
+    nonEvm: document.querySelectorAll('#netListMainnet [data-net-non-evm]').length,
+  }))()`);
+  if (!sweep.networks || sweep.networks.rows < 1) {
+    throw new Error('feature sweep: the network picker listed nothing: ' + JSON.stringify(sweep.networks));
+  }
+
+  // ── the non-EVM chains, on the real device ───────────────────────────────
+  // BTC/SOL/XRP are selectable networks with their own receive address and
+  // their own Send panel (docs/NON-EVM-SENDING.md). The unit suite signs real
+  // vectors; this proves the SCREEN exists and answers inside the app, and it
+  // is the only place the non-EVM path meets a real Android WebView.
+  step('feature sweep: switch to a non-EVM chain (Bitcoin)');
+  if (!sweep.networks.nonEvm) throw new Error('feature sweep: no non-EVM row in the network picker');
+  if (!(await jsClick('#netListMainnet [data-net-non-evm]'))) {
+    throw new Error('feature sweep: the non-EVM network row could not be clicked');
+  }
+  await sleep(2500);
+  if (!(await page.wait('#nonEvmReceiveBtn', 20000).then(() => true).catch(() => false))) {
+    throw new Error('feature sweep: the non-EVM home never offered its Receive button');
+  }
+  sweep.nonEvm = { home: true };
+  await page.shot('35-nonevm-home');
+
+  step('feature sweep: non-EVM receive shows that chain address + QR');
+  await jsClick('#nonEvmReceiveBtn');
+  await page.wait('#modalBox > .receive-qr svg', 15000);
+  await sleep(600);
+  await page.shot('36-nonevm-receive');
+  sweep.nonEvm.address = await page.evaluate(`(() => {
+    const box = document.querySelector('#modalBox');
+    const text = (box ? box.textContent : '').replace(/\\s+/g, ' ');
+    const m = text.match(/\\b(bc1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{6,}|[13][a-km-zA-HJ-NP-Z1-9]{25,40}|[1-9A-HJ-NP-Za-km-z]{32,44}|r[1-9A-HJ-NP-Za-km-z]{24,34})\\b/);
+    return m ? m[1] : '';
+  })()`);
+  await closeModal();
+  if (!sweep.nonEvm.address) throw new Error('feature sweep: the non-EVM receive modal showed no chain address');
+  // The wallet's OWN address is used as the send destination in the panel step
+  // below: it is a valid address for the active chain by construction, so the
+  // panel must accept it — a hand-written sample address could be a bad
+  // checksum and the step would fail for the wrong reason.
+  sweep.nonEvm.addressShort = sweep.nonEvm.address.slice(0, 14) + '…';
+
+  step('feature sweep: non-EVM send panel renders and prices (nothing sent)');
+  await openView('dashboard');
+  if (!(await jsClick('#nonEvmSendBtn2'))) throw new Error('feature sweep: the non-EVM Send button is missing');
+  await page.wait('#nonEvmTo', 15000);
+  await page.wait('#nonEvmAmount', 15000);
+  await page.type('#nonEvmTo', sweep.nonEvm.address);
+  await page.type('#nonEvmAmount', '0.001');
+  await sleep(2500);
+  await page.shot('37-nonevm-send');
+  sweep.nonEvm.send = await page.evaluate(`(() => ({
+    to: !!document.querySelector('#nonEvmTo'),
+    amount: (document.querySelector('#nonEvmAmount')?.value || ''),
+    fee: (document.querySelector('#nonEvmFeeValue')?.textContent || '').trim().slice(0, 80),
+    estimate: (document.querySelector('#nonEvmEstimate')?.textContent || '').trim().slice(0, 120),
+    netSel: !!document.querySelector('#nonEvmNetSel'),
+    sendBtn: !!document.querySelector('#nonEvmSendBtn'),
+  }))()`);
+  if (!sweep.nonEvm.send.sendBtn) throw new Error('feature sweep: the non-EVM send panel has no Send button');
+
   // ── native bridge diagnostics (permanent, CDP-side) ─────────────────────
   // Where the console-to-logcat routing is a moving target, the driver reads
   // the bridge state itself: does the plugin exist, does a native method
@@ -1072,6 +1297,14 @@ async function main() {
     consoleTrail: report.consoleTrail.length,
     native: report.native && (report.native.ping || report.native.evaluateFailed || 'n/a'),
     dapp: report.dapp && (report.dapp.log ? String(report.dapp.log).split('\n').slice(-1)[0] : 'n/a'),
+    sweep: report.sweep && {
+      views: 'dashboard..settings',
+      receive: report.sweep.receive && (report.sweep.receive.square ? 'square' : 'NOT square'),
+      lang: report.sweep.langId || 'n/a',
+      networks: report.sweep.networks && report.sweep.networks.rows,
+      nonEvmSendBtn: report.sweep.nonEvm && report.sweep.nonEvm.send && report.sweep.nonEvm.send.sendBtn,
+      nonEvmFee: report.sweep.nonEvm && report.sweep.nonEvm.send && report.sweep.nonEvm.send.fee,
+    },
   }));
   if (report.consoleErrors.length || report.exceptions.length) {
     die('unfiltered console errors / exceptions:\n  ' + [...report.consoleErrors, ...report.exceptions].join('\n  '));
