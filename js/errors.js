@@ -242,9 +242,15 @@ export function explainError(err, context) {
   // 2. No rule matched. If it reads as a sentence rather than machine output, it is
   //    almost certainly one this app wrote on purpose — "Enter amount to swap",
   //    "Fill contract, token ID, and price." Those must arrive unchanged.
-  if (typeof err === 'string' && !looksRaw(err)) return err;
+  // Blank is NOT a sentence. `new Error('')`, `{ message: '' }` and a rejected ''
+  // used to reach here and be returned verbatim, so the toast rendered empty and
+  // faded after 3.5s — on a failed transaction that is the worst outcome, because
+  // the user cannot tell anything happened. looksRaw('') is false by definition
+  // (nothing machine-shaped about it), so without trim() an empty failure passed
+  // the "already human?" test and short-circuited straight to the user.
+  if (typeof err === 'string' && err.trim() && !looksRaw(err)) return err;
   if (err && typeof err === 'object' && typeof err.message === 'string'
-      && !looksRaw(err.message) && !err.reason && !err.code) {
+      && err.message.trim() && !looksRaw(err.message) && !err.reason && !err.code) {
     return err.message;
   }
 

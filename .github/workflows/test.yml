@@ -15,7 +15,15 @@ jobs:
     # runs died silently inside `npm test` (4h14m and 31m until manually
     # cancelled). The in-test timeout fires first and names the test; this is
     # the backstop for anything else that stops answering.
-    timeout-minutes: 20
+    #
+    # Was 20. The M9 proxy-runtime test legitimately needs ~184s of wasm solc
+    # compile plus real anvil deploys (measured on a phone), and a GitHub runner
+    # is slower than that — so at 20 minutes the job hit its own backstop while
+    # the suite was still working, and GitHub cancelled it. A cancelled suite
+    # says nothing about the code, it just hides every other result. The in-test
+    # timeouts are what make a hang loud; this number only has to leave room for
+    # the slowest legitimate test plus the rest of the suite.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 

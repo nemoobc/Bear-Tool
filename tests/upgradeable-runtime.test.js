@@ -141,7 +141,15 @@ const both = (a, b) => [...a, ...b].filter((f) => f.type !== 'constructor');
 // answering). Locally the test takes tens of seconds; a runner stall then
 // becomes a FAILING test naming itself instead of a job silent for 4 hours
 // (runs 37446987299, 37487059130, both cancelled mid-`npm test`).
-test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skipReason, timeout: 300_000 }, async (t) => {
+// The budget is sized from a real measurement, not a guess: on a Termux phone
+// (anvil + solc wasm compile + a UUPS proxy pair deployed and driven) this test
+// passes in 183.7s. A GitHub 2-core runner is at least ~1.6x slower, which is
+// why the old 300s cap was hit at exactly 300004ms and the 20-minute job limit
+// then cancelled the rest of the suite — a cancelled suite reports nothing, so
+// one legitimately heavy test was erasing every other result. 15 minutes leaves
+// ~4.9x the measured cost, enough headroom for a slow runner without turning a
+// genuine hang into a very long wait.
+test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skipReason, timeout: 900_000 }, async (t) => {
   if (skipReason) return;
   // A missing compiler is an unavailable tool (skip, and say so). Anvil that
   // is INSTALLED but refuses to start is a broken test, not a missing tool —

@@ -195,3 +195,35 @@ test('the table is not empty and every rule is reachable', () => {
   // every rule carrying a sentence that reads like one.
   assert.ok(__tableSize >= 30, `hanya ${__tableSize} aturan — tabel kemungkinan hilang`);
 });
+
+// A rejection with no message used to reach the user as an EMPTY toast: it popped,
+// said nothing, and faded after 3.5s. On a failed transaction that is the worst
+// possible outcome — the user cannot tell whether anything happened. Blank input
+// must fall through to the generic sentence instead of passing the
+// "already a human sentence?" test (looksRaw('') is false by definition).
+test('a failure with no message still tells the user something', () => {
+  const blanks = [
+    ['', 'string kosong'],
+    ['   ', 'string spasi'],
+    [new Error(''), 'Error tanpa pesan'],
+    [{ message: '' }, 'objek message kosong'],
+    [{ message: '   ' }, 'objek message spasi'],
+    [undefined, 'undefined'],
+    [null, 'null'],
+  ];
+  for (const [input, label] of blanks) {
+    const out = explainError(input, 'Swap');
+    assert.ok(typeof out === 'string', `${label}: bukan string (${typeof out})`);
+    assert.ok(out.trim().length > 0, `${label}: pesan kosong sampai ke user → ${JSON.stringify(out)}`);
+    assert.doesNotMatch(out, /\bundefined\b|\bnull\b|\[object/, `${label}: nilai technical bocor → ${out}`);
+  }
+});
+
+// The trim() guard must not start swallowing real sentences: the whole point of
+// step 2 is that a message the app wrote on purpose arrives unchanged.
+test('a real sentence still passes through untouched after the blank guard', () => {
+  for (const m of ['Enter amount to swap', 'Fill contract, token ID, and price.', 'Wallet not ready']) {
+    assert.equal(explainError(m, 'Swap'), m, `kalimat baik dirubah: ${m}`);
+    assert.equal(explainError(new Error(m), 'Swap'), m, `Error berisi kalimat baik dirubah: ${m}`);
+  }
+});
