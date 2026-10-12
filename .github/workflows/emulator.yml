@@ -112,6 +112,14 @@ jobs:
             df -h > disk-usage.txt 2>&1 || true
             ( for i in $(seq 1 30); do echo "$(date -Is) adb=[$(adb devices 2>/dev/null | tr "\n" " ")qemu=$(pgrep -fc qemu 2>/dev/null) app=$(adb shell pidof com.nemoobc.beartool 2>/dev/null | tr -d "\r") free=[$(free -m 2>/dev/null | awk '/^Mem:/{print "tot="$2" avail="$7}')q=[$(pgrep -af qemu 2>/dev/null | tr "\n" ";" | cut -c1-160)]"; sleep 10; done ) > emulator-heartbeat.txt 2>&1 &
             python3 -u -m http.server 8080 --directory dist > http-server.log 2>&1 &
+            # Screen recording for the whole run. The parser runs EVERY line as its
+            # own `sh -c`, so the recorder is started here and stopped at the end
+            # without any shared state, and both halves are `|| echo` guarded: a
+            # device that refuses screenrecord must not fail the run. Fixed path
+            # because variables do not survive between lines. --time-limit is the
+            # backstop if the SIGINT never lands (then the file is still a valid
+            # mp4 and the screenshots remain the primary evidence).
+            (adb shell screenrecord --time-limit 2400 --bit-rate 4000000 /sdcard/bear-e2e.mp4 > /dev/null 2>&1 &) || echo SR_START_RC=$?
             # ONE recovery cycle against fleet qemu deaths (10 of 19 runs):
             # classification + relaunch live in the script — one line, no state
             # across the parser's one-process-per-line model.
@@ -123,6 +131,9 @@ jobs:
             tail -5 emulator-heartbeat.txt || true
             timeout 30 adb logcat -d > emulator-logcat.txt || echo LOGCAT_FINAL_RC=$?
             adb devices -l > emulator-devices-final.txt 2>&1 || true
+            adb shell pkill -INT screenrecord || echo SR_STOP_RC=$?
+            sleep 4
+            adb pull /sdcard/bear-e2e.mp4 emulator-e2e.mp4 || echo SR_PULL_RC=$?
             timeout 30 adb shell screencap -p /sdcard/emulator-boot.png || echo SCREENCAP_RC=$?
             timeout 30 adb pull /sdcard/emulator-boot.png emulator-boot.png || echo PULL_RC=$?
 
@@ -151,5 +162,8 @@ jobs:
             disk-usage.txt
             http-server.log
             emulator-boot.png
+            emulator-e2e.mp4
             emulator-artifacts/
-          if-no-files-found: error
+          # warn, not error: a device that refused screenrecord would otherwise
+          # fail the upload of every screenshot with it.
+          if-no-files-found: warn

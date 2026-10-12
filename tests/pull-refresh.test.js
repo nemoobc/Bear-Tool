@@ -210,3 +210,73 @@ test('the indicator has a home: show / thumb-follow / spinning states', () => {
   assert.match(css, /\.pull-refresh\.go \.pr-spin \{ animation: pr-spin/s,
     'the committed refresh must visibly spin');
 });
+
+// Bug, found on a real Android WebView (user report 2026-12): inside the Discord
+// message pane — a 320px overflow-y:auto list — scrolling up through old
+// messages and then pulling down fired the wallet-wide refresh. Scroll and
+// refresh had become one gesture.
+//
+// The cause: atTop() read ONLY window.scrollY / documentElement.scrollTop /
+// body.scrollTop. Every one of those is 0 inside a scrolled inner pane, so the
+// wallet considered itself "at the top" no matter where the finger actually was.
+test('a pull inside a scrolled inner pane is a scroll, not a refresh', () => {
+  const env = fakeEnv();
+  // The pane: overflow-y auto, taller than its box, scrolled down 180px.
+  const pane = {
+    tag: 'div',
+    className: 'discord-msgs',
+    style: { overflowY: 'auto' },
+    scrollTop: 180,
+    scrollHeight: 1200,
+    clientHeight: 320,
+    parentElement: null,
+  };
+  // A row inside the pane; the gesture lands on it.
+  const row = { tag: 'div', closest: () => null, parentElement: pane };
+  pane.parentElement = env.doc.body;
+  env.win.getComputedStyle = (el) => ({ overflowY: el.style && el.style.overflowY ? el.style.overflowY : 'visible' });
+
+  let calls = 0;
+  const pr = initPullRefresh({ win: env.win, doc: env.doc, onRefresh: () => { calls += 1; } });
+  env.fire('touchstart', env.mkEv(200, 100, row));
+  env.fire('touchmove', env.mkEv(200, 400, row));
+  env.fire('touchend', env.mkEv(200, 400, row));
+
+  assert.equal(calls, 0, 'pulling down inside a scrolled message pane must not refresh the wallet');
+  pr && pr.destroy();
+});
+
+test('the same pull OUTSIDE that pane still refreshes (the fix is narrow)', () => {
+  const env = fakeEnv();
+  const pane = { tag: 'div', className: 'discord-msgs', style: { overflowY: 'auto' }, scrollTop: 180, scrollHeight: 1200, clientHeight: 320, parentElement: env.doc.body };
+  const outside = { tag: 'div', closest: () => null, parentElement: env.doc.body };
+  env.win.getComputedStyle = (el) => ({ overflowY: el.style && el.style.overflowY ? el.style.overflowY : 'visible' });
+
+  let calls = 0;
+  const pr = initPullRefresh({ win: env.win, doc: env.doc, onRefresh: () => { calls += 1; } });
+  env.fire('touchstart', env.mkEv(200, 100, outside));
+  env.fire('touchmove', env.mkEv(200, 400, outside));
+  env.fire('touchend', env.mkEv(200, 400, outside));
+
+  assert.equal(calls, 1, 'the wallet-level pull-to-refresh must still work — the guard is for inner scrollers only');
+  pr && pr.destroy();
+});
+
+test('a pane scrolled to the top no longer blocks the pull (no dead zone)', () => {
+  // The guard must be about POSITION, not about being inside a scrollable box.
+  // If it fired merely because the pane can scroll, the Discord screen would have
+  // no pull-to-refresh at all — a feature silently missing rather than a bug.
+  const env = fakeEnv();
+  const pane = { tag: 'div', className: 'discord-msgs', style: { overflowY: 'auto' }, scrollTop: 0, scrollHeight: 1200, clientHeight: 320, parentElement: env.doc.body };
+  const row = { tag: 'div', closest: () => null, parentElement: pane };
+  env.win.getComputedStyle = (el) => ({ overflowY: el.style && el.style.overflowY ? el.style.overflowY : 'visible' });
+
+  let calls = 0;
+  const pr = initPullRefresh({ win: env.win, doc: env.doc, onRefresh: () => { calls += 1; } });
+  env.fire('touchstart', env.mkEv(200, 100, row));
+  env.fire('touchmove', env.mkEv(200, 400, row));
+  env.fire('touchend', env.mkEv(200, 400, row));
+
+  assert.equal(calls, 1, 'a pane at its own top must still allow the wallet refresh');
+  pr && pr.destroy();
+});

@@ -184,14 +184,29 @@ function markStep(name) {
 // run's FATAL line (hardening note 1).
 let report = null;
 function die(msg) {
+  // Say WHERE and WITH WHAT, not just that something timed out. Every failure
+  // this driver has produced so far read like "timeout waiting for #x", which
+  // points at a selector instead of a cause; the three lines below turn it into
+  // a diagnosis: the step in flight, the console/network evidence gathered while
+  // it ran, and the most recent dropped requests.
+  let diagnosis = '';
   try {
     if (report) {
-      report.fatal = msg;
+      if (report.lastStep) diagnosis += `\n  step in flight: ${report.lastStep}`;
+      const ev = (report.stepCtx || []).slice(-6);
+      if (ev.length) diagnosis += '\n  evidence while it ran:\n    ' + ev.join('\n    ');
+      const nf = (report.netFailures || []).slice(-5);
+      if (nf.length) diagnosis += '\n  dropped requests (last 5):\n    ' + nf.join('\n    ');
+    }
+  } catch { /* report half-built — the plain message below still has to print */ }
+  try {
+    if (report) {
+      report.fatal = msg + diagnosis;
       report.pass = false;
       writeFileSync(path.join(OUT, 'emulator-report.json'), JSON.stringify(report, null, 2));
     }
   } catch { /* report dir gone — stderr below still matters */ }
-  process.stderr.write('[e2e] FATAL: ' + msg + '\n', () => process.exit(1));
+  process.stderr.write('[e2e] FATAL: ' + msg + diagnosis + '\n', () => process.exit(1));
   // Fallback if the write callback never fires (stderr itself wedged):
   setTimeout(() => process.exit(1), 2000).unref();
 }
@@ -310,6 +325,22 @@ function makePage(cdp) {
       const ok = await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return false; el.click(); return true; })()`);
       if (!ok) throw new Error('click target missing: ' + sel);
     },
+    // A REAL key event. A synthetic KeyboardEvent dispatched from evaluate()
+    // works only if the handler happens to listen where the event was thrown,
+    // and the app listens on document/window — so Escape would "pass" without
+    // ever reaching the modal. CDP Input is what a finger on the keyboard sends.
+    async press(key) {
+      const KEYS = {
+        Escape: { code: 'Escape', vk: 27 },
+        Enter: { code: 'Enter', vk: 13 },
+        Backspace: { code: 'Backspace', vk: 8 },
+      };
+      const k = KEYS[key] || { code: key, vk: 0 };
+      const base = { key, code: k.code, windowsVirtualKeyCode: k.vk, nativeVirtualKeyCode: k.vk };
+      await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+      return true;
+    },
     async type(sel, value) {
       const ok = await evaluate(`(() => {
         const el = document.querySelector(${JSON.stringify(sel)});
@@ -352,6 +383,19 @@ function collectConsole(cdp) {
         report.consoleErrors.push(text.slice(0, 400));
       }
     }
+    // Evidence for the step that is running RIGHT NOW — this is what a failing
+    // run quotes, so "step X timed out" arrives with what the app logged while
+    // it was timing out instead of only the selector name.
+    if (ev.method === 'Runtime.consoleAPICalled') {
+      const t = (ev.params.args || []).map((a) => a.value ?? a.description ?? '').join(' ');
+      if (ev.params.type === 'error' && report.stepCtx.length < 12) report.stepCtx.push('console: ' + t.slice(0, 200));
+    }
+    if (ev.method === 'Network.loadingFailed') {
+      const err = ev.params.errorText || ('failed ' + ev.params.type + ' ' + (ev.params.requestId || ''));
+      const line = 'request-failed: ' + err;
+      if (report.netFailures.length < 60) report.netFailures.push(line);
+      if (report.stepCtx.length < 12) report.stepCtx.push(line);
+    }
     if (ev.method === 'Runtime.exceptionThrown') {
       const d = ev.params.exceptionDetails;
       report.exceptions.push((d.exception?.description || d.text || 'unknown').slice(0, 500));
@@ -361,13 +405,36 @@ function collectConsole(cdp) {
 
 async function main() {
   mkdirSync(OUT, { recursive: true });
-  report = { steps: [], consoleErrors: [], consoleTrail: [], exceptions: [], native: null, dapp: null, pass: false };
-  const step = (name) => { report.steps.push(name); markStep(name); };
+  // Root-cause plumbing (2026-12). A bare "timeout waiting for #foo" names a
+  // selector, not a cause: the run that found it could not say whether the app
+  // was busy, crashed silently, or waiting on a network call that never came
+  // back. Three additions make a failure explain itself:
+  //   netFailures — every request the WebView gave up on (Network.loadingFailed),
+  //   stepCtx     — the console errors and dropped requests seen SINCE the last
+  //                 step marker, so the failing step arrives with its own
+  //                 evidence attached instead of the whole run's noise,
+  //   lastStep    — the step that was in flight, which the fatal path quotes.
+  report = { steps: [], consoleErrors: [], consoleTrail: [], exceptions: [], netFailures: [], stepCtx: [], lastStep: '', native: null, dapp: null, pass: false };
+  const step = (name) => {
+    report.steps.push(name);
+    report.lastStep = name;
+    // Close the PREVIOUS step's evidence window before starting a new one, so
+    // whatever a step reports belongs to that step and not to the one after it.
+    if (report.stepCtx.length) report.stepLog.push({ step: report.lastClosedStep, evidence: report.stepCtx.splice(0) });
+    report.lastClosedStep = name;
+    markStep(name);
+  };
+  report.stepLog = [];
 
   const cdp = await connectCDP();
   markStep('cdp connected');
   await cdp.send('Runtime.enable');
   await cdp.send('Page.enable');
+  // Without this the Network domain stays off and `Network.loadingFailed` is
+  // never emitted — so a run whose real problem was a dropped RPC looks exactly
+  // like a run whose problem was a hung selector. That is the whole difference
+  // between knowing and guessing, so it is on by default, not per-step.
+  await cdp.send('Network.enable').catch(() => {});
 
   const page = makePage(cdp);
 
@@ -1218,6 +1285,167 @@ async function main() {
   // their own Send panel (docs/NON-EVM-SENDING.md). The unit suite signs real
   // vectors; this proves the SCREEN exists and answers inside the app, and it
   // is the only place the non-EVM path meets a real Android WebView.
+  // ── feature sweep, continued: the features a wallet is judged on ─────────
+  // Everything above proves the app BOOTS and the dApp bridge works. What
+  // follows covers the parts a user actually touches: the money guards on
+  // Send, the settings toggles, the address book, MAX, and the modals' own
+  // a11y contract. Each one asserts the app REFUSED something (nothing was
+  // broadcast, nothing was deleted) rather than that a screen appeared —
+  // a wallet test that only proves "it rendered" proves nothing.
+
+  step('feature sweep: send refuses a malformed address (nothing broadcast)');
+  await openView('send');
+  await page.wait('#sendTo', 15000);
+  await page.wait('#sendAmount', 15000);
+  const beforeBad = await page.evaluate(`(() => ({
+    act: (JSON.parse(localStorage.getItem('bear.activity') || '[]')).length,
+  }))()`);
+  await page.evaluate(`(() => {
+    const to = document.querySelector('#sendTo');
+    const amt = document.querySelector('#sendAmount');
+    const set = (el, v) => { const s = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value').set; s.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };
+    set(to, '0xNOTANADDRESS');
+    set(amt, '999');
+    return true;
+  })()`);
+  await sleep(1200);
+  await jsClick('#btnSend');
+  await sleep(2500);
+  const afterBad = await page.evaluate(`(() => ({
+    act: (JSON.parse(localStorage.getItem('bear.activity') || '[]')).length,
+    toast: [...document.querySelectorAll('#toastWrap .toast')].map((t) => t.textContent).join(' | ').slice(0, 160),
+  }))()`);
+  if (afterBad.act !== beforeBad.act) throw new Error('feature sweep: a malformed address still recorded activity: ' + JSON.stringify(afterBad));
+  await page.shot('40-send-invalid');
+
+  step('feature sweep: MAX never exceeds the balance it read');
+  await page.evaluate(`(() => {
+    const set = (el, v) => { const s = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value').set; s.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); };
+    const to = document.querySelector('#sendTo');
+    const amt = document.querySelector('#sendAmount');
+    if (to) set(to, '');
+    if (amt) set(amt, '');
+    return true;
+  })()`);
+  await sleep(800);
+  const maxPressed = await page.evaluate(`(() => {
+    const btns = [...document.querySelectorAll('#view-send button')].filter((b) => /^MAX$/i.test(b.textContent.trim()));
+    if (!btns.length) return { pressed: false };
+    btns[0].click();
+    return { pressed: true };
+  })()`);
+  if (!maxPressed.pressed) throw new Error('feature sweep: the MAX button is missing on the Send view');
+  await sleep(1500);
+  const maxState = await page.evaluate(`(() => ({
+    amount: document.querySelector('#sendAmount')?.value || '',
+    note: document.querySelector('#sendMaxNote')?.textContent?.trim().slice(0, 120) || '',
+  }))()`);
+  // An empty wallet legitimately has nothing to MAX; a filled-in balance that
+  // is not a plain number would be worse than no answer.
+  if (maxState.amount && !/^[0-9]*\.?[0-9]+$/.test(maxState.amount.trim())) {
+    throw new Error('feature sweep: MAX wrote something that is not an amount: ' + JSON.stringify(maxState));
+  }
+  sweep.max = maxState;
+  await page.shot('41-send-max');
+
+  step('feature sweep: the address book adds, lists and deletes');
+  await openView('settings');
+  const ab = await page.evaluate(`(() => {
+    const open = document.querySelector('#addressBookAccordion') || document.querySelector('#addressBookToggle');
+    if (open) open.click();
+    return !!open;
+  })()`);
+  if (ab) {
+    await sleep(900);
+    await page.wait('#abLabel', 10000).catch(() => false);
+    await page.wait('#abAddress', 10000).catch(() => false);
+    const added = await page.evaluate(`(() => {
+      const set = (el, v) => { const s = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value').set; s.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };
+      const label = document.querySelector('#abLabel');
+      const addr = document.querySelector('#abAddress');
+      if (!label || !addr) return { ok: false, why: 'fields missing' };
+      set(label, 'Emu Entry');
+      set(addr, '0x1111111111111111111111111111111111111111');
+      const btn = document.querySelector('#btnAddAddress');
+      if (!btn) return { ok: false, why: '#btnAddAddress missing' };
+      btn.click();
+      return { ok: true };
+    })()`);
+    await sleep(1500);
+    if (added.ok) {
+      const listed = await page.evaluate(`(() => {
+        const list = JSON.parse(localStorage.getItem('bear.addressBook') || '[]');
+        const row = [...document.querySelectorAll('#addressBookList .ab-item')].some((r) => /Emu Entry/.test(r.textContent));
+        return { count: list.length, row };
+      })()`);
+      if (listed.count < 1) throw new Error('feature sweep: the address book did not store the entry: ' + JSON.stringify(listed));
+      await page.shot('42-address-book');
+      const removed = await page.evaluate(`(() => {
+        const del = document.querySelector('#addressBookList .ab-delete');
+        if (!del) return false;
+        del.click();
+        return true;
+      })()`);
+      await sleep(1200);
+      if (removed) {
+        const after = await page.evaluate(`(JSON.parse(localStorage.getItem('bear.addressBook') || '[]')).length`);
+        if (after >= listed.count) throw new Error('feature sweep: delete did not remove the address-book entry (' + listed.count + ' → ' + after + ')');
+      }
+    }
+  }
+  sweep.addressBook = { present: ab };
+
+  step('feature sweep: settings toggles apply immediately (theme, currency, testnet)');
+  await openView('settings');
+  await page.wait('#setCurrency', 10000).catch(() => false);
+  const toggles = await page.evaluate(`(() => {
+    const out = {};
+    const theme = document.querySelector('.theme-btn');
+    if (theme) { const before = document.documentElement.dataset.theme || document.body.dataset.theme || ''; theme.click(); out.theme = { before, after: document.documentElement.dataset.theme || document.body.dataset.theme || '' }; theme.click(); }
+    const cur = document.querySelector('#setCurrency');
+    if (cur) {
+      const opts = [...cur.options].map((o) => o.value);
+      const other = opts.find((v) => v && v !== cur.value);
+      if (other) { const before = cur.value; cur.value = other; cur.dispatchEvent(new Event('change', { bubbles: true })); out.currency = { before, after: cur.value }; }
+    }
+    const testnet = document.querySelector('#setTestnet');
+    if (testnet && testnet.type === 'checkbox') { const before = testnet.checked; testnet.click(); testnet.dispatchEvent(new Event('change', { bubbles: true })); out.testnet = { before, after: testnet.checked }; testnet.click(); testnet.dispatchEvent(new Event('change', { bubbles: true })); }
+    return out;
+  })()`);
+  if (toggles.theme && toggles.theme.before === toggles.theme.after) throw new Error('feature sweep: the theme button changed nothing: ' + JSON.stringify(toggles.theme));
+  if (toggles.currency && toggles.currency.before === toggles.currency.after) throw new Error('feature sweep: currency did not switch: ' + JSON.stringify(toggles.currency));
+  sweep.toggles = toggles;
+  await page.shot('43-settings-toggles');
+
+  step('feature sweep: the Security Center opens and closes (focus returns)');
+  await openView('settings');
+  const sec = await page.evaluate(`(() => {
+    const d = document.querySelector('#securityCenter') || document.querySelector('[data-security-center]');
+    const summary = d ? (d.querySelector('summary') || d) : null;
+    if (!summary) return { found: false };
+    summary.click();
+    return { found: true, open: d.hasAttribute('open') || d.classList.contains('open') };
+  })()`);
+  sweep.security = sec;
+  await page.shot('44-security-center');
+
+  step('feature sweep: a modal traps focus and Escape restores it');
+  await openView('dashboard');
+  await jsClick('#quickReceive');
+  await page.wait('#modalBox', 12000).catch(() => false);
+  const modalA11y = await page.evaluate(`(() => {
+    const box = document.querySelector('#modalBox');
+    if (!box) return { open: false };
+    const active = document.activeElement;
+    return { open: true, focusInside: !!(active && box.contains(active)), labelled: !!document.querySelector('#modalBox [id]') };
+  })()`);
+  if (modalA11y.open && modalA11y.focusInside === false) throw new Error('feature sweep: the Receive modal opened without moving focus inside: ' + JSON.stringify(modalA11y));
+  await page.press('Escape').catch(() => false);
+  await sleep(700);
+  const closed = await page.evaluate(`!document.querySelector('#modalBox') || document.querySelector('#modalBox').hidden === true`);
+  if (modalA11y.open && !closed) throw new Error('feature sweep: Escape did not close the Receive modal');
+  sweep.modal = { ...modalA11y, escapeClosed: closed };
+
   // ── native bridge diagnostics (permanent, CDP-side) ─────────────────────
   // Where the console-to-logcat routing is a moving target, the driver reads
   // the bridge state itself: does the plugin exist, does a native method

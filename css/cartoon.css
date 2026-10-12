@@ -923,6 +923,22 @@ select.input option, select.select option, .input option {
   height: 100%;
 }
 .asset-info { flex: 1; }
+/* Network-picker rows only (found by LOOKING at the emulator screenshot
+   34-network-picker.png, 2026-12): "BNB Smart Chain" wrapped to THREE lines in a
+   282px card — the card grew to twice its neighbours' height and pushed
+   "Chain 56 · BNB" onto a second line, so the list stopped reading as a list.
+   .asset-info is a flex item, and a flex item's default min-width:auto refuses to
+   shrink below its content, which is why the name wrapped instead of eliding.
+   Scoped to [data-net] rows on purpose: the dashboard asset list shares these
+   classes, and there a long token name SHOULD wrap. The full chain name stays in
+   the row's accessible name, and the trailing badge keeps its slot. */
+.asset-row[data-net] .asset-info { min-width: 0; }
+.asset-row[data-net] .asset-name,
+.asset-row[data-net] .asset-symbol {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .asset-name { font-weight: 700; }
 .asset-symbol { font-size: 0.8rem; color: var(--ink-soft); }
 .asset-balance { text-align: right; }
@@ -1022,6 +1038,17 @@ select.input option, select.select option, .input option {
      sits over the mobile bottom nav (both are bottom-anchored) and swallows
      taps — the user could not press Settings/More while any toast showed. */
   pointer-events: none;
+}
+/* On a phone the toast used to sit ON the bottom nav: pointer-events:none meant
+   taps passed through, but the card still covered two of the five labels
+   (emulator shot 32-send-guard.png — "Activity" and "Swap" hidden behind it).
+   Same clearance the scroll-top FAB already uses: nav height + inset + a gap. */
+@media (max-width: 768px) {
+  #toast-wrap {
+    bottom: calc(var(--mobile-nav-h, 64px) + 16px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    right: 12px;
+  }
 }
 .toast {
   background: var(--white);
@@ -2021,9 +2048,23 @@ select.input option, select.select option, .input option {
   font-weight: 600;
   user-select: none;
 }
+/* A seed word must never break across lines. `overflow-wrap: anywhere` did
+   exactly that on a narrow phone — emulator shot 02-seed-phrase.png showed
+   "tornado" as "tornad" / "o", "express" as "expres" / "s", "assault" and
+   "endless" likewise — and the same screen tells the user to WRITE THE WORDS
+   DOWN. A wrapped word is a word somebody writes down wrong, and a wrong seed
+   is a wallet that never comes back. So: one line, no break, and if a word is
+   genuinely too wide for its cell it scrolls rather than mutating itself. */
 .seed-word > span {
   min-width: 0;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  /* Ellipsis, not a scrollbar. A cell that scrolls silently shows a chopped word
+     with no sign it was chopped — the exact failure `overflow-wrap: anywhere`
+     caused. An ellipsis is an honest "there is more here"; nothing in a seed
+     phrase is ever truncated in the DATA (this is display only, the copy button
+     carries the full 12 words). */
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 600;
 }
 

@@ -2438,11 +2438,9 @@ function showTokenActions(el) {
   $('#tokenHistory').onclick = () => { closeModal(); switchView('activity'); };
 }
 
-// Derive the non-EVM receive addresses for the active account. These come from
-// the SAME seed as the EVM address (see js/coin-trees.js), so one recovery
-// phrase restores every chain. Chains whose derivation is not yet proven against
-// published vectors (Solana, XRP) come back with `receive: null` and an
-// `unsupported` reason — shown as such, never a fabricated address.
+// Receive sheet: ONE address, the active network's, and the QR for it. The
+// sheet used to derive non-EVM addresses from the same seed here; those chains
+// were removed (2026-12), so this is the EVM address and nothing else.
 function showReceiveModal(address, symbol) {
   const net = getNetworkById(get('networkId'));
   // ONE receive per network, and the ACTIVE network decides which chain this

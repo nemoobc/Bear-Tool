@@ -34,6 +34,10 @@ const driverRaw = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'
 // explanation teaches people to delete the explanation.
 const driverSrc = driverRaw.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 const workflow = yaml.load(readFileSync(path.join(here, '..', '.github', 'workflows', 'emulator.yml'), 'utf8'));
+// The raw text as well: the screenrecord lines live inside a YAML block
+// scalar that the parser hands back as one string, so the guards on them can
+// only be read from the source.
+const workflowRaw = readFileSync(path.join(here, '..', '.github', 'workflows', 'emulator.yml'), 'utf8');
 
 test('fatal paths flush before exit — console.error + process.exit lost the last run\'s message', () => {
   // The exact pair that swallowed the FATAL line must not come back.
@@ -43,7 +47,9 @@ test('fatal paths flush before exit — console.error + process.exit lost the la
   // report written synchronously first.
   assert.match(driverSrc, /process\.stderr\.write\('\[e2e\] FATAL[\s\S]{0,120}\(\) => process\.exit\(1\)/,
     'die() harus exit dari callback flush stderr, bukan memotongnya');
-  assert.match(driverSrc, /report\.fatal = msg;[\s\S]{0,120}writeFileSync\(path\.join\(OUT, 'emulator-report\.json'\)/,
+  // The fatal text may carry a diagnosis (step in flight + evidence + dropped
+  // requests); what matters is that `fatal` is ASSIGNED before the report write.
+  assert.match(driverSrc, /report\.fatal = msg[^;]*;[\s\S]{0,120}writeFileSync\(path\.join\(OUT, 'emulator-report\.json'\)/,
     'report wajib ditulis sinkron berisi `fatal` SEBELUM exit — file tidak punya race flush');
 });
 
@@ -447,4 +453,44 @@ test('the chainChanged verdict reads the LAST event, not the one from connect', 
     'ambil kejadian TERAKHIR');
   assert.match(driverSrc, /chgLast === '0x89' \|\| Date\.now\(\) > chgDeadline/,
     'tunggu sampai 0x89 (atau deadline) sebelum menuduh');
+});
+
+// A failure that only says "timeout waiting for #x" points at a selector, not a
+// cause. Run 38260123665 produced exactly that and cost a full build+emulator
+// cycle to turn into "the Receive sheet rendered nothing". The driver now carries
+// three things so a failure explains itself: Network.enable (so loadingFailed is
+// ever emitted), the request failures themselves, and the console/network
+// evidence gathered since the last step marker.
+test('a fatal failure explains itself: step in flight, evidence, dropped requests', () => {
+  // Network domain must be on, or the dropped-request half of the story is absent.
+  assert.match(driverSrc, /cdp\.send\('Network\.enable'\)/,
+    'Network.enable wajib dipanggil — tanpa itu Network.loadingFailed tak pernah terkirim');
+  assert.match(driverSrc, /Network\.loadingFailed/,
+    'driver harus menangkap request yang gagal');
+  assert.match(driverSrc, /report\.netFailures/,
+    'request gagal harus masuk report, bukan dibuang');
+  assert.match(driverSrc, /report\.lastStep/,
+    'driver harus tahu langkah mana yang sedang jalan saat gagal');
+  // The evidence window is closed at the NEXT step marker, so a failing step
+  // arrives with its own evidence rather than the whole run's noise.
+  assert.match(driverSrc, /report\.stepLog\.push/,
+    'bukti per langkah harus ditutup saat langkah berikutnya dimulai');
+  // And die() quotes it.
+  assert.match(driverSrc, /step in flight:/,
+    'pesan kegagalan harus menyebut langkah yang sedang jalan');
+  assert.match(driverSrc, /dropped requests/,
+    'pesan kegagalan harus menyebut request yang gagal');
+  // Finally: the workflow must ship the recording, or a run that fails on a
+  // gesture can only be read from stills.
+  assert.match(workflowRaw, /screenrecord/,
+    'emulator.yml harus merekam layar — video satu-satunya bukti gerakan');
+  assert.match(workflowRaw, /bear-e2e\.mp4/,
+    'rekaman harus ikut terunggah sebagai artifact');
+  // Every adb line in that script is its own `sh -c`, so a line that can fail
+  // has to guard itself — an unguarded screenrecord would kill the rest.
+  const wfCode = workflowRaw.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+  for (const line of wfCode.split('\n').filter((l) => /screenrecord|ad[bp] .*bear-e2e/.test(l))) {
+    assert.match(line, /\|\| echo/,
+      `baris rekaman tanpa guard: ${line.trim()} — satu baris gagal mematikan sisa skrip`);
+  }
 });

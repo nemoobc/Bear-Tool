@@ -119,7 +119,34 @@ export function initPullRefresh(opts = {}) {
   // `overflow-x: hidden` on html,body severs the viewport overflow propagation,
   // so body becomes the scroller and window.scrollY stays 0 forever (proven in
   // the live probe 2026-10-09: de.scrollTop=120 reads back 0, body=140 reads 140).
-  const atTop = () => {
+  // "At the top" has to mean: this GESTURE is not inside something that can
+  // scroll. Reading only window/body scrollTop (the old version) says a screen
+  // is "at the top" even when the finger is deep inside a scrolled pane —
+  // .discord-msgs is a 320px overflow-y:auto list, and pulling down there
+  // scrolled the message list back to its top AND fired the refresh: scroll and
+  // refresh wearing one gesture. Walk up from the touch target to the nearest
+  // scrolling ancestor and honour ITS position; only fall through to the page
+  // when the touch is on the page itself.
+  const scrolledAncestor = (el) => {
+    let n = el;
+    while (n && n !== doc.body && n !== doc.documentElement) {
+      const st = n.style || {};
+      // win.getComputedStyle, not the global: this module is unit-tested against
+      // a fake window that provides exactly this, and a bare global would throw
+      // ReferenceError inside a touch handler — the one place a throw is invisible.
+      const cs = (win.getComputedStyle && win.getComputedStyle(n)) || null;
+      const oy = st.overflowY || (cs && cs.overflowY) || '';
+      const canScroll = /auto|scroll|overlay/.test(oy) && (n.scrollHeight > n.clientHeight + 1);
+      if (canScroll && (n.scrollTop || 0) > 0) return n;
+      n = n.parentElement || n.parentNode;
+    }
+    return null;
+  };
+
+  const atTop = (target) => {
+    // A scrolled pane under the finger wins over everything: this is a scroll
+    // gesture, not a pull.
+    if (target && scrolledAncestor(target)) return false;
     const winY = win.scrollY || 0;
     const sc = doc.scrollingElement || doc.documentElement || {};
     const deY = sc.scrollTop || 0;
@@ -136,7 +163,7 @@ export function initPullRefresh(opts = {}) {
     if (target && typeof target.closest === 'function'
       && target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
     if (doc.querySelector && doc.querySelector('.modal.open')) return;
-    if (!atTop()) return; // mid-scroll: page scroll, not PTR
+    if (!atTop(target)) return; // mid-scroll, or inside a pane that scrolls, not PTR
     startY = t0.clientY;
     startX = t0.clientX;
     pxNow = 0;

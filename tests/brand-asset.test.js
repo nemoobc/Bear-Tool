@@ -110,3 +110,29 @@ test('every identity mark is given an explicit box, not left to the font', () =>
   assert.ok(!/\.pill-bear\s*[{,]/.test(noComments), '.pill-bear rule must be gone with its markup');
   assert.ok(!/\.asset-bear\s*[{,]/.test(noComments), '.asset-bear rule must be gone with its markup');
 });
+
+// Visual regression found by LOOKING at the emulator screenshot
+// 34-network-picker.png (2026-12): "BNB Smart Chain" wrapped onto THREE lines in
+// the 282px network card, so that card was twice the height of its neighbours and
+// "Chain 56 · BNB" spilled onto a second line. No unit test could see it — it is
+// a layout fact, and nothing measured the box.
+//
+// The cause is flexbox, not the markup: .asset-info is a flex item and a flex
+// item's min-width:auto refuses to shrink below its content, so the name wrapped
+// instead of eliding. The fix is scoped to [data-net] rows — the dashboard asset
+// list shares these classes and SHOULD let a long token name wrap.
+test('network rows elide a long chain name instead of growing the card', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
+
+  assert.match(css, /\.asset-row\[data-net\]\s+\.asset-info\s*\{[^}]*min-width:\s*0/,
+    'the network row info box must be allowed to shrink (min-width:0), or the name wraps');
+  assert.match(css, /\.asset-row\[data-net\]\s+\.asset-name[^}]*text-overflow:\s*ellipsis/,
+    'the chain name must elide at one line');
+  assert.match(css, /\.asset-row\[data-net\][^{]*\.asset-name[^{]*\{[^}]*white-space:\s*nowrap/,
+    'eliding needs white-space:nowrap');
+  // Scoped, not global: .asset-name is shared with the dashboard asset list.
+  const bare = /^\s*\.asset-name\s*\{[^}]*(text-overflow|white-space)\s*:/m;
+  assert.doesNotMatch(css, bare,
+    'do not make every asset name elide — the dashboard list should still wrap long token names');
+});
