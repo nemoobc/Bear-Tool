@@ -58,6 +58,16 @@ const MARKS = {
   btc:    ['#F7931A', '#FFB457', '₿',  14],
   sol:    ['#14F195', '#9945FF', '◎',  14],
   xrp:    ['#233A55', '#3D5A8C', '✕',  15],
+  // Add-Network presets with a native ticker of their own (2026-10-12). The
+  // existing gate only walked NETWORKS, so these three rode the fallback peach
+  // disc in the picker — user report: "di list network beberapa ga ada logo
+  // nya". Colours are not invented: they are the `color` each preset already
+  // carries in CHAIN_PRESETS (js/network.js), which is where this app's idea of
+  // a chain's brand already lived. Presets whose symbol is ETH keep the Ethereum
+  // mark on purpose — that IS their settlement asset.
+  glmr:   ['#53CBC8', '#8FE3E1', 'G',  13],   // Moonbeam
+  cro:    ['#002D74', '#1B5AA8', 'C',  13],   // Cronos
+  metis:  ['#00DACC', '#5FF0E4', 'M',  13],   // Metis Andromeda
   // Bundled popular tokens (js/network.js everyTokens). A contract token with
   // NO cached image used to wear the flat peach disc — every non-bundled
   // ticker on the dashboard looked like a placeholder (user report

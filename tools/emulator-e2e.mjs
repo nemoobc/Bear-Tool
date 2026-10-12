@@ -1225,14 +1225,19 @@ async function main() {
     throw new Error('feature sweep: the non-EVM network row could not be clicked');
   }
   await sleep(2500);
-  if (!(await page.wait('#nonEvmReceiveBtn', 20000).then(() => true).catch(() => false))) {
-    throw new Error('feature sweep: the non-EVM home never offered its Receive button');
+  // The non-EVM home no longer paints its own Send/Receive pair — that was a
+  // second door to the two actions already in the quick-action bar above (four
+  // buttons, two jobs). What this step proves is unchanged: those quick actions
+  // exist on the non-EVM home. Both are static dashboard markup, so waiting on one
+  // is a real check that the home finished rendering for the active chain.
+  if (!(await page.wait('#quickReceive', 20000).then(() => true).catch(() => false))) {
+    throw new Error('feature sweep: the non-EVM home never offered the Receive action');
   }
   sweep.nonEvm = { home: true };
   await page.shot('35-nonevm-home');
 
   step('feature sweep: non-EVM receive shows that chain address + QR');
-  await jsClick('#nonEvmReceiveBtn');
+  await jsClick('#quickReceive');
   await page.wait('#modalBox > .receive-qr svg', 15000);
   await sleep(600);
   await page.shot('36-nonevm-receive');
@@ -1252,7 +1257,7 @@ async function main() {
 
   step('feature sweep: non-EVM send panel renders and prices (nothing sent)');
   await openView('dashboard');
-  if (!(await jsClick('#nonEvmSendBtn2'))) throw new Error('feature sweep: the non-EVM Send button is missing');
+  if (!(await jsClick('.quick-action-btn[data-view="send"]'))) throw new Error('feature sweep: the Send action is missing');
   await page.wait('#nonEvmTo', 15000);
   await page.wait('#nonEvmAmount', 15000);
   await page.type('#nonEvmTo', sweep.nonEvm.address);

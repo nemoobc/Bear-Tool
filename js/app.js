@@ -2214,12 +2214,9 @@ function renderNonEvmHome(net) {
       </div>
       <span class="badge badge-mainnet">${escapeHtml(net.symbol)}</span>
     </div>
-    <button class="btn btn-block mt-16" id="nonEvmSendBtn2">Send ${escapeHtml(net.symbol)}</button>
-    <button class="btn btn-primary btn-block mt-8" id="nonEvmReceiveBtn">Receive ${escapeHtml(net.symbol)}</button>
-    <p class="small dim mt-16" role="note">${note}</p>
+    <p class="small dim mt-16" role="note">Use <b>Send</b> and <b>Receive</b> above — they already
+    speak ${escapeHtml(net.symbol)} on this network. ${note}</p>
   `;
-  $('#nonEvmReceiveBtn')?.addEventListener('click', () => showReceiveModal(get('address'), net.symbol));
-  $('#nonEvmSendBtn2')?.addEventListener('click', () => switchView('send'));
 }
 
 // Renders the home screen for the ACTIVE network. A non-EVM network

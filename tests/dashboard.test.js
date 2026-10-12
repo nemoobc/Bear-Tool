@@ -235,11 +235,14 @@ test('dashboard: the non-EVM home states what works and clears the USD hero', ()
   // The USD total belongs to an EVM portfolio. Leaving the previous one on
   // screen under "Bitcoin" is a lie with a dollar sign.
   assert.match(body, /\$\('#totalBalance'\)\.textContent = '—';/, 'hero total dikosongkan, bukan angka lama');
-  assert.match(body, /Receive \$\{escapeHtml\(net\.symbol\)\}/, 'ada tombol Receive untuk chain itu');
+  // The per-chain Receive button was removed (2026-10-12): it duplicated the
+  // quick-action Receive that sits above on every network. What must hold now is
+  // that the panel sends the user to it, and that Receive still opens the sheet
+  // for THIS chain's address.
   assert.match(body, /Receiving and sending work here/, 'apa yang bisa dilakukan dinyatakan');
   assert.match(body, /Swapping and bridging need an EVM network/, 'batasnya dinyatakan');
-  assert.match(body, /id="nonEvmReceiveBtn"/, 'tombolnya bisa diklik');
-  assert.match(body, /showReceiveModal\(get\('address'\), net\.symbol\)/, 'membuka sheet chain itu');
+  assert.match(body, /Use <b>Send<\/b> and <b>Receive<\/b> above/, 'panel mengarahkan ke quick-action');
+  assert.doesNotMatch(body, /id="nonEvmReceiveBtn"/, 'tombol Receive duplikat tidak boleh kembali');
   // No fabricated number: no price lookup, no balance call, no token scan.
   assert.doesNotMatch(body, /getProvider|balanceOf|fetchAllPrices|renderAssets\(/,
     'tidak ada panggilan EVM di layar non-EVM');

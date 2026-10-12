@@ -65,10 +65,31 @@ test('refreshView routes Send to the non-EVM panel for a non-EVM network', () =>
   assert.match(body, /loadSendTokens\(\)/);
 });
 
-test('the non-EVM home offers Send, and it opens the send view', () => {
+test('the non-EVM home does not add a second Send/Receive pair', () => {
+  // The quick-action bar already offers Send and Receive, and they speak the
+  // active chain. renderNonEvmHome used to paint "Send BTC" and "Receive BTC"
+  // right below them, so the home screen showed FOUR buttons for TWO actions —
+  // and a user could not tell which pair was the real one. The panel now says
+  // to use the ones above instead.
   const home = app.slice(app.indexOf('function renderNonEvmHome('), app.indexOf('async function loadDashboard'));
-  assert.match(home, /id="nonEvmSendBtn2"/);
-  assert.match(home, /\$\('#nonEvmSendBtn2'\)\?\.addEventListener\('click', \(\) => switchView\('send'\)\)/);
+  assert.doesNotMatch(home, /nonEvmSendBtn2/, 'tombol Send duplikat dihapus dari panel non-EVM');
+  assert.doesNotMatch(home, /nonEvmReceiveBtn/, 'tombol Receive duplikat dihapus dari panel non-EVM');
+  assert.doesNotMatch(home, /<button[^>]*>\s*Send\s*\$\{escapeHtml\(net\.symbol\)/,
+    'tidak boleh ada tombol Send berlabel simbol jaringan di panel ini');
+  // and the note must actually point at them, or the panel just looks empty
+  assert.match(home, /Use <b>Send<\/b> and <b>Receive<\/b> above/,
+    'panel harus mengarahkan user ke tombol yang sudah ada');
+});
+
+test('Send and Receive on the non-EVM home are the quick actions, wired once', () => {
+  // The pair the note points at has to be real and bound: Send goes through
+  // data-view="send", Receive through #quickReceive. Both are in the static
+  // dashboard, so they exist on every network and there is nothing to paint.
+  const dash = readFileSync(new URL('../src/views/dashboard.jsx', import.meta.url), 'utf8');
+  assert.match(dash, /data-view="send"/, 'quick-action Send hilang dari dashboard');
+  assert.match(dash, /id="quickReceive"/, 'quick-action Receive hilang dari dashboard');
+  assert.match(app, /\$\('#quickReceive'\)\?\.addEventListener\('click'/,
+    'quickReceive tak ter-bound — panel menunjuk ke tombol yang tak jalan');
 });
 
 // ── wiring: confirm before signing, key from the active account ─────────
