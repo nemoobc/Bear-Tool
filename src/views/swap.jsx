@@ -12,7 +12,8 @@ export default function SwapView() {
                      the amount controls. Id kept — E2E contract. */}
                 <div className="swap-field-head">
                   <label htmlFor="swapFrom" data-i18n="swap.from">From</label>
-                  <span className="swap-balance" id="swapFromBalance">Balance: —</span>
+                  <span className="swap-balance"><span data-i18n="swap.balance">Balance:</span>
+                    <span id="swapFromBalance">—</span></span>
                 </div>
                 <div className="swap-input-row">
                                     <div className="token-picker" data-picker="swapFrom">
@@ -65,7 +66,8 @@ export default function SwapView() {
               <div className="swap-field">
                 <div className="swap-field-head">
                   <label htmlFor="swapTo" data-i18n="swap.to">To</label>
-                  <span className="swap-balance" id="swapToBalance">Balance: —</span>
+                  <span className="swap-balance"><span data-i18n="swap.balance">Balance:</span>
+                  <span id="swapToBalance">—</span></span>
                 </div>
                 <div className="swap-input-row">
                                     <div className="token-picker" data-picker="swapTo">
@@ -102,7 +104,7 @@ export default function SwapView() {
               </div>
               <div id="swapQuote" className="quote-box hidden"></div>
               <div className="swap-route hidden" id="swapRoute">
-                <div className="route-label">Route:</div>
+                <div className="route-label" data-i18n="swap.route">Route:</div>
                 <div className="route-info" id="routeInfo"></div>
               </div>
               <div className="swap-impact hidden" id="swapImpact"></div>

@@ -77,7 +77,7 @@ export default function SettingsView() {
                 <div className="field-row">
                   <div>
                     <label htmlFor="setTestnet" data-i18n="set.testnet">Testnet mode</label>
-                    <p className="small dim" data-i18n="set.testnet.hint">Show test networks in the network list. Hiding them while you are on one moves you to Ethereum first.</p>
+                    <p className="small dim" data-hint="testnet" data-i18n="set.testnet.hint">Show test networks in the network list. Hiding them while you are on one moves you to Ethereum first.</p>
                   </div>
                   {/* The whole row is the label, so the hit area is the row and
                        not the 26px switch alone. */}
@@ -121,10 +121,10 @@ export default function SettingsView() {
                  the method and for the two detection approaches that were
                  measured and discarded. */}
             <div className="set-group">
-              <h4 className="set-group-h">EIP-7702 support</h4>
+              <h4 className="set-group-h" data-i18n="set.eip7702">EIP-7702 support</h4>
               <div className="field">
-                <p className="small dim">Ask every network we ship whether it accepts EIP-7702 set-code transactions, and show which RPC endpoint answered. Read-only: no signature, no broadcast, no cost.</p>
-                <button type="button" className="btn btn-primary btn-block" id="btn7702Check">Check all networks</button>
+                <p className="small dim" data-i18n="set.eip7702.hint">Ask every network we ship whether it accepts EIP-7702 set-code transactions, and show which RPC endpoint answered. Read-only: no signature, no broadcast, no cost.</p>
+                <button type="button" className="btn btn-primary btn-block" id="btn7702Check" data-i18n="set.eip7702.checkAll">Check all networks</button>
                 <div id="eip7702Results" className="mt-16"></div>
                 {/* This deletes the check's OUTPUT — the rows left on screen
                      after a sweep — not the debug log: the collector ring and
@@ -132,7 +132,7 @@ export default function SettingsView() {
                      hidden until the scan finishes — app.js reveals it in the
                      success path so a failed run never offers to "delete
                      output" that was never produced. */}
-                <button type="button" className="btn btn-ghost btn-block mt-8" id="btnClearEipResults" hidden>🗑 Delete results</button>
+                <button type="button" className="btn btn-ghost btn-block mt-8" id="btnClearEipResults" hidden data-i18n="set.eip7702.deleteResults">🗑 Delete results</button>
               </div>
             </div>
 

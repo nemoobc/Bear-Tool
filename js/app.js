@@ -1516,6 +1516,18 @@ function syncTestnetSwitches() {
   for (const el of [$('#setTestnet')]) {
     if (el && el.checked !== on) el.checked = on;
   }
+  // The hint describes what the switch does FROM WHERE IT IS, so a user who just
+  // switched test networks off is not still reading "show test networks in the
+  // network list". The dictionary used to hold both texts under one key, where the
+  // second silently overwrote the first and the OFF wording could never render.
+  const hint = document.querySelector('[data-hint="testnet"]');
+  if (hint) {
+    const key = on ? 'set.testnet.hint' : 'set.testnet.hint.off';
+    if (hint.dataset.i18n !== key) {
+      hint.dataset.i18n = key;
+      hint.textContent = t(key);
+    }
+  }
 }
 
 // The same-seed chains are ordinary rows in the network list (user 2026-10-11:
@@ -1672,19 +1684,31 @@ function netRow(n) {
   // chain a row is answers a different question than the one being asked. The
   // custom row had already given up its tag for exactly this reason (below); now
   // the built-in rows do too, and the header carries the type.
+  // The current row used to carry a "✓ Current" badge in the row's trailing slot,
+  // and it cost that row its own text. The emulator measured it: the row has about
+  // 144px for text, "BNB Smart Chain" needs 120 and the badge took 66, so the name
+  // elided and the subtitle "Chain 137 · POL" (88px) was cut to 54. A badge cannot
+  // share a line with either of those and fit.
+  //
+  // So the marker moved onto the logo, where it overlaps instead of displacing:
+  // it costs the text no width at all. The explanation it carried did not go away —
+  // it is the aria-label and the tooltip, which is where a screen reader needs it
+  // anyway, and the mint left border already says "this one" at a glance.
   const tail = n.custom
     ? `<button class="btn-icon net-remove" data-remove-net="${escapeHtml(n.id)}"
          aria-label="Remove ${escapeHtml(n.name)}" title="Remove this network">✕</button>`
-    : isCurrent
-      // The current row spends the slot answering the real question: why nothing
-      // happens when I tap this.
-      ? `<span class="badge">✓ Current</span>`
-      : '';
+    : '';
   // `has-tail` reserves the right edge for the badge / remove button, which sits
   // over the row rather than beside it. Rows without one keep the full width —
   // the class is set per row because the tail is per row.
   return `<div class="asset-row${tail ? ' has-tail' : ''}" data-net="${escapeHtml(n.id)}" ${active}>
-    <div class="net-logo">${getNetworkLogo(n.name, 32)}</div>
+    <div class="net-logo-wrap">
+      <div class="net-logo">${getNetworkLogo(n.name, 32)}</div>
+      ${isCurrent
+        ? `<span class="net-current-mark" role="img" aria-label="Current network — tapping it does nothing"
+             title="Current network — tapping it does nothing">\u2713</span>`
+        : ''}
+    </div>
     <div class="asset-info"><div class="asset-name">${escapeHtml(n.name)}</div>
       <div class="asset-symbol">Chain ${escapeHtml(String(n.chainId))} · ${escapeHtml(n.symbol)}</div></div>
     ${tail}

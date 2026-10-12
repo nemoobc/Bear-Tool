@@ -962,7 +962,30 @@ select.input option, select.select option, .input option {
   row-gap: 3px;
   align-items: center;
 }
-.asset-row[data-net] .net-logo { grid-area: logo; }
+
+/* The current network's marker sits on the logo rather than beside the text. As a
+   trailing badge it needed ~66px of a row that has ~144px for text, and the
+   emulator measured the cost: the chain name elided and "Chain 137 · POL" was cut
+   to 54px. Overlapping the logo costs the text nothing, and the sentence the badge
+   used to carry is now the aria-label and tooltip, where it is also read aloud. */
+.asset-row[data-net] .net-logo-wrap { position: relative; grid-area: logo; }
+.net-current-mark {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--mint);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+}
 .asset-row[data-net] .asset-info { display: contents; }
 .asset-row[data-net] .asset-name { grid-area: name; }
 .asset-row[data-net] .asset-symbol { grid-area: symbol; }

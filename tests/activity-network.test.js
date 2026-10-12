@@ -114,7 +114,16 @@ test('switcher: jaringan aktif ditandai non-destinasi dan kliknya di-guard sebel
   const nrBody = app.slice(nr, nr + 3600);
   assert.match(nrBody, /data-net-current="1"/, 'baris aktif membawa penanda data-net-current');
   assert.match(nrBody, /aria-disabled="true"/, 'baris aktif diberi aria-disabled');
-  assert.match(nrBody, /✓ Current/, 'baris aktif menjawab kenapa tap tak berbuat apa-apa');
+  // Matched against the MARKUP, not the prose. This assertion used to look for the
+  // literal "✓ Current"; when the badge became a marker over the logo, the string
+  // survived in the commit comment that explains the change, and the gate went on
+  // passing while the thing it names was gone — the exact failure a gate is
+  // supposed to prevent. It now requires the element and the sentence it carries
+  // for a screen reader, since that sentence is the whole reason the marker exists.
+  assert.match(nrBody, /class="net-current-mark"/,
+    'baris aktif harus menandai dirinya, bukan hanya diberi garis hijau');
+  assert.match(nrBody, /aria-label="Current network[^"]*"/,
+    'penanda harus menjelaskan kenapa tap tak berbuat apa-apa');
 
   // The type badge was removed from built-in rows, and this is the gate that keeps
   // it removed. It repeated the MAINNET / TESTNET badge sitting directly above the

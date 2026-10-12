@@ -357,7 +357,11 @@ test('Deployed Contracts: baris registry membawa tombol copy alamat penuh', () =
 //    Private Key (Drainner)"
 test('sponsor key field → wallet-only picker, no auto-detect (rescue + claim + revoke)', () => {
   const view = fs.readFileSync(new URL('../src/views/deploy.jsx', import.meta.url), 'utf8');
-  assert.equal((view.match(/<label htmlFor="\w+SponsorFrom">Sponsor wallet<\/label>/g) || []).length, 3,
+  // Attribute-tolerant on purpose: these labels now carry data-i18n, and a matcher
+  // that spelled the whole opening tag broke on the wiring rather than on the
+  // thing it is here to prove. The requirement is unchanged — a label whose htmlFor
+  // ends in SponsorFrom and whose text is "Sponsor wallet", in all three forms.
+  assert.equal((view.match(/<label\b[^>]*htmlFor="\w+SponsorFrom"[^>]*>Sponsor wallet<\/label>/g) || []).length, 3,
     'all three forms (rescue + claim + revoke) offer the picker');
   assert.doesNotMatch(view, /auto-detect/i,
     'the auto entry and label are gone — sponsor is picked, never assumed (2026-10-06)');

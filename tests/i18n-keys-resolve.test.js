@@ -62,3 +62,33 @@ test('no key uses a dot-prefixed or empty segment', () => {
     assert.ok(!/\.\./.test(k) && !k.startsWith('.') && !k.endsWith('.'), `malformed key: ${k}`);
   }
 });
+
+// A duplicate key is invisible to every other gate here: the tables still match,
+// every key still resolves, and the translation is still non-blank. One of them
+// simply stops existing. This file already carried two: `nav.nft` twice in
+// English, and `set.testnet.hint` twice in both languages — written as an OFF
+// wording and an ON wording for the same switch, which a plain object literal
+// cannot hold. The ON text won, so the OFF wording had never once been shown.
+test('neither language table defines a key twice', () => {
+  for (const [name, start, end] of [['en', '  en: {', '  id: {'], ['id', '  id: {', '\nexport function']]) {
+    const body = src.slice(src.indexOf(start), src.indexOf(end));
+    const keys = [...body.matchAll(/'([a-zA-Z0-9_.]+)':/g)].map((m) => m[1]);
+    const dupes = keys.filter((k, i) => keys.indexOf(k) !== i);
+    assert.deepEqual([...new Set(dupes)], [],
+      `${name} mendefinisikan kunci yang sama lebih dari sekali — satu diam-diam hilang`);
+  }
+});
+
+// The switch describes its own effect, so the sentence has to move with it.
+test('the testnet hint describes the state the switch is actually in', () => {
+  const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const fn = app.slice(app.indexOf('function syncTestnetSwitches'));
+  assert.match(fn.slice(0, 1200), /set\.testnet\.hint\.off/,
+    'hint harus punya dua wujud: sakelar nyala dan mati');
+  assert.match(fn.slice(0, 1200), /hint\.textContent = t\(key\)/,
+    'hint harus ditulis ulang dari kamus, bukan dari teks yang tertinggal');
+  // Both wordings must exist, in both languages, or the toggle shows a bare key.
+  for (const key of ['set.testnet.hint', 'set.testnet.hint.off']) {
+    assert.ok(src.includes(`'${key}':`), key + ' harus ada di kamus');
+  }
+});

@@ -14,7 +14,7 @@ export default function NftView() {
                 placeholder="Import collection contract (0x...)"
                 aria-label="NFT collection contract address"
                 autoComplete="off" spellCheck={false} />
-              <button id="btnNftImport" type="button" className="btn btn-sm btn-secondary">Import</button>
+              <button id="btnNftImport" type="button" className="btn btn-sm btn-secondary" data-i18n="nft.import">Import</button>
             </div>
 
             {/* A neutral loading state, and nothing more. It used to claim
@@ -25,8 +25,8 @@ export default function NftView() {
                  imported and never called. The outcome is nft.js's to state. */}
             <div id="nftList" className="nft-grid">
               <div className="nft-empty" role="status">
-                <div className="nft-empty-title">Loading your NFTs…</div>
-                <div className="nft-empty-hint">Reading the collection list for this wallet on the current network.</div>
+                <div className="nft-empty-title" data-i18n="nft.loading">Loading your NFTs…</div>
+                <div className="nft-empty-hint" data-i18n="nft.reading">Reading the collection list for this wallet on the current network.</div>
               </div>
             </div>
           </div>

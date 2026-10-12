@@ -9,7 +9,7 @@ export default function SendView() {
               <summary className="address-book-toggle"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Address Book</summary>
               <div className="address-book" id="addressBook">
                 <div className="address-book-list" id="addressBookList">
-                  <p className="small text-center">No saved addresses yet.</p>
+                  <p className="small text-center" data-i18n="send.addrEmpty">No saved addresses yet.</p>
                 </div>
                 <div className="address-book-add mt-8">
                   <input className="input" id="abLabel" placeholder="Label (e.g. My Safe)" />

@@ -259,8 +259,13 @@ export function loadSwapTokens() {
     // thousands, precision that shrinks as the number grows, a genuine zero as
     // 0.00, and dust reported as — instead of the old hand-rolled
     // toFixed(4) which printed a lying "0.0000" for 1 wei.
-    if (fb) fb.textContent = `Balance: ${ft ? fmtAmount(ft.balance, ft.decimals) : '—'}`;
-    if (tb) tb.textContent = `Balance: ${tt ? fmtAmount(tt.balance, tt.decimals) : '—'}`;
+    // Only the VALUE goes here. The word "Balance" is a translated label rendered
+    // by its own element (data-i18n="swap.balance"): when it lived inside this
+    // string, switching language made applyTranslations() overwrite the whole span
+    // and the balance the user was reading disappeared back to an em dash — and
+    // until the next quote, in English.
+    if (fb) fb.textContent = ft ? fmtAmount(ft.balance, ft.decimals) : '—';
+    if (tb) tb.textContent = tt ? fmtAmount(tt.balance, tt.decimals) : '—';
     // auto-route: refresh quote when tokens change (if amount > 0)
     const amt = $('#swapFromAmount')?.value;
     if (amt && parseFloat(amt) > 0) getSwapQuote();
