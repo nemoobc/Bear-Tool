@@ -641,3 +641,20 @@ test('the Security Center shot waits for the notice stack to clear', () => {
   assert.match(before, /#toast-wrap \.toast/,
     'langkah harus mengecek tumpukan notifikasi sebelum memotret');
 });
+
+// A correct claim and a screenshot of somewhere else is not evidence. The shot
+// showed the top of Settings while the step reported the Security Center open
+// and painted — true, and not what the picture was of.
+test('the Security Center shot is taken of the Security Center', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  const at = drv.indexOf("await page.shot('44-security-center')");
+  const before = drv.slice(Math.max(0, at - 1200), at);
+  // The call, not the word: the step's comment says "scrollIntoView before the
+  // shot", so a gate that searched for the name was satisfied by the explanation
+  // while the call sat deleted. Same trap as the Security Center comment, and the
+  // third time it has appeared here — which is why it is now a shape, not a word.
+  assert.match(before, /d\.scrollIntoView\(/,
+    'langkah harus menggulir ke Security Center sebelum memotret');
+  assert.match(before, /has no text to show/,
+    'dan panel kosong harus menggagalkan run, bukan lolos dengan state benar');
+});

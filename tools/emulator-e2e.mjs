@@ -1655,6 +1655,18 @@ async function main() {
     if (!pending) break;
     await sleep(250);
   }
+  // Scroll to it. The state said open and painted, and the screenshot said the top
+  // of Settings — a correct claim and a picture of somewhere else. scrollIntoView
+  // before the shot so the evidence is of the thing the step is about.
+  const secText = await page.evaluate(`(() => {
+    const d = document.querySelector('#securityCenterDetails');
+    if (!d) return null;
+    d.scrollIntoView({ block: 'center' });
+    return (document.querySelector('#securityCenter')?.textContent || '').trim();
+  })()`);
+  if (!secText) throw new Error('feature sweep: the Security Center has no text to show');
+  sweep.securityText = secText.slice(0, 60);
+  await sleep(600);
   await page.shot('44-security-center');
 
   step('feature sweep: a modal traps focus and Escape restores it');
