@@ -107,10 +107,30 @@ test('switcher: jaringan aktif ditandai non-destinasi dan kliknya di-guard sebel
   // netRow menandai baris aktif:
   const nr = app.indexOf('function netRow(');
   assert.ok(nr > -1, 'netRow harus ada');
-  const nrBody = app.slice(nr, app.indexOf('function ', nr + 10) > 0 ? nr + 1600 : nr + 1600);
+  // Window wide enough for the whole function INCLUDING its comments. At 1600 the
+  // comments explaining the row's trailing slot pushed "✓ Current" out of the
+  // window and the assertion failed on a function that still had it — a gate
+  // measuring how much prose someone wrote rather than what the code does.
+  const nrBody = app.slice(nr, nr + 3600);
   assert.match(nrBody, /data-net-current="1"/, 'baris aktif membawa penanda data-net-current');
   assert.match(nrBody, /aria-disabled="true"/, 'baris aktif diberi aria-disabled');
   assert.match(nrBody, /✓ Current/, 'baris aktif menjawab kenapa tap tak berbuat apa-apa');
+
+  // The type badge was removed from built-in rows, and this is the gate that keeps
+  // it removed. It repeated the MAINNET / TESTNET badge sitting directly above the
+  // group (js/app.js renders that header for both lists), and it was not free: the
+  // emulator measured the chain id and symbol sharing 63px with a ~73px badge and
+  // coming out as "Chain 56 ·" — cut. The row's trailing slot is for what the
+  // header cannot say: that this is the current one, or that you added it yourself.
+  assert.doesNotMatch(nrBody, /badge-mainnet|badge-testnet/,
+    'baris jaringan bawaan tak perlu mengulang tipe yang sudah tertulis di header seksi');
+  for (const header of ['id="netListMainnet"', 'id="netListTestnet"']) {
+    const at2 = app.indexOf(header);
+    assert.ok(at2 > -1, header + ' harus ada');
+    const group = app.slice(at2, at2 + 220);
+    assert.match(group, /badge-mainnet|badge-testnet/,
+      header + ' harus membawa header bertipe MAINNET/TESTNET — itulah yang membuat badge per-baris tak perlu');
+  }
 
   // handler: guard datang SEBELUM pemanggilan switch (ekstraksi
   // activateNetwork, M-A 2026-10-06 — set() pindah ke chokepoint):

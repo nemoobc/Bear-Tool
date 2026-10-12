@@ -2067,7 +2067,7 @@ select.input option, select.select option, .input option {
      the twelve words came out as "prese…", "incre…", "convi…" on the emulator
      screenshot. Truncation is honest but a seed word still has to be READABLE,
      because the screen tells the user to write it down. */
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   line-height: 1.85;
   color: var(--ink);
 }

@@ -1664,15 +1664,22 @@ function netRow(n) {
   // 78px against 63px for every built-in. The tag is also the redundant half -
   // you added this network yourself, and its chain id is already in the
   // subtitle, so what the row actually needed was a way to take it away.
+  // The trailing slot is only worth spending on something the section header does
+  // not already say. "Mainnet"/"Testnet" on every row repeated the MAINNET /
+  // TESTNET badge directly above the group — and it cost the row what it actually
+  // needed: the emulator measured "Chain 56 · BNB" in 83px of a 63px slot, so the
+  // chain id and symbol were cut to "Chain 56…". A picker that cannot show which
+  // chain a row is answers a different question than the one being asked. The
+  // custom row had already given up its tag for exactly this reason (below); now
+  // the built-in rows do too, and the header carries the type.
   const tail = n.custom
     ? `<button class="btn-icon net-remove" data-remove-net="${escapeHtml(n.id)}"
          aria-label="Remove ${escapeHtml(n.name)}" title="Remove this network">✕</button>`
     : isCurrent
-      // The section header already says MAINNET/TESTNET, so the current row
-      // spends its one trailing slot answering the real question: why nothing
+      // The current row spends the slot answering the real question: why nothing
       // happens when I tap this.
       ? `<span class="badge">✓ Current</span>`
-      : `<span class="badge ${n.type === 'mainnet' ? 'badge-mainnet' : 'badge-testnet'}">${escapeHtml(titleCase(n.type))}</span>`;
+      : '';
   return `<div class="asset-row" data-net="${escapeHtml(n.id)}" ${active}>
     <div class="net-logo">${getNetworkLogo(n.name, 32)}</div>
     <div class="asset-info"><div class="asset-name">${escapeHtml(n.name)}</div>
