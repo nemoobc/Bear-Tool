@@ -8,12 +8,12 @@ export default function BridgeView() {
             <div className="bridge-card">
               <div className="bridge-chains">
                 <div className="bridge-chain-field">
-                  <label htmlFor="bridgeFromChain">From</label>
+                  <label htmlFor="bridgeFromChain" data-i18n="bridge.from">From</label>
                   <div className="token-picker" data-picker="bridgeFromChain"><select className="select bridge-chain-select token-picker-native" id="bridgeFromChain" aria-label="source chain"></select><button type="button" className="token-picker-trigger" id="bridgeFromChainBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose source chain"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeFromChainPanel" role="listbox" hidden></div></div>
                 </div>
                 <div className="bridge-chain-arrow">→</div>
                 <div className="bridge-chain-field">
-                  <label htmlFor="bridgeToChain">To</label>
+                  <label htmlFor="bridgeToChain" data-i18n="bridge.to">To</label>
                   <div className="token-picker" data-picker="bridgeToChain"><select className="select bridge-chain-select token-picker-native" id="bridgeToChain" aria-label="destination chain"></select><button type="button" className="token-picker-trigger" id="bridgeToChainBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose destination chain"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeToChainPanel" role="listbox" hidden></div></div>
                 </div>
               </div>
@@ -27,17 +27,17 @@ export default function BridgeView() {
                   pushing the row past the phone's edge. */}
               <div className="bridge-chains bridge-token-row">
                 <div className="bridge-chain-field">
-                  <label htmlFor="bridgeToken">From token</label>
+                  <label htmlFor="bridgeToken" data-i18n="bridge.token_from">From token</label>
                   <div className="token-picker" data-picker="bridgeToken"><select className="select token-picker-native" id="bridgeToken" aria-label="from token"></select><button type="button" className="token-picker-trigger" id="bridgeTokenBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose source token"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeTokenPanel" role="listbox" hidden></div></div>
                 </div>
                 <div className="bridge-chain-arrow">→</div>
                 <div className="bridge-chain-field">
-                  <label htmlFor="bridgeToToken">To token</label>
+                  <label htmlFor="bridgeToToken" data-i18n="bridge.token_to">To token</label>
                   <div className="token-picker" data-picker="bridgeToToken"><select className="select token-picker-native" id="bridgeToToken" aria-label="to token"></select><button type="button" className="token-picker-trigger" id="bridgeToTokenBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose destination token"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeToTokenPanel" role="listbox" hidden></div></div>
                 </div>
               </div>
               <div className="field">
-                <label htmlFor="bridgeAmount">Amount</label>
+                <label htmlFor="bridgeAmount" data-i18n="bridge.amount">Amount</label>
                 <div className="amount-row">
                   <input className="input" id="bridgeAmount" type="number" placeholder="0.0" min="0" step="any" />
                 </div>
@@ -51,20 +51,20 @@ export default function BridgeView() {
                        spends the last wei cannot pay for itself. */}
                   <button className="pct-btn pct-max" type="button" data-bridge-pct="100"
                           title="Use the largest amount that can actually be sent"
-                          aria-label="MAX: use the largest amount that can actually be sent">MAX</button>
+                          aria-label="MAX: use the largest amount that can actually be sent" data-i18n="send.max">MAX</button>
                 </div>
                 <p className="max-note" id="bridgeMaxNote" role="status" aria-live="polite"></p>
               </div>
               <div className="field mb-8">
-                <label htmlFor="bridgeRouterSelect">Bridge Router</label>
-                <div className="token-picker" data-picker="bridgeRouterSelect"><select className="select token-picker-native" id="bridgeRouterSelect" aria-label="bridge provider"><option value="auto">Auto (Best Route)</option><option value="lifi">LI.FI</option></select><button type="button" className="token-picker-trigger" id="bridgeRouterSelectBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose bridge provider"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeRouterSelectPanel" role="listbox" hidden></div></div>
+                <label htmlFor="bridgeRouterSelect" data-i18n="bridge.router">Bridge Router</label>
+                <div className="token-picker" data-picker="bridgeRouterSelect"><select className="select token-picker-native" id="bridgeRouterSelect" aria-label="bridge provider"><option value="auto" data-i18n="bridge.router.auto">Auto (Best Route)</option><option value="lifi">LI.FI</option></select><button type="button" className="token-picker-trigger" id="bridgeRouterSelectBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose bridge provider"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button><div className="token-picker-panel" id="bridgeRouterSelectPanel" role="listbox" hidden></div></div>
               </div>
               <div id="bridgeRoute" className="bridge-route hidden"></div>
               {/* Always visible, disabled until a quote validates — hiding it
                   left the screen with no bridge button at all when the quote
                   failed (live report, 2026-10-03). doBridgeExec still refuses
                   a missing/stale quote on its own. */}
-              <button type="button" className="btn btn-success btn-block btn-lg" id="btnBridgeExec" disabled>Bridge</button>
+              <button type="button" className="btn btn-success btn-block btn-lg" id="btnBridgeExec" data-i18n="bridge.action" disabled>Bridge</button>
               <div id="bridgeQuote" className="quote-box hidden"></div>
               <div id="bridgeStatus" className="bridge-status hidden">
                 <div className="bridge-progress"><div className="bridge-progress-fill" id="bridgeProgressFill"></div></div>

@@ -2888,7 +2888,7 @@ function bindViews() {
     set('settings', { ...s });
     saveSettings();
     startAutoLock();
-    toast('Auto-lock set to ' + (minutes === 0 ? 'never' : minutes + ' min'), 'success');
+    toast(minutes === 0 ? t('settings.autolock.toast.never') : t('settings.autolock.toast.min', { min: minutes }), 'success');
   });
   // The testnet switch, in Settings — the only copy (the picker duplicate was
   // removed 2026-10-04: one toggle per setting). It goes through

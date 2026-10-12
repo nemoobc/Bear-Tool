@@ -11,7 +11,7 @@ export default function SwapView() {
                      stray line under the pct buttons where it read as part of
                      the amount controls. Id kept — E2E contract. */}
                 <div className="swap-field-head">
-                  <label htmlFor="swapFrom">From</label>
+                  <label htmlFor="swapFrom" data-i18n="swap.from">From</label>
                   <span className="swap-balance" id="swapFromBalance">Balance: —</span>
                 </div>
                 <div className="swap-input-row">
@@ -37,7 +37,7 @@ export default function SwapView() {
                          pay for itself. */}
                     <button className="pct-btn pct-max" type="button" data-swap-pct="100"
                             title="Largest amount that can actually be sent"
-                            aria-label="MAX: the largest amount that can actually be sent">MAX</button>
+                            aria-label="MAX: the largest amount that can actually be sent" data-i18n="send.max">MAX</button>
                   </div>
                   {/* Was inside the Bridge heading's inline SVG, where a paragraph gets no
                        layout box at all: it rendered at 0x0, so the app computed a
@@ -64,7 +64,7 @@ export default function SwapView() {
               </div>
               <div className="swap-field">
                 <div className="swap-field-head">
-                  <label htmlFor="swapTo">To</label>
+                  <label htmlFor="swapTo" data-i18n="swap.to">To</label>
                   <span className="swap-balance" id="swapToBalance">Balance: —</span>
                 </div>
                 <div className="swap-input-row">
@@ -81,16 +81,16 @@ export default function SwapView() {
                 </div>
               </div>
               <div className="field mb-8">
-                <label htmlFor="swapRouterSelect">Router</label>
+                <label htmlFor="swapRouterSelect" data-i18n="swap.router">Router</label>
                 <div className="token-picker" data-picker="swapRouterSelect">
-                  <select className="select token-picker-native" id="swapRouterSelect" aria-label="swap provider"><option value="auto">Auto (Best Price)</option><option value="kyberswap">KyberSwap</option><option value="1inch">1inch</option><option value="paraswap">ParaSwap</option><option value="sushiswap">SushiSwap</option><option value="uniswap_v3">Uniswap V3</option><option value="uniswap_v2">Uniswap V2</option></select>
+                  <select className="select token-picker-native" id="swapRouterSelect" aria-label="swap provider"><option value="auto" data-i18n="swap.router.auto">Auto (Best Price)</option><option value="kyberswap">KyberSwap</option><option value="1inch">1inch</option><option value="paraswap">ParaSwap</option><option value="sushiswap">SushiSwap</option><option value="uniswap_v3">Uniswap V3</option><option value="uniswap_v2">Uniswap V2</option></select>
                   <button type="button" className="token-picker-trigger" id="swapRouterSelectBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose swap provider"><span className="token-picker-logo" data-logo="" aria-hidden="true"></span><span className="token-picker-symbol" data-symbol="">—</span><span className="token-picker-caret" aria-hidden="true">▾</span></button>
                   <div className="token-picker-panel" id="swapRouterSelectPanel" role="listbox" hidden></div>
                 </div>
               </div>
               <div className="swap-extras">
                 <div className="field">
-                  <label htmlFor="swapSlippage">Slippage</label>
+                  <label htmlFor="swapSlippage" data-i18n="swap.slippage">Slippage</label>
                   <div className="slippage-btns" id="swapSlippage">
                     <button type="button" className="slippage-btn" data-val="0.1">0.1%</button>
                     <button type="button" className="slippage-btn active" data-val="0.5">0.5%</button>
@@ -106,11 +106,11 @@ export default function SwapView() {
                 <div className="route-info" id="routeInfo"></div>
               </div>
               <div className="swap-impact hidden" id="swapImpact"></div>
-              <button type="button" className="btn btn-primary btn-block btn-lg" id="btnSwap">Swap</button>
+              <button type="button" className="btn btn-primary btn-block btn-lg" id="btnSwap" data-i18n="swap.action">Swap</button>
             </div>
             <div id="swapPending" className="swap-pending hidden">
               <div className="spinner-wrap"><div className="spinner-bear-wrap"><div className="ring"></div><span className="spinner-bear">🐻</span></div></div>
-              <div className="spinner-info"><span className="spinner-label">Swapping tokens…</span></div>
+              <div className="spinner-info"><span className="spinner-label" data-i18n="swap.swapping">Swapping tokens…</span></div>
             </div>
           </div>
         </section>

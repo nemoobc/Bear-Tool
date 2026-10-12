@@ -58,13 +58,13 @@ export default function SettingsView() {
                     menyetel defaultSelected pada opsi — atribut selected="" di
                     DOM, sama persis dengan markup HTML aslinya. */}
                 <select className="select" id="setAutoLock" defaultValue="5">
-                  <option value="1">1 minute</option>
-                  <option value="5">5 minutes</option>
-                  <option value="10">10 minutes</option>
-                  <option value="15">15 minutes</option>
-                  <option value="30">30 minutes</option>
-                  <option value="60">1 hour</option>
-                  <option value="0">Never</option>
+                  <option value="1" data-i18n="settings.autolock.min1">1 minute</option>
+                  <option value="5" data-i18n="settings.autolock.min5">5 minutes</option>
+                  <option value="10" data-i18n="settings.autolock.min10">10 minutes</option>
+                  <option value="15" data-i18n="settings.autolock.min15">15 minutes</option>
+                  <option value="30" data-i18n="settings.autolock.min30">30 minutes</option>
+                  <option value="60" data-i18n="settings.autolock.hour1">1 hour</option>
+                  <option value="0" data-i18n="settings.autolock.never">Never</option>
                 </select>
               </div>
 

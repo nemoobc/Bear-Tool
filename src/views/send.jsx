@@ -14,13 +14,13 @@ export default function SendView() {
                 <div className="address-book-add mt-8">
                   <input className="input" id="abLabel" placeholder="Label (e.g. My Safe)" />
                   <input className="input mt-4" id="abAddress" placeholder="0x..." />
-                  <button type="button" className="btn btn-primary btn-block mt-8" id="btnAddAddress">Add Address</button>
+                  <button type="button" className="btn btn-primary btn-block mt-8" id="btnAddAddress" data-i18n="send.add_address">Add Address</button>
                 </div>
               </div>
             </details>
             <div className="send-card">
               <div className="field">
-                <label htmlFor="sendTo">To address</label>
+                <label htmlFor="sendTo" data-i18n="send.to">To address</label>
                 <div className="send-address-wrap">
                   <input className="input" id="sendTo" placeholder="0x... or ENS name" autoComplete="off" spellCheck="false" />
                   <button type="button" className="btn btn-ghost btn-sm" id="btnSendPaste" title="Paste"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg> </button>
@@ -28,7 +28,7 @@ export default function SendView() {
                 <div className="send-ens-status hidden" id="sendEnsStatus"></div>
               </div>
               <div className="field">
-                <label htmlFor="sendToken">Token</label>
+                <label htmlFor="sendToken" data-i18n="send.token">Token</label>
                 <div className="send-token-wrap">
                   {/* Same in-app picker as Swap/Bridge: a native select's option
                       list is an OS popup that escapes the page on a phone (live
@@ -43,7 +43,7 @@ export default function SendView() {
                 </div>
               </div>
               <div className="field">
-                <label htmlFor="sendAmount">Amount</label>
+                <label htmlFor="sendAmount" data-i18n="send.amount">Amount</label>
                 <input className="input" id="sendAmount" type="number" placeholder="0.0" min="0" step="any" />
                 <div className="send-pct-btns" id="sendPctBtns" role="group" aria-label="Amount shortcuts">
                   <button type="button" className="pct-btn" data-pct="25">25%</button>
@@ -56,7 +56,7 @@ export default function SendView() {
                        does; the amount field shows the number either way. */}
                   <button type="button" className="pct-btn pct-max" data-pct="100"
                           title="Send everything spendable — the balance minus the fee"
-                          aria-label="MAX: send everything spendable, the balance minus the fee">MAX</button>
+                          aria-label="MAX: send everything spendable, the balance minus the fee" data-i18n="send.max">MAX</button>
                 </div>
                 {/* The note closes the button row above it, then becomes a
                      sibling. Left inside .send-pct-btns it became the fifth
@@ -66,21 +66,21 @@ export default function SendView() {
                 <p className="max-note" id="sendMaxNote" role="status" aria-live="polite"></p>
               </div>
               <div className="field">
-                <label>Gas speed</label>
+                <label data-i18n="send.gas">Gas speed</label>
                 <div className="gas-btns" id="sendGas">
-                  <button type="button" className="gas-btn" data-speed="slow">🐢 Slow</button>
-                  <button type="button" className="gas-btn active" data-speed="normal">🚶 Normal</button>
-                  <button type="button" className="gas-btn" data-speed="fast">🏃 Fast</button>
-                  <button type="button" className="gas-btn" data-speed="auto">🤖 Auto</button>
+                  <button type="button" className="gas-btn" data-speed="slow" data-i18n="send.gas_slow">🐢 Slow</button>
+                  <button type="button" className="gas-btn active" data-speed="normal" data-i18n="send.gas_normal">🚶 Normal</button>
+                  <button type="button" className="gas-btn" data-speed="fast" data-i18n="send.gas_fast">🏃 Fast</button>
+                  <button type="button" className="gas-btn" data-speed="auto" data-i18n="send.gas_auto">🤖 Auto</button>
                 </div>
               </div>
               <div id="sendPreview" className="quote-box hidden"></div>
               <div className="gas-estimate" id="sendGasEstimate">
-                <span className="gas-est-label">Est. gas:</span>
+                <span className="gas-est-label" data-i18n="send.gas_est">Est. gas:</span>
                 <span className="gas-est-value" id="gasEstValue">—</span>
                 <span className="gas-est-usd" id="gasEstUsd"></span>
               </div>
-              <button type="button" className="btn btn-primary btn-block btn-lg" id="btnSend">Send</button>
+              <button type="button" className="btn btn-primary btn-block btn-lg" id="btnSend" data-i18n="send.send">Send</button>
             </div>
           </div>
         </section>

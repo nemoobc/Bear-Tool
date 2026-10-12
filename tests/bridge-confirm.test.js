@@ -13,7 +13,11 @@ const bridgeJs = fs.readFileSync(new URL('../js/bridge.js', import.meta.url), 'u
 const bridgeView = fs.readFileSync(new URL('../src/views/bridge.jsx', import.meta.url), 'utf8');
 
 test('the exec button reads Bridge, not Execute Bridge', () => {
-  assert.match(bridgeView, /id="btnBridgeExec" disabled>Bridge</,
+  // Matches the button by id + its visible word with ANY attributes allowed in
+  // between (the button now carries data-i18n). The point is the LABEL — "Bridge",
+  // not "Execute Bridge" — so pinning attribute order would fail the moment an
+  // unrelated attribute is added without changing what the test protects.
+  assert.match(bridgeView, /id="btnBridgeExec"[^>]*>Bridge</,
     'the visible button is just Bridge');
   assert.doesNotMatch(bridgeView, /Execute Bridge/,
     'the extra verb is gone from the view');
