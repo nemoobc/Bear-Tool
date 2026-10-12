@@ -1502,7 +1502,15 @@ async function main() {
   if (modalA11y.open && modalA11y.focusInside === false) throw new Error('feature sweep: the Receive modal opened without moving focus inside: ' + JSON.stringify(modalA11y));
   sweep.escapeRoute = await pressEscape();
   await sleep(700);
-  const closed = await page.evaluate(`!document.querySelector('#modalBox') || document.querySelector('#modalBox').hidden === true`);
+  // closeModal() removes the `open` class from the OVERLAY; #modalBox stays in the
+  // DOM and is never `hidden`. The previous check looked for #modalBox.hidden,
+  // which the app never sets, so a modal that closed correctly still read as
+  // open (run 38283749329, 38284771281).
+  const closed = await page.evaluate(`(() => {
+    const o = document.querySelector('#modalOverlay');
+    if (!o) return true;
+    return !o.classList.contains('open') && !document.body.classList.contains('modal-open');
+  })()`);
   if (modalA11y.open && !closed) throw new Error('feature sweep: Escape did not close the Receive modal');
   sweep.modal = { ...modalA11y, escapeClosed: closed };
 
