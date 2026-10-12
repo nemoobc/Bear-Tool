@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ethers } from 'ethers';
+import { readFileSync } from 'node:fs';
 
 globalThis.ethers = ethers;
 globalThis.localStorage = { getItem: () => null, setItem() {} };
@@ -772,4 +773,21 @@ test('README pair numbers are pinned to the code (HUKUM 10)', async () => {
     `README must state the measured pair count (${withE}/${withE + without})`);
   assert.ok(readme.includes(`the other ${without} share no stable family`),
     `README must state the native-only count (${without})`);
+});
+
+// The destination column is what a person reads before moving money, and for a
+// native-to-native pair it used to name the SOURCE token. Screenshot
+// 30-view-bridge.png: destination chain BNB, destination token "POL" — a token
+// that does not exist there. The fallback existed for the ERC-20 twin lookup and
+// was reused for native, where the right answer is the destination chain's own
+// symbol and nothing has to be looked up.
+test('the destination column names the destination chain\'s token, not the source\'s', () => {
+  const src = readFileSync(new URL('../js/bridge.js', import.meta.url), 'utf8');
+  const at = src.indexOf('const destSymbol = (o) => {');
+  assert.ok(at > 0, 'destSymbol harus terdefinisi');
+  const body = src.slice(at, at + 600);
+  assert.match(body, /if \(o\.value === 'native'\) return toNet\.symbol/,
+    'opsi native harus memakai simbol jaringan TUJUAN, bukan simbol sumber');
+  assert.doesNotMatch(body, /if \(o\.value === 'native'\) return o\.symbol/,
+    'kembalikan ke simbol sumber: bug yang ditemukan dari screenshot');
 });

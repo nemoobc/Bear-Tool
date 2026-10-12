@@ -322,7 +322,16 @@ function renderBridgeTokenOptions() {
     if (o.value === 'native') return null;
     return (POPULAR_TOKENS[toNet.chainId] || []).find(x => sameAddr(x.address, o.toAddress)) || null;
   };
-  const destSymbol = (o) => destMeta(o)?.symbol || o.symbol;
+  // The destination column must name the token AS IT EXISTS on the destination
+  // chain. The fallback to the source symbol printed "POL" there while the
+  // destination chain was BNB — a token that does not exist on BNB, shown to
+  // someone about to move money (emulator shot 30-view-bridge.png). For the
+  // native option the destination name is simply the destination chain's own
+  // symbol; for an ERC-20 it is the twin found in the destination list.
+  const destSymbol = (o) => {
+    if (o.value === 'native') return toNet.symbol || o.symbol;
+    return destMeta(o)?.symbol || o.symbol;
+  };
   tok.innerHTML = opts.map(o => {
     const label = o.value === 'native'
       ? `${o.symbol} — ${t('bridge.native')}`
