@@ -503,23 +503,54 @@ async function main() {
   // its own content", and on this screen that means a word the user is being
   // told to write down exists only partly.
   const seedFit = await page.evaluate(`(() => {
-    const out = { clipped: [], cells: 0, cellW: 0, words: [] };
+    const out = { clipped: [], cells: 0, tightest: { text: '', slack: 1e9 }, widest: null, fontPx: 0 };
     for (const cell of document.querySelectorAll('.seed-word > span')) {
+      const text = cell.textContent.trim();
+      const client = Math.round(cell.clientWidth);
+      const scroll = Math.round(cell.scrollWidth);
+      const fs = parseFloat(getComputedStyle(cell).fontSize) || 0;
       out.cells++;
-      out.cellW = Math.round(cell.getBoundingClientRect().width);
-      out.words.push(cell.textContent);
-      if (cell.scrollWidth > cell.clientWidth + 1) {
-        out.clipped.push(cell.textContent + ' (' + cell.scrollWidth + '>' + cell.clientWidth + ')');
+      out.fontPx = fs;
+      const slack = client - scroll;
+      if (slack < out.tightest.slack) out.tightest = { text, client, scroll, slack };
+      if (!out.widest || text.length > out.widest.len) {
+        out.widest = { text, len: text.length, client, scroll, slack, fs };
       }
+      if (slack < -1) out.clipped.push(text + ' (' + scroll + '>' + client + ')');
+    }
+    // Worst case, not this run's luck. A seed is random: this one may not contain
+    // an 8-letter word at all, and a layout that only fits "exist" and "wasp" is
+    // not a layout that fits a seed phrase. So put the longest word BIP-39 has
+    // ("absolute", 8 letters) into a real cell, measure that, and put the original
+    // back — the DOM is restored before anything reads it.
+    const probe = document.querySelector('.seed-word > span');
+    if (probe) {
+      const keep = probe.textContent;
+      probe.textContent = 'absolute';
+      out.worst = {
+        text: 'absolute', client: Math.round(probe.clientWidth), scroll: Math.round(probe.scrollWidth),
+        fits: probe.scrollWidth <= probe.clientWidth + 1,
+      };
+      probe.textContent = keep;
     }
     return out;
   })()`);
   if (!seedFit.cells) throw new Error('seed words not found to measure');
   if (seedFit.clipped.length) {
     throw new Error('seed words are truncated on this screen: ' + JSON.stringify(seedFit.clipped)
-      + ' cell=' + seedFit.cellW + 'px — the screen asks the user to write these down');
+      + ' — the screen asks the user to write these down');
   }
-  report.seedFit = { cells: seedFit.cells, cellW: seedFit.cellW, longest: seedFit.words.sort((a, b) => b.length - a.length)[0] };
+  if (seedFit.worst && !seedFit.worst.fits) {
+    throw new Error('the longest BIP-39 word does not fit a seed cell: "absolute" needs '
+      + seedFit.worst.scroll + 'px of ' + seedFit.worst.client + 'px — this seed happened not to '
+      + 'contain one, which is exactly why it has to be measured on purpose');
+  }
+  console.log('[gate] seed-text cells=' + seedFit.cells + ' font=' + seedFit.fontPx
+    + 'px longest="' + seedFit.widest.text + '"(' + seedFit.widest.len + ' letters)'
+    + ' box=' + seedFit.widest.client + 'px text=' + seedFit.widest.scroll
+    + 'px slack=' + seedFit.widest.slack + 'px worst="absolute" '
+    + (seedFit.worst ? seedFit.worst.scroll + '/' + seedFit.worst.client + 'px fits=' + seedFit.worst.fits : 'n/a'));
+  report.seedFit = { cells: seedFit.cells, fontPx: seedFit.fontPx, longest: seedFit.widest };
 
   step('seed confirmation (3 positions, read the app’s own question)');
   for (let i = 0; i < 3; i++) {
@@ -1324,6 +1355,39 @@ async function main() {
   sweep.networks = await page.evaluate(`(() => ({
     rows: document.querySelectorAll('#netListMainnet [data-net]').length,
   }))()`);
+
+  // Measured, not assumed — same rule as the seed words. Two stylesheet fixes in
+  // a row were judged wrong here: one let "BNB Smart Chain" wrap to three lines
+  // and double the card's height, the next elided every name ("BNB S…",
+  // "Arbitr…", subtitle "Chain 1·…") because the type badge ate the width. Which
+  // of those two is correct is not a question for the source: it is a question
+  // about how wide a name comes out on this card. So measure every name and every
+  // subtitle, and report the worst margin in the log — a picker that shows
+  // "BNB S…" as the chain you are about to switch to is a wrong answer, not a
+  // cosmetic one.
+  const netText = await page.evaluate(`(() => {
+    const out = { clipped: [], tightest: { text: '', slack: 1e9 }, nameW: 0, rowW: 0 };
+    for (const row of document.querySelectorAll('#netListMainnet [data-net]')) {
+      const rw = Math.round(row.getBoundingClientRect().width);
+      out.rowW = rw;
+      for (const sel of ['.asset-name', '.asset-symbol']) {
+        const el = row.querySelector(sel);
+        if (!el) continue;
+        const slack = el.clientWidth - el.scrollWidth;
+        out.nameW = Math.max(out.nameW, Math.round(el.clientWidth));
+        if (slack < out.tightest.slack) out.tightest = { text: el.textContent.trim(), slack };
+        if (slack < 0) out.clipped.push(sel + ': ' + el.textContent.trim() + ' (' + el.scrollWidth + '>' + el.clientWidth + ')');
+      }
+    }
+    return out;
+  })()`);
+  if (!netText.rowW) throw new Error('feature sweep: no network rows to measure');
+  if (netText.clipped.length) {
+    throw new Error('network names are clipped in the picker: ' + JSON.stringify(netText.clipped)
+      + ' row=' + netText.rowW + 'px — the chain name is what the user reads before switching');
+  }
+  console.log('[gate] net-text row=' + netText.rowW + 'px nameCol=' + netText.nameW
+    + 'px tightest="' + netText.tightest.text + '" slack=' + netText.tightest.slack + 'px');
   if (!sweep.networks || sweep.networks.rows < 1) {
     throw new Error('feature sweep: the network picker listed nothing: ' + JSON.stringify(sweep.networks));
   }

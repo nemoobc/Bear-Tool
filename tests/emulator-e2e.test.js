@@ -503,10 +503,45 @@ test('a fatal failure explains itself: step in flight, evidence, dropped request
 // is allowed to fail the run.
 test('the driver measures seed words on the device instead of assuming a fit', () => {
   const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
-  assert.match(drv, /scrollWidth\s*>\s*\w+\.clientWidth/,
-    'driver harus membandingkan scrollWidth dengan clientWidth — itu definisi "kotak memotong isinya"');
+  // Compared as a slack, which is the same fact: scrollWidth is what the text
+  // needs, clientWidth is what the box gives it, and a negative difference is a
+  // box clipping its own content.
+  assert.match(drv, /const slack = \w+ - scroll/,
+    'driver harus membandingkan lebar teks dengan lebar kotak — itu definisi "kotak memotong isinya"');
+  assert.match(drv, /slack < -1/, 'selisih negatif berarti terpotong dan harus menggagalkan run');
   assert.match(drv, /seed words are truncated on this screen/,
     'kata seed terpotong harus bisa menggagalkan run, bukan hanya dicatat');
   assert.match(drv, /report\.seedFit/,
     'hasil pengukuran harus masuk laporan, supaya bisa dibaca tanpa menebak');
+});
+
+// Two fixes in a row were wrong in opposite directions on the network picker: one
+// let "BNB Smart Chain" wrap to three lines and double the card, the next elided
+// every name ("BNB S…", "Arbitr…", subtitle "Chain 1·…") because the type badge
+// ate the width. Neither could be settled from source — which of the two is right
+// depends on how wide a name actually comes out on a real card — so the driver
+// measures it there, and reports the tightest margin so a future change has
+// something to be compared against instead of an opinion.
+test('the driver measures network names and subtitles on the device', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  assert.match(drv, /network names are clipped in the picker/,
+    'nama jaringan terpotong harus bisa menggagalkan run');
+  assert.match(drv, /net-text row=/,
+    'lebar baris dan margin paling sempit harus tercetak — supaya ada angka, bukan pendapat');
+  for (const sel of ['asset-name', 'asset-symbol']) {
+    assert.ok(drv.includes(sel), 'pengukuran harus mencakup ' + sel + ', bukan hanya nama');
+  }
+});
+
+// A seed is random, so a run whose twelve words all happen to be short proves
+// nothing about the next run. The worst case is measured on purpose: the longest
+// word BIP-39 contains is put into a real cell, measured, and put back.
+test('the driver measures the longest BIP-39 word, not only the words this seed drew', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  assert.match(drv, /textContent = 'absolute'/,
+    'kata terpanjang harus diuji secara sengaja, bukan取决insi seedAcak');
+  assert.match(drv, /the longest BIP-39 word does not fit a seed cell/,
+    'kegagalan worst-case harus menggagalkan run');
+  assert.match(drv, /probe\.textContent = keep/,
+    'DOM harus dikembalikan seperti semula — langkah berikutnya membaca kata seed dari sini');
 });

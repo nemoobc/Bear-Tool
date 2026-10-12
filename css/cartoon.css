@@ -932,9 +932,38 @@ select.input option, select.select option, .input option {
    Scoped to [data-net] rows on purpose: the dashboard asset list shares these
    classes, and there a long token name SHOULD wrap. The full chain name stays in
    the row's accessible name, and the trailing badge keeps its slot. */
-.asset-row[data-net] .asset-info { min-width: 0; }
+/* Network rows in the picker: the name is the LABEL of the thing being chosen,
+   so it gets the whole width. It used to share one line with the type badge, and
+   the badge is expensive — "Mainnet" is ~73px, the logo 32px, the gaps 24px —
+   which left the name about 58px of a 187px card. Every name then had to elide:
+   "Ether…", "BNB S…", "Arbitr…", and the subtitle with it, "Chain 1·…". An
+   earlier fix had instead let the name wrap, which made "BNB Smart Chain" three
+   lines tall and doubled the card beside its neighbours. Two ways to be wrong.
+
+   So: name on its own full-width row, subtitle and badge share the one below.
+   The card stays one line tall and the name is finally readable — which was the
+   only thing that mattered. min-width:0 keeps the grid column shrinkable, and the
+   ellipsis stays only as a floor for absurdly narrow screens; the emulator
+   measures every name and subtitle on the device and fails the run if one is
+   still clipped. */
+.asset-row[data-net] {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "logo name  name"
+    "logo symbol badge";
+  column-gap: 12px;
+  row-gap: 3px;
+  align-items: center;
+}
+.asset-row[data-net] .net-logo { grid-area: logo; }
+.asset-row[data-net] .asset-info { display: contents; }
+.asset-row[data-net] .asset-name { grid-area: name; }
+.asset-row[data-net] .asset-symbol { grid-area: symbol; }
+.asset-row[data-net] .badge { grid-area: badge; justify-self: end; }
 .asset-row[data-net] .asset-name,
 .asset-row[data-net] .asset-symbol {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

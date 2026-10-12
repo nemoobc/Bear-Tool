@@ -117,22 +117,61 @@ test('every identity mark is given an explicit box, not left to the font', () =>
 // "Chain 56 · BNB" spilled onto a second line. No unit test could see it — it is
 // a layout fact, and nothing measured the box.
 //
-// The cause is flexbox, not the markup: .asset-info is a flex item and a flex
-// item's min-width:auto refuses to shrink below its content, so the name wrapped
-// instead of eliding. The fix is scoped to [data-net] rows — the dashboard asset
-// list shares these classes and SHOULD let a long token name wrap.
-test('network rows elide a long chain name instead of growing the card', async () => {
+// Two fixes came after that, and the second one was just as wrong as the first:
+//   1. min-width:0 so the name would elide  -> the name elided to "BNB S…",
+//      "Arbitr…", "Ether…" and the subtitle to "Chain 1·…". A picker that cannot
+//      read out the chain you are about to switch to is worse than a tall card.
+//   2. this grid: the name gets a row to itself across the full card width, and
+//      the subtitle and the type badge share the line under it.
+//
+// What is assertable from source is the SHAPE of that layout — which slot each
+// piece occupies. Whether a name fits is measured on the device instead
+// (tools/emulator-e2e.mjs, "network names are clipped in the picker"), because
+// that is a property of a real card, not of a stylesheet.
+test('a network row gives the chain name its own full-width line', async () => {
   const { readFileSync } = await import('node:fs');
   const css = readFileSync(new URL('../css/cartoon.css', import.meta.url), 'utf8');
 
-  assert.match(css, /\.asset-row\[data-net\]\s+\.asset-info\s*\{[^}]*min-width:\s*0/,
-    'the network row info box must be allowed to shrink (min-width:0), or the name wraps');
-  assert.match(css, /\.asset-row\[data-net\]\s+\.asset-name[^}]*text-overflow:\s*ellipsis/,
-    'the chain name must elide at one line');
-  assert.match(css, /\.asset-row\[data-net\][^{]*\.asset-name[^{]*\{[^}]*white-space:\s*nowrap/,
-    'eliding needs white-space:nowrap');
-  // Scoped, not global: .asset-name is shared with the dashboard asset list.
+  const row = /\.asset-row\[data-net\]\s*\{([^}]*)\}/.exec(css);
+  assert.ok(row, 'baris jaringan harus punya aturan sendiri');
+  assert.match(row[1], /display:\s*grid/,
+    'nama dan badge tak bisa berbagi satu baris: badge "Mainnet" memakan ~73px dari ~187px');
+  assert.match(row[1], /grid-template-areas:[\s\S]*logo[\s\S]*name[\s\S]*name/,
+    'nama harus membentang penuh di barisnya, bukan berbagi lebar dengan badge');
+  assert.match(row[1], /grid-template-areas:[\s\S]*symbol[\s\S]*badge/,
+    'badge pindah ke baris subjudul — di situ ia tidakconditionally menyingkirkan nama');
+  assert.match(row[1], /grid-template-columns:[^;]*minmax\(0,\s*1fr\)/,
+    'kolom teks harus boleh menyusut (minmax(0,1fr)); kalau tidak, nama meluber');
+
+  // The info wrapper hands its children to the grid; without this the areas name
+  // the logo and the badge but neither text element is ever placed.
+  assert.match(css, /\.asset-row\[data-net\][^}]*\.asset-info\s*\{\s*display:\s*contents/,
+    '.asset-info harus jadi display:contents agar nama & subjudul benar-benar jadi sel grid');
+  assert.match(css, /\.asset-row\[data-net\][^}]*\.asset-name\s*\{\s*grid-area:\s*name/);
+  assert.match(css, /\.asset-row\[data-net\][^}]*\.asset-symbol\s*\{\s*grid-area:\s*symbol/);
+  assert.match(css, /\.asset-row\[data-net\][^}]*\.badge\s*\{[^}]*justify-self:\s*end/,
+    'badge menempel kanan di barisnya sendiri');
+
+  // Still one line, still clipped visibly rather than pushing the row apart: the
+  // ellipsis is the floor for absurdly narrow screens, not the plan. The device
+  // measurement above is what says whether it is ever reached.
+  for (const part of ['asset-name', 'asset-symbol']) {
+    // Every rule mentioning this part, joined: the placement rule says
+    // `grid-area: name` and a separate grouped rule carries min-width / nowrap /
+    // ellipsis. Reading only the first one made this gate fail on a layout that
+    // was correct — a gate that cries wolf about correct code teaches you to
+    // ignore it.
+    const blocks = [...css.matchAll(new RegExp(`\\.asset-row\\[data-net\\][^{;]*\\.${part}[^{;]*\\{([^}]*)\\}`, 'g'))]
+      .map((m) => m[1]).join('\n');
+    assert.ok(blocks, part + ' harus punya aturan di baris jaringan');
+    assert.match(blocks, /min-width:\s*0/, part + ' harus boleh menyusut');
+    assert.match(blocks, /white-space:\s*nowrap/, part + ' tidak boleh membungkus jadi kartu tinggi');
+    assert.match(blocks, /text-overflow:\s*ellipsis/, part + ' terpotong harus kelihatan');
+  }
+
+  // Scoped, not global: .asset-name is shared with the dashboard asset list, where
+  // a long token name SHOULD wrap.
   const bare = /^\s*\.asset-name\s*\{[^}]*(text-overflow|white-space)\s*:/m;
   assert.doesNotMatch(css, bare,
-    'do not make every asset name elide — the dashboard list should still wrap long token names');
+    'jangan membuat semua asset name elide — daftar aset di dashboard masih boleh wrap');
 });
