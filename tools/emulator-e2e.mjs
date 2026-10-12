@@ -1092,15 +1092,24 @@ async function main() {
     await page.shot(`30-view-${view}`);
   }
 
-  // Bridge has no nav item of its own — it lives behind the Swap chooser, and
-  // the chooser TOGGLES, so press until the view is actually there.
+  // Bridge has no nav item of its own — it lives behind the Swap chooser modal,
+  // and that modal only opens on the SECOND click of the Swap nav item
+  // (js/app.js showSwapBridgeChooser). So: press Swap twice, the chooser modal
+  // appears, then click #chooseBridge (its handler does closeModal +
+  // switchView('bridge')).
   step('feature sweep: bridge opens through the swap chooser');
   let bridgeOpen = false;
   for (let i = 0; i < 3 && !bridgeOpen; i++) {
-    await openView('swap');
-    await jsClick('#chooseBridge');
-    await sleep(900);
+    // First press leaves swap (or no-op), second press opens the chooser.
+    await jsClick('#mobileNav .mobile-nav-item[data-view="swap"]');
+    await sleep(600);
+    await jsClick('#mobileNav .mobile-nav-item[data-view="swap"]');
+    // Wait for the chooser's Bridge button to actually be in the DOM.
+    const chooserReady = await page.wait('#chooseBridge', 8000).then(() => true).catch(() => false);
+    if (chooserReady) await jsClick('#chooseBridge');
+    await sleep(1200);
     bridgeOpen = await viewActive('bridge');
+    if (!bridgeOpen) await closeModal();
   }
   if (!bridgeOpen) throw new Error('feature sweep: the Swap chooser never opened the Bridge view');
   sweep.bridge = true;
