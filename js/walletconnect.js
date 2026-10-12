@@ -21,6 +21,7 @@
 // this module costs nothing at boot and opens no socket until the user
 // actually pastes a wc: URI.
 import { openModal, closeModal, confirmTx, escapeHtml, toast } from './ui.js';
+import { t } from './i18n.js';
 import { get, set, requireUnlock } from './state.js';
 import { getNetworkById, getNetwork } from './network.js';
 
@@ -534,7 +535,7 @@ function renderSessions(root) {
   if (!kit) return;
   const sessions = Object.values((kit.getActiveSessions && kit.getActiveSessions()) || {});
   if (!sessions.length) {
-    root.innerHTML = '<p class="small dim">No active sessions.</p>';
+    root.innerHTML = `<p class="small dim">${escapeHtml(t('wc.noSessions'))}</p>`;
     return;
   }
   root.innerHTML = sessions.map((s) => `
@@ -673,7 +674,7 @@ export function openPairWalletConnect(prefill = '') {
       if (!t.startsWith('wc:') || seenWc.has(t) || !isValidWcUri(t)) return;
       seenWc.add(t);
       fill(t);
-      msg.textContent = 'Pairing link found in the clipboard — connecting...';
+      msg.textContent = t('wc.clipboardFound');
       go.click();
     } catch { /* clipboard denied — the Paste button stays the answer */ }
   };
@@ -684,9 +685,9 @@ export function openPairWalletConnect(prefill = '') {
     try {
       const text = await navigator.clipboard.readText();
       fill((text || '').trim());
-      if (!input.value) msg.textContent = 'Clipboard is empty.';
+      if (!input.value) msg.textContent = t('wc.clipboardEmpty');
     } catch {
-      msg.textContent = 'Clipboard refused by the browser — paste manually.';
+      msg.textContent = t('wc.clipboardDenied');
     }
   };
   input.focus();
@@ -696,19 +697,19 @@ export function openPairWalletConnect(prefill = '') {
     const uri = (input.value || '').trim();
     if (!isValidWcUri(uri)) {
       // Validation BEFORE any import: a bad paste must never open a socket.
-      msg.textContent = 'That does not look like a WalletConnect URI (it must start with "wc:" and carry @relay).';
+      msg.textContent = t('wc.badUri');
       return;
     }
-    msg.textContent = 'Connecting to the relay...';
+    msg.textContent = t('wc.connecting');
     go.disabled = true;
     try {
       const w = await ensureKit();
       await w.pair({ uri });
-      msg.textContent = 'Paired. Check the dApp - the connection request is waiting for approval here.';
+      msg.textContent = t('wc.paired');
       toast('WalletConnect pairing started.', 'info');
       renderSessions(sessionsRoot);
     } catch (e) {
-      msg.textContent = 'Pairing failed: ' + ((e && e.message) || e);
+      msg.textContent = t('wc.pairFailed') + ' ' + ((e && e.message) || e);
     } finally {
       go.disabled = false;
     }

@@ -248,7 +248,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const activeChainId = () => getNetworkById(get('networkId'))?.chainId || currentChain;
     const activeNetName = () => getNetworkById(get('networkId'))?.name || 'this network';
 
-    if (netEl) netEl.textContent = 'Network: ' + activeChainLabel();
+    if (netEl) netEl.textContent = t('net.label') + ' ' + activeChainLabel();
     const box = document.getElementById('tokenDetect');
     const saveBtn = document.getElementById('btnConfirmAddToken');
     const ERC20 = [
@@ -278,10 +278,10 @@ window.addEventListener('DOMContentLoaded', () => {
       if (!provider) { reset(); return; }
       const mine = ++probeSeq;
       box.style.display = '';
-      document.getElementById('tdSymbol').textContent = 'Detecting…';
+      document.getElementById('tdSymbol').textContent = t('tok.detecting');
       document.getElementById('tdName').textContent = '';
       document.getElementById('tdDecimals').textContent = '';
-      document.getElementById('tdNote').textContent = 'Reading name, symbol and decimals from the contract…';
+      document.getElementById('tdNote').textContent = t('tok.readingContract');
       try {
         // ethers v6 rejects a MIXED-case address whose EIP-55 checksum does not
         // match, and the throw happened before any network call — soft() ate it
@@ -309,18 +309,18 @@ window.addEventListener('DOMContentLoaded', () => {
           document.getElementById('tdName').textContent = '';
           document.getElementById('tdDecimals').textContent = '';
           document.getElementById('tokenDetect').style.display = '';
-          document.getElementById('tdNote').textContent = 'No ERC-20 name/symbol found at that address on this network.';
+          document.getElementById('tdNote').textContent = t('tok.noMeta');
           return;
         }
         document.getElementById('tdIcon').textContent = '🪙';
         document.getElementById('tdSymbol').textContent = sym || nm || 'Unknown';
         document.getElementById('tdName').textContent = [nm, sym].filter(Boolean).join(' · ') || '—';
-        document.getElementById('tdDecimals').textContent = `${dec} decimals`;
+        document.getElementById('tdDecimals').textContent = t('tok.decimals', { dec });
         // Say which network was read, and what to do if it is the wrong one.
         // The old wording offered a control that could not change the answer.
         document.getElementById('tdNote').textContent =
-          'Read from ' + activeChainLabel() + '. '
-          + 'Not the token you expected? Switch network first, then paste it again.';
+          t('tok.readFrom', { net: activeChainLabel() }) + ' '
+          + t('tok.notExpected');
         saveBtn.disabled = false;
         saveBtn.dataset.sym = sym || nm || '';
         saveBtn.dataset.dec = String(dec);
@@ -328,7 +328,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (mine !== probeSeq) return;
         reset();
         document.getElementById('tokenDetect').style.display = '';
-        document.getElementById('tdNote').textContent = explainError(e, 'Reading that contract');
+        document.getElementById('tdNote').textContent = explainError(e, 'err.readContract');
       }
     };
 
@@ -952,7 +952,7 @@ function bindOpenSeaPanel() {
         keyState.classList.toggle('key-bad', !res.ok);
       }
     } catch {
-      if (keyState) keyState.textContent = '⚠️ Offline / request failed.';
+      if (keyState) keyState.textContent = t('common.offline');
     }
   });
 
@@ -968,9 +968,9 @@ function bindOpenSeaPanel() {
     const input = $('#openSeaContract')?.value?.trim();
     const addr = $('#openSeaWlAddress')?.value?.trim() || get('address');
     const chainId = getNetworkById(get('networkId'))?.chain || 'ethereum';
-    if (!input) return statusEl.textContent = 'Isi link OpenSea / slug / address kontrak dulu.';
-    if (!addr) return statusEl.textContent = 'Wallet belum terhubung — isi "Wallet for WL check" manual.';
-    statusEl.textContent = 'Menganalisis koleksi…';
+    if (!input) return statusEl.textContent = t('wl.fillFirst');
+    if (!addr) return statusEl.textContent = t('wl.noWallet');
+    statusEl.textContent = t('wl.analyzing');
     try {
       const r = await resolveSlug(input, chainId);
       const verdict = await checkEligibility({ slug: r.slug, address: addr });
@@ -993,7 +993,7 @@ function bindOpenSeaPanel() {
       }
 
       // Eligible → gather the rest.
-      statusEl.textContent = 'Eligible — menghitung biaya & memeriksa kontrak…';
+      statusEl.textContent = t('wl.eligible');
       const intel = r.contract ? await nftIntel({ contract: r.contract, tokenId: r.input?.tokenId, chain: chainId }).catch(() => null) : null;
       const ask = r.slug ? await collectionAsk({ slug: r.slug, chain: chainId }).catch(() => ({ lowest: null })) : { lowest: null };
       const gasWei = await estimateMintGas(r.contract, addr).catch(() => 0n);
@@ -1025,7 +1025,7 @@ function bindOpenSeaPanel() {
           + `<ul class="intel-signals">${renderSignals(safety.signals)}</ul>`
           + `<p class="small dim">${escapeHtml(safety.note)}</p>`;
     } catch (e) {
-      statusEl.textContent = '⚠️ ' + explainError(e, 'Eligibility check');
+      statusEl.textContent = '⚠️ ' + explainError(e, 'err.eligibility');
     }
   });
 
@@ -1068,26 +1068,26 @@ function bindOpenSeaPanel() {
     const contract = $('#openSeaContract')?.value?.trim();
     const tokenId = $('#openSeaTokenId')?.value?.trim();
     const price = $('#openSeaPrice')?.value?.trim();
-    if (!contract || !tokenId || !price) return s.textContent = 'Fill contract, token ID, and price.';
-    s.textContent = 'Listing...';
+    if (!contract || !tokenId || !price) return s.textContent = t('os.fillListing');
+    s.textContent = t('os.listing');
     try {
       const net = getNetworkById(get('networkId'));
       const res = await listNft({ contractAddress: contract, tokenId, price, chainId: net?.chainId || 1 });
       lastListedOrder = res.order || null;
-      s.textContent = '✅ Listing submitted!';
-    } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'Listing'); }
+      s.textContent = t('os.listingSubmitted');
+    } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'err.listing'); }
   });
   // Cancel listing
   $('#btnOpenSeaCancel')?.addEventListener('click', async () => {
     const s = status(); if (!s) return;
-    if (!lastListedOrder) return s.textContent = '⚠️ No listing from this session to cancel — list here first.';
-    s.textContent = 'Cancelling...';
+    if (!lastListedOrder) return s.textContent = t('os.noListingToCancel');
+    s.textContent = t('os.cancelling');
     try {
       const net = getNetworkById(get('networkId'));
       await cancelListing({ order: lastListedOrder, chainId: net?.chainId || 1 });
       lastListedOrder = null;
-      s.textContent = '✅ Listing cancelled!';
-    } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'Cancelling the listing'); }
+      s.textContent = t('os.listingCancelled');
+    } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'err.cancellingListing'); }
   });
   // Accept top offer — needs contract (+token ID); a full asset link works too
   $('#btnAcceptTopOffer')?.addEventListener('click', async () => {
@@ -1096,12 +1096,12 @@ function bindOpenSeaPanel() {
     const tokenId = $('#openSeaTokenId')?.value?.trim();
     const parsed = parseOpenSeaInput(input || '');
     const contract = parsed?.contract || input;
-    if (!contract || !tokenId) return s.textContent = 'Isi kontrak (atau link asset) + token ID dulu.';
-    s.textContent = 'Finding top offer...';
+    if (!contract || !tokenId) return s.textContent = t('os.fillOffer');
+    s.textContent = t('os.findingOffer');
     try {
       const result = await getHighestOffer({ contract, tokenId });
       s.textContent = result?.price ? `Top offer: $${result.price} — ready to accept.` : 'No active offers found.';
-    } catch { s.textContent = '⚠️ Could not fetch offers.'; }
+    } catch { s.textContent = t('os.noOffers'); }
   });
 }
 
@@ -1346,8 +1346,8 @@ function showSeedPhrase(mnemonic, address) {
     $('#seedChoices').innerHTML = rollChoices()
       .map(w => `<button class="btn btn-ghost seed-choice-btn" data-word="${escapeHtml(w)}">${escapeHtml(w)}</button>`)
       .join('');
-    $('#seedQLabel').textContent = `Select word #${ask[qPos] + 1} to confirm`;
-    $('#seedProg').textContent = `Confirmation ${qPos + 1} of 3`;
+    $('#seedQLabel').textContent = t('seed.pickWord', { n: ask[qPos] + 1 });
+    $('#seedProg').textContent = t('seed.confirmProgress', { n: qPos + 1 });
   };
   paint();
 
@@ -1785,7 +1785,7 @@ function showAddNetworkModal() {
     const seq = ++detectSeq;
     const out = $('#cnDetect');
     if (!isSafeRpcUrl(url)) { out.textContent = ''; return; }
-    out.textContent = 'Detecting chain…';
+    out.textContent = t('net.detectingChain');
     try {
       const res = await fetch(url, {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1807,20 +1807,20 @@ function showAddNetworkModal() {
         ? `Chain ${chainId} · ${picked.symbol}`
         : `Chain ${chainId} · not in the catalogue`;
       if (known) {
-        out.textContent = `✅ Detected ${known.name} (chain ${chainId})`;
+        out.textContent = t('net.detectedKnown', { name: known.name, chain: chainId });
         $('#cnNameField').style.display = 'none';
         $('#cnName').value = '';
       } else {
         // Unknown chain: the number is known, the name is not. Let the user
         // name it rather than inventing a label that will be wrong later.
-        out.textContent = `✅ Detected chain ${chainId} — not in the catalogue, name it below`;
+        out.textContent = t('net.detectedUnknown', { chain: chainId });
         $('#cnNameField').style.display = '';
         $('#cnName').focus();
       }
       $all('.chain-preset').forEach((r) => { r.style.borderLeft = ''; });
     } catch {
       if (seq !== detectSeq) return;
-      out.textContent = '⚠️ Could not reach that RPC';
+      out.textContent = t('net.rpcUnreachable');
       picked = null;
     }
   };
@@ -1850,7 +1850,7 @@ function showAddNetworkModal() {
     $('#cnDetect').textContent = '';
     $('#cnIcon').textContent = d.icon;
     $('#cnNameLabel').textContent = d.name;
-    $('#cnChainLabel').textContent = `Chain ${d.chain} · ${d.symbol}`;
+    $('#cnChainLabel').textContent = t('net.chainLabel', { chain: d.chain, symbol: d.symbol });
     $('#cnRpc').value = d.rpc;
     $all('.chain-preset').forEach((r) => { r.style.borderLeft = ''; });
     el.style.borderLeft = '8px solid var(--mint)';
@@ -1909,7 +1909,7 @@ function showAddNetworkModal() {
     }
     // Prove the endpoint really is the chain that was picked before saving it.
     const btn = $('#cnSave');
-    btn.disabled = true; btn.textContent = 'Checking RPC…';
+    btn.disabled = true; btn.textContent = t('net.checkingRpc');
     try {
       const res = await fetch(rpc, {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1923,7 +1923,7 @@ function showAddNetworkModal() {
     } catch {
       return toast('Could not reach that RPC', 'error');
     } finally {
-      btn.disabled = false; btn.textContent = 'Add Network';
+      btn.disabled = false; btn.textContent = t('net.addNetwork');
     }
     // An unknown chain has no catalogue name, so the one the user typed is used.
     if (custom && !picked.name) picked.name = displayName;
@@ -2232,7 +2232,7 @@ async function loadDashboard(opts = {}) {
     // paragraph — the list stayed empty until the next tick succeeded. The
     // rows on display are seconds old and still true; keep them and log.
     if (!soft) {
-      assetList.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Reading your assets'))}</p>`;
+      assetList.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'err.readingAssets'))}</p>`;
     }
   }
 }
@@ -2287,7 +2287,7 @@ function renderAssets(tokens) {
   const totalUsd = tokens.reduce((s, t) => s + holdingUsd(t), 0);
   animateValue($('#totalBalance'), totalUsd, { duration: 600, formatter: fmtUsd });
   if (!tokens.length) {
-    assetList.innerHTML = '<p class="small text-center">No assets found.</p>';
+    assetList.innerHTML = `<p class="small text-center">${escapeHtml(t('dash.noAssets'))}</p>`;
     $('#assetSearch').style.display = 'none';
     return;
   }
@@ -2317,7 +2317,7 @@ function renderAssets(tokens) {
       <div class="asset-arrow"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
     </div>`).join('');
   if (filtered.length === 0) {
-    assetList.innerHTML = '<p class="small text-center">No tokens match your search.</p>';
+    assetList.innerHTML = `<p class="small text-center">${escapeHtml(t('dash.noTokenMatch'))}</p>`;
   }
   // The per-asset 24h sparkline was removed from the coin list: it fetched a
   // history call for every row, all of which failed CORS from a plain static
@@ -2840,7 +2840,7 @@ async function runEip7702Check() {
   const btn = $('#btn7702Check');
   const clearBtn = $('#btnClearEipResults');
   if (!out) return;
-  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  if (btn) { btn.disabled = true; btn.textContent = t('common.checking'); }
   // Hidden while running; the success path reveals it (live request: "setiap
   // selesai scan nanti muncul tombol [hapus hasil cek]"). A failed scan leaves
   // it hidden — an error line is not check output, so there is nothing to
@@ -2863,9 +2863,9 @@ async function runEip7702Check() {
     // was a literal `true`).
     scanned = Array.isArray(results) && results.length > 0;
   } catch (e) {
-    out.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'Checking support'))}</p>`;
+    out.innerHTML = `<p class="small text-center">${escapeHtml(explainError(e, 'err.checkingSupport'))}</p>`;
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Check all networks'; }
+    if (btn) { btn.disabled = false; btn.textContent = t('set.eip7702.checkAll'); }
     if (clearBtn) clearBtn.hidden = !scanned;
   }
 }
@@ -2897,7 +2897,7 @@ function renderActivity() {
   if (!visible.length) {
     list.innerHTML = `<div class="empty-state">
       <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      <p>No transactions yet</p>
+      <p>${escapeHtml(t('act.empty'))}</p>
     </div>`;
     return;
   }
@@ -2991,7 +2991,7 @@ async function showActivityDetail(a) {
 
   const box = $('#actChain');
   const hasHash = a.hash && a.hash.startsWith('0x');
-  if (!hasHash) { box.innerHTML = `<p class="small dim">No transaction hash recorded for this entry.</p>`; return; }
+  if (!hasHash) { box.innerHTML = `<p class="small dim">${escapeHtml(t('tx.noHash'))}</p>`; return; }
   let provider;
   if (rowNetId === activeId) {
     provider = get('provider');
@@ -3000,7 +3000,7 @@ async function showActivityDetail(a) {
     provider = await getProvider(net.chainId).catch(() => null);
   }
   if (!provider) {
-    box.innerHTML = `<p class="small dim">Connect a network to read this transaction from the chain.</p>`;
+    box.innerHTML = `<p class="small dim">${escapeHtml(t('tx.connectToRead'))}</p>`;
     return;
   }
   try {
@@ -3008,7 +3008,7 @@ async function showActivityDetail(a) {
       provider.getTransaction(a.hash),
       provider.getTransactionReceipt(a.hash).catch(() => null),
     ]);
-    if (!tx && !receipt) { box.innerHTML = `<p class="small dim">Not found on ${escapeHtml(net?.name || 'this network')} yet — it may still be pending.</p>`; return; }
+    if (!tx && !receipt) { box.innerHTML = `<p class="small dim">${escapeHtml(t('tx.notFoundYet', { net: net?.name || t('tx.thisNetwork') }))}</p>`; return; }
     const gasPrice = tx?.gasPrice ?? 0n;
     const used = receipt?.gasUsed ?? 0n;
     const fee = used * (receipt?.effectiveGasPrice ?? gasPrice);
@@ -3033,10 +3033,10 @@ async function showActivityDetail(a) {
       receipt ? row('Gas price', val(ethers.formatUnits(receipt.effectiveGasPrice ?? gasPrice, 'gwei')) + ' gwei') : '',
       receipt ? row('Fee paid', escapeHtml(ethers.formatEther(fee)) + ' ' + escapeHtml(sym)) : '',
     ].filter(Boolean).join('');
-    box.innerHTML = `<h3 class="mb-8">On chain</h3><div class="dsig-list">${chain}</div>`;
+    box.innerHTML = `<h3 class="mb-8">${escapeHtml(t('tx.onChain'))}</h3><div class="dsig-list">${chain}</div>`;
   } catch (e) {
     console.warn('[BearTool] chain read failed:', e);
-    box.innerHTML = `<p class="small" style="color:var(--danger)">${escapeHtml(explainError(e, 'Reading the chain'))}</p>`;
+    box.innerHTML = `<p class="small" style="color:var(--danger)">${escapeHtml(explainError(e, 'err.readingChain'))}</p>`;
   }
 }
 
@@ -3150,7 +3150,7 @@ function renderAddressBook() {
   const el = $('#addressBookList');
   if (!el) return;
   if (!list.length) {
-    el.innerHTML = '<p class="small text-center">No saved addresses yet.</p>';
+    el.innerHTML = `<p class="small text-center">${escapeHtml(t('send.addrEmpty'))}</p>`;
     return;
   }
   el.innerHTML = list.map((item, i) => `

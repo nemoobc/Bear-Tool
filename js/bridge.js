@@ -698,7 +698,7 @@ export async function doBridge() {
   } catch (e) {
     if (seq !== quoteSeq) return;
     set('bridgeQuote', null);
-    box.innerHTML = `<div class="quote-error">⚠️ ${escapeHtml(explainError(e, 'Bridge quote'))} No bridge will be started.</div>
+    box.innerHTML = `<div class="quote-error">⚠️ ${escapeHtml(explainError(e, 'err.bridgeQuote'))} No bridge will be started.</div>
       <div class="quote-error-detail">${escapeHtml(fromNet.name)} → ${escapeHtml(toNet.name)}</div>`;
   }
 }
@@ -872,7 +872,7 @@ async function doBridgeExecInner() {
           if (decision === 'reset+approve') await sendApprove(0n, 'approval reset');
           await sendApprove(BigInt(context.amountSmallest), 'approval');
         } catch (e) {
-          return toast(`${explainError(e, 'Approval')} — bridge not signed`, 'error');
+          return toast(`${explainError(e, 'err.approval')} — bridge not signed`, 'error');
         }
         toast('Approval confirmed — refreshing route…', 'success');
         // The original quote can outlive this approval wait (LI.FI quotes
@@ -884,7 +884,7 @@ async function doBridgeExecInner() {
           // fetchBoundQuote re-validates field-by-field like quote time did.
           fresh = await fetchBoundQuote(q.router || 'lifi', context);
         } catch (e) {
-          return toast(`Approval done, but no fresh route (${explainError(e, 're-quote')}) — try again`, 'error');
+          return toast(`Approval done, but no fresh route (${explainError(e, 'errRequote')}) — try again`, 'error');
         }
         // A fresh quote may name a DIFFERENT spender than we just approved —
         // executing against it would fail the allowance pull. Refuse honestly.

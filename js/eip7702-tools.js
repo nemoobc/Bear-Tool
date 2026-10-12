@@ -7,6 +7,7 @@
 const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 
 import { $, toast, confirmTx, escapeHtml, setBtnDots, promptPassword } from './ui.js';
+import { t } from './i18n.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, receiptVerdict, withTimeout } from './safetx.js';
 import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.js';
@@ -244,7 +245,7 @@ function renderBatchList() {
   const list = $('#batchList');
   if (!list) return;
   if (!batchCalls.length) {
-    list.innerHTML = '<p class="small text-center">No calls yet. Add one below.</p>';
+    list.innerHTML = `<p class="small text-center">${escapeHtml(t('eip7702.noCalls'))}</p>`;
     return;
   }
   list.innerHTML = batchCalls.map((b, i) => `
@@ -517,22 +518,22 @@ function wireRescueHelperDetect() {
   const run = async () => {
     const addr = input.value.trim();
     if (!addr) { clear(); return; }
-    if (!wallet.isValidAddress(addr)) { out.textContent = 'Invalid address'; out.className = 'small'; return; }
-    out.textContent = 'Checking contract on-chain…';
+    if (!wallet.isValidAddress(addr)) { out.textContent = t('eip7702.invalidAddress'); out.className = 'small'; return; }
+    out.textContent = t('eip7702.checkingContract');
     try {
       const net = getNetworkById(get('networkId'));
       const provider = await getProvider(net.chainId);
       const det = await probeRescueContract(addr, provider, null, null);
       if (input.value.trim() !== addr) return; // stale — field moved on
       if (det.ok) {
-        out.textContent = `Detected rescue contract — SAFE ${wallet.shortAddress(det.safe)} · deployer ${wallet.shortAddress(det.rescuer)}`;
+        out.textContent = t('eip7702.detectedRescue', { safe: wallet.shortAddress(det.safe), deployer: wallet.shortAddress(det.rescuer) });
         out.className = 'small';
       } else {
         out.textContent = det.reason + ' — Execute will ask to deploy a new one.';
         out.className = 'small';
       }
     } catch (e) {
-      out.textContent = 'Could not read that contract — ' + (e?.shortMessage || e?.message || String(e));
+      out.textContent = t('eip7702.cannotRead') + ' ' + (e?.shortMessage || e?.message || String(e));
     }
   };
   input.addEventListener('input', run);
@@ -954,7 +955,7 @@ async function executeClaim() {
       const delta = (safeBefore != null && safeAfter != null) ? safeAfter - safeBefore : null;
       box.classList.remove('hidden');
       box.innerHTML =
-        `<div class="small"><strong>Claim result</strong> — ${escapeHtml(symbol)}</div>` +
+        `<div class="small"><strong>${escapeHtml(t('eip7702.claimResult'))}</strong> — ${escapeHtml(symbol)}</div>` +
         `<div class="small">SAFE: ${fmt(safeBefore)} → ${fmt(safeAfter)}` +
         (delta != null ? ` (${delta >= 0n ? '+' : ''}${fmt(delta)})` : '') + '</div>' +
         `<div class="small">EOA: ${fmt(eoaBefore)} → ${fmt(eoaAfter)}</div>`;
@@ -1187,7 +1188,7 @@ export async function deployRescueHelper() {
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
     toast('Rescue helper deployed: ' + wallet.shortAddress(addr), 'success');
     const det = $('#rescueHelperDetect');
-    if (det) det.textContent = 'Deployed: ' + addr;
+    if (det) det.textContent = t('eip7702.deployed') + ' ' + addr;
     renderHelperStatus();
     renderDeployedRegistry();
   } catch (e) {
@@ -1258,7 +1259,7 @@ export function renderDeployedRegistry() {
   const all = ['batch', 'rescue', 'airdrop', 'proxy', 'revoker']
     .flatMap(type => listDeployed(type, chainId).map(item => ({ ...item, type })));
   if (!all.length) {
-    list.innerHTML = '<p class="small text-center">No deployed helper contracts on this chain yet.</p>';
+    list.innerHTML = `<p class="small text-center">${escapeHtml(t('eip7702.noHelpers'))}</p>`;
     return;
   }
   list.innerHTML = all.map((item, i) => `
@@ -1322,14 +1323,14 @@ async function checkDelegation() {
     const delegate = await getDelegation(provider, addr);
     if (delegate) {
       status.className = 'delegate-status delegated';
-      text.innerHTML = `Delegated to <span class="addr">${escapeHtml(delegate)}</span>`;
+      text.innerHTML = `<span>${escapeHtml(t('eip7702.delegatedTo'))}</span> <span class="addr">${escapeHtml(delegate)}</span>`;
     } else {
       status.className = 'delegate-status eoa';
-      text.textContent = 'Plain EOA (no delegation) — nothing to revoke.';
+      text.textContent = t('eip7702.plainEoa');
     }
   } catch {
     status.className = 'delegate-status eoa';
-    text.textContent = 'Cannot check (RPC error)';
+    text.textContent = t('eip7702.cannotCheck');
   }
 }
 
@@ -1440,7 +1441,7 @@ export async function revokeDelegation() {
   } catch (e) {
     toast(e?.message || String(e), 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Revoke delegation'; }
+    if (btn) { btn.disabled = false; btn.textContent = t('eip7702.revokeBtn'); }
   }
 }
 

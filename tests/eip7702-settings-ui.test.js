@@ -71,7 +71,7 @@ test('only an endpoint that said yes is offered as a link', () => {
 });
 
 test('the check button disables itself while it runs, and comes back', () => {
-  assert.match(app, /btn\.disabled = true; btn\.textContent = 'Checking…'/, 'locked during');
+  assert.match(app, /btn\.disabled = true; btn\.textContent = t\('common\.checking'\)/, 'locked during');
   assert.match(app, /finally \{\s*\n\s*if \(btn\) \{ btn\.disabled = false/, 'released even on throw');
 });
 

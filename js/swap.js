@@ -9,6 +9,7 @@
 const BROADCAST_TIMEOUT_MS = 15000; // same bound send.js uses
 
 import { $, toast, confirmTx, escapeHtml, spinnerDots, fmtAmount } from './ui.js';
+import { t } from './i18n.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, receiptVerdict, withTimeout } from './safetx.js';
 import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
@@ -511,8 +512,8 @@ export async function getSwapQuote() {
     set('swapQuote', quoteData);
     $('#swapToAmount').value = outFormatted;
     quoteBox.innerHTML =
-      `Route: <b>${escapeHtml(result.source)}</b> · Rate: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
-      `Slippage: ${escapeHtml(slippage)}%`;
+      `${escapeHtml(t('swap.route'))} <b>${escapeHtml(result.source)}</b> · ${escapeHtml(t('swap.rate'))}: 1 ${escapeHtml(sellSymbol)} ≈ ${rate.toFixed(6)} ${escapeHtml(buySymbol)}<br>` +
+      `${escapeHtml(t('swap.slippage'))}: ${escapeHtml(slippage)}%`;
   }
 
   // ── native ↔ wrapped twin: direct WETH deposit/withdraw, never a DEX ──
@@ -534,7 +535,7 @@ export async function getSwapQuote() {
       set('swapQuote', null);
       $('#swapToAmount').value = '';
       console.warn(`[BearTool] quote via ${selectedRouter} failed:`, e);
-      quoteBox.innerHTML = `<div class="quote-error">⚠️ ${escapeHtml(explainError(e, `Quoting via ${selectedRouter}`))}</div>`;
+      quoteBox.innerHTML = `<div class="quote-error">⚠️ ${escapeHtml(explainError(e, t('err.quotingVia', { router: selectedRouter })))}</div>`;
       return;
     }
   }
@@ -560,7 +561,7 @@ export async function getSwapQuote() {
   set('swapQuote', null);
   $('#swapToAmount').value = '';
   quoteBox.innerHTML =
-    `<div class="quote-error">⚠️ No route available on ${escapeHtml(net.name)} — no swap will happen.</div>` +
+    `<div class="quote-error">⚠️ ${escapeHtml(t('swap.noRoute', { net: net.name }))}</div>` +
     `<div class="quote-error-detail">${escapeHtml(errors.join(' · '))}</div>`;
 }
 

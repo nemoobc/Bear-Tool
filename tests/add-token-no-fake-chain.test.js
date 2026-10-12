@@ -44,6 +44,9 @@ test('detection still reads name, symbol and decimals from the contract', () => 
   for (const fn of ['c.symbol()', 'c.name()', 'c.decimals()']) {
     assert.ok(app.includes(fn), `${fn} must still be read`);
   }
-  assert.match(app, /Detected on chain|Read from /,
+  // The note now goes through the dictionary (t('tok.readFrom')), so this pins
+  // the key rather than the sentence: the behaviour required is that the note
+  // says WHICH network answered, not that it says it in one particular language.
+  assert.match(app, /t\('tok\.readFrom'/,
     'the note must say which network answered');
 });

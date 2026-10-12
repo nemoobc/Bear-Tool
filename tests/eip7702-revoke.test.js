@@ -37,6 +37,6 @@ test('revoke: revoke path sends a real type-4 tx to ZERO_ADDRESS', () => {
 
 test('revoke: check path reads on-chain delegation', () => {
   assert.match(toolsSrc, /getDelegation\(provider, addr\)/, 'check must query the delegation');
-  assert.match(toolsSrc, /Plain EOA \(no delegation\)/, 'check must report plain EOA state');
-  assert.match(toolsSrc, /Delegated to/, 'check must report the delegated implementation');
+  assert.match(toolsSrc, /t\('eip7702\.plainEoa'\)/, 'check must report plain EOA state');
+  assert.match(toolsSrc, /t\('eip7702\.delegatedTo'/, 'check must report the delegated implementation');
 });

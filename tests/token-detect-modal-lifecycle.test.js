@@ -33,12 +33,15 @@ test('B3: "not a token" branch re-shows #tokenDetect with its note', () => {
   const body = branch[0];
   assert.match(body, /tokenDetect'\)\.style\.display = ''/,
     'reset() hides the box — the branch must re-show it so the note is visible');
-  assert.match(body, /No ERC-20 name\/symbol found/,
+  // Translated: the wording lives in the dictionary now, so the branch is pinned by
+  // the key it writes. The ORDER check below still runs on the same branch, so a
+  // moved or deleted note still fails here.
+  assert.match(body, /t\('tok\.noMeta'\)/,
     'the user-facing explanation must stay in this branch');
   // Order: the re-show must come BEFORE the note is written, or the note is
   // written into an element that display:none is about to (re)apply.
   const showIdx = body.indexOf("tokenDetect').style.display = ''");
-  const noteIdx = body.indexOf('No ERC-20 name/symbol found');
+  const noteIdx = body.indexOf("t('tok.noMeta')");
   assert.ok(showIdx !== -1 && noteIdx > showIdx,
     'box must be visible before the note is assigned');
 });

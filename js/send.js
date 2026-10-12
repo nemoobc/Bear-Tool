@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { $, toast, confirmTx, fmtAmount, escapeHtml } from './ui.js';
+import { t } from './i18n.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, receiptVerdict, withTimeout, RPC_TIMEOUT_MS } from './safetx.js';
 import { getNetworkById, ERC20_ABI, POPULAR_TOKENS } from './network.js';
@@ -160,7 +161,7 @@ export async function updateSendPreview() {
     if (gasValue) gasValue.textContent = '—';
     if (gasUsd) gasUsd.textContent = '';
     if (to && amt && !wallet.isValidAddress(to)) {
-      preview.innerHTML = '⚠️ Invalid address';
+      preview.innerHTML = `⚠️ ${escapeHtml(t('send.invalidAddress'))}`;
       preview.classList.remove('hidden');
     }
     return;
@@ -192,7 +193,7 @@ export async function updateSendPreview() {
       if (gasUsd) gasUsd.textContent = nativeUsd ? `$${(parseFloat(gasEth) * nativeUsd).toFixed(2)}` : '';
     }
   } catch { /* gas preview is optional */ }
-  preview.innerHTML = `Sending <b>${escapeHtml(amt)}</b> to <span class="mono">${escapeHtml(wallet.shortAddress(to))}</span>${gasLine}`;
+  preview.innerHTML = `${escapeHtml(t('send.previewSending'))} <b>${escapeHtml(amt)}</b> ${escapeHtml(t('send.previewTo'))} <span class="mono">${escapeHtml(wallet.shortAddress(to))}</span>${gasLine}`;
   preview.classList.remove('hidden');
 }
 
