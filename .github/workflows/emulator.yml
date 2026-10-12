@@ -123,6 +123,15 @@ jobs:
             # ONE recovery cycle against fleet qemu deaths (10 of 19 runs):
             # classification + relaunch live in the script — one line, no state
             # across the parser's one-process-per-line model.
+            # Wait, bounded, for the device to actually register with adb before
+            # the journey starts. Two runs died at exactly this point with an EMPTY
+            # `adb devices` (run 38280599592, 38281687968): qemu was alive (qemu=1)
+            # but never registered, so the driver's very first CDP probe failed and
+            # the run reported steps=0 — which reads like "the app broke" when
+            # nothing had even launched. Bounded at 180s and guarded, so a device
+            # that registers late gets its run, and one that never appears costs
+            # three minutes instead of the whole job.
+            timeout 180 sh -c 'until adb devices 2>/dev/null | grep -qE "device$"; do sleep 3; done' || echo WAIT_DEVICE_RC=$?
             timeout 2100 env E2E_OUT=emulator-artifacts bash tools/e2e-recover.sh || echo E2E_FAILED_RC=$?
             cat e2e-stdout.log || true
             echo "=== crash / fatal ==="
