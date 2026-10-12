@@ -545,3 +545,24 @@ test('the driver measures the longest BIP-39 word, not only the words this seed 
   assert.match(drv, /probe\.textContent = keep/,
     'DOM harus dikembalikan seperti semula — langkah berikutnya membaca kata seed dari sini');
 });
+
+// A translation that is wired but never looked at is a translation nobody has
+// seen work. 79 labels were wired across the views (47 on Deploy alone) and the
+// driver only ever screenshotted Settings in Indonesian, so nothing proved the
+// dictionary reached the screen. This step reads the rendered text of the screen
+// that had the most unwired labels, while Indonesian is actually selected.
+test('the driver proves Indonesian renders on the screen that had the most unwired labels', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  assert.match(drv, /Deploy speaks Indonesian while Indonesian is selected/,
+    'driver harus punya langkah yang memeriksa bahasa Indonesia di Deploy');
+  assert.match(drv, /33b-deploy-id/, 'langkah itu harus menyimpan bukti layar');
+  // The phrases must not be words the two languages share, or a half-applied
+  // switch ("Labels are wired" in English) could pass the check by luck.
+  for (const phrase of ['Antrekan panggilan', 'Selamatkan ERC-20/ERC-721', 'Jenis aset']) {
+    assert.match(drv, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `frasa "${phrase}" harus jadi bagian dari pemeriksaan`);
+  }
+  // And the check has to be able to fail, or it is decoration.
+  assert.match(drv, /Deploy did not render Indonesian while Indonesian was selected/,
+    'kegagalan harus menggagalkan run');
+});

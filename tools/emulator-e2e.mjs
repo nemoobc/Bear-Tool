@@ -1341,6 +1341,28 @@ async function main() {
   };
   sweep.langId = await setLang('id');
   await page.shot('33-settings-id');
+
+  // While Indonesian is ACTIVE, open the screen that had the most unwired labels
+  // and check that its Indonesian is actually on screen. 79 labels were wired to
+  // the dictionary across the views, and 47 of them were on Deploy alone — but a
+  // wiring that is never looked at is a wiring nobody has seen work. Reading the
+  // rendered text proves the whole chain at once: key present in both languages,
+  // attribute on the element, applyTranslations() reached it.
+  step('feature sweep: Deploy speaks Indonesian while Indonesian is selected');
+  if (await openView('deploy')) {
+    await sleep(900);
+    await page.shot('33b-deploy-id');
+    const idText = await page.evaluate(`document.body.innerText`);
+    // Phrases chosen because their English and Indonesian forms share no words,
+    // so a half-applied language switch cannot pass by coincidence.
+    const want = ['Antrekan panggilan', 'Selamatkan ERC-20/ERC-721', 'Jenis aset'];
+    const missing = want.filter((w) => !idText.includes(w));
+    if (missing.length) {
+      throw new Error('Deploy did not render Indonesian while Indonesian was selected — missing: '
+        + JSON.stringify(missing));
+    }
+    sweep.deployId = want.length;
+  }
   sweep.langEn = await setLang('en');
   if (sweep.langId !== 'id') throw new Error('feature sweep: the language did not switch to Indonesian: ' + JSON.stringify(sweep));
   if (sweep.langEn !== 'en') throw new Error('feature sweep: the language did not switch back to English: ' + JSON.stringify(sweep));
