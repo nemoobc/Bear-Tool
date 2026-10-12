@@ -438,6 +438,27 @@ async function main() {
 
   const page = makePage(cdp);
 
+  // A REAL key first, then the synthetic route. CDP input goes to whatever target
+  // the session is attached to; after a view switch the WebView target can have
+  // moved on and a key sent to a stale target reaches nothing (run 38283749329:
+  // "Escape did not close the Receive modal" on a modal that IS dismissible). The
+  // app's handler is `document.addEventListener('keydown')`, so a KeyboardEvent
+  // dispatched on document reaches it deterministically. The assertion stays strict
+  // either way — this only makes sure the press ARRIVES.
+  const pressEscape = async () => {
+    await page.press('Escape').catch(() => {});
+    const stillOpen = await page.evaluate(`(() => {
+      const o = document.querySelector('#modalOverlay');
+      return !!(o && o.classList.contains('open'));
+    })()`).catch(() => true);
+    if (!stillOpen) return 'cdp';
+    await page.evaluate(`(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+      return true;
+    })()`).catch(() => {});
+    return 'synthetic';
+  };
+
   // Can the user SEE the wallet chrome, or does the native browser own the
   // screen? No page target can answer that — the overlay is a sibling native
   // view. Measured 2026-10-11 (run 38161736957): the dApp page keeps reporting
@@ -1479,7 +1500,7 @@ async function main() {
     return { open: true, focusInside: !!(active && box.contains(active)), labelled: !!document.querySelector('#modalBox [id]') };
   })()`);
   if (modalA11y.open && modalA11y.focusInside === false) throw new Error('feature sweep: the Receive modal opened without moving focus inside: ' + JSON.stringify(modalA11y));
-  await page.press('Escape').catch(() => false);
+  sweep.escapeRoute = await pressEscape();
   await sleep(700);
   const closed = await page.evaluate(`!document.querySelector('#modalBox') || document.querySelector('#modalBox').hidden === true`);
   if (modalA11y.open && !closed) throw new Error('feature sweep: Escape did not close the Receive modal');
