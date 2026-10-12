@@ -2450,7 +2450,8 @@ function showReceiveModal(address, symbol) {
   // to be "BTC" (BTCB) used to reach the Bitcoin branch by name, which is the
   // counterfeit class the logo registry already refuses; the chain the wallet
   // is standing on is the only honest answer.
-
+  const label = net?.symbol || symbol || 'EVM';
+  const addr = address || get('address');
 
   let qrSvg = '';
   if (addr) {

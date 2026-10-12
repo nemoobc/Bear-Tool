@@ -87,3 +87,34 @@ test('chart: drawMiniChart says rate-limited, not "no data", when that is the ca
   assert.match(fn, /paintMessage\(rateLimited \? [`'"][^`'"]*[Rr]ate-limited[^`'"]*[`'"] : `No \$\{timeframe\} data`\)/,
     'the ternary must keep the honest "no data" message for the genuine case');
 });
+
+// Regression, 2026-10-12: removing the non-EVM chains deleted the two lines
+// that DEFINED `addr` and `label` inside showReceiveModal — they had been
+// `const addr = nonEvm ? … : (address || get('address'))`. With the ternary
+// gone, nothing declared them, so `if (addr)` read an undeclared identifier,
+// no address and no QR were rendered, and the Receive sheet came up empty.
+// The whole local unit suite stayed green: nothing in it opens the Receive
+// sheet at runtime, and the emulator is the surface that showed it (the QR
+// never appeared on a real Android WebView).
+//
+// This gate reads the function and proves the identifiers it uses are bound
+// inside it — the class of mistake, not this one instance.
+test('showReceiveModal binds every identifier it reads', () => {
+  const start = app.indexOf('function showReceiveModal(');
+  assert.ok(start > -1, 'showReceiveModal tidak ditemukan');
+  const body = app.slice(start, app.indexOf('\nfunction ', start + 10) === -1
+    ? app.length
+    : app.indexOf('\nfunction ', start + 10));
+
+  // Identifiers the template and the QR path depend on.
+  for (const id of ['addr', 'label', 'qrSvg']) {
+    assert.match(body, new RegExp(`\\b(const|let|var)\\s+${id}\\b`),
+      `showReceiveModal memakai "${id}" tanpa mendeklarasikannya — persis regresi hapus-non-EVM`);
+  }
+  // A use inside the template is the thing that throws in a browser: it renders
+  // as literal text there but ReferenceErrors the moment the branch runs.
+  assert.match(body, /\$\{escapeHtml\(addr\)\}|\$\{qrSvg/, 'template harus memakai addr/qrSvg');
+  // And the address has a real source, not a bare identifier.
+  assert.match(body, /const addr = address \|\| get\('address'\)|const addr = .*get\('address'\)/,
+    "addr harus berasal dari address argumen atau state wallet");
+});
