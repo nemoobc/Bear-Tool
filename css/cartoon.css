@@ -2030,19 +2030,27 @@ select.input option, select.select option, .input option {
 .seed-words {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 14px;
+  gap: 8px 10px;
   font-family: var(--font-mono, monospace);
-  font-size: 1.05rem;
-  line-height: 1.9;
+  /* Sized so the LONGEST BIP-39 word (8 letters) fits its cell without an
+     ellipsis. At 1.05rem an 8-letter word is ~81px and the number column took
+     1.9em (~32px), so the cell needed ~121px of the ~118px it has — three of
+     the twelve words came out as "prese…", "incre…", "convi…" on the emulator
+     screenshot. Truncation is honest but a seed word still has to be READABLE,
+     because the screen tells the user to write it down. */
+  font-size: 0.95rem;
+  line-height: 1.85;
   color: var(--ink);
 }
 @media (min-width: 560px) {
   .seed-words { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
-.seed-word { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.seed-word { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .seed-word > b {
   flex: 0 0 auto;
-  min-width: 1.9em;
+  /* "12." at 0.95rem mono is ~2.0em wide; 1.5em leaves the ellipsis-free budget
+     to the word, which is the part the user has to transcribe. */
+  min-width: 1.5em;
   text-align: right;
   color: var(--ink-soft);
   font-weight: 600;

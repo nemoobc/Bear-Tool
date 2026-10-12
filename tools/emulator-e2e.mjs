@@ -494,6 +494,33 @@ async function main() {
   step('seed phrase visible');
   await page.shot('02-seed-phrase');
 
+  // Measured, not assumed. Two rounds of this run were spent on a seed word
+  // that broke across lines ("tornad" / "o") and then on three that came out as
+  // "prese…", "incre…", "convi…" after the no-break fix — each was caught here in
+  // the source, and neither could be settled there: whether a word FITS depends
+  // on the real card width of a real phone, which no stylesheet arithmetic in a
+  // unit test knows. scrollWidth > clientWidth is exactly "the box is clipping
+  // its own content", and on this screen that means a word the user is being
+  // told to write down exists only partly.
+  const seedFit = await page.evaluate(`(() => {
+    const out = { clipped: [], cells: 0, cellW: 0, words: [] };
+    for (const cell of document.querySelectorAll('.seed-word > span')) {
+      out.cells++;
+      out.cellW = Math.round(cell.getBoundingClientRect().width);
+      out.words.push(cell.textContent);
+      if (cell.scrollWidth > cell.clientWidth + 1) {
+        out.clipped.push(cell.textContent + ' (' + cell.scrollWidth + '>' + cell.clientWidth + ')');
+      }
+    }
+    return out;
+  })()`);
+  if (!seedFit.cells) throw new Error('seed words not found to measure');
+  if (seedFit.clipped.length) {
+    throw new Error('seed words are truncated on this screen: ' + JSON.stringify(seedFit.clipped)
+      + ' cell=' + seedFit.cellW + 'px — the screen asks the user to write these down');
+  }
+  report.seedFit = { cells: seedFit.cells, cellW: seedFit.cellW, longest: seedFit.words.sort((a, b) => b.length - a.length)[0] };
+
   step('seed confirmation (3 positions, read the app’s own question)');
   for (let i = 0; i < 3; i++) {
     const label = await page.evaluate(`document.querySelector('#seedQLabel').textContent`);

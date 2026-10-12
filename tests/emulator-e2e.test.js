@@ -494,3 +494,19 @@ test('a fatal failure explains itself: step in flight, evidence, dropped request
       `baris rekaman tanpa guard: ${line.trim()} — satu baris gagal mematikan sisa skrip`);
   }
 });
+
+// Whether a seed word FITS cannot be decided from source — it depends on the
+// card width of the real phone. Two emulator runs were spent discovering that
+// the hard way (words broke mid-word, then three came out as "prese…"), because
+// both times the question was asked of a stylesheet instead of a device. The
+// driver now measures it there, so the gate is that the measurement exists and
+// is allowed to fail the run.
+test('the driver measures seed words on the device instead of assuming a fit', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  assert.match(drv, /scrollWidth\s*>\s*\w+\.clientWidth/,
+    'driver harus membandingkan scrollWidth dengan clientWidth — itu definisi "kotak memotong isinya"');
+  assert.match(drv, /seed words are truncated on this screen/,
+    'kata seed terpotong harus bisa menggagalkan run, bukan hanya dicatat');
+  assert.match(drv, /report\.seedFit/,
+    'hasil pengukuran harus masuk laporan, supaya bisa dibaca tanpa menebak');
+});
