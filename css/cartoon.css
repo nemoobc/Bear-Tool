@@ -440,28 +440,10 @@ body::before {
   margin: 0 auto;
 }
 
-/* ── Non-EVM networks (BTC/SOL/XRP) ───────────────────────────────────
-   They are pickable networks like any other (2026-10-11), so the topbar pill
-   wears the chain's own mark — but the pill is a LABEL here, not a "chain 1"
-   claim: there is no chainId behind it. Tinted so a glance says "not an EVM
-   chain", which is exactly the thing the user has to know before tapping Send.
-   The home screen behind that pill carries a statement row, not a token row,
-   so it must not read as tappable. */
-.network-pill.non-evm {
-  background: var(--honey);
-}
-.theme-dark .network-pill.non-evm {
-  background: var(--white);
-}
-.non-evm-home {
-  cursor: default;
-}
 
-/* ── Receive: one chain per sheet ─────────────────────────────────────
-   One recovery phrase backs every chain, but the sheet shows ONE network
-   (the active EVM chain, or the active non-EVM chain)
-   — user 2026-10-11: "setiap jaringan fitur receive 1 aja". The bordered
-   address card keeps a long bech32/XRP address from running into the copy
+/* ── Receive: one chain per sheet ───────────────────────────────────────
+   One recovery phrase backs every chain, but the sheet shows ONE network.
+   The bordered address card keeps a long address from running into the copy
    button on a narrow phone. */
 .receive-addr {
   font-size: 0.78rem;

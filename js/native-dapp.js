@@ -341,18 +341,11 @@ async function handleNativeRpc({ id, origin, payload }) {
   // mainnet transactions this wallet cannot sign. Named refusal instead, same
   // code (4901) as dapp-exec/walletconnect, so every path tells one story.
   const activeNet = getNetworkById(get('networkId'));
-  const nonEvmActive = activeNet?.type === 'non-evm';
-  const chainId = nonEvmActive ? `non-evm:${activeNet.id}` : 'eip155:' + Number(activeNet?.chainId || 1);
+  const chainId = 'eip155:' + Number(activeNet?.chainId || 1);
 
   // Read-only answers work even while locked.
   if (method === 'eth_chainId' || method === 'net_version') {
-    if (nonEvmActive) {
-      return respondError({
-        code: 4901,
-        message: `Bear Tool is on ${activeNet.name}, a non-EVM network with no EVM chain. Switch to an EVM network first.`,
-      });
-    }
-    return respond(method === 'eth_chainId'
+        return respond(method === 'eth_chainId'
       ? '0x' + Number(activeNet.chainId).toString(16)
       : String(activeNet.chainId));
   }
@@ -407,7 +400,7 @@ async function handleNativeRpc({ id, origin, payload }) {
     const domChain = Number(domain.chainId);
     const localNet = getNetworkById(get('networkId'));
     if (Number.isFinite(domChain) && localNet && Number(localNet.chainId) !== domChain) {
-      const m = `This signature targets chain ${domChain}, but Bear Tool is on ${localNet?.type === 'non-evm' ? `${localNet.name} (a non-EVM network with no EVM chain)` : `${localNet.name} (chain ${localNet.chainId})`}. Switch network first — nothing was signed.`;
+      const m = `This signature targets chain ${domChain}, but Bear Tool is on ${`${localNet.name} (chain ${localNet.chainId})`}. Switch network first — nothing was signed.`;
       toast(m, 'error');
       return respondError({ code: -32000, message: m });
     }
@@ -433,7 +426,7 @@ async function handleNativeRpc({ id, origin, payload }) {
     const txReq = (msg.params || [])[0] || {};
     const reqChain = Number(txReq.chainId);
     if (Number.isFinite(reqChain) && localNet && Number(localNet.chainId) !== reqChain) {
-      const m = `This dApp asked for chain ${reqChain}, but Bear Tool is on ${localNet?.type === 'non-evm' ? `${localNet.name} (a non-EVM network with no EVM chain)` : `${localNet.name} (chain ${localNet.chainId})`}. Switch network in Bear Tool and ask again — nothing was sent.`;
+      const m = `This dApp asked for chain ${reqChain}, but Bear Tool is on ${`${localNet.name} (chain ${localNet.chainId})`}. Switch network in Bear Tool and ask again — nothing was sent.`;
       toast(m, 'error');
       return respondError({ code: -32000, message: m });
     }

@@ -178,44 +178,7 @@ test('RPC: no duplicate endpoints within a network', () => {
 // BTC/SOL/XRP used to be a footnote under the EVM address. They are pickable
 // networks now (user 2026-10-11: "jadi network aktif yang bisa dipilih"), and
 // the rules that make them safe to select are pinned here.
-test('NON_EVM_CHAINS: BTC/SOL/XRP carry no chainId and no RPC', () => {
-  assert.equal(net.NON_EVM_CHAINS.length, 3);
-  assert.deepEqual(net.NON_EVM_CHAINS.map(c => c.id), ['bitcoin', 'solana', 'xrp']);
-  assert.deepEqual(net.NON_EVM_CHAINS.map(c => c.symbol), ['BTC', 'SOL', 'XRP']);
-  for (const c of net.NON_EVM_CHAINS) {
-    assert.equal(c.chainId, null, `${c.id} must have NO chainId — nothing to call`);
-    assert.equal(c.type, 'non-evm', `${c.id} is marked non-evm`);
-    assert.ok(!('rpc' in c), `${c.id} must carry no RPC list`);
-    assert.ok(net.isNonEvmNetwork(c), `${c.id} recognised by isNonEvmNetwork`);
-  }
-});
 
-test('isNonEvmNetwork is false for every EVM network and for nothing', () => {
-  for (const n of net.NETWORKS) {
-    assert.equal(net.isNonEvmNetwork(n), false, `${n.id} is EVM`);
-  }
-  assert.equal(net.isNonEvmNetwork(null), false);
-  assert.equal(net.isNonEvmNetwork(undefined), false);
-  assert.equal(net.isNonEvmNetwork({}), false);
-});
 
-test('getNetworkById resolves a non-EVM chain — never the ethereum fallback', () => {
-  // Letting 'bitcoin' reach the stale-id fallback would render Ethereum while
-  // networkId still says 'bitcoin' — the silent-substitution class, inverted.
-  assert.equal(net.getNetworkById('bitcoin').name, 'Bitcoin');
-  assert.equal(net.getNetworkById('solana').symbol, 'SOL');
-  assert.equal(net.getNetworkById('xrp').type, 'non-evm');
-  // The fallback itself still works for a genuinely unknown id.
-  assert.equal(net.getNetworkById('no-such-network').id, 'ethereum');
-});
 
-test('getAllNetworks stays EVM-only: 23, and no non-EVM entry leaked in', () => {
-  // Every EVM path (getNetwork(chainId), getProvider, token lists, the bridge
-  // picker) assumes a chainId and an RPC list — one null-chainId entry in there
-  // would break all of it.
-  const all = net.getAllNetworks();
-  assert.equal(all.length, net.NETWORKS.length);
-  assert.ok(all.every(n => net.isNonEvmNetwork(n) === false));
-  assert.equal(net.getNetwork('bitcoin'), undefined);
-});
 

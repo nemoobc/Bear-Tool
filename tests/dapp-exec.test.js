@@ -84,22 +84,6 @@ test('currentChainId resolves the registry, never NaN', () => {
   assert.equal(currentChainId(), 1);
 });
 
-test('currentChainId REFUSES on a non-EVM network instead of answering 1', () => {
-  // BTC/SOL/XRP are pickable networks now (2026-10-11) and have no EVM chain.
-  // Returning 1 here would sign a dApp request on Ethereum while the wallet's
-  // own pill says Bitcoin — the silent-chain-substitution this file exists to
-  // kill. The refusal must be loud and named, not a fallback.
-  for (const id of ['bitcoin', 'solana', 'xrp']) {
-    set('networkId', id);
-    assert.throws(() => currentChainId(), (e) => {
-      assert.equal(e.code, 4901, `${id}: kode error yang bisa dibaca dApp`);
-      assert.match(e.message, /non-EVM/i, `${id}: menyebut sebabnya`);
-      return true;
-    }, `${id} harus ditolak`);
-  }
-  set('networkId', 'ethereum');
-  assert.equal(currentChainId(), 1, 'kembali ke EVM lagi normal');
-});
 
 // ── personal_sign ─────────────────────────────────────────────────
 test('splitSignParams accepts spec and legacy order', () => {

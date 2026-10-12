@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const { NETWORKS, CHAIN_PRESETS, NON_EVM_CHAINS } =
+const { NETWORKS, CHAIN_PRESETS } =
   await import(pathToFileURL(path.join(here, '..', 'js', 'network.js')).href);
 const { tokenLogoHTML } = await import(pathToFileURL(path.join(here, '..', 'js', 'token-logo.js')).href);
 
@@ -75,7 +75,3 @@ test('the three preset marks use the colour the preset already declares', () => 
   }
 });
 
-test('every non-EVM receive card renders a brand mark', () => {
-  const missing = NON_EVM_CHAINS.map((c) => c.symbol).filter((s) => !hasMark(s));
-  assert.deepEqual(missing, [], `non-EVM cards without a mark: ${missing.join(', ')}`);
-});

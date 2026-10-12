@@ -128,17 +128,6 @@ test('a bundled registry token wears its brand offline; a user-added one keeps t
   assert.doesNotMatch(userAdded, /26A17B/, 'a user-added contract still gets the counterfeit guard');
 });
 
-test('the marks bundling needs exist: chain natives + the popular curated tickers', () => {
-  store.clear();
-  for (const sym of ['BTC', 'SOL', 'XRP']) {
-    assert.match(tokenLogoHTML(sym, 24, { remote: false }), /url\(#/,
-      `${sym} native needs its own mark (receive cards wear it)`);
-  }
-  for (const sym of ['SHIB', 'ARB', 'OP', 'PEPE', 'CRV', 'SNX', 'SUSHI', 'COMP', 'MKR', 'LDO', 'WETH']) {
-    assert.match(tokenLogoHTML(sym, 24, { remote: false, bundled: true }), /url\(#/,
-      `bundled ${sym} needs a brand mark, not the peach disc`);
-  }
-});
 
 test('the bundled flag comes from the registry check, never a blind true', async () => {
   // A blind `bundled: true` at a call site that ALSO receives user tokens would

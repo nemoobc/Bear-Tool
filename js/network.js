@@ -638,31 +638,6 @@ export function providerEndpoint(provider) {
   return provider?.bearEndpoint || null;
 }
 
-// ── Non-EVM chains the SAME recovery phrase can receive on ──────────────────
-// BTC/SOL/XRP are pickable networks like any other (user 2026-10-11: "itu chain
-// btc,sol,xrp bukan receive dijadiin satu" → pilih: "jadi network aktif yang
-// bisa dipilih"). Selecting one moves the wallet to that chain, and Receive then
-// shows THAT chain's own address — one receive per active network.
-//
-// They deliberately do NOT live in NETWORKS/getAllNetworks(): every EVM path
-// there (getNetwork(chainId), getProvider, token lists, the bridge picker)
-// assumes a numeric chainId and an RPC list, and one null-chainId entry would
-// break all of it. They resolve by ID instead, so getNetworkById() stays the
-// single entry point every caller already uses.
-export const NON_EVM_CHAINS = [
-  { id: 'bitcoin', name: 'Bitcoin', chainId: null, type: 'non-evm', symbol: 'BTC',
-    decimals: 8, explorer: 'https://mempool.space', icon: '₿', color: '#F7931A' },
-  { id: 'solana', name: 'Solana', chainId: null, type: 'non-evm', symbol: 'SOL',
-    decimals: 9, explorer: 'https://solscan.io', icon: '◎', color: '#14F195' },
-  { id: 'xrp', name: 'XRP Ledger', chainId: null, type: 'non-evm', symbol: 'XRP',
-    decimals: 6, explorer: 'https://xrpscan.com', icon: '✕', color: '#23292F' },
-];
-
-/** True for a chain with no chainId, no RPC and no signer — receive-only. */
-export function isNonEvmNetwork(net) {
-  return !!net && net.type === 'non-evm';
-}
-
 export function getAllNetworks() {
   const all = [...NETWORKS, ...getCustomNetworks()];
   // Settings → Testnet mode OFF hides every testnet from choosers.
@@ -678,12 +653,6 @@ export function getNetwork(chainId) {
 export function getNetworkById(id) {
   const found = getAllNetworks().find(n => n.id === id);
   if (found) return found;
-  // A non-EVM chain is a REAL choice in the picker, not a stale id. Letting it
-  // reach the ethereum fallback below would leave the wallet rendering Ethereum
-  // while networkId still says 'bitcoin' — the silent-substitution class this
-  // fallback exists to prevent, turned inside out.
-  const nonEvm = NON_EVM_CHAINS.find(c => c.id === id);
-  if (nonEvm) return nonEvm;
   // A stale/unknown saved networkId must not turn every feature into
   // "Cannot read properties of undefined (reading 'chainId')".
   console.warn('[BearTool] unknown networkId "' + id + '" — falling back to ethereum');

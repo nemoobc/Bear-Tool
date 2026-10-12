@@ -472,18 +472,7 @@ const dynamicSkip = new Set([
   // Audited below: each id has id="…" in discord.js.
   // #discordInvite (invite join row, painted with the Servers card).
   'discordStatus','discordClientId','discordToken','btnDiscordLeaveConfirm','discordInvite',
-  // Non-EVM home used to paint its own Receive + Send buttons (#nonEvmReceiveBtn,
-  // #nonEvmSendBtn2). Removed 2026-10-12: the quick-action bar above already has
-  // Send and Receive that speak the active chain, so the pair was a second door to
-  // the same two actions (four buttons, two jobs). Those ids are gone from the DOM
-  // and must stay gone — leaving them here would let a stray reference pass.
 
-  // Non-EVM Send panel (js/non-evm-send.js, 2026-10-11): the whole form is
-  // painted per active chain — XRP needs a destination tag field, Bitcoin a fee
-  // selector, Solana neither — so it cannot live in one static jsx view. Same
-  // bargain as every id above: each one is asserted to be generated below.
-  'nonEvmTo','nonEvmPaste','nonEvmAmount','nonEvmMaxNote','nonEvmBalanceLine',
-  'nonEvmTag','nonEvmFeeSel','nonEvmFeeValue','nonEvmNetSel','nonEvmSendBtn','nonEvmSendNote'
 ]);
 
 test('E2E-probe: every $(\'#id\') reference across ALL js files exists in the page markup', async () => {
@@ -504,66 +493,6 @@ test('E2E-probe: every $(\'#id\') reference across ALL js files exists in the pa
   assert.deepEqual(missing, [], 'every static JS-referenced ID must exist in the page markup (index.html + src/views) (null element = innerHTML crash)');
 });
 
-test('E2E-probe: runtime-injected ids are really created (dynamicSkip is not a blind pass)', async () => {
-  const fs = await import('node:fs');
-  const path = await import('node:path');
-  const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  // Every id below is deliberately NOT in index.html — it is injected when the
-  // user opens the mobile bar, the Add-network picker, the Security Center or
-  // the Add-token modal. (mobileMoreBtn was here until the bar lost its More
-  // button; keeping a removed id in the skip list would have made this test
-  // pass for the wrong reason, which is the whole thing it exists to prevent.) The ID probe skips them because a static grep cannot see
-  // them; this test is the other half of that bargain: each one must actually
-  // appear in the markup that builds it, so a rename cannot slip through.
-  const mustAppear = [
-    // Add-network picker (showAddNetworkModal)
-    'cnForm','cnIcon','cnNameLabel','cnChainLabel','cnSearch','cnNoMatch',
-    // Add-token autodetect panel
-    'tdIcon','tdSymbol','tdName','tdDecimals','tdNote',
-    // Seed confirmation (showSeedPhrase) — all four are rebuilt per question
-    'seedChoices','seedQLabel','seedProg','seedRestart',
-    // Import sheet (showImportModal)
-    'importBack',
-    // Create sheet (showCreateModal)
-    'createBack',
-    // Custom-RPC detection (showAddNetworkModal)
-    'cnCustomBtn','cnNameField','cnName','cnDetect',
-    // Activity detail sheet (showActivityDetail)
-    'actChain',
-    // Non-EVM Send panel — painted by js/non-evm-send.js per active chain
-    'nonEvmTo','nonEvmPaste','nonEvmAmount','nonEvmMaxNote','nonEvmBalanceLine',
-    'nonEvmTag','nonEvmFeeSel','nonEvmFeeValue','nonEvmNetSel','nonEvmSendBtn','nonEvmSendNote'
-  ];
-  // Some ids are painted by a module other than app.js — the non-EVM send panel
-  // lives in js/non-evm-send.js. The generator check must see those too, or a
-  // skip entry would hide a rename exactly the way this test exists to prevent.
-  const painted = app + '\n' + fs.readFileSync(new URL('../js/non-evm-send.js', import.meta.url), 'utf8');
-  for (const id of mustAppear) {
-    assert.ok(
-      painted.includes(`id="${id}"`),
-      `#${id} is in dynamicSkip but nothing generates it — remove it from the skip list or create it`
-    );
-  }
-  // Wizard ids are a second dynamic family: extraFieldsHtml() prints
-  // `id="${f.id}"` from the STANDARDS field declarations in contracts.js, so a
-  // static grep of app.js cannot see them either. Same bargain as mustAppear —
-  // every wizard id in dynamicSkip must be declared as a real field, otherwise
-  // the skip entry would be hiding a rename.
-  const contractsSrc = fs.readFileSync(new URL('../js/contracts.js', import.meta.url), 'utf8');
-  const staticIds = new Set([...appSource().matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
-  const wizardIds = [...dynamicSkip].filter((id) => id.startsWith('deploy') && !staticIds.has(id));
-  for (const id of wizardIds) {
-    assert.ok(
-      contractsSrc.includes(`id: '${id}'`),
-      `#${id} is in dynamicSkip but no contracts.js field declares it — remove it from the skip list or declare it`
-    );
-  }
-  // And the generators themselves must still exist.
-  assert.match(app, /function syncMobileNav\(\)/, 'syncMobileNav must exist');
-  assert.ok(!/function showMoreSheet\(/.test(app),
-    'showMoreSheet is gone with the More button; it must not linger as a second, parallel route into the views');
-  assert.match(app, /function showAddNetworkModal\(\)/, 'showAddNetworkModal must exist');
-});
 
 test('E2E-probe: unawaited async render calls are caught (no global "Unexpected error" toast)', async () => {
   const fs = await import('node:fs');

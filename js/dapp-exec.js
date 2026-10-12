@@ -57,9 +57,6 @@ function err(code, message) {
  * (the "stale saved id" case pinned in dapp-exec.test.js). */
 export function currentChainId() {
   const net = getNetworkById(get('networkId'));
-  if (net?.type === 'non-evm') {
-    throw err(4901, `This wallet is on ${net.name} — a non-EVM network with no EVM chain. Switch to an EVM network first.`);
-  }
   const n = Number(net?.chainId);
   return Number.isFinite(n) && n > 0 ? n : 1;
 }

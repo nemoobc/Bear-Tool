@@ -821,17 +821,6 @@ export function solanaMemoUri({ address, memo } = {}) {
  * EVM tree uses. This is what "all chains active on create wallet" means:
  * one mnemonic, one backup, addresses that are actually spendable on each.
  */
-export function nonEvmAddresses(seed, index = 0) {
-  const btc = btcAddresses(seed, index);
-  const xrp = xrpAddresses(seed, index);
-  const sol = solanaAddress(seed, index);
-  return {
-    bitcoin: { receive: btc.nativeSegwit, legacy: btc.legacy, xpub: btc.xpub },
-    xrp: { receive: xrp.classic, destinationTag: xrpDestinationTag(seed, index) },
-    solana: { receive: sol.address },
-  };
-}
-
 // Export the primitives for tests that compare against published vectors.
 export const __internals = {
   base58Encode, base58Decode, base58Check, sha256d,

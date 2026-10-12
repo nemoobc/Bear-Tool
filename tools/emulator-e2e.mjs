@@ -1207,8 +1207,7 @@ async function main() {
   await sleep(800);
   await page.shot('34-network-picker');
   sweep.networks = await page.evaluate(`(() => ({
-    rows: document.querySelectorAll('#netListMainnet [data-net], #netListMainnet [data-net-non-evm]').length,
-    nonEvm: document.querySelectorAll('#netListMainnet [data-net-non-evm]').length,
+    rows: document.querySelectorAll('#netListMainnet [data-net]').length,
   }))()`);
   if (!sweep.networks || sweep.networks.rows < 1) {
     throw new Error('feature sweep: the network picker listed nothing: ' + JSON.stringify(sweep.networks));
@@ -1219,61 +1218,6 @@ async function main() {
   // their own Send panel (docs/NON-EVM-SENDING.md). The unit suite signs real
   // vectors; this proves the SCREEN exists and answers inside the app, and it
   // is the only place the non-EVM path meets a real Android WebView.
-  step('feature sweep: switch to a non-EVM chain (Bitcoin)');
-  if (!sweep.networks.nonEvm) throw new Error('feature sweep: no non-EVM row in the network picker');
-  if (!(await jsClick('#netListMainnet [data-net-non-evm]'))) {
-    throw new Error('feature sweep: the non-EVM network row could not be clicked');
-  }
-  await sleep(2500);
-  // The non-EVM home no longer paints its own Send/Receive pair — that was a
-  // second door to the two actions already in the quick-action bar above (four
-  // buttons, two jobs). What this step proves is unchanged: those quick actions
-  // exist on the non-EVM home. Both are static dashboard markup, so waiting on one
-  // is a real check that the home finished rendering for the active chain.
-  if (!(await page.wait('#quickReceive', 20000).then(() => true).catch(() => false))) {
-    throw new Error('feature sweep: the non-EVM home never offered the Receive action');
-  }
-  sweep.nonEvm = { home: true };
-  await page.shot('35-nonevm-home');
-
-  step('feature sweep: non-EVM receive shows that chain address + QR');
-  await jsClick('#quickReceive');
-  await page.wait('#modalBox > .receive-qr svg', 15000);
-  await sleep(600);
-  await page.shot('36-nonevm-receive');
-  sweep.nonEvm.address = await page.evaluate(`(() => {
-    const box = document.querySelector('#modalBox');
-    const text = (box ? box.textContent : '').replace(/\\s+/g, ' ');
-    const m = text.match(/\\b(bc1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{6,}|[13][a-km-zA-HJ-NP-Z1-9]{25,40}|[1-9A-HJ-NP-Za-km-z]{32,44}|r[1-9A-HJ-NP-Za-km-z]{24,34})\\b/);
-    return m ? m[1] : '';
-  })()`);
-  await closeModal();
-  if (!sweep.nonEvm.address) throw new Error('feature sweep: the non-EVM receive modal showed no chain address');
-  // The wallet's OWN address is used as the send destination in the panel step
-  // below: it is a valid address for the active chain by construction, so the
-  // panel must accept it — a hand-written sample address could be a bad
-  // checksum and the step would fail for the wrong reason.
-  sweep.nonEvm.addressShort = sweep.nonEvm.address.slice(0, 14) + '…';
-
-  step('feature sweep: non-EVM send panel renders and prices (nothing sent)');
-  await openView('dashboard');
-  if (!(await jsClick('.quick-action-btn[data-view="send"]'))) throw new Error('feature sweep: the Send action is missing');
-  await page.wait('#nonEvmTo', 15000);
-  await page.wait('#nonEvmAmount', 15000);
-  await page.type('#nonEvmTo', sweep.nonEvm.address);
-  await page.type('#nonEvmAmount', '0.001');
-  await sleep(2500);
-  await page.shot('37-nonevm-send');
-  sweep.nonEvm.send = await page.evaluate(`(() => ({
-    to: !!document.querySelector('#nonEvmTo'),
-    amount: (document.querySelector('#nonEvmAmount')?.value || ''),
-    fee: (document.querySelector('#nonEvmFeeValue')?.textContent || '').trim().slice(0, 80),
-    estimate: (document.querySelector('#nonEvmEstimate')?.textContent || '').trim().slice(0, 120),
-    netSel: !!document.querySelector('#nonEvmNetSel'),
-    sendBtn: !!document.querySelector('#nonEvmSendBtn'),
-  }))()`);
-  if (!sweep.nonEvm.send.sendBtn) throw new Error('feature sweep: the non-EVM send panel has no Send button');
-
   // ── native bridge diagnostics (permanent, CDP-side) ─────────────────────
   // Where the console-to-logcat routing is a moving target, the driver reads
   // the bridge state itself: does the plugin exist, does a native method
@@ -1316,8 +1260,6 @@ async function main() {
       receive: report.sweep.receive && (report.sweep.receive.square ? 'square' : 'NOT square'),
       lang: report.sweep.langId || 'n/a',
       networks: report.sweep.networks && report.sweep.networks.rows,
-      nonEvmSendBtn: report.sweep.nonEvm && report.sweep.nonEvm.send && report.sweep.nonEvm.send.sendBtn,
-      nonEvmFee: report.sweep.nonEvm && report.sweep.nonEvm.send && report.sweep.nonEvm.send.fee,
     },
   }));
   if (report.consoleErrors.length || report.exceptions.length) {

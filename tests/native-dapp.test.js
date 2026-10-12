@@ -175,21 +175,6 @@ test('native RPC glue refuses to sign while locked and falls back honestly', () 
   assert.doesNotMatch(src, /isMetaMask: true/, 'the glue must never claim to be MetaMask');
 });
 
-test('on a non-EVM network the native glue names the refusal instead of answering 0x0', () => {
-  // BTC/SOL/XRP became pickable networks (2026-10-11) and have no EVM chain.
-  // `'0x' + Number(n.chainId).toString(16)` on one is '0x0' and net_version was
-  // the string 'null' — a dApp cannot even detect the lie. It gets 4901 instead.
-  const src = readFileSync(join(root, 'js/native-dapp.js'), 'utf8');
-  const i = src.indexOf("method === 'eth_chainId' || method === 'net_version'");
-  assert.ok(i !== -1, 'both chain reads are answered on one branch');
-  const body = src.slice(i, src.indexOf("method === 'eth_accounts'", i));
-  assert.match(body, /if \(nonEvmActive\)/, 'non-EVM ditolak eksplisit');
-  assert.match(body, /code: 4901/, 'kode yang sama dengan dapp-exec + walletconnect');
-  assert.ok(body.indexOf('nonEvmActive') < body.indexOf('0x'),
-    'penolakan sebelum hex apa pun dihitung');
-  assert.match(src, /const chainId = nonEvmActive \? `non-evm:\$\{activeNet\.id\}`/,
-    'label sesi tidak mengaku eip155:1 saat di chain non-EVM');
-});
 
 // The diagnostic build served its purpose: emulator run 38014313964 pinned the
 // root cause (proxy-'then' hang, ping.back=OK after the fix) and the boot-time

@@ -72,21 +72,6 @@ test('a locked wallet answers nothing at all, not even the chain id', async () =
   await assert.rejects(() => p.request({ method: 'eth_getBalance', params: [ADDR, 'latest'] }), /locked/);
 });
 
-test('a non-EVM active network rejects eth_chainId instead of answering 0x1', async () => {
-  // app.js answers the injected provider with currentChainId(), which THROWS on
-  // BTC/SOL/XRP (no EVM chain). The `?? 1` fallback in the bridge must never be
-  // reached: a page told "0x1" believes it is on Ethereum and builds a mainnet
-  // transaction this wallet cannot sign. The rejection is the honest answer.
-  const p = createProvider({
-    origin: ORIGIN,
-    getAddress: () => ADDR,
-    isUnlocked: () => true,
-    getChainId: () => { const e = new Error('This wallet is on Bitcoin — a non-EVM network with no EVM chain. Switch to an EVM network first.'); e.code = 4901; throw e; },
-    onRequest: async () => '0xresult',
-  });
-  await assert.rejects(() => p.request({ method: 'eth_chainId' }), /non-EVM network/);
-  await assert.rejects(() => p.request({ method: 'net_version' }), /non-EVM network/);
-});
 
 // ── consent is per origin, and a refusal is final ────────────────────────
 test('eth_requestAccounts asks first and returns the address once granted', async () => {
