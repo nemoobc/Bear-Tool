@@ -311,6 +311,36 @@ async function askUser(fn) {
  * parity); falls back to the wallet modal on web or on a build whose plugin
  * predates confirm(). Same rows contract as confirmTx.
  */
+// Flatten an EIP-712 payload into "Field: value" lines the confirmation sheet can
+// show. The sheet used to display only the type name — "Mail", "Permit",
+// "Order" — which says nothing about WHAT is being authorised: the site picks
+// that name, and a payload that moves tokens can call itself "Mail". The person
+// signing had nothing to compare it against. Nested structs and arrays are read
+// one level deep and mark what they truncate, because a value that cannot be
+// shown must not vanish silently.
+export function typedDataFields(message, depth = 0) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return [];
+  const out = [];
+  for (const [k, v] of Object.entries(message)) {
+    if (v === null || v === undefined) continue;
+    if (Array.isArray(v)) {
+      const head = v.slice(0, 3).map((x) => (typeof x === 'object' && x !== null ? '{…}' : String(x))).join(', ');
+      out.push({ k, v: `[${v.length}] ${head}${v.length > 3 ? '…' : ''}` });
+    } else if (typeof v === 'object') {
+      const keys = Object.keys(v);
+      out.push({
+        k,
+        v: depth
+          ? `{${keys.slice(0, 3).join(', ')}${keys.length > 3 ? ', …' : ''}}`
+          : typedDataFields(v, depth + 1).map((f) => `${f.k}: ${f.v}`).join(' · ') || '{…}',
+      });
+    } else {
+      out.push({ k, v: String(v) });
+    }
+  }
+  return out;
+}
+
 async function askConfirm({ title, rows, confirmText }) {
   const p = plugin;
   if (p) {
@@ -420,6 +450,9 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: t('site.chain'), v: chainId },
         { k: t('site.domain'), v: String(domain.name || '?') + (domain.version ? ' v' + domain.version : '') },
         { k: t('site.primaryType'), v: String(parsed.primaryType || '?') },
+        // The fields themselves, not just the type name: that name is chosen by
+        // the site, and can be called anything.
+        ...typedDataFields(parsed.message).slice(0, 8).map((f) => ({ k: f.k, v: f.v })),
         { k: t('site.site'), v: site },
         { k: t('site.account'), v: shortAddr(signer.address) },
       ],
