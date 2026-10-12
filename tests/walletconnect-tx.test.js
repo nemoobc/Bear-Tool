@@ -217,3 +217,19 @@ test('accounts and chain id are answered, not refused — connect must be able t
   // approval must not hit -32601.
   assert.match(src, /method === 'eth_accounts' \|\| method === 'eth_requestAccounts'/);
 });
+
+test('eth_chainId refuses on a non-EVM network — never answers the `|| 1` fallback', () => {
+  // BTC/SOL/XRP are pickable networks now (2026-10-11) and carry no chainId.
+  // `Number(local?.chainId || 1)` would have answered "0x1" here: the dApp would
+  // believe it was on Ethereum and build a mainnet transaction this wallet
+  // cannot sign. Same refusal (4901) as dapp-exec's currentChainId, so a dApp
+  // sees one story from both paths.
+  const i = src.indexOf("method === 'eth_chainId'");
+  const body = src.slice(i, src.indexOf("method === 'wallet_switchEthereumChain'", i));
+  assert.match(body, /if \(local\?\.type === 'non-evm'\)/, 'non-EVM network ditolak eksplisit');
+  assert.match(body, /respondError\(topic, id, \{[\s\S]*?code: 4901/, 'kode yang sama dengan dapp-exec');
+  assert.ok(body.indexOf("type === 'non-evm'") < body.indexOf('Number(local?.chainId || 1)'),
+    'penolakan HARUS sebelum fallback `|| 1` dipakai');
+  // And the two mismatch refusals must not print "chain null"/"chain 0".
+  assert.match(src, /localNet\?\.type === 'non-evm'/, 'pesan mismatch menyebut non-EVM dengan jujur');
+});

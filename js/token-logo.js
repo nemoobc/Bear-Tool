@@ -385,6 +385,19 @@ export function getNetworkLogo(name, size = 24) {
   if (n.includes('avalanche')) {
     return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,2 2,22 22,22" fill="#E84142"/><text x="12" y="18" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">AVAX</text></svg>`;
   }
+  // Non-EVM chains from the same seed — now pickable networks (2026-10-11), so
+  // the topbar pill and the network modal wear the chain's own mark. The coin
+  // list already files these under MARKS (btc/sol/xrp); two different marks for
+  // one chain read as two different chains.
+  if (n === 'bitcoin' || n === 'btc') {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="12" fill="#F7931A"/><text x="12" y="17" text-anchor="middle" fill="#FFFFFF" font-size="14" font-weight="800" font-family="Arial">₿</text></svg>`;
+  }
+  if (n === 'solana' || n === 'sol') {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="12" fill="#14F195"/><text x="12" y="17" text-anchor="middle" fill="#0B0B0B" font-size="14" font-weight="800" font-family="Arial">◎</text></svg>`;
+  }
+  if (n === 'xrp' || n.includes('xrp ledger')) {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="12" fill="#23292F"/><text x="12" y="17" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="800" font-family="Arial">✕</text></svg>`;
+  }
   // Custom / unknown — satellite icon
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="10" fill="#9B5DE5"/><circle cx="12" cy="12" r="4" fill="white"/><line x1="12" y1="2" x2="12" y2="6" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="18" x2="12" y2="22" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="2" y1="12" x2="6" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="18" y1="12" x2="22" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`;
 }

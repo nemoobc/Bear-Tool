@@ -1,13 +1,15 @@
-// The Receive modal is where "one recovery phrase, every chain" becomes
-// visible to a person. It used to show exactly one address — the EVM one —
-// which is how a multi-account wallet quietly tells a user they have no Bitcoin
-// address. These pin the shape of that screen so it cannot quietly shrink back.
+// The Receive sheet shows exactly ONE network — the ACTIVE one. BTC/SOL/XRP are
+// pickable networks (user 2026-10-11: "itu chain btc,sol,xrp bukan receive
+// dijadiin satu" → pilih: "jadi network aktif yang bisa dipilih"), so the sheet
+// reads the active network instead of appending every other chain under the EVM
+// address ("Other chains — same recovery phrase" — the exact mixing removed).
 //
 // Everything rendered here comes from js/coin-trees.js, whose addresses are
 // proven against published vectors in tests/coin-trees.test.js. What is pinned
-// HERE is the wiring: that the modal asks that module (not a hardcoded string),
-// renders every chain it gets, labels an unavailable chain as unavailable
-// rather than blank, and keeps the EVM address exactly where it was.
+// HERE is the wiring: that the sheet asks that module (not a hardcoded string),
+// titles itself after the chain it shows, renders THAT chain's address (never
+// the EVM one under a "Receive BTC" title), reports an unavailable chain
+// instead of a blank, and carries XRP's destination tag.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -25,49 +27,69 @@ const slice = (from, to) => {
   return app.slice(i, j > i ? j : app.length);
 };
 
-test('the receive modal lists every non-EVM chain the wallet can derive', () => {
-  const fn = slice('function nonEvmReceiveRows()', 'function receiveAddressCard');
+test('the receive rows derive every non-EVM chain from the session seed', () => {
+  const fn = slice('function nonEvmReceiveRows()', 'function showReceiveModal');
   assert.match(app, /import \{ nonEvmAddresses \} from '\.\/coin-trees\.js'/,
     'alamat non-EVM HARUS datang dari coin-trees.js — bukan string yang diketik di UI');
   assert.match(fn, /nonEvmAddresses\(secret, Number\(wallet\.getActiveAccountIndex\(\) \|\| 0\)\)/,
     'turunkan dari mnemonic sesi + akun yang sedang aktif');
   assert.match(fn, /wallet\.getSession\(\)/, 'butuh seed aktif; tanpa itu tidak ada yang dikarang');
-  // Every chain coin-trees.js can return must have a row here — a chain that
-  // works but is never rendered is a feature nobody can reach.
+  // Every chain the module can return must have a row here — a chain that works
+  // but is never reachable is a feature nobody can use.
   for (const [key, label] of [['bitcoin', 'Bitcoin'], ['solana', 'Solana'], ['xrp', 'XRP']]) {
-    assert.match(fn, new RegExp(`\\['${key}', '${label}'`), `${label} punya baris di receive`);
+    assert.match(fn, new RegExp(`\\['${key}', '${label}'`), `${label} punya baris`);
   }
 });
 
-test('an unavailable chain reads as unavailable — never a blank or a fake address', () => {
-  const card = slice('function receiveAddressCard', 'function showReceiveModal');
-  assert.match(card, /if \(!addr\)/, 'alamat kosong = belum tersedia');
-  assert.match(card, /Not available yet/, 'ada kalimat yang menjelaskan');
-  assert.match(card, /escapeHtml\(reason \|\| 'coming soon'\)/, 'alasan sebenar ikut tampil');
-  assert.doesNotMatch(card.slice(0, card.indexOf('if (!addr)')),
-    /data-copy=/, 'tidak ada tombol copy untuk alamat yang tidak ada');
-});
-
-test('the EVM address is unchanged and still first — the common case must not move', () => {
+test('the sheet shows exactly ONE chain: the ACTIVE network', () => {
   const modal = slice('function showReceiveModal');
-  assert.match(modal, /<h2>Receive \$\{escapeHtml\(evmLabel\)\}<\/h2>/, 'judul tetap sama');
-  assert.match(modal, /data-copy="\$\{escapeHtml\(addr\)\}">Copy Address<\/button>/,
-    'tombol Copy Address milik EVM tetap persis seperti sebelumnya');
-  // The other chains come AFTER it, under a divider — never above.
-  const evmAt = modal.indexOf('Copy Address');
-  const chainsAt = modal.indexOf('${chainsHtml}');
-  assert.ok(chainsAt > evmAt, 'chain lain menyusul DI BAWAH alamat EVM');
-  assert.match(modal, /receive-other-title">Other chains — same recovery phrase/,
-    'dan diberi tahu bahwa ini satu frasa pemulihan yang sama');
+  assert.match(modal, /<h2>Receive \$\{escapeHtml\(label\)\}<\/h2>/, 'satu judul, satu chain');
+  // The ACTIVE network decides the chain — never the token ticker. A BSC token
+  // whose symbol is "BTC" (BTCB) used to reach the Bitcoin branch by name.
+  assert.match(modal, /const nonEvm = isNonEvmNetwork\(net\)/,
+    'chain non-EVM ditentukan oleh NETWORK AKTIF');
+  assert.match(modal, /nonEvmReceiveRows\(\)\.find\(\(c\) => c\.sym === net\.symbol\)/,
+    'ambil SATU baris — chain aktif, bukan semuanya');
+  assert.doesNotMatch(modal, /\['BTC', 'SOL', 'XRP'\]\.includes\(/,
+    'ticker token tidak boleh menentukan chain');
+  // The old multi-chain dump is gone, root and branch — including the helper it
+  // needed, so no dead code can quietly grow back into it. Checked against the
+  // RENDERED template: the comment above this code quotes the removed wording.
+  const tmpl = modal.slice(modal.indexOf('openModal(`'));
+  assert.doesNotMatch(tmpl, /Other chains/, 'blok "Other chains" sudah dibuang');
+  assert.doesNotMatch(tmpl, /chainsHtml/, 'tidak ada lagi render semua chain sekaligus');
+  assert.doesNotMatch(app, /receiveAddressCard/, 'helper kartu per-chain sudah dihapus');
 });
 
-test('each chain is its own card, with its own copy button and QR', () => {
-  const card = slice('function receiveAddressCard', 'function showReceiveModal');
-  assert.match(card, /qrcode\(0, 'M'\)/, 'QR per chain, bukan cuma untuk EVM');
-  assert.match(card, /data-copy="\$\{escapeHtml\(addr\)\}">Copy \$\{escapeHtml\(label\)\} address<\/button>/,
-    'setiap chain punya tombol copy-nya sendiri');
-  assert.match(card, /aria-label="QR code for \$\{escapeHtml\(label\)\}"/,
+test('a non-EVM network shows ITS address, not the EVM one', () => {
+  const modal = slice('function showReceiveModal');
+  assert.match(modal, /const label = nonEvm \? nonEvm\.name/, 'judul memakai nama chain-nya');
+  assert.match(modal, /const addr = nonEvm \? \(nonEvm\.address \|\| ''\) : \(address \|\| get\('address'\)\)/,
+    'alamat mengikuti chain yang ditampilkan — bukan selalu alamat EVM');
+  assert.match(modal, /const tag = nonEvm \? nonEvm\.destinationTag/, 'tag XRP ikut kalau ada');
+});
+
+test('an unavailable chain reads as unavailable — never a blank or a fake address', () => {
+  const modal = slice('function showReceiveModal');
+  const tmpl = modal.slice(modal.indexOf('openModal(`'));
+  assert.match(tmpl, /!addr \?/, 'alamat kosong = belum tersedia');
+  assert.match(tmpl, /Not available yet/, 'ada kalimat yang menjelaskan');
+  assert.match(tmpl, /escapeHtml\(reason \|\| 'coming soon'\)/, 'alasan sebenar ikut tampil');
+  // QR and copy button live ONLY in the "has an address" branch — a chain with
+  // no address must not offer either.
+  const offAt = tmpl.indexOf('!addr ?');
+  assert.ok(tmpl.indexOf('receive-qr') > offAt, 'QR hanya di cabang ada-alamat');
+  assert.ok(tmpl.indexOf('data-copy=') > offAt, 'tombol copy hanya di cabang ada-alamat');
+});
+
+test('the shown chain gets a QR and a copy button labelled with the chain', () => {
+  const modal = slice('function showReceiveModal');
+  assert.match(modal, /qrcode\(0, 'M'\)/, 'QR untuk chain yang ditampilkan');
+  const tmpl = modal.slice(modal.indexOf('openModal(`'));
+  assert.match(tmpl, /aria-label="QR code for \$\{escapeHtml\(label\)\}"/,
     'QR diberi label yang menyebut chain-nya (a11y)');
+  assert.match(tmpl, /data-copy="\$\{escapeHtml\(addr\)\}">Copy Address<\/button>/,
+    'tombol Copy Address membawa alamat chain itu');
 });
 
 test('an XRP deposit shows its DestinationTag as its own copyable field', () => {
@@ -75,43 +97,49 @@ test('an XRP deposit shows its DestinationTag as its own copyable field', () => 
   // with the wrong tag is routinely uncredited. The tag must therefore be a
   // labelled row with its OWN copy button, not a footnote — and it must come
   // from the derivation, never be typed or counted.
-  const rows = slice('function nonEvmReceiveRows()', 'function receiveAddressCard');
-  assert.match(rows, /destinationTag: row\.destinationTag/, 'tag diteruskan ke kartu');
-  const card = slice('function receiveAddressCard', 'function showReceiveModal');
-  assert.match(card, /tag !== undefined && tag !== null && tag !== ''/, 'hanya tampil kalau ada');
-  assert.match(card, /receive-tag-label">Destination tag</, 'ada label yang menyebut "Destination tag"');
-  assert.match(card, /data-copy="\$\{escapeHtml\(String\(tag\)\)\}"/, 'tag punya tombol copy sendiri');
-  assert.match(card, /aria-label="Copy destination tag for/, 'tombol tag punya nama yang bisa dibaca screen reader');
-  // The chain map must pass the tag through, not swallow it.
-  assert.match(app, /receiveAddressCard\(\{\s*\n\s*label: c\.name, sublabel: c\.sym, addr: c\.address, reason: c\.reason, tag: c\.destinationTag,/,
-    'showReceiveModal meneruskan tag ke kartu');
+  const rows = slice('function nonEvmReceiveRows()', 'function showReceiveModal');
+  assert.match(rows, /destinationTag: row\.destinationTag/, 'tag diteruskan dari derivasi');
+  const modal = slice('function showReceiveModal');
+  assert.match(modal, /tag !== undefined && tag !== null && tag !== ''/, 'hanya tampil kalau ada');
+  assert.match(modal, /receive-tag-label">Destination tag</, 'ada label yang menyebut "Destination tag"');
+  assert.match(modal, /data-copy="\$\{escapeHtml\(String\(tag\)\)\}"/, 'tag punya tombol copy sendiri');
+  assert.match(modal, /aria-label="Copy destination tag for/, 'tombol tag punya nama yang bisa dibaca screen reader');
 });
 
-test('the receive-only chains also live in the Network list, each with its mark', () => {
-  // "harusnya ada di list network" (report 2026-10-11): BTC/SOL/XRP are no
-  // longer only a blob under the EVM address — the Network list carries them as
-  // their own logo rows that open Receive focused on that chain.
-  assert.match(app, /function nonEvmNetSection\(\)/, 'ada section receive-only di modal jaringan');
-  assert.match(app, /\$\{nonEvmNetSection\(\)\}/, 'dan benar-benar dipasang di daftar');
-  assert.match(app, /data-net-non-evm="\$\{escapeHtml\(c\.key\)\}"/, 'tiap baris punya key chain-nya');
-  assert.match(app, /tokenLogoHTML\(c\.sym, 32, \{ remote: false \}\)/, 'tiap baris memakai mark chain-nya');
-  assert.match(app, /const focusNonEvm = \['BTC', 'SOL', 'XRP'\]\.includes\(requested\) \? requested : null;/,
-    'membuka Receive dari baris non-EVM memberi judul chain itu, bukan chain EVM aktif');
-  assert.doesNotMatch(app, /data-net="\$\{escapeHtml\(c\.key\)\}"/, 'baris receive-only BUKAN network switch');
-  // The receive cards themselves wear the chain mark.
-  const card = slice('function receiveAddressCard', 'function showReceiveModal');
-  assert.match(card, /tokenLogoHTML\(sublabel, 30, \{ remote: false \}\)/, 'kartu receive pakai logo chain');
-  assert.match(css, /\.receive-chain-logo\s*\{/, 'dan CSS-nya ada');
-  assert.ok(css.includes('.receive-chain-name'), 'nama+logo dibungkus flex');
+test('the same-seed chains are pickable networks inside the mainnet list', () => {
+  // "harusnya ada di list network" → "bukan receive only" → "jadi network aktif
+  // yang bisa dipilih" (user 2026-10-11). BTC/SOL/XRP are rows of the SAME list
+  // as the EVM mainnets, and picking one makes it the active network.
+  assert.match(app, /function nonEvmNetRows\(\)/, 'ada baris chain same-seed');
+  // Anchors use the DOM id attributes, not '#netListMainnet': that CSS-style
+  // form only appears in the search handler further down the file.
+  const mainnet = app.indexOf('id="netListMainnet"');
+  const testnet = app.indexOf('id="netListTestnet"');
+  const injected = mainnet > -1 ? app.indexOf('${nonEvmNetRows()}', mainnet) : -1;
+  assert.ok(mainnet > -1 && injected > mainnet && (testnet === -1 || injected < testnet),
+    'baris non-EVM dirender DI DALAM daftar MAINNET, bukan di seksi sendiri');
+  assert.doesNotMatch(app, /id="netListNonEvm"/, 'tidak ada lagi seksi/bucket terpisah');
+  assert.doesNotMatch(app, /RECEIVE-ONLY/, 'tidak ada lagi label "RECEIVE-ONLY"');
+  assert.doesNotMatch(app, /· receive only/, 'subtitle tidak lagi bilang "receive only"');
+  assert.match(app, /activateNetwork\(\(el\.dataset\.netNonEvm \|\| ''\)\.toLowerCase\(\)\)/,
+    'tap satu baris = jadikan network AKTIF');
+  const rowsFn = app.slice(app.indexOf('function nonEvmNetRows()'), app.indexOf('function showReceiveModal'));
+  assert.match(rowsFn, /isCurrent[\s\S]*?✓ Current/, 'baris yang aktif menandai dirinya Current');
+  assert.match(app, /data-net-non-evm="\$\{escapeHtml\(c\.key\)\}"/, 'tiap baris punya id chain-nya');
+  assert.doesNotMatch(app, /data-net="\$\{escapeHtml\(c\.key\)\}"/, 'baris non-EVM BUKAN switch EVM (data-net)');
 });
 
-test('the styles those cards rely on exist', () => {
-  for (const sel of ['.receive-chain', '.receive-chain-head', '.receive-chain-sub',
-    '.receive-addr', '.receive-chain-off', '.receive-divider', '.receive-other-title',
+test('the styles the receive sheet uses exist — and the dead ones stay dead', () => {
+  for (const sel of ['.receive-qr', '.receive-addr', '.receive-chain-off',
     '.receive-tag-row', '.receive-tag-label', '.receive-tag-value']) {
     assert.ok(css.includes(sel), `css/cartoon.css harus punya ${sel}`);
   }
   // Long bech32/XRP addresses must not push a copy button off a narrow phone.
   assert.match(css, /\.receive-addr\s*\{[^}]*word-break|overflow-wrap/,
     'alamat panjang wajib membungkus');
+  // The one-chain-per-sheet rule retired these; they must not linger.
+  for (const dead of ['.receive-divider', '.receive-other-title', '.receive-chain-name',
+    '.receive-chain-logo', '.receive-chain-head', '.receive-chain-sub']) {
+    assert.ok(!css.includes(dead), `${dead} sudah tidak dipakai — hapus dari CSS`);
+  }
 });

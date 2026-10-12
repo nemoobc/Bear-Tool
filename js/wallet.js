@@ -182,42 +182,30 @@ export function signerFromSecret(secret, index = getActiveAccountIndex()) {
 }
 
 // ── session persistence (refresh keeps wallet unlocked) ──
-// The secret is written to sessionStorage (per-tab, survives refresh) AND to
-// localStorage with a timestamp. The localStorage copy lets a closed-and-
-// reopened tab come back unlocked — but only within the auto-lock window
-// (checked in app.js boot), so closing the tab can never leave the wallet
-// unlocked forever. Lock / auto-lock clears both copies.
-const SESSION_LS_KEY = 'bear.session.ls';
+// The decrypted secret lives ONLY in sessionStorage — the per-WebView-instance
+// store. A refresh keeps it (the wallet stays unlocked); killing the app or
+// closing the tab wipes it and the password is asked again. Nothing is written
+// to localStorage: an older build also kept a plaintext copy there
+// ('bear.session.ls') so a closed-and-reopened tab came back unlocked, but that
+// left the seed readable on disk by any script running on this origin — where
+// one injection could drain every chain at once. That copy is gone, and it is
+// purged on sight so an upgraded install does not keep it either.
+const LEGACY_SESSION_LS_KEY = 'bear.session.ls';
 export function saveSession(secret) {
   try { sessionStorage.setItem(SESSION_KEY, secret); } catch { /* private mode */ }
-  try { localStorage.setItem(SESSION_LS_KEY, JSON.stringify({ s: secret, ts: Date.now() })); } catch { /* private mode */ }
 }
 export function getSession() {
-  try {
-    const ss = sessionStorage.getItem(SESSION_KEY);
-    if (ss) return ss;
-  } catch { /* ignore */ }
-  try {
-    const ls = JSON.parse(localStorage.getItem(SESSION_LS_KEY) || 'null');
-    if (ls && ls.s) return ls.s;
-  } catch { /* ignore */ }
-  return null;
+  try { return sessionStorage.getItem(SESSION_KEY); } catch { return null; }
 }
-// Timestamp of the localStorage copy (null when absent). Used by app.js boot
-// to reject tab-reopen restores older than the auto-lock window.
-export function getSessionTs() {
-  try {
-    const ls = JSON.parse(localStorage.getItem(SESSION_LS_KEY) || 'null');
-    return ls && typeof ls.ts === 'number' ? ls.ts : null;
-  } catch { return null; }
-}
-// True when the sessionStorage copy exists (a true refresh keeps it fresh).
-export function hasSessionStorage() {
-  try { return sessionStorage.getItem(SESSION_KEY) !== null; } catch { return false; }
+// Delete the plaintext localStorage copy an older build may have left behind.
+// Called at boot and on every lock, so the seed stops sitting on disk even
+// before the user unlocks once.
+export function purgeLegacySession() {
+  try { localStorage.removeItem(LEGACY_SESSION_LS_KEY); } catch { /* ignore */ }
 }
 export function clearSession() {
   try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
-  try { localStorage.removeItem(SESSION_LS_KEY); } catch { /* ignore */ }
+  purgeLegacySession();
 }
 
 // derive additional account from seed

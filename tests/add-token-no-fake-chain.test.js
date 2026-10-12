@@ -24,8 +24,13 @@ test('there is no Chain ID input to type a wrong number into', () => {
 
 test('the network is shown, read-only, as the source of the metadata', () => {
   assert.match(app, /id="tdNetwork"/, 'the active network must be stated on screen');
-  assert.match(app, /Network: ' \+ activeNetName\(\)/,
+  // The label is built from the ACTIVE network record, never a typed field. It
+  // became activeChainLabel() on 2026-10-11: on a non-EVM network the honest
+  // text is "(no EVM chain)" instead of "chain null".
+  assert.match(app, /Network: ' \+ activeChainLabel\(\)/,
     'and it must name the network it will actually read');
+  assert.match(app, /activeChainLabel = \(\) => isNonEvmNetwork\(/,
+    'label derives from the live network, with the non-EVM case named');
   // "chain" here is a chainId, taken from the network record - not typed.
   assert.match(app, /getNetworkById\(get\('networkId'\)\)\?\.chainId/);
 });

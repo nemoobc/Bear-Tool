@@ -209,3 +209,83 @@ test('dashboard: refresh mode soft yang gagal TIDAK mengosongkan daftar saldo', 
   assert.match(body, /assetList\.innerHTML = `<p class="small text-center">/,
     'mode penuh tetap menampilkan pesan error');
 });
+
+// ── non-EVM networks: the home screen behind the pill ──────────────────────
+// BTC/SOL/XRP are pickable networks (2026-10-11). "Being on" one means there is
+// no provider to read, no token list and no signer — so the EVM pipeline must
+// not run at all, and the screen must say what the wallet CAN do instead of
+// showing the last EVM number under a Bitcoin label.
+test('dashboard: a non-EVM network never enters the EVM pipeline', () => {
+  const start = app.indexOf('async function loadDashboard');
+  const branch = app.indexOf('renderNonEvmHome(net)', start);
+  const provider = app.indexOf('await getProvider(', start);
+  const setProvider = app.indexOf("set('provider', provider)", start);
+  assert.ok(start > -1 && branch > start, 'ada cabang non-EVM di loadDashboard');
+  assert.ok(branch < provider && branch < setProvider,
+    'cabang non-EVM HARUS mendahului getProvider/set(provider), atau jalur EVM jalan di chainId null');
+  assert.match(app, /if \(isNonEvmNetwork\(net\)\) return renderNonEvmHome\(net\);/,
+    'gerbangnya eksplisit');
+});
+
+test('dashboard: the non-EVM home states what works and clears the USD hero', () => {
+  const start = app.indexOf('function renderNonEvmHome(');
+  const end = app.indexOf('async function loadDashboard', start);
+  assert.ok(start > -1 && end > start, 'renderNonEvmHome harus ada');
+  const body = app.slice(start, end);
+  // The USD total belongs to an EVM portfolio. Leaving the previous one on
+  // screen under "Bitcoin" is a lie with a dollar sign.
+  assert.match(body, /\$\('#totalBalance'\)\.textContent = '—';/, 'hero total dikosongkan, bukan angka lama');
+  assert.match(body, /Receive \$\{escapeHtml\(net\.symbol\)\}/, 'ada tombol Receive untuk chain itu');
+  assert.match(body, /Receiving and sending work here/, 'apa yang bisa dilakukan dinyatakan');
+  assert.match(body, /Swapping and bridging need an EVM network/, 'batasnya dinyatakan');
+  assert.match(body, /id="nonEvmReceiveBtn"/, 'tombolnya bisa diklik');
+  assert.match(body, /showReceiveModal\(get\('address'\), net\.symbol\)/, 'membuka sheet chain itu');
+  // No fabricated number: no price lookup, no balance call, no token scan.
+  assert.doesNotMatch(body, /getProvider|balanceOf|fetchAllPrices|renderAssets\(/,
+    'tidak ada panggilan EVM di layar non-EVM');
+});
+
+test('dashboard: the remaining EVM-only views refuse on a non-EVM network — but Send does not', () => {
+  const start = app.indexOf('export function switchView(');
+  const body = app.slice(start, app.indexOf('function showSwapBridgeChooser', start));
+  assert.match(app, /const EVM_ONLY_VIEWS = new Set\(\['send', 'swap', 'bridge', 'deploy', 'nft', 'activity'\]\)/,
+    'daftar view yang butuh chain EVM');
+  // Sending BTC/SOL/XRP is implemented (js/non-evm-send.js), so 'send' gets its
+  // own form instead of a refusal — while the other five still refuse.
+  assert.match(app, /const NON_EVM_VIEWS = new Set\(\['send'\]\)/,
+    'send punya jalur sendiri di chain non-EVM');
+  assert.match(body, /if \(isNonEvmNetwork\(activeNet\) && EVM_ONLY_VIEWS\.has\(view\) && !NON_EVM_VIEWS\.has\(view\)\)/,
+    'gerbang ada di switchView — SATU chokepoint');
+  assert.match(body, /return false;/, 'menolak tanpa memindahkan view');
+  assert.ok(body.indexOf('EVM_ONLY_VIEWS.has(view)') < body.indexOf("classList.remove('active')"),
+    'penolakan terjadi SEBELUM highlight/view berubah');
+});
+
+test('dashboard: switching to a non-EVM network drops the previous chain provider', () => {
+  const start = app.indexOf('export function activateNetwork(');
+  const body = app.slice(start, app.indexOf('function netRow', start));
+  assert.match(body, /if \(isNonEvmNetwork\(net\)\) \{[\s\S]*set\('provider', null\)/,
+    'provider chain lama dibuang — dApp tidak boleh membaca chain yang pill-nya sudah bukan itu');
+  assert.match(body, /switchView\('dashboard'\)/,
+    'pindah ke home, jangan tinggalkan form chain lama di layar');
+});
+
+test('dashboard: adding an ERC-20 token is refused (and hidden) on a non-EVM network', () => {
+  // "+ Add Token" is a sibling of #assetList in the dashboard markup, so the
+  // non-EVM home would still show it. Tapping it used to open the probe with
+  // `chainId || 1` and file the token under Ethereum while the pill said
+  // Bitcoin — the same silent substitution refused everywhere else.
+  const home = app.slice(app.indexOf('function renderNonEvmHome('), app.indexOf('async function loadDashboard'));
+  assert.match(home, /querySelector\('\.asset-addtoken'\)[\s\S]*?'display', 'none'/,
+    'kontrol tambah token disembunyikan di layar non-EVM');
+  const evmPath = app.slice(app.indexOf('function renderAssets('), app.indexOf('function renderAssets(') + 600);
+  assert.match(evmPath, /querySelector\('\.asset-addtoken'\)[\s\S]*?'display', ''/,
+    'dan muncul kembali di dashboard EVM');
+  const handler = app.slice(app.indexOf("document.getElementById('btnAddCustomToken')"),
+    app.indexOf("const addrEl = document.getElementById"));
+  assert.match(handler, /if \(isNonEvmNetwork\(netNow\)\)/, 'handler-nya juga menolak, bukan cuma disembunyikan');
+  assert.ok(handler.indexOf('isNonEvmNetwork(netNow)') < handler.indexOf('openModal('),
+    'penolakan SEBELUM modal chain lama dibuka');
+  assert.match(handler, /switch to an EVM network to add a token/, 'tolak dengan alasan bernama');
+});
+

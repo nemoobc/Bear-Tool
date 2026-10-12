@@ -107,15 +107,61 @@ test.describe('Receive modal content', () => {
   });
 });
 
-// The EVM address is the primary card, so it is a DIRECT child of #modalBox —
-// the per-chain cards are nested inside .receive-chain. Scoping the locators to
-// the modal box (rather than a bare '.receive-qr') is what keeps these tests
-// strict-mode-clean now that Receive lists EVM + Bitcoin + Solana + XRP.
-test('every chain from the same seed is listed below the EVM address', async ({ page }) => {
+// One receive per network (user 2026-10-11: "setiap jaringan fitur receive 1
+// aja"): the dashboard sheet belongs to the ACTIVE chain alone. The old
+// "Other chains — same recovery phrase" dump of BTC/SOL/XRP under the EVM
+// address is gone, so there is exactly one QR and one address in the modal.
+test('the receive sheet shows exactly one chain — no other-chains dump', async ({ page }) => {
   await openReceive(page);
-  await expect(page.locator('.receive-other-title')).toHaveText(/same recovery phrase/i);
-  const cards = page.locator('.receive-chain');
-  await expect(cards).toHaveCount(3);
-  const heads = await cards.locator('.receive-chain-head strong').allTextContents();
-  expect(heads, 'one card per non-EVM chain, in a stable order').toEqual(['Bitcoin', 'Solana', 'XRP']);
+  await expect(page.locator('#modalBox > .receive-qr svg')).toHaveCount(1);
+  await expect(page.locator('#modalBox > .copy-btn[data-copy]')).toHaveCount(1);
+  await expect(page.locator('.receive-other-title')).toHaveCount(0);
+  await expect(page.locator('.receive-chain')).toHaveCount(0);
 });
+
+// The same-seed chains are ordinary rows in the MAINNET list (not a
+// "receive-only" bucket): picking one makes it the ACTIVE network, and Receive
+// then shows THAT chain's own address — one receive per active network (user
+// 2026-10-11: "jadi network aktif yang bisa dipilih").
+test('a same-seed chain is a real network: picking it switches, and Receive follows', async ({ page }) => {
+  await gotoApp(page);
+  await skipIntro(page);
+  await createWallet(page);
+  await page.locator('#networkPill').click();
+  await page.waitForSelector('[data-net-non-evm="bitcoin"]', { timeout: 10_000 });
+  // It is a row of the same MAINNET list, and it never reads as "receive only".
+  await expect(page.locator('#modalBox')).not.toContainText(/receive[- ]only/i);
+  await page.locator('[data-net-non-evm="bitcoin"]').click();
+
+  // The switch landed: the topbar names the chain, and it marks itself Current
+  // when the picker is reopened — a network, not a one-off action.
+  await expect(page.locator('#networkName')).toHaveText('Bitcoin');
+  await page.locator('#networkPill').click();
+  await expect(page.locator('[data-net-non-evm="bitcoin"]')).toContainText('✓ Current');
+  await page.locator('#modalBox .modal-close').click();
+
+  // And the wallet on that chain has exactly one thing to offer: its own address.
+  await page.locator('#quickReceive').click();
+  await page.waitForSelector('#modalBox > .receive-qr svg', { timeout: 10_000 });
+  await expect(page.locator('#modalBox h2')).toHaveText(/Receive Bitcoin/);
+  const addr = await page.locator('#modalBox > .copy-btn[data-copy]').getAttribute('data-copy');
+  expect(addr, 'the sheet must carry the BITCOIN address, not the EVM one').toMatch(/^bc1q/);
+});
+
+// Being on a non-EVM chain must not half-open the EVM screens: Send would show
+// the previous chain's form and a signer this wallet does not have for Bitcoin.
+test('an EVM-only view refuses while a non-EVM network is active', async ({ page }) => {
+  await gotoApp(page);
+  await skipIntro(page);
+  await createWallet(page);
+  await page.locator('#networkPill').click();
+  await page.waitForSelector('[data-net-non-evm="bitcoin"]', { timeout: 10_000 });
+  await page.locator('[data-net-non-evm="bitcoin"]').click();
+  await expect(page.locator('#networkName')).toHaveText('Bitcoin');
+
+  await page.locator('#quickActions [data-view="send"]').click();
+  await expect(page.locator('#view-dashboard')).toHaveClass(/active/);
+  await expect(page.locator('#view-send')).not.toHaveClass(/active/);
+  await expect(page.locator('#toast-wrap .toast').first()).toContainText(/switch to an EVM network/i);
+});
+

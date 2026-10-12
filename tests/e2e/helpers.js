@@ -402,16 +402,12 @@ export async function simulateTabClose(page) {
   await page.evaluate(() => sessionStorage.clear());
 }
 
-// Simulate a session that expired past the auto-lock window: clear the
-// sessionStorage copy and age the localStorage copy beyond the default 5 min.
+// Simulate a session that has ended: wipe the sessionStorage copy. There is no
+// localStorage copy any more (the plaintext session was removed), so a closed
+// tab or a killed app always lands on the unlock screen.
 export async function expireSession(page) {
   await page.evaluate(() => {
     sessionStorage.clear();
-    const ls = JSON.parse(localStorage.getItem('bear.session.ls') || 'null');
-    if (ls) {
-      ls.ts = Date.now() - 10 * 60 * 1000; // 10 min old > 5 min window
-      localStorage.setItem('bear.session.ls', JSON.stringify(ls));
-    }
   });
 }
 

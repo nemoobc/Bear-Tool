@@ -10,9 +10,9 @@ import { nonEvmAddresses } from '../js/coin-trees.js';
 
 const SEED = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
-// Mirror of app.js receiveAddressCard / nonEvmReceiveRows, kept deliberately
-// dumb: if the renderer's shape changes, THIS must change with it — that is
-// the point, it is the behaviour contract.
+// Mirror of app.js nonEvmReceiveRows, kept deliberately dumb: if the
+// derivation's shape changes, THIS must change with it — that is the point, it
+// is the behaviour contract.
 const META = [
   ['bitcoin', 'Bitcoin', 'BTC'],
   ['solana', 'Solana', 'SOL'],

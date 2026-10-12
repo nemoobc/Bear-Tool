@@ -47,9 +47,20 @@ function err(code, message) {
   return e;
 }
 
-/** The chain this wallet is ON, as a number. Never NaN. */
+/** The chain this wallet is ON, as a number. Never NaN.
+ *
+ * BTC/SOL/XRP are selectable networks now (same-seed chains this wallet can
+ * only RECEIVE on) and they have NO EVM chain id. Answering 1 there would sign
+ * a dApp request on Ethereum while the wallet's own pill says Bitcoin — the
+ * silent-chain-substitution this file exists to kill — so a non-EVM network
+ * refuses instead. An unknown/empty id still falls back to the registry default
+ * (the "stale saved id" case pinned in dapp-exec.test.js). */
 export function currentChainId() {
-  const n = Number(getNetworkById(get('networkId'))?.chainId);
+  const net = getNetworkById(get('networkId'));
+  if (net?.type === 'non-evm') {
+    throw err(4901, `This wallet is on ${net.name} — a non-EVM network with no EVM chain. Switch to an EVM network first.`);
+  }
+  const n = Number(net?.chainId);
   return Number.isFinite(n) && n > 0 ? n : 1;
 }
 

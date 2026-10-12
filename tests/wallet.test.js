@@ -86,19 +86,40 @@ test('session: saveSession/getSession/clearSession roundtrip', async () => {
   assert.equal(wallet.getSession(), null);
 });
 
-test('session: localStorage fallback restores a closed tab (within window)', async () => {
+test('session: the secret is only in sessionStorage — never plaintext in localStorage', async () => {
   session.clear();
   store.clear();
   const res = await wallet.createWallet('password123');
   wallet.saveSession(res.mnemonic);
-  // simulate tab close: sessionStorage wiped, localStorage survives
+  assert.equal(wallet.getSession(), res.mnemonic, 'sessionStorage holds the session');
+  // The seed must not reach localStorage in any form.
+  const dumped = [...store.entries()].map(([, v]) => String(v)).join('\n');
+  assert.ok(!dumped.includes(res.mnemonic), 'the mnemonic must never be written to localStorage');
+  assert.equal(store.has('bear.session.ls'), false, 'no plaintext session key in localStorage');
+  // Simulate killing the app / closing the tab: sessionStorage wiped → locked.
   session.clear();
-  assert.equal(wallet.hasSessionStorage(), false, 'sessionStorage copy must be gone after tab close');
-  assert.equal(wallet.getSession(), res.mnemonic, 'localStorage copy must restore the session');
-  assert.ok(wallet.getSessionTs() > 0, 'localStorage copy must carry a timestamp');
+  assert.equal(wallet.getSession(), null, 'a closed tab must NOT restore the wallet from disk');
+});
+
+test('session: purgeLegacySession deletes a plaintext copy left by an older build', async () => {
+  session.clear();
+  store.clear();
+  const res = await wallet.createWallet('password123');
+  store.set('bear.session.ls', JSON.stringify({ s: res.mnemonic, ts: Date.now() }));
+  assert.equal(store.has('bear.session.ls'), true, 'leftover present before purge');
+  wallet.purgeLegacySession();
+  assert.equal(store.has('bear.session.ls'), false, 'the plaintext copy must be purged');
+});
+
+test('session: clearSession also purges a legacy plaintext copy', async () => {
+  session.clear();
+  store.clear();
+  const res = await wallet.createWallet('password123');
+  wallet.saveSession(res.mnemonic);
+  store.set('bear.session.ls', JSON.stringify({ s: res.mnemonic, ts: Date.now() }));
   wallet.clearSession();
-  assert.equal(wallet.getSession(), null, 'clearSession must wipe the localStorage copy too');
-  assert.equal(wallet.getSessionTs(), null);
+  assert.equal(wallet.getSession(), null);
+  assert.equal(store.has('bear.session.ls'), false, 'lock must purge the legacy copy');
 });
 
 test('signerFromSecret: derives the same address as unlockWallet', async () => {

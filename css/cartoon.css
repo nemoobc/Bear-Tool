@@ -440,60 +440,35 @@ body::before {
   margin: 0 auto;
 }
 
-/* ── Receive: non-EVM chains from the same seed ───────────────────────
-   One recovery phrase now backs every chain, so the receive modal lists
-   the other chains under the primary (EVM) address. Each chain is its own
-   bordered card so a long bech32/xpub address never runs into its
-   neighbour's copy button on a narrow phone. */
-.receive-divider {
-  margin: 20px 0 14px;
-  border: none;
-  border-top: 2px dashed var(--ink);
-  opacity: 0.35;
+/* ── Non-EVM networks (BTC/SOL/XRP) ───────────────────────────────────
+   They are pickable networks like any other (2026-10-11), so the topbar pill
+   wears the chain's own mark — but the pill is a LABEL here, not a "chain 1"
+   claim: there is no chainId behind it. Tinted so a glance says "not an EVM
+   chain", which is exactly the thing the user has to know before tapping Send.
+   The home screen behind that pill carries a statement row, not a token row,
+   so it must not read as tappable. */
+.network-pill.non-evm {
+  background: var(--honey);
 }
-.receive-other-title {
-  font-size: 0.9rem;
-  margin: 0 0 12px;
-  opacity: 0.75;
-}
-.receive-chain {
-  border: 2px solid var(--ink);
-  border-radius: 12px;
-  padding: 12px;
+.theme-dark .network-pill.non-evm {
   background: var(--white);
 }
-.receive-chain-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 8px;
+.non-evm-home {
+  cursor: default;
 }
-/* The chain wears its own mark before its name — the same logo language as the
-   network list (user report 2026-10-11: "logo list coin ga ada … receive kok
-   nyatu btc xrp sama solana"). */
-.receive-chain-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.receive-chain-logo {
-  display: inline-flex;
-  align-items: center;
-}
-.receive-chain-logo .token-mark,
-.receive-chain-logo img.token-logo-img {
-  width: 30px;
-  height: 30px;
-}
-.receive-chain-sub {
-  font-size: 0.75rem;
-  opacity: 0.6;
-  letter-spacing: 0.04em;
-}
+
+/* ── Receive: one chain per sheet ─────────────────────────────────────
+   One recovery phrase backs every chain, but the sheet shows ONE network
+   (the active EVM chain, or the active non-EVM chain)
+   — user 2026-10-11: "setiap jaringan fitur receive 1 aja". The bordered
+   address card keeps a long bech32/XRP address from running into the copy
+   button on a narrow phone. */
 .receive-addr {
   font-size: 0.78rem;
   background: var(--cream);
   margin-bottom: 10px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 /* XRP's DestinationTag sits BESIDE the address, not under it: exchange deposit
    forms put "Tag" in its own box, and sending without the right one is a

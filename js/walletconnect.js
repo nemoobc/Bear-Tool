@@ -354,8 +354,11 @@ async function handleRequest({ id, topic, params }) {
     // signature the dApp can never use, behind a dialog that looked fine.
     const domChain = Number(domain.chainId);
     const localNet = getNetworkById(get('networkId'));
+    const localLabel = localNet?.type === 'non-evm'
+      ? `${localNet.name} (a non-EVM network with no EVM chain)`
+      : `${localNet?.name} (chain ${localNet?.chainId})`;
     if (Number.isFinite(domChain) && localNet && Number(localNet.chainId) !== domChain) {
-      const msg = `This signature targets chain ${domChain}, but Bear Tool is on ${localNet.name} (chain ${localNet.chainId}). Switch network first — nothing was signed.`;
+      const msg = `This signature targets chain ${domChain}, but Bear Tool is on ${localLabel}. Switch network first — nothing was signed.`;
       toast(msg, 'error');
       return respondError(topic, id, { code: -32000, message: msg });
     }
@@ -384,7 +387,7 @@ async function handleRequest({ id, topic, params }) {
     // dialog that said "eip155:137". Refuse the mismatch instead of executing
     // on the wrong chain.
     if (reqChain !== null && localNet && Number(localNet.chainId) !== reqChain) {
-      const msg = `This dApp asked for chain ${reqChain}, but Bear Tool is on ${localNet.name} (chain ${localNet.chainId}). Switch network in Bear Tool and ask again — nothing was sent.`;
+      const msg = `This dApp asked for chain ${reqChain}, but Bear Tool is on ${localNet?.type === 'non-evm' ? `${localNet.name} (a non-EVM network with no EVM chain)` : `${localNet.name} (chain ${localNet.chainId})`}. Switch network in Bear Tool and ask again — nothing was sent.`;
       toast(msg, 'error');
       return respondError(topic, id, { code: -32000, message: msg });
     }
@@ -418,6 +421,17 @@ async function handleRequest({ id, topic, params }) {
 
   if (method === 'eth_chainId' || method === 'net_version') {
     const local = getNetworkById(get('networkId'));
+    // A non-EVM network (BTC/SOL/XRP — receive-only) has NO EVM chain id.
+    // Answering the `|| 1` fallback here would tell the dApp "you are on
+    // Ethereum" while the wallet's own pill says Bitcoin, and the dApp would go
+    // on to build a mainnet transaction the wallet cannot sign. Same refusal as
+    // dapp-exec's currentChainId, same code.
+    if (local?.type === 'non-evm') {
+      return respondError(topic, id, {
+        code: 4901,
+        message: `Bear Tool is on ${local.name}, a non-EVM network with no EVM chain. Switch to an EVM network first.`,
+      });
+    }
     // Not named `id`: that is the JSON-RPC request id from the handler's own
     // parameter, and a local by that name puts every later `id` in the
     // function out of its declaring block (tests/scope.test.js).

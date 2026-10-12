@@ -155,10 +155,15 @@ const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 // Solana: same alphabet, but the encoder below is the standard base58 for
 // 32-byte payloads (leading zero bytes become '1').
 
-function base58Encode(bytes) {
+export function base58Encode(bytes) {
   let zeros = 0;
   while (zeros < bytes.length && bytes[zeros] === 0) zeros += 1;
-  const digits = [0];
+  // Start EMPTY, not [0]. A seeded zero is a phantom leading digit: it cancels
+  // out once a real byte is folded in, but for a value that is entirely zero
+  // bytes the loop never runs — so the seed would add one '1' too many. That
+  // value is not hypothetical: Solana's System Program address is 32 zero
+  // bytes, i.e. 32 ones.
+  const digits = [];
   for (let i = zeros; i < bytes.length; i += 1) {
     let carry = bytes[i];
     for (let j = 0; j < digits.length; j += 1) {
@@ -176,10 +181,10 @@ function base58Encode(bytes) {
   return out;
 }
 
-function base58Decode(str) {
+export function base58Decode(str) {
   let zeros = 0;
   while (zeros < str.length && str[zeros] === '1') zeros += 1;
-  const bytes = [0];
+  const bytes = [];   // empty for the same reason as the encoder above
   for (let i = zeros; i < str.length; i += 1) {
     let carry = B58.indexOf(str[i]);
     if (carry < 0) throw new Error(`coin-trees: not base58 — "${str[i]}"`);
@@ -197,7 +202,7 @@ function base58Decode(str) {
 }
 
 // double-SHA256, the checksum every Bitcoin/XRP base58check payload carries.
-function sha256d(bytes) {
+export function sha256d(bytes) {
   return ethers.getBytes(ethers.sha256(ethers.sha256(bytes)));
 }
 
@@ -243,8 +248,41 @@ function bech32Encode(hrp, data) {
   return out;
 }
 
+// bech32m (BIP-350) uses the same encoding with a different final constant. A
+// segwit v1 (taproot, bc1p…) address checks out as bech32m and nothing else —
+// decoding it here lets the caller refuse it by name instead of mis-reading it.
+const BECH32M_CONST = 0x2bc830a3;
+
+/**
+ * Decode a bech32 / bech32m string (BIP-173, BIP-350). Returns the human
+ * readable part, the data words with the checksum stripped, and which flavour
+ * the checksum proved. Throws on mixed case, a bad character, a bad checksum
+ * or a missing separator — a wallet must never guess at a destination.
+ */
+export function bech32Decode(address) {
+  if (typeof address !== 'string' || address.length < 8 || address.length > 90) {
+    throw new Error('bech32: invalid length');
+  }
+  if (address !== address.toLowerCase() && address !== address.toUpperCase()) {
+    throw new Error('bech32: mixed case');
+  }
+  const lower = address.toLowerCase();
+  const sep = lower.lastIndexOf('1');
+  if (sep < 1 || sep + 7 > lower.length) throw new Error('bech32: missing separator');
+  const hrp = lower.slice(0, sep);
+  const data = [];
+  for (const ch of lower.slice(sep + 1)) {
+    const v = BECH32.indexOf(ch);
+    if (v === -1) throw new Error(`bech32: invalid character "${ch}"`);
+    data.push(v);
+  }
+  const polymod = bech32Polymod(bech32HrpExpand(hrp).concat(data));
+  if (polymod !== BECH32_CONST && polymod !== BECH32M_CONST) throw new Error('bech32: bad checksum');
+  return { hrp, data: data.slice(0, -6), encoding: polymod === BECH32_CONST ? 'bech32' : 'bech32m' };
+}
+
 /** Convert 8-bit bytes to 5-bit groups (bech32's data words). */
-function convertBits(data, from, to, pad) {
+export function convertBits(data, from, to, pad) {
   let acc = 0;
   let bits = 0;
   const out = [];
@@ -283,7 +321,13 @@ function segwitAddress(prefix, version, program) {
  * @param {number} index account index, matching the EVM tree's own numbering
  * @returns {{legacy:string, nativeSegwit:string, taproot?:string, xpub:string}}
  */
-export function btcAddresses(seed, index = 0) {
+/**
+ * Bitcoin key material for one account — address AND the signing key, from one
+ * derivation so the address a user sees can never disagree with the key that
+ * signs for it. btcAddresses() below is this, minus the secrets.
+ * @returns {{legacy:string, nativeSegwit:string, xpub:string, publicKey:string, privateKey:string}}
+ */
+export function btcKeypair(seed, index = 0) {
   const i = Number(index) || 0;
   // m/44'/0'/0'/0/i — the BIP-44 Bitcoin tree. Coin type 0, NOT 60.
   const node = ethers.HDNodeWallet.fromPhrase(String(seed), undefined, `m/44'/0'/0'/0/${i}`);
@@ -297,7 +341,14 @@ export function btcAddresses(seed, index = 0) {
     legacy,                                             // 1… / 3…
     nativeSegwit: segwitAddress('bc', 0, program),        // bc1q…
     xpub: node.neuter().extendedKey,
+    publicKey: ethers.hexlify(compressed),
+    privateKey: node.privateKey,
   };
+}
+
+export function btcAddresses(seed, index = 0) {
+  const { legacy, nativeSegwit, xpub } = btcKeypair(seed, index);
+  return { legacy, nativeSegwit, xpub };
 }
 
 // Taproot (bc1p…) is deliberately NOT offered yet. Its key-path output needs
@@ -325,7 +376,7 @@ export function btcAddresses(seed, index = 0) {
 // which renders as 25 bytes → an 'r…' string of 25-35 chars.
 const XRP58 = 'rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz';
 
-function xrpBase58Encode(bytes) {
+export function xrpBase58Encode(bytes) {
   let zeros = 0;
   while (zeros < bytes.length && bytes[zeros] === 0) zeros += 1;
   const digits = [0];
@@ -343,7 +394,32 @@ function xrpBase58Encode(bytes) {
   return out;
 }
 
-export function xrpAddresses(seed, index = 0) {
+// XRP base58 decode — the mirror of the encoder above, and NOT the Bitcoin one:
+// 'r' is index 0 and no other alphabet decodes a real r… address to the right
+// 20 bytes (see the note on the checksum above; that bug is why this exists).
+export function xrpBase58Decode(str) {
+  let zeros = 0;
+  while (zeros < str.length && str[zeros] === 'r') zeros += 1;
+  const bytes = [0];
+  for (let i = zeros; i < str.length; i += 1) {
+    let carry = XRP58.indexOf(str[i]);
+    if (carry < 0) throw new Error(`coin-trees: not XRP base58 — "${str[i]}"`);
+    for (let j = 0; j < bytes.length; j += 1) {
+      carry += bytes[j] * 58;
+      bytes[j] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) { bytes.push(carry & 0xff); carry >>= 8; }
+  }
+  return new Uint8Array([...new Array(zeros).fill(0), ...bytes.reverse()]);
+}
+
+/**
+ * XRP key material for one account — address AND the signing key, from one
+ * derivation. `publicKey` is the uppercase hex the ledger expects in
+ * SigningPubKey; `privateKey` is 32 bytes for the secp256k1 signer.
+ */
+export function xrpKeypair(seed, index = 0) {
   const i = Number(index) || 0;
   // m/44'/144'/0'/0/i — coin type 144, the same trailing /0/i as every other
   // chain here so account 1 is account 1 everywhere.
@@ -353,7 +429,17 @@ export function xrpAddresses(seed, index = 0) {
   const payload = ethers.concat([new Uint8Array([0x00]), id]);
   const sum = ethers.getBytes(ethers.sha256(ethers.sha256(payload))).slice(0, 4);
   const classic = xrpBase58Encode(ethers.getBytes(ethers.concat([payload, sum])));
-  return { classic, accountId: ethers.hexlify(id) };
+  return {
+    classic,
+    accountId: ethers.hexlify(id),
+    publicKey: ethers.hexlify(compressed).slice(2).toUpperCase(),
+    privateKey: node.privateKey,
+  };
+}
+
+export function xrpAddresses(seed, index = 0) {
+  const { classic, accountId } = xrpKeypair(seed, index);
+  return { classic, accountId };
 }
 
 // ── Solana ──────────────────────────────────────────────────────────────
@@ -421,7 +507,7 @@ function ed25519Derive(keyChain, index) {
 // this wallet holds. m/44'/501' is Solana's BIP-44 coin type; the trailing
 // /0/i matches the EVM and Bitcoin trees so one account index means the same
 // thing on every chain.
-export function solanaAddress(seed, index = 0) {
+export function solanaKeypair(seed, index = 0) {
   const i = Number(index) || 0;
   const bip39Seed = ethers.Mnemonic.fromPhrase(String(seed)).computeSeed(); // 64 bytes
   let kc = ed25519MasterFromSeed(bip39Seed);
@@ -435,7 +521,16 @@ export function solanaAddress(seed, index = 0) {
   kc = ed25519Derive(kc, 0);
   kc = ed25519Derive(kc, i);
   const publicKey = ed25519PublicKey(kc.key);
-  return { address: base58Encode(publicKey), publicKey: ethers.hexlify(publicKey) };
+  return {
+    address: base58Encode(publicKey),
+    publicKey: ethers.hexlify(publicKey),
+    privateKey: ethers.hexlify(kc.key),
+  };
+}
+
+export function solanaAddress(seed, index = 0) {
+  const { address, publicKey } = solanaKeypair(seed, index);
+  return { address, publicKey };
 }
 
 // ed25519 public key = scalar × base point, encoded y with the sign bit of x
@@ -520,7 +615,7 @@ function edEncodePoint(Pt) {
 // clamp() is h[0] &= 248; h[31] &= 127; h[31] |= 64. Two errors lived here
 // before: hashing the key (it was being multiplied RAW by the group order L,
 // which is not the spec — L only bounds the order) and omitting the clamp.
-function ed25519PublicKey(privateKey32) {
+export function ed25519PublicKey(privateKey32) {
   const h = sha512(privateKey32);                 // 64 bytes, per RFC
   const s = new Uint8Array(32);
   s.set(h.slice(0, 32));
@@ -530,6 +625,90 @@ function ed25519PublicKey(privateKey32) {
   for (let i = 31; i >= 0; i -= 1) scalar = (scalar << 8n) | BigInt(s[i]);
   const Pt = edScalarMul(B, scalar);
   return edEncodePoint(Pt);
+}
+
+// The order of the ed25519 prime-order subgroup: L = 2^252 + 27742317777372353535851937790883648493.
+const ED25519_L = (1n << 252n) + 27742317777372353535851937790883648493n;
+
+function leToBig(bytes) {
+  let v = 0n;
+  for (let i = bytes.length - 1; i >= 0; i -= 1) v = (v << 8n) | BigInt(bytes[i]);
+  return v;
+}
+
+function bigToLe(value, width) {
+  const out = new Uint8Array(width);
+  let v = value;
+  for (let i = 0; i < width; i += 1) { out[i] = Number(v & 0xffn); v >>= 8n; }
+  return out;
+}
+
+function bytesOf(value) {
+  return value instanceof Uint8Array ? value : ethers.getBytes(value);
+}
+
+/**
+ * RFC 8032 §5.1.6 Ed25519 signature. Returns R ‖ S (64 bytes) — exactly what
+ * Solana wants, and exactly what the spec's own test vectors say (checked in
+ * tests/coin-trees.test.js against RFC 8032 §7.1 TEST 1 and TEST 2).
+ *
+ * The three scalars, in order, are the whole algorithm:
+ *   s = clamp(SHA-512(seed)[0:32])          — the secret scalar (same as the pubkey)
+ *   r = SHA-512(prefix ‖ M) mod L           — nonce, prefix = SHA-512(seed)[32:64]
+ *   k = SHA-512(R ‖ A ‖ M) mod L            — challenge binding the key and msessage
+ *   S = (r + k·s) mod L
+ * Get the reduction mod L wrong, or key the nonce off the wrong half of the hash
+ * and the signature is invalid — it does not "mostly work".
+ */
+export function ed25519Sign(privateKey32, message) {
+  const key = bytesOf(privateKey32);
+  if (key.length !== 32) throw new Error('ed25519: the private key is 32 bytes');
+  const msg = bytesOf(message);
+  const h = sha512(key);                 // 64 bytes
+  const sBytes = new Uint8Array(h.slice(0, 32));
+  sBytes[0] &= 248; sBytes[31] &= 127; sBytes[31] |= 64;
+  const s = leToBig(sBytes);
+  const prefix = h.slice(32, 64);
+  const A = edEncodePoint(edScalarMul(B, s));              // 32 bytes, the public key
+  const r = leToBig(sha512(ethers.getBytes(ethers.concat([prefix, msg])))) % ED25519_L;
+  const R = edEncodePoint(edScalarMul(B, r));              // 32 bytes
+  const k = leToBig(sha512(ethers.getBytes(ethers.concat([R, A, msg])))) % ED25519_L;
+  const S = (r + k * s) % ED25519_L;
+  return ethers.getBytes(ethers.concat([R, bigToLe(S, 32)]));   // R ‖ S, 64 bytes
+}
+
+/** Decode a compressed ed25519 point (32 bytes) → extended coords, or null. */
+function edDecodePoint(bytes) {
+  const sign = (bytes[31] & 0x80) ? 1n : 0n;
+  const y = mod(leToBig(bytes.slice(0, 32)) & ((1n << 255n) - 1n));
+  const x = recoverX(y, sign);
+  if (x === null) return null;
+  return [x, y, 1n, mod(x * y)];
+}
+
+/**
+ * RFC 8032 §5.1.7 verification, used to PROVE our own signer and to check
+ * published transactions against their published key. Checks S < L (a
+ * non-canonical S would otherwise be accepted by a sloppier check) and the
+ * group equation  [S]B == R + [k]A, rewritten here as  [S]B − [k]A == R.
+ * The public key is a Solana address's own bytes, so this verifies a real
+ * on-chain transaction against the sender's own address.
+ */
+export function ed25519Verify(publicKey32, message, signature64) {
+  const pk = bytesOf(publicKey32);
+  const sig = bytesOf(signature64);
+  if (pk.length !== 32 || sig.length !== 64) return false;
+  const R = sig.slice(0, 32);
+  const S = leToBig(sig.slice(32, 64));
+  if (S >= ED25519_L) return false;
+  const A = edDecodePoint(pk);
+  if (!A) return false;
+  const msg = bytesOf(message);
+  const k = leToBig(sha512(ethers.getBytes(ethers.concat([R, pk, msg])))) % ED25519_L;
+  const sB = edScalarMul(B, S);
+  const kA = edScalarMul(A, k);
+  const negkA = [mod(-kA[0]), kA[1], kA[2], mod(-kA[3])];
+  return ethers.hexlify(edEncodePoint(edAdd(sB, negkA))) === ethers.hexlify(R);
 }
 
 // ── deposit memo / tag ──────────────────────────────────────────────────
@@ -656,6 +835,6 @@ export function nonEvmAddresses(seed, index = 0) {
 // Export the primitives for tests that compare against published vectors.
 export const __internals = {
   base58Encode, base58Decode, base58Check, sha256d,
-  bech32Encode, convertBits, ed25519PublicKey, ed25519Derive,
-  xrpBase58Encode, XRP58,
+  bech32Encode, bech32Decode, convertBits, ed25519PublicKey, ed25519Derive,
+  xrpBase58Encode, xrpBase58Decode, XRP58,
 };

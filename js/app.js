@@ -8,7 +8,8 @@
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider, getDelegation,
          addCustomNetwork, removeCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
-         applyRpcOverrides, providerEndpoint, detectNetworkType, isBundledContract } from './network.js';
+         applyRpcOverrides, providerEndpoint, detectNetworkType, isBundledContract,
+         isNonEvmNetwork } from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
@@ -31,6 +32,7 @@ import { t, setLang, applyTranslations } from './i18n.js';
 import { renderDapps, POPULAR_DAPPS } from './dapps.js';
 import { dappBrowserOnLock } from './dapp-browser.js';
 import { nonEvmAddresses } from './coin-trees.js';
+import { loadNonEvmSend, unloadNonEvmSend } from './non-evm-send.js';
 import { renderSecurityCenter } from './security-center.js';
 import { renderDiscord, bindDiscordPanel, finishOAuthRedirect } from './discord.js';
 // scanTransaction finally has a caller. It has been written and tested since
@@ -157,25 +159,15 @@ window.addEventListener('DOMContentLoaded', () => {
       );
       console.warn('[BearTool] crypto.subtle unavailable; secure context required for wallet operations.');
     }
-    // Session secret survives a refresh (sessionStorage) and a tab reopen
-    // (localStorage fallback, within the auto-lock window): restore the signer
-    // and stay unlocked. Lock / auto-lock clears both copies.
+    // The session secret survives a refresh (sessionStorage only): restore the
+    // signer and stay unlocked. It does NOT survive killing the app or closing
+    // the tab — that copy was plaintext on disk and is deliberately gone. Lock /
+    // auto-lock clears it too. Purge any legacy localStorage copy at boot, so an
+    // upgraded install stops keeping the seed on disk even before first unlock.
+    wallet.purgeLegacySession?.();
     const sessionSecret = wallet.getSession();
     if (sessionSecret) {
       try {
-        // A true refresh keeps the sessionStorage copy (always fresh). A
-        // tab-reopen restore comes from localStorage — only trust it within
-        // the auto-lock window, so closing the tab can't leave the wallet
-        // unlocked forever. "Never" (0) falls back to a 24h cap.
-        if (!wallet.hasSessionStorage()) {
-          const ts = wallet.getSessionTs();
-          const minutes = get('settings').autoLock;
-          const maxAge = (minutes > 0 ? minutes : 24 * 60) * 60 * 1000;
-          if (ts && Date.now() - ts > maxAge) {
-            wallet.clearSession();
-            throw new Error('Session expired');
-          }
-        }
         const signer = wallet.signerFromSecret(sessionSecret);
         set('signer', signer);
         set('address', signer.address);
@@ -221,7 +213,17 @@ window.addEventListener('DOMContentLoaded', () => {
   // a wrong paste is obvious instead of silently landing in the asset list as an
   // unlabelled row.
   document.getElementById('btnAddCustomToken')?.addEventListener('click', () => {
-    const currentChain = get('networkId') ? (getNetworkById(get('networkId'))?.chainId || 1) : 1;
+    // A token is an ERC-20: it only exists on an EVM chain. While a non-EVM
+    // network is active there is no contract to read, so `chainId || 1` would
+    // quietly file the token under Ethereum. Refuse by name instead. (The button
+    // is also hidden on that screen — this is the belt to that braces, since it
+    // is one tap away from any future entry point.)
+    const netNow = getNetworkById(get('networkId'));
+    if (isNonEvmNetwork(netNow)) {
+      toast(`${netNow.name} has no ERC-20 contracts — switch to an EVM network to add a token.`, 'info');
+      return;
+    }
+    const currentChain = get('networkId') ? (netNow?.chainId || 1) : 1;
     openModal(`
       <button class="modal-close" type="button" data-close-modal>✕</button>
       <h2>Add Custom Token</h2>
@@ -253,7 +255,12 @@ window.addEventListener('DOMContentLoaded', () => {
     const netEl = document.getElementById('tdNetwork');
     const activeChainId = () => getNetworkById(get('networkId'))?.chainId || currentChain;
     const activeNetName = () => getNetworkById(get('networkId'))?.name || 'this network';
-    if (netEl) netEl.textContent = 'Network: ' + activeNetName() + ' (chain ' + activeChainId() + ')';
+    // Printing "chain null" would be the same lie as answering 0x1: say plainly
+    // that the wallet moved to a network with no EVM chain.
+    const activeChainLabel = () => isNonEvmNetwork(getNetworkById(get('networkId')))
+      ? activeNetName() + ' (no EVM chain)'
+      : activeNetName() + ' (chain ' + activeChainId() + ')';
+    if (netEl) netEl.textContent = 'Network: ' + activeChainLabel();
     const box = document.getElementById('tokenDetect');
     const saveBtn = document.getElementById('btnConfirmAddToken');
     const ERC20 = [
@@ -324,7 +331,7 @@ window.addEventListener('DOMContentLoaded', () => {
         // Say which network was read, and what to do if it is the wrong one.
         // The old wording offered a control that could not change the answer.
         document.getElementById('tdNote').textContent =
-          'Read from ' + activeNetName() + ' (chain ' + activeChainId() + '). '
+          'Read from ' + activeChainLabel() + '. '
           + 'Not the token you expected? Switch network first, then paste it again.';
         saveBtn.disabled = false;
         saveBtn.dataset.sym = sym || nm || '';
@@ -606,10 +613,30 @@ function initScrollTopFab() {
   sync();
 }
 
+// Views that need a real EVM chain: a provider to read from and a signer to
+// send with. A non-EVM network (BTC/SOL/XRP) has neither, so these refuse up
+// front with the reason instead of opening a screen that can only fail.
+//
+// 'send' is no longer in this category: sending BTC/SOL/XRP is implemented
+// (js/non-evm-send.js), and it does not go through the EVM pipeline at all. The
+// remaining five are still EVM-only and still refuse by name.
+const EVM_ONLY_VIEWS = new Set(['send', 'swap', 'bridge', 'deploy', 'nft', 'activity']);
+
+// The one view in EVM_ONLY_VIEWS that non-EVM chains DO have their own form for.
+const NON_EVM_VIEWS = new Set(['send']);
+
 // Exported for the native ⋯ menu's "Transaction history": the wallet owns the
 // history view, and the menu is a native view that cannot reach into this
 // module's internals.
 export function switchView(view) {
+  const activeNet = getNetworkById(get('networkId'));
+  if (isNonEvmNetwork(activeNet) && EVM_ONLY_VIEWS.has(view) && !NON_EVM_VIEWS.has(view)) {
+    // Named, not labelled: the user asked for these to be REAL networks, so the
+    // refusal says what is missing (an EVM chain) instead of stamping the chain
+    // "receive-only".
+    toast(`This view needs an EVM network — switch to one for that.`, 'info');
+    return false;
+  }
   $all('.nav-item').forEach(i => i.classList.remove('active'));
   $all('.mobile-nav-item').forEach(i => i.classList.remove('active'));
   // Bridge lives behind the Swap nav button, so Swap stays highlighted there.
@@ -624,6 +651,7 @@ export function switchView(view) {
   $all('.view').forEach(v => v.classList.remove('active'));
   $('#view-' + view).classList.add('active');
   refreshView(view);
+  return true;
 }
 
 // Second click on the Swap nav item — pick between same-chain swap and bridge.
@@ -665,7 +693,18 @@ export function refreshView(view) {
   if (view === 'discord') renderDiscord($('#discordRoot'));
   if (!get('address')) return;
   if (view === 'dashboard') loadDashboard();
-  if (view === 'send') loadSendTokens();
+  if (view === 'send') {
+    // BTC/SOL/XRP have their own send form (js/non-evm-send.js). The EVM form is
+    // hidden while one of them is active, not deleted, so switching back to an
+    // EVM network restores it exactly as it was.
+    const sendNet = getNetworkById(get('networkId'));
+    if (isNonEvmNetwork(sendNet)) {
+      loadNonEvmSend(sendNet);
+      return true;
+    }
+    unloadNonEvmSend();
+    loadSendTokens();
+  }
   if (view === 'swap') loadSwapTokens();
   if (view === 'bridge') loadBridgeChains();
   if (view === 'deploy') { loadEip7702(); bindOpenSeaPanel(); }
@@ -1512,30 +1551,36 @@ function syncTestnetSwitches() {
   }
 }
 
-// The Receive-only chains live IN the network list (user report 2026-10-11:
-// "itu receive kok nyatu btc xrp sama solana? harusnya ada di list network").
-// Same row shape as a network — logo, name, one line of truth — but they never
-// switch the active EVM chain: tapping one opens Receive focused on that chain.
-// Deliberately NOT `data-net`, so the network search and the switcher skip them.
-function nonEvmNetSection() {
+// The same-seed chains are ordinary rows in the network list (user 2026-10-11:
+// "itu chain btc,sol,xrp bukan receive dijadiin satu" → "jadi network aktif yang
+// bisa dipilih"): picking one makes it the ACTIVE network. There is no EVM chain
+// to switch to, so the home screen becomes that chain's receive surface and
+// Receive shows THAT chain's address — one receive per active network. They are
+// rendered INSIDE the mainnet list (not in a bucket of their own) and carry
+// `data-net-non-evm` rather than `data-net`, so the EVM switch wiring stays
+// untouched.
+function nonEvmNetRows() {
   let rows = [];
   try { rows = nonEvmReceiveRows(); } catch { return ''; }
   if (!rows.length) return '';
-  return `
-    <div id="netListNonEvm">
-      <div class="mb-8 mt-16"><span class="badge badge-testnet">RECEIVE-ONLY · SAME SEED</span></div>
-      ${rows.map((c) => `<div class="asset-row" data-net-non-evm="${escapeHtml(c.key)}" role="button" tabindex="0"
-          aria-label="Receive on ${escapeHtml(c.name)}${c.address ? '' : ' — not available yet'}">
-        <div class="net-logo">${tokenLogoHTML(c.sym, 32, { remote: false })}</div>
-        <div class="asset-info">
-          <div class="asset-name">${escapeHtml(c.name)}</div>
-          <div class="asset-symbol">${c.address
-            ? escapeHtml(c.address.slice(0, 10) + '…' + c.address.slice(-6))
-            : escapeHtml(c.reason || 'coming soon')} · receive only</div>
-        </div>
-        <span class="badge badge-${c.address ? 'mainnet' : 'testnet'}">${c.address ? 'Receive' : 'Soon'}</span>
-      </div>`).join('')}
+  const activeId = get('networkId');
+  return rows.map((c) => {
+    const isCurrent = c.key === activeId;
+    return `<div class="asset-row" data-net-non-evm="${escapeHtml(c.key)}" role="button" tabindex="0"
+        ${isCurrent ? 'data-net-current="1" aria-disabled="true"' : ''}
+        aria-label="${isCurrent ? 'Current network ' : 'Switch to '}${escapeHtml(c.name)}${c.address ? '' : ' — not available yet'}">
+      <div class="net-logo">${tokenLogoHTML(c.sym, 32, { remote: false })}</div>
+      <div class="asset-info">
+        <div class="asset-name">${escapeHtml(c.name)}</div>
+        <div class="asset-symbol">${c.address
+          ? escapeHtml(c.address.slice(0, 10) + '…' + c.address.slice(-6))
+          : escapeHtml(c.reason || 'coming soon')}</div>
+      </div>
+      ${isCurrent
+        ? '<span class="badge">✓ Current</span>'
+        : `<span class="badge badge-${c.address ? 'mainnet' : 'testnet'}">${c.address ? 'Mainnet' : 'Soon'}</span>`}
     </div>`;
+  }).join('');
 }
 
 export function showNetworkModal() {
@@ -1549,6 +1594,7 @@ export function showNetworkModal() {
     <div id="netListMainnet">
       <div class="mb-8"><span class="badge badge-mainnet">MAINNET</span></div>
       ${nets.filter(n => n.type === 'mainnet').map(n => netRow(n)).join('')}
+      ${nonEvmNetRows()}
     </div>
     <div id="netListTestnet">
       <div class="mb-8 mt-16">
@@ -1560,7 +1606,6 @@ export function showNetworkModal() {
            flip it in Settings and reopen this picker. -->
       ${nets.filter(n => n.type === 'testnet').map(n => netRow(n)).join('')}
     </div>
-    ${nonEvmNetSection()}
     <hr class="mt-16 mb-16">
     <button class="btn btn-secondary btn-block" id="addNetBtn">+ Add Custom Network</button>
   `;
@@ -1590,13 +1635,15 @@ export function showNetworkModal() {
   if (searchInput) {
     searchInput.addEventListener('input', () => {
       const q = searchInput.value.toLowerCase().trim();
-      $all('[data-net]').forEach(el => {
+      // Search covers the same-seed chains too: they are rows in this list, so
+      // typing "bitcoin" must find Bitcoin instead of hiding everything.
+      $all('[data-net], [data-net-non-evm]').forEach(el => {
         const name = (el.querySelector('.asset-name')?.textContent || '').toLowerCase();
         const chainId = (el.querySelector('.asset-symbol')?.textContent || '').toLowerCase();
         el.style.display = (!q || name.includes(q) || chainId.includes(q)) ? '' : 'none';
       });
       // hide section headers if all rows hidden
-      const mainnetRows = document.querySelectorAll('#netListMainnet [data-net]');
+      const mainnetRows = document.querySelectorAll('#netListMainnet [data-net], #netListMainnet [data-net-non-evm]');
       const testnetRows = document.querySelectorAll('#netListTestnet [data-net]');
       const mainnetVisible = [...mainnetRows].some(r => r.style.display !== 'none');
       const testnetVisible = [...testnetRows].some(r => r.style.display !== 'none');
@@ -1616,19 +1663,22 @@ export function showNetworkModal() {
     }
     activateNetwork(el.dataset.net);
   }));
-  // Receive-only chains sitting in the same list: tapping one does NOT switch
-  // the EVM chain (there is nothing to switch to) — it opens Receive focused on
-  // that chain. Keyboard-reachable like every other row.
+  // Same-seed chains (BTC/SOL/XRP) sitting in the same list: picking one makes
+  // it the ACTIVE network — no EVM switch happens, the home screen becomes that
+  // chain's receive surface and Receive shows that chain's address. The row you
+  // are already on is not a destination, exactly like an EVM row.
+  // Keyboard-reachable like every other row.
   $all('[data-net-non-evm]').forEach((el) => {
-    const open = () => {
-      const key = (el.dataset.netNonEvm || '').toLowerCase();
-      const sym = key === 'bitcoin' ? 'BTC' : key === 'solana' ? 'SOL' : 'XRP';
-      closeModal();
-      showReceiveModal(get('address'), sym);
+    const go = () => {
+      if (el.dataset.netCurrent !== undefined) {
+        toast('Already on this network', 'info');
+        return;
+      }
+      activateNetwork((el.dataset.netNonEvm || '').toLowerCase());
     };
-    el.addEventListener('click', open);
+    el.addEventListener('click', go);
     el.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
     });
   });
   // Bridge source chain decides WHERE the tx runs, so picking one switches
@@ -1659,10 +1709,19 @@ export function activateNetwork(id, { close = true } = {}) {
   if (String(id) === String(get('networkId'))) return false;
   set('networkId', id);
   localStorage.setItem('bear.networkId', id);
-  announceChainChanged(getNetworkById(id)?.chainId);
+  const net = getNetworkById(id);
+  announceChainChanged(net?.chainId);
   if (close) closeModal();
   toast('Network switched', 'success');
   updateTopbar();
+  // A non-EVM target has no EVM chain: drop the previous chain's cached
+  // provider (a dApp must not read a chain the pill no longer names) and land
+  // on its receive home instead of the old chain's form.
+  if (isNonEvmNetwork(net)) {
+    set('provider', null);
+    if (get('address')) switchView('dashboard');
+    return true;
+  }
   if (get('address')) loadDashboard();
   return true;
 }
@@ -2117,6 +2176,59 @@ function syncHomeWalletName() {
   } catch { /* name is cosmetic — skip */ }
 }
 
+// ── home screen for a non-EVM network ─────────────────────────────────────
+// BTC/SOL/XRP are pickable networks (2026-10-11), and this is what "being on"
+// one means: no EVM provider to read from, no token list. Sending and receiving
+// are implemented for these chains (docs/NON-EVM-SENDING.md); swap/bridge/deploy
+// /nft/activity still need an EVM chain. Pretending otherwise IS the bug — so the
+// screen states exactly what this wallet can do here. The USD hero is cleared
+// rather than left showing the last EVM portfolio total under a Bitcoin label.
+function renderNonEvmHome(net) {
+  const assetList = $('#assetList');
+  if (!assetList) return;
+  const search = $('#assetSearch');
+  if (search) search.style.display = 'none';
+  // Hide "+ Add Token" with the search box: adding a token means reading an
+  // ERC-20 contract, and this screen has no EVM chain to read one on. The
+  // handler refuses too — neither the button nor the leak.
+  document.querySelector('.asset-addtoken')?.style.setProperty('display', 'none');
+  // The hero sparkline is the previous chain's 24h native price — leaving it
+  // drawn under a Bitcoin label is a chart of a market this screen is not on.
+  const spark = $('#heroSpark');
+  if (spark) spark.innerHTML = '';
+  $('#totalBalance').textContent = '—';
+  $('#balanceSub').textContent = net.name;
+  // Locked is not "coming soon": deriving the address needs the decrypted seed,
+  // so while the wallet is locked there is nothing to show yet. Saying "coming
+  // soon" there would describe a missing feature instead of a locked wallet and
+  // send the user looking for one.
+  const note = wallet.getSession()
+    ? `Receiving and sending work here — the ${escapeHtml(net.symbol)} address comes from the same recovery phrase. Swapping and bridging need an EVM network.`
+    : `Unlock the wallet to see your ${escapeHtml(net.symbol)} address.`;
+  assetList.innerHTML = `
+    <div class="asset-row non-evm-home" role="note">
+      <div class="net-logo">${tokenLogoHTML(net.symbol, 32, { remote: false })}</div>
+      <div class="asset-info">
+        <div class="asset-name">${escapeHtml(net.name)}</div>
+        <div class="asset-symbol">${escapeHtml(net.symbol)} · same recovery phrase</div>
+      </div>
+      <span class="badge badge-mainnet">${escapeHtml(net.symbol)}</span>
+    </div>
+    <button class="btn btn-block mt-16" id="nonEvmSendBtn2">Send ${escapeHtml(net.symbol)}</button>
+    <button class="btn btn-primary btn-block mt-8" id="nonEvmReceiveBtn">Receive ${escapeHtml(net.symbol)}</button>
+    <p class="small dim mt-16" role="note">${note}</p>
+  `;
+  $('#nonEvmReceiveBtn')?.addEventListener('click', () => showReceiveModal(get('address'), net.symbol));
+  $('#nonEvmSendBtn2')?.addEventListener('click', () => switchView('send'));
+}
+
+// Renders the home screen for the ACTIVE network. A non-EVM network
+// (BTC/SOL/XRP) has no chainId to read (docs/NON-EVM-SENDING.md), so it returns
+// to its own receive home before any EVM step can run on a null chain.
+//
+// `soft` (the auto-refresh ticks) keeps the current rows on screen until the new
+// snapshot lands — a spinner flash every minute is worse than a balance that is
+// seconds old.
 async function loadDashboard(opts = {}) {
   if (!get('address')) return;
   const net = getNetworkById(get('networkId'));
@@ -2127,12 +2239,10 @@ async function loadDashboard(opts = {}) {
   // Wallet name above the balance hero — same writer as a post-delete refresh
   // (syncHomeWalletName above), so the label cannot drift from the list.
   syncHomeWalletName();
+  if (isNonEvmNetwork(net)) return renderNonEvmHome(net);
 
   const assetList = $('#assetList');
   if (!assetList) return;
-  // Soft mode (auto-refresh ticks): keep the current rows on screen until the
-  // new snapshot lands — a spinner flash every minute is worse than a balance
-  // that is seconds old.
   const soft = opts.soft === true;
   if (!soft) assetList.innerHTML = spinner(64, 'Loading assets...');
   // 24h price sparkline for the native asset — keyless series
@@ -2263,6 +2373,9 @@ import { explainError } from './errors.js';
 function renderAssets(tokens) {
   const assetList = $('#assetList');
   if (!assetList) return;
+  // The "+ Add Token" control is an ERC-20 control: it belongs to the EVM
+  // dashboard and comes back with it (renderNonEvmHome hides it — see there).
+  document.querySelector('.asset-addtoken')?.style.setProperty('display', '');
   const totalUsd = tokens.reduce((s, t) => s + holdingUsd(t), 0);
   animateValue($('#totalBalance'), totalUsd, { duration: 600, formatter: fmtUsd });
   if (!tokens.length) {
@@ -2482,33 +2595,44 @@ function nonEvmReceiveRows() {
   });
 }
 
-function receiveAddressCard({ label, sublabel, addr, reason, tag }) {
-  if (!addr) {
-    return `<div class="receive-chain mb-12">
-      <div class="receive-chain-head">
-        <span class="receive-chain-name">
-          ${sublabel ? `<span class="receive-chain-logo" aria-hidden="true">${tokenLogoHTML(sublabel, 30, { remote: false })}</span>` : ''}
-          <strong>${escapeHtml(label)}</strong>
-        </span>
-      </div>
-      <div class="receive-chain-off" role="note">Not available yet — ${escapeHtml(reason || 'coming soon')}</div>
-    </div>`;
-  }
-  const qr = (() => {
+function showReceiveModal(address, symbol) {
+  const net = getNetworkById(get('networkId'));
+  // ONE receive per network, and the ACTIVE network decides which chain this
+  // sheet belongs to — NOT the token ticker. A BSC token whose symbol happens
+  // to be "BTC" (BTCB) used to reach the Bitcoin branch by name, which is the
+  // counterfeit class the logo registry already refuses; the chain the wallet
+  // is standing on is the only honest answer.
+  const nonEvm = isNonEvmNetwork(net)
+    ? (nonEvmReceiveRows().find((c) => c.sym === net.symbol)
+       || { name: net.name, symbol: net.symbol, address: null, reason: null })
+    : null;
+  // The sheet shows ONE chain: the active EVM network, or the active non-EVM
+  // chain. It used to append BTC/SOL/XRP under the EVM address ("Other chains —
+  // same recovery phrase") — that dump is exactly the mixing this removes.
+  // Every chain still has its own receive, reached from its own row.
+  const label = nonEvm ? nonEvm.name : (net?.symbol || symbol || 'EVM');
+  const addr = nonEvm ? (nonEvm.address || '') : (address || get('address'));
+  const tag = nonEvm ? nonEvm.destinationTag : undefined;
+  const reason = nonEvm
+    ? (nonEvm.reason || (wallet.getSession() ? null : 'Unlock the wallet to see this address'))
+    : null;
+
+  let qrSvg = '';
+  if (addr) {
     try {
       if (typeof qrcode === 'function') {
-        const q = qrcode(0, 'M');
-        q.addData(addr);
-        q.make();
-        return `<div class="receive-qr text-center" role="img" aria-label="QR code for ${escapeHtml(label)}">${q.createSvgTag(4, 8)}</div>`;
+        const qr = qrcode(0, 'M');
+        qr.addData(addr);
+        qr.make();
+        qrSvg = qr.createSvgTag(4, 8);
       }
     } catch { /* QR unavailable — the address is still shown below */ }
-    return '';
-  })();
+  }
+
   // XRP only. Most exchanges ask for "Address" and "Tag" in SEPARATE boxes and
-  // credit the wrong one (or none) — so the tag is its own labelled row with
-  // its own copy button, not a footnote under the address. It is stable for the
-  // life of the account by construction (derived from the key, not a counter).
+  // credit the wrong one (or none) — so the tag is its own labelled row with its
+  // own copy button, not a footnote under the address. Stable for the life of
+  // the account by construction (derived from the key, not a counter).
   const tagRow = (tag !== undefined && tag !== null && tag !== '')
     ? `<div class="receive-tag-row">
          <span class="receive-tag-label">Destination tag</span>
@@ -2517,61 +2641,18 @@ function receiveAddressCard({ label, sublabel, addr, reason, tag }) {
            aria-label="Copy destination tag for ${escapeHtml(label)}">Copy tag</button>
        </div>`
     : '';
-  return `<div class="receive-chain mb-12">
-    <div class="receive-chain-head">
-      <span class="receive-chain-name">
-        ${sublabel ? `<span class="receive-chain-logo" aria-hidden="true">${tokenLogoHTML(sublabel, 30, { remote: false })}</span>` : ''}
-        <strong>${escapeHtml(label)}</strong>
-      </span>
-      ${sublabel ? `<span class="receive-chain-sub">${escapeHtml(sublabel)}</span>` : ''}
-    </div>
-    ${qr}
-    <div class="mono receive-addr" style="word-break:break-all;padding:10px;border-radius:8px">${escapeHtml(addr)}</div>
-    ${tagRow}
-    <button class="copy-btn btn btn-secondary btn-block" data-copy="${escapeHtml(addr)}">Copy ${escapeHtml(label)} address</button>
-  </div>`;
-}
-
-function showReceiveModal(address, symbol) {
-  const addr = address || get('address');
-  const net = getNetworkById(get('networkId'));
-  // A non-EVM chain opened from the wallet's Network list (BTC/SOL/XRP sit there
-  // as receive-only entries) titles the sheet after THAT chain, not the active
-  // EVM network — the user tapped Bitcoin, the sheet says "Receive BTC".
-  const requested = String(symbol || '').toUpperCase();
-  const focusNonEvm = ['BTC', 'SOL', 'XRP'].includes(requested) ? requested : null;
-  const evmLabel = focusNonEvm || net?.symbol || symbol || 'EVM';
-  let qrSvg = '';
-  try {
-    if (typeof qrcode === 'function') {
-      const qr = qrcode(0, 'M');
-      qr.addData(addr);
-      qr.make();
-      qrSvg = qr.createSvgTag(4, 8);
-    }
-  } catch { /* QR unavailable — address is still shown below */ }
-
-  // Non-EVM chains from the same seed. Rendered BELOW the EVM address so the
-  // common case (tap Receive on an EVM token) is unchanged, and the other
-  // chains are one scroll away rather than a second tap.
-  const chains = nonEvmReceiveRows();
-  const chainsHtml = chains.length ? `
-    <hr class="receive-divider" />
-    <h3 class="receive-other-title">Other chains — same recovery phrase</h3>
-    ${chains.map((c) => receiveAddressCard({
-      label: c.name, sublabel: c.sym, addr: c.address, reason: c.reason, tag: c.destinationTag,
-    })).join('')}
-  ` : '';
 
   openModal(`
     <button class="modal-close" type="button" data-close-modal>✕</button>
-    <h2>Receive ${escapeHtml(evmLabel)}</h2>
-    ${qrSvg ? `<div class="receive-qr text-center mb-16" role="img" aria-label="QR code for ${escapeHtml(evmLabel)}">${qrSvg}</div>` : ''}
-    <div class="text-center mb-16">
-      <div class="mono" style="font-size:0.85rem;word-break:break-all;padding:12px;background:var(--cream);border-radius:10px;border:2px solid var(--ink)">${escapeHtml(addr)}</div>
-    </div>
-    <button class="copy-btn btn btn-primary btn-block" data-copy="${escapeHtml(addr)}">Copy Address</button>
-    ${chainsHtml}
+    <h2>Receive ${escapeHtml(label)}</h2>
+    ${!addr ? `<div class="receive-chain-off" role="note">Not available yet — ${escapeHtml(reason || 'coming soon')}</div>` : `
+      ${qrSvg ? `<div class="receive-qr text-center mb-16" role="img" aria-label="QR code for ${escapeHtml(label)}">${qrSvg}</div>` : ''}
+      <div class="text-center mb-16">
+        <div class="mono receive-addr" style="font-size:0.85rem;word-break:break-all;padding:12px;background:var(--cream);border-radius:10px;border:2px solid var(--ink)">${escapeHtml(addr)}</div>
+      </div>
+      <button class="copy-btn btn btn-primary btn-block" data-copy="${escapeHtml(addr)}">Copy Address</button>
+      ${tagRow}
+    `}
   `);
 }
 

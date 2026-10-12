@@ -60,7 +60,14 @@ function chainHex(chainId) {
 }
 
 /** Push the wallet's active chain to the native toolbar. The plugin updates
- *  its ◆ chip and fires EIP-1193 chainChanged into every open dApp tab. */
+ *  its ◆ chip and fires EIP-1193 chainChanged into every open dApp tab.
+ *
+ *  On a non-EVM network (BTC/SOL/XRP) chainHex() is '' and the plugin's
+ *  `0x[0-9a-fA-F]+` guard then fires NO chainChanged at all — deliberate. There
+ *  is no EVM chain to announce, and announcing the previous one (or a made-up
+ *  '0x1') is the silent-chain-substitution this wallet refuses everywhere else.
+ *  The chip still follows the wallet ("BTC"); a dApp that asks eth_chainId gets
+ *  the named 4901 refusal from handleRequest. */
 export async function syncNativeChain() {
   if (!plugin) return;
   const n = getNetworkById(get('networkId'));
@@ -327,16 +334,27 @@ async function handleNativeRpc({ id, origin, payload }) {
 
   const method = msg.method;
   const site = String(origin || 'this site');
-  const chainId = 'eip155:' + (getNetworkById(get('networkId'))?.chainId || 1);
+  // BTC/SOL/XRP are pickable networks now (2026-10-11) and have NO EVM chain id.
+  // `Number(n.chainId)` on one of those is 0, so the old answers were '0x0' and
+  // 'null' — a corrupted chain id, not even the '1' fallback. The session label
+  // must not claim eip155:1 either: a native dApp page told "chain 1" builds
+  // mainnet transactions this wallet cannot sign. Named refusal instead, same
+  // code (4901) as dapp-exec/walletconnect, so every path tells one story.
+  const activeNet = getNetworkById(get('networkId'));
+  const nonEvmActive = activeNet?.type === 'non-evm';
+  const chainId = nonEvmActive ? `non-evm:${activeNet.id}` : 'eip155:' + Number(activeNet?.chainId || 1);
 
   // Read-only answers work even while locked.
-  if (method === 'eth_chainId') {
-    const n = getNetworkById(get('networkId'));
-    return respond(n ? '0x' + Number(n.chainId).toString(16) : '0x1');
-  }
-  if (method === 'net_version') {
-    const n = getNetworkById(get('networkId'));
-    return respond(n ? String(n.chainId) : '1');
+  if (method === 'eth_chainId' || method === 'net_version') {
+    if (nonEvmActive) {
+      return respondError({
+        code: 4901,
+        message: `Bear Tool is on ${activeNet.name}, a non-EVM network with no EVM chain. Switch to an EVM network first.`,
+      });
+    }
+    return respond(method === 'eth_chainId'
+      ? '0x' + Number(activeNet.chainId).toString(16)
+      : String(activeNet.chainId));
   }
 
   const signer = get('signer');
@@ -389,7 +407,7 @@ async function handleNativeRpc({ id, origin, payload }) {
     const domChain = Number(domain.chainId);
     const localNet = getNetworkById(get('networkId'));
     if (Number.isFinite(domChain) && localNet && Number(localNet.chainId) !== domChain) {
-      const m = `This signature targets chain ${domChain}, but Bear Tool is on ${localNet.name} (chain ${localNet.chainId}). Switch network first — nothing was signed.`;
+      const m = `This signature targets chain ${domChain}, but Bear Tool is on ${localNet?.type === 'non-evm' ? `${localNet.name} (a non-EVM network with no EVM chain)` : `${localNet.name} (chain ${localNet.chainId})`}. Switch network first — nothing was signed.`;
       toast(m, 'error');
       return respondError({ code: -32000, message: m });
     }
@@ -415,7 +433,7 @@ async function handleNativeRpc({ id, origin, payload }) {
     const txReq = (msg.params || [])[0] || {};
     const reqChain = Number(txReq.chainId);
     if (Number.isFinite(reqChain) && localNet && Number(localNet.chainId) !== reqChain) {
-      const m = `This dApp asked for chain ${reqChain}, but Bear Tool is on ${localNet.name} (chain ${localNet.chainId}). Switch network in Bear Tool and ask again — nothing was sent.`;
+      const m = `This dApp asked for chain ${reqChain}, but Bear Tool is on ${localNet?.type === 'non-evm' ? `${localNet.name} (a non-EVM network with no EVM chain)` : `${localNet.name} (chain ${localNet.chainId})`}. Switch network in Bear Tool and ask again — nothing was sent.`;
       toast(m, 'error');
       return respondError({ code: -32000, message: m });
     }

@@ -471,7 +471,18 @@ const dynamicSkip = new Set([
   // card in discord.jsx would flash the wrong shape on every reconnect.
   // Audited below: each id has id="…" in discord.js.
   // #discordInvite (invite join row, painted with the Servers card).
-  'discordStatus','discordClientId','discordToken','btnDiscordLeaveConfirm','discordInvite'
+  'discordStatus','discordClientId','discordToken','btnDiscordLeaveConfirm','discordInvite',
+  // Non-EVM home (renderNonEvmHome, 2026-10-11): the Receive button is painted
+  // into #assetList for whichever same-seed chain is active, so a static
+  // dashboard.jsx cannot hold it. Asserted in mustAppear below.
+  'nonEvmReceiveBtn',
+  // Non-EVM Send panel (js/non-evm-send.js, 2026-10-11): the whole form is
+  // painted per active chain — XRP needs a destination tag field, Bitcoin a fee
+  // selector, Solana neither — so it cannot live in one static jsx view. Same
+  // bargain as every id above: each one is asserted to be generated below.
+  'nonEvmSendBtn2',
+  'nonEvmTo','nonEvmPaste','nonEvmAmount','nonEvmMaxNote','nonEvmBalanceLine',
+  'nonEvmTag','nonEvmFeeSel','nonEvmFeeValue','nonEvmNetSel','nonEvmSendBtn','nonEvmSendNote'
 ]);
 
 test('E2E-probe: every $(\'#id\') reference across ALL js files exists in the page markup', async () => {
@@ -517,11 +528,22 @@ test('E2E-probe: runtime-injected ids are really created (dynamicSkip is not a b
     // Custom-RPC detection (showAddNetworkModal)
     'cnCustomBtn','cnNameField','cnName','cnDetect',
     // Activity detail sheet (showActivityDetail)
-    'actChain'
+    'actChain',
+    // Non-EVM home (renderNonEvmHome) — the Receive button for the active
+    // same-seed chain
+    'nonEvmReceiveBtn',
+    // Non-EVM Send panel — painted by js/non-evm-send.js per active chain
+    'nonEvmSendBtn2',
+    'nonEvmTo','nonEvmPaste','nonEvmAmount','nonEvmMaxNote','nonEvmBalanceLine',
+    'nonEvmTag','nonEvmFeeSel','nonEvmFeeValue','nonEvmNetSel','nonEvmSendBtn','nonEvmSendNote'
   ];
+  // Some ids are painted by a module other than app.js — the non-EVM send panel
+  // lives in js/non-evm-send.js. The generator check must see those too, or a
+  // skip entry would hide a rename exactly the way this test exists to prevent.
+  const painted = app + '\n' + fs.readFileSync(new URL('../js/non-evm-send.js', import.meta.url), 'utf8');
   for (const id of mustAppear) {
     assert.ok(
-      app.includes(`id="${id}"`),
+      painted.includes(`id="${id}"`),
       `#${id} is in dynamicSkip but nothing generates it — remove it from the skip list or create it`
     );
   }
