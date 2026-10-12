@@ -1645,6 +1645,16 @@ async function main() {
   if (!sec.open) throw new Error('feature sweep: the Security Center did not open when its summary was activated');
   if (!sec.painted) throw new Error('feature sweep: the Security Center opened empty — nothing was rendered into it');
   sweep.security = sec;
+  // Let the notices go before the picture. The previous runs proved this matters:
+  // the settings toggles leave toasts behind, and a screenshot taken on top of them
+  // shows a column of notices with a sliver of Settings at the top — the screen is
+  // technically correct and visually useless as evidence. They dismiss on their
+  // own, so waiting is enough; failing if they never do is not.
+  for (let i = 0; i < 30; i++) {
+    const pending = await page.evaluate(`document.querySelectorAll('#toast-wrap .toast').length`).catch(() => 0);
+    if (!pending) break;
+    await sleep(250);
+  }
   await page.shot('44-security-center');
 
   step('feature sweep: a modal traps focus and Escape restores it');

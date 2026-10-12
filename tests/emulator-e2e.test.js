@@ -629,3 +629,15 @@ test('the Security Center step opens the details it means to open', () => {
   assert.match(body, /if \(!sec\.painted\) throw/,
     'terbuka tapi kosong bukan Security Center yang bekerja');
 });
+
+// The Security Center screenshot arrived covered by six stacked toasts — the
+// screen underneath was correct and the picture was useless. Toasts dismiss
+// themselves, so waiting is the fix; taking the shot on top of them is not.
+test('the Security Center shot waits for the notice stack to clear', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  const at = drv.indexOf("await page.shot('44-security-center')");
+  assert.ok(at > 0);
+  const before = drv.slice(Math.max(0, at - 1400), at);
+  assert.match(before, /#toast-wrap \.toast/,
+    'langkah harus mengecek tumpukan notifikasi sebelum memotret');
+});

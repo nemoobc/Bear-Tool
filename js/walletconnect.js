@@ -273,14 +273,14 @@ async function handleProposal({ id, params }) {
     return;
   }
   const ok = await confirmTx({
-    title: 'Connect "' + dappName + '" to Bear Tool?',
+    title: t('site.connectTitle', { site: dappName }),
     rows: [
-      { k: 'dApp', v: dappName },
-      { k: 'Account', v: shortAddr(addr) },
-      { k: 'Chains', v: chains.join(', ') },
-      { k: 'Can request', v: WC_SESSION_METHODS.join(', ') },
+      { k: t('site.site'), v: dappName },
+      { k: t('site.account'), v: shortAddr(addr) },
+      { k: t('wc.chains'), v: chains.join(', ') },
+      { k: t('site.canRequest'), v: WC_SESSION_METHODS.join(', ') },
     ],
-    confirmText: 'Connect',
+    confirmText: t('site.connect'),
   });
   if (!ok) {
     await kit.rejectSession({ id, reason: USER_REJECTED }).catch(() => {});
@@ -333,13 +333,13 @@ async function handleRequest({ id, topic, params }) {
   if (method === 'personal_sign') {
     const [hex] = params.request.params || [];
     const ok = await confirmTx({
-      title: 'Sign message?',
+      title: t('sign.title'),
       rows: [
-        { k: 'Chain', v: chainId },
-        { k: 'Account', v: shortAddr(signer.address) },
-        { k: 'Message', v: hexToPreview(hex) },
+        { k: t('site.chain'), v: chainId },
+        { k: t('site.account'), v: shortAddr(signer.address) },
+        { k: t('site.message'), v: hexToPreview(hex) },
       ],
-      confirmText: 'Confirm',
+      confirmText: t('sign.action'),
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);
     return respond(topic, id, await signer.signMessage(hexToBytes(hex)));
@@ -362,14 +362,14 @@ async function handleRequest({ id, topic, params }) {
       return respondError(topic, id, { code: -32000, message: msg });
     }
     const ok = await confirmTx({
-      title: 'Sign typed data?',
+      title: t('sign.typedTitle'),
       rows: [
-        { k: 'Chain', v: chainId },
-        { k: 'Domain', v: String(domain.name || '?') + (domain.version ? ' v' + domain.version : '') },
-        { k: 'Primary type', v: String(parsed.primaryType || '?') },
-        { k: 'Account', v: shortAddr(signer.address) },
+        { k: t('site.chain'), v: chainId },
+        { k: t('site.domain'), v: String(domain.name || '?') + (domain.version ? ' v' + domain.version : '') },
+        { k: t('site.primaryType'), v: String(parsed.primaryType || '?') },
+        { k: t('site.account'), v: shortAddr(signer.address) },
       ],
-      confirmText: 'Confirm',
+      confirmText: t('sign.action'),
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);
     const types = { ...(parsed.types || {}) };
@@ -396,14 +396,14 @@ async function handleRequest({ id, topic, params }) {
       return respondError(topic, id, { code: -32000, message: 'No provider for the current network.' });
     }
     const ok = await confirmTx({
-      title: 'Send transaction?',
+      title: t('sign.txTitle'),
       rows: [
-        { k: 'Chain', v: chainId },
-        { k: 'To', v: shortAddr(tx.to || '') },
-        { k: 'Value', v: fmtValue(tx.value, nativeUnit(localNet)) },
-        { k: 'Data', v: tx.data && tx.data !== '0x' ? (String(tx.data).length / 2 - 1) + ' bytes' : 'none' },
+        { k: t('site.chain'), v: chainId },
+        { k: t('site.to'), v: shortAddr(tx.to || '') },
+        { k: t('site.value'), v: fmtValue(tx.value, nativeUnit(localNet)) },
+        { k: t('site.data'), v: tx.data && tx.data !== '0x' ? (String(tx.data).length / 2 - 1) + ' ' + t('site.bytes') : '—' },
       ],
-      confirmText: 'Sign & Send',
+      confirmText: t('sign.send'),
       danger: !!(tx.data && tx.data !== '0x'),
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);

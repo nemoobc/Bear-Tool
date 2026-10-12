@@ -68,6 +68,11 @@ export function dappLogo(url) {
 }
 
 // ── toast ──
+// Three, then the oldest leaves. Chosen from the screenshot rather than taste: at
+// six, the stack covered the whole screen on a 360px phone.
+const MAX_TOASTS = 3;
+const TOAST_MS = 3500;
+
 export function toast(msg, type = 'info') {
   const wrap = $('#toast-wrap');
   const el = document.createElement('div');
@@ -78,12 +83,47 @@ export function toast(msg, type = 'info') {
   // shapes. The translator is idempotent, so a message that is already a sentence
   // is left exactly as written — "Enter amount to swap" still arrives as itself.
   el.textContent = type === 'error' ? explainError(msg) : String(msg ?? '');
+
+  // A repeated message REFRESHES the one already showing instead of stacking a
+  // second copy. Toggling a switch twice in three seconds said "Testnets hidden"
+  // and "Testnets hidden" in two identical cards, which reads like two events
+  // happened when one did.
+  // Both reads below are guarded. In the app the wrapper is a real element with
+  // children, but #toast-wrap is reachable through a stub in a couple of dozen
+  // tests that only model appendChild — and a cap that throws where it used to
+  // work is worse than a cap that does nothing.
+  const last = wrap.lastElementChild;
+  if (last && last.dataset && last.dataset.toastText === el.textContent) {
+    restartToast(last);
+    return;
+  }
+
   wrap.appendChild(el);
-  setTimeout(() => {
+  el.dataset.toastText = el.textContent;
+  // Cap the stack. Six notices stacked upward covered the entire Settings screen
+  // on a phone — the emulator screenshot 43/44 shows the screen with only its
+  // top and bottom bars visible. Notifications exist to be read while something
+  // else is on screen; when they ARE the screen, they are in the way. Oldest
+  // goes first: the newest one is the reason the user is looking.
+  if (Array.isArray(wrap.children)) {
+    while (wrap.children.length > MAX_TOASTS && wrap.firstElementChild) {
+      wrap.firstElementChild.remove();
+    }
+  }
+
+  restartToast(el);
+}
+
+// Restart an existing toast's disappearance. Re-arming the timer on a repeat is
+// what makes "Testnets hidden" stay up for the moment the switch came back on.
+function restartToast(el) {
+  clearTimeout(el._toastTimer);
+  clearTimeout(el._toastFade);
+  el._toastTimer = setTimeout(() => {
     el.style.opacity = '0';
     el.style.transition = 'opacity 0.3s';
-    setTimeout(() => el.remove(), 300);
-  }, 3500);
+    el._toastFade = setTimeout(() => el.remove(), 300);
+  }, TOAST_MS);
 }
 
 // ── modal (a11y: aria-labelledby, focus trap, Escape, restore focus) ──

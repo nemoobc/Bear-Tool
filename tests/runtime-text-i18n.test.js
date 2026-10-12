@@ -110,3 +110,35 @@ test('every t() key used by a module resolves in both languages', () => {
   }
   assert.deepEqual([...new Set(missing)], [], `kunci hilang dari kamus: ${[...new Set(missing)].join(', ')}`);
 });
+// Confirmation sheets are the screens where a wrong word costs money, and they are
+// built from object properties — `title:`, `k:`, `confirmText:` — which the
+// textContent/innerHTML scan above cannot see: nothing is assigned to the DOM
+// there, a value is handed to a renderer. Screenshot 06-dapp-connect-sheet.png
+// showed the whole family in English on a wallet that speaks Indonesian.
+test('the dApp confirmation sheets carry no unwired literal of their own', () => {
+  for (const mod of ['native-dapp', 'walletconnect']) {
+    const src = readFileSync(new URL(`../js/${mod}.js`, import.meta.url), 'utf8');
+    const bare = [...src.matchAll(/\b(title|confirmText|cancelText|k):\s*'([A-Z][^']{1,40})'/g)]
+      .map((m) => `${m[1]}: '${m[2]}'`);
+    assert.deepEqual(bare, [], `${mod}.js masih punya kalimat Inggris di sheet konfirmasi: ${bare.join(' | ')}`);
+  }
+});
+
+// The connect sheet's capability list used to be one CSV line — "accounts, sign,
+// send transactions" — where the irreversible one sat last with nothing marking it.
+// Three of those capabilities cannot inform a decision if they are one string, so
+// they are three rows and the sending one says plainly that it cannot be undone.
+test('the connect sheet says what a site may ask, one row at a time', () => {
+  const src = readFileSync(new URL('../js/native-dapp.js', import.meta.url), 'utf8');
+  const at = src.indexOf("t('site.connectTitle'");
+  assert.ok(at > 0, ' Judul connect harus lewat kamus');
+  const body = src.slice(at, at + 900);
+  for (const key of ['site.canSee', 'site.canSign', 'site.canSend']) {
+    assert.match(body, new RegExp(`t\\('${key}'\\)`), `${key} harus punya barisnya sendiri`);
+  }
+  const dict = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const send = /'site\.canSendValue': '([^']+)'/.exec(dict);
+  assert.ok(send, 'deskripsi "bisa mengirim" harus ada');
+  assert.match(send[1], /cannot be undone/,
+    'mengirim transaksi tidak bisa dibatalkan — itu harus tertulis, bukan tersirat');
+});

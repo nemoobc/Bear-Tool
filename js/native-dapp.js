@@ -14,6 +14,7 @@
 //   not silently executed on the local chain;
 // - locked wallet raises the unlock prompt and answers honestly.
 import { confirmTx, toast, setModalVisibilityHook } from './ui.js';
+import { t } from './i18n.js';
 import { get, requireUnlock, on } from './state.js';
 import { getNetworkById, getNetwork } from './network.js';
 import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
@@ -361,13 +362,22 @@ async function handleNativeRpc({ id, origin, payload }) {
 
   if (method === 'eth_requestAccounts') {
     const ok = await askConfirm({
-      title: 'Connect "' + site + '" to Bear Tool?',
+      title: t('site.connectTitle', { site }),
+      // One row per capability, each saying what it MEANS, instead of a single
+      // CSV line. The old line read "accounts, sign, send transactions" — three
+      // different consequences sharing one visual weight, with the irreversible
+      // one (moving money) last and unremarked. It was also static text: it
+      // described what the wallet can do in general, not anything this site
+      // asked for, so it could not inform a decision however it was worded.
+      // This says what the site may ask, and names the one that cannot be undone.
       rows: [
-        { k: 'Site', v: site },
-        { k: 'Account', v: shortAddr(signer.address) },
-        { k: 'Can request', v: 'accounts, sign, send transactions' },
+        { k: t('site.site'), v: site },
+        { k: t('site.account'), v: shortAddr(signer.address) },
+        { k: t('site.canSee'), v: t('site.canSeeValue') },
+        { k: t('site.canSign'), v: t('site.canSignValue') },
+        { k: t('site.canSend'), v: t('site.canSendValue') },
       ],
-      confirmText: 'Connect',
+      confirmText: t('site.connect'),
     });
     if (!ok) return respondError(USER_REJECTED);
     connectedOrigins.add(site);
@@ -377,14 +387,14 @@ async function handleNativeRpc({ id, origin, payload }) {
   if (method === 'personal_sign') {
     const [hex] = msg.params || [];
     const ok = await askConfirm({
-      title: 'Sign message?',
+      title: t('sign.title'),
       rows: [
-        { k: 'Chain', v: chainId },
-        { k: 'Site', v: site },
-        { k: 'Account', v: shortAddr(signer.address) },
-        { k: 'Message', v: String(hexToBytes(hex)).slice(0, 80) },
+        { k: t('site.chain'), v: chainId },
+        { k: t('site.site'), v: site },
+        { k: t('site.account'), v: shortAddr(signer.address) },
+        { k: t('site.message'), v: String(hexToBytes(hex)).slice(0, 80) },
       ],
-      confirmText: 'Sign',
+      confirmText: t('sign.action'),
     });
     if (!ok) return respondError(USER_REJECTED);
     return respond(await signer.signMessage(hexToBytes(hex)));
@@ -405,15 +415,15 @@ async function handleNativeRpc({ id, origin, payload }) {
       return respondError({ code: -32000, message: m });
     }
     const ok = await askConfirm({
-      title: 'Sign typed data?',
+      title: t('sign.typedTitle'),
       rows: [
-        { k: 'Chain', v: chainId },
-        { k: 'Domain', v: String(domain.name || '?') + (domain.version ? ' v' + domain.version : '') },
-        { k: 'Primary type', v: String(parsed.primaryType || '?') },
-        { k: 'Site', v: site },
-        { k: 'Account', v: shortAddr(signer.address) },
+        { k: t('site.chain'), v: chainId },
+        { k: t('site.domain'), v: String(domain.name || '?') + (domain.version ? ' v' + domain.version : '') },
+        { k: t('site.primaryType'), v: String(parsed.primaryType || '?') },
+        { k: t('site.site'), v: site },
+        { k: t('site.account'), v: shortAddr(signer.address) },
       ],
-      confirmText: 'Confirm',
+      confirmText: t('sign.action'),
     });
     if (!ok) return respondError(USER_REJECTED);
     const types = { ...(parsed.types || {}) };
@@ -433,15 +443,15 @@ async function handleNativeRpc({ id, origin, payload }) {
     const provider = get('provider');
     if (!provider) return respondError({ code: -32000, message: 'No provider for the current network.' });
     const ok = await askConfirm({
-      title: 'Send transaction?',
+      title: t('sign.txTitle'),
       rows: [
-        { k: 'Chain', v: chainId },
-        { k: 'Site', v: site },
-        { k: 'To', v: shortAddr(txReq.to || '') },
-        { k: 'Value', v: String(txReq.value || '0x0') },
-        { k: 'Data', v: txReq.data && txReq.data !== '0x' ? (String(txReq.data).length / 2 - 1) + ' bytes' : 'none' },
+        { k: t('site.chain'), v: chainId },
+        { k: t('site.site'), v: site },
+        { k: t('site.to'), v: shortAddr(txReq.to || '') },
+        { k: t('site.value'), v: String(txReq.value || '0x0') },
+        { k: t('site.data'), v: txReq.data && txReq.data !== '0x' ? (String(txReq.data).length / 2 - 1) + ' bytes' : 'none' },
       ],
-      confirmText: 'Confirm',
+      confirmText: t('sign.action'),
     });
     if (!ok) return respondError(USER_REJECTED);
     // Keystore signers are plain ethers.Wallet instances with NO provider —
