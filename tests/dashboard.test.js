@@ -289,3 +289,29 @@ test('dashboard: adding an ERC-20 token is refused (and hidden) on a non-EVM net
   assert.match(handler, /switch to an EVM network to add a token/, 'tolak dengan alasan bernama');
 });
 
+
+// A single corrupted record used to blank the whole address book: renderAddressBook
+// maps over every entry, and shortAddress() called addr.slice() unguarded, so
+// `{"label":"x","address":123}` from an older build, a half-finished migration or
+// a hand-edited store threw "addr.slice is not a function" and took the screen
+// with it. Type-safe now, and the two-char token is escaped so it can never grow
+// into a tag.
+test('a corrupted address-book record cannot break the render', async () => {
+  const { shortAddress } = await import('../js/wallet.js');
+  for (const bad of [123, {}, [], true, null, undefined, '']) {
+    const out = shortAddress(bad);
+    assert.equal(typeof out, 'string', `shortAddress(${JSON.stringify(bad)}) returned ${typeof out}`);
+    assert.doesNotMatch(out, /is not a function|undefined/, `shortAddress(${JSON.stringify(bad)}) -> ${out}`);
+  }
+  // the normal path is unchanged
+  assert.equal(shortAddress('0x1234567890abcdef1234567890abcdef12345678'), '0x1234…5678');
+  assert.equal(shortAddress(''), '');
+});
+
+test('the address-book avatar token is escaped, not pasted raw into innerHTML', async () => {
+  const src = await import('node:fs').then((m) => m.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8'));
+  const line = src.split('\n').find((l) => l.includes('token-icon default'));
+  assert.ok(line, 'could not find the address-book avatar markup');
+  assert.match(line, /escapeHtml\(String\(item\?\.label/,
+    'the avatar token must be escaped and string-coerced before it reaches innerHTML');
+});

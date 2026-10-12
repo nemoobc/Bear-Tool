@@ -3301,7 +3301,7 @@ function renderAddressBook() {
   }
   el.innerHTML = list.map((item, i) => `
     <div class="ab-item">
-      <div class="token-icon default">${(item.label || '?').slice(0, 2).toUpperCase()}</div>
+      <div class="token-icon default">${escapeHtml(String(item?.label ?? '?').slice(0, 2).toUpperCase())}</div>
       <div class="ab-item-info">
         <div class="ab-item-label">${escapeHtml(item.label)}</div>
         <div class="ab-item-address">${escapeHtml(wallet.shortAddress(item.address))}</div>

@@ -301,8 +301,16 @@ export async function exportSecret(password) {
 
 // ── helpers ──
 export function shortAddress(addr) {
+  // Type-safe: this is called with values straight out of localStorage (the
+  // address book, the account list) and inside template literals. A single
+  // corrupted record — `{"label":"x","address":123}` from an older build, a
+  // half-finished migration, or a hand-edited store — used to throw
+  // `addr.slice is not a function`, and because renderAddressBook maps over
+  // the whole list, ONE bad record blanked the entire screen. String() costs
+  // nothing for the normal string case and makes the bad case merely ugly.
   if (!addr) return '';
-  return addr.slice(0, 6) + '…' + addr.slice(-4);
+  const s = String(addr);
+  return s.slice(0, 6) + '…' + s.slice(-4);
 }
 
 export function isValidAddress(addr) {
