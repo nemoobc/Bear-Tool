@@ -136,27 +136,54 @@ test('a network row gives the chain name its own full-width line', async () => {
   assert.ok(row, 'baris jaringan harus punya aturan sendiri');
   assert.match(row[1], /display:\s*grid/,
     'nama dan badge tak bisa berbagi satu baris: badge "Mainnet" memakan ~73px dari ~187px');
-  assert.match(row[1], /grid-template-areas:[\s\S]*logo[\s\S]*name[\s\S]*name/,
-    'nama harus membentang penuh di barisnya, bukan berbagi lebar dengan badge');
-  assert.match(row[1], /grid-template-areas:[\s\S]*symbol[\s\S]*badge/,
-    'badge pindah ke baris subjudul — di situ ia tidakconditionally menyingkirkan nama');
+  assert.match(row[1], /position:\s*relative/,
+    'tail diposisikan di atas baris, jadi baris harus jadi titik acuan');
+  assert.match(row[1], /grid-template-areas:[\s\S]*logo[\s\S]*name[\s\S]*symbol/,
+    'nama dan subjudul masing-masing punya baris penuh');
   assert.match(row[1], /grid-template-columns:[^;]*minmax\(0,\s*1fr\)/,
     'kolom teks harus boleh menyusut (minmax(0,1fr)); kalau tidak, nama meluber');
 
+  // TWO columns, and no badge column. A third `auto` column sized itself to the
+  // widest tail in the list — the "✓ Current" badge — and so one row's badge took
+  // the subtitle width from every other row ("Chain 137 · POL" got 48px of the
+  // 91px it needed). A column whose width depends on some OTHER row is not a
+  // layout, it is a rumour.
+  const cols = /grid-template-columns:\s*([^;]+);/.exec(row[1]);
+  assert.ok(cols, 'kolom grid harus dinyatakan');
+  assert.equal(cols[1].trim().split(/\s+(?![^(]*\))/).length, 2,
+    'baris jaringan hanya boleh punya dua kolom: logo dan teks. Kolom ketiga_impak '
+    + 'lebar baris lain. Ditemukan: ' + cols[1].trim());
+  assert.doesNotMatch(css, /\.asset-row\[data-net\][^}]*\.badge\s*\{[^}]*grid-area/,
+    'badge tidak boleh jadi sel grid — ia harus keluar dari aliran kolom');
+
+  // The tail floats over the right edge, and only rows that have one give up the
+  // space. Set per row in netRow() as `has-tail`, because the tail is per row.
+  const tail = /\.asset-row\[data-net\][^{]*\.badge[^{]*\{([^}]*)\}/.exec(css);
+  assert.ok(tail, 'badge di baris jaringan harus punya aturan');
+  for (const prop of ['position:\\s*absolute', 'right:\\s*\\d', 'top:\\s*50%']) {
+    assert.match(tail[1], new RegExp(prop),
+      'tail harus melayang di tepi kanan baris (' + prop + ')');
+  }
+  const reserve = /\.asset-row\[data-net\]\.has-tail\s*\{[^}]*padding-right:\s*([\d.]+)px/.exec(css);
+  assert.ok(reserve, 'baris yang punya tail wajib menyisakan ruang untuknya');
+  // The VALUE, not the presence of the property: `padding-right: 0` satisfies
+  // "has padding-right" while reserving nothing, and the badge would then sit on
+  // top of the chain id. The widest tail is the "✓ Current" badge at ~66px, so
+  // anything under 60 leaves the tail overlapping the text it is meant to sit
+  // beside. Checked by mutation: setting this to 0 must make the gate red.
+  assert.ok(parseFloat(reserve[1]) >= 60,
+    `ruang untuk tail hanya ${reserve[1]}px; badge Current ~66px akan menimpa chain id`);
+  const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(app, /asset-row\$\{tail \? ' has-tail' : ''\}/,
+    'kelas has-tail dipasang hanya pada baris yang benar-benar punya tail');
+
   // The info wrapper hands its children to the grid; without this the areas name
-  // the logo and the badge but neither text element is ever placed.
+  // the logo but neither text element is ever placed.
   assert.match(css, /\.asset-row\[data-net\][^}]*\.asset-info\s*\{\s*display:\s*contents/,
     '.asset-info harus jadi display:contents agar nama & subjudul benar-benar jadi sel grid');
-  assert.match(css, /\.asset-row\[data-net\][^}]*\.asset-name\s*\{\s*grid-area:\s*name/);
-  assert.match(css, /\.asset-row\[data-net\][^}]*\.asset-symbol\s*\{\s*grid-area:\s*symbol/);
-  assert.match(css, /\.asset-row\[data-net\][^}]*\.badge\s*\{[^}]*justify-self:\s*end/,
-    'badge menempel kanan di barisnya sendiri');
 
-  // Still one line, still clipped visibly rather than pushing the row apart: the
-  // ellipsis is the floor for absurdly narrow screens, not the plan. The device
-  // measurement above is what says whether it is ever reached.
   for (const part of ['asset-name', 'asset-symbol']) {
-    // Every rule mentioning this part, joined: the placement rule says
+  // Every rule mentioning this part, joined: the placement rule says
     // `grid-area: name` and a separate grouped rule carries min-width / nowrap /
     // ellipsis. Reading only the first one made this gate fail on a layout that
     // was correct — a gate that cries wolf about correct code teaches you to

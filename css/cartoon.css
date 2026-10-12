@@ -933,25 +933,31 @@ select.input option, select.select option, .input option {
    classes, and there a long token name SHOULD wrap. The full chain name stays in
    the row's accessible name, and the trailing badge keeps its slot. */
 /* Network rows in the picker: the name is the LABEL of the thing being chosen,
-   so it gets the whole width. It used to share one line with the type badge, and
-   the badge is expensive — "Mainnet" is ~73px, the logo 32px, the gaps 24px —
-   which left the name about 58px of a 187px card. Every name then had to elide:
-   "Ether…", "BNB S…", "Arbitr…", and the subtitle with it, "Chain 1·…". An
-   earlier fix had instead let the name wrap, which made "BNB Smart Chain" three
-   lines tall and doubled the card beside its neighbours. Two ways to be wrong.
+   so it gets the whole width, and so does the subtitle under it. Getting there
+   took three passes, each visible in the emulator rather than in the source:
 
-   So: name on its own full-width row, subtitle and badge share the one below.
-   The card stays one line tall and the name is finally readable — which was the
-   only thing that mattered. min-width:0 keeps the grid column shrinkable, and the
-   ellipsis stays only as a floor for absurdly narrow screens; the emulator
-   measures every name and subtitle on the device and fails the run if one is
-   still clipped. */
+   1. "BNB Smart Chain" wrapped onto three lines and doubled the card's height.
+   2. min-width:0 made it elide instead — every name a stub, "BNB S…", "Arbitr…",
+      and the subtitle with it, "Chain 1·…".
+   3. A grid gave the name a full-width row and left the subtitle sharing a line
+      with the type badge. The type badge then went away (the section header above
+      the group already says MAINNET/TESTNET), but the grid still had an `auto`
+      column, and that column sized itself to the widest tail in the list — the
+      "✓ Current" badge. One row's badge therefore stole the subtitle width from
+      every other row: "Chain 137 · POL" measured 91px of 48px.
+
+   So the tail leaves the flow entirely: it is positioned over the row's right
+   edge, and only rows that actually have a tail reserve room for it. Two columns
+   now, and nothing in the list can squeeze another. The ellipsis stays as a floor
+   for absurdly narrow screens; the emulator measures every name and subtitle on
+   the device and fails the run if either is clipped. */
 .asset-row[data-net] {
+  position: relative;
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-columns: 32px minmax(0, 1fr);
   grid-template-areas:
-    "logo name  name"
-    "logo symbol badge";
+    "logo  name"
+    "logo  symbol";
   column-gap: 12px;
   row-gap: 3px;
   align-items: center;
@@ -960,7 +966,17 @@ select.input option, select.select option, .input option {
 .asset-row[data-net] .asset-info { display: contents; }
 .asset-row[data-net] .asset-name { grid-area: name; }
 .asset-row[data-net] .asset-symbol { grid-area: symbol; }
-.asset-row[data-net] .badge { grid-area: badge; justify-self: end; }
+.asset-row[data-net] .badge,
+.asset-row[data-net] .net-remove {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+/* Only a row that really carries a tail gives up the space. Hardcoded because it
+   is the widest tail ("✓ Current", ~66px) plus its gap; a longer tail would grow
+   the row instead of overlapping the text, and the emulator measures that too. */
+.asset-row[data-net].has-tail { padding-right: 92px; }
 .asset-row[data-net] .asset-name,
 .asset-row[data-net] .asset-symbol {
   min-width: 0;

@@ -1680,7 +1680,10 @@ function netRow(n) {
       // happens when I tap this.
       ? `<span class="badge">✓ Current</span>`
       : '';
-  return `<div class="asset-row" data-net="${escapeHtml(n.id)}" ${active}>
+  // `has-tail` reserves the right edge for the badge / remove button, which sits
+  // over the row rather than beside it. Rows without one keep the full width —
+  // the class is set per row because the tail is per row.
+  return `<div class="asset-row${tail ? ' has-tail' : ''}" data-net="${escapeHtml(n.id)}" ${active}>
     <div class="net-logo">${getNetworkLogo(n.name, 32)}</div>
     <div class="asset-info"><div class="asset-name">${escapeHtml(n.name)}</div>
       <div class="asset-symbol">Chain ${escapeHtml(String(n.chainId))} · ${escapeHtml(n.symbol)}</div></div>
