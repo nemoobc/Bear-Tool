@@ -8,6 +8,12 @@
 
 const { ethers } = globalThis;
 
+// Local HTML escape. This file may not import anything — the in-browser solc
+// compiler has no import resolver (see the header) — so ui.js's esc() is not
+// reachable from here. Same five characters, same mapping.
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 // ── ERC-20 ──
 const ERC20_SOURCE = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.37;
@@ -1692,7 +1698,17 @@ export function getStandard(id) {
 }
 
 // Markup for the per-standard extra fields (name/symbol stay in index.html).
-export function extraFieldsHtml(id) {
+// The Deploy form is COMPOSED at runtime from the label strings in the tables
+// below, so those labels never exist in the markup and applyTranslations() has
+// nothing to find. That is how the card above the Deploy button kept reading
+// "ERC-20 Token Contract" while the labels above it turned Indonesian.
+//
+// `tr` arrives as an argument rather than an import: this file is deliberately
+// import-free (the in-browser solc compiler has no import resolver), so the only
+// way in is for the caller — js/deploy.js, a module — to hand the translator over.
+// Without one, the labels stay English exactly as they always were, which is the
+// safe direction to fail in.
+export function extraFieldsHtml(id, tr = (x) => x) {
   const std = getStandard(id);
   const out = [];
   const pills = [];
@@ -1710,7 +1726,7 @@ export function extraFieldsHtml(id) {
     if (f.type === 'section') {
       // Report: "fitur compiler configuration" — a visible sub-heading, not a field.
       flushPills();
-      out.push(`<div class="wizard-section-title" role="heading" aria-level="3">${f.label}</div>`);
+      out.push(`<div class="wizard-section-title" role="heading" aria-level="3">${esc(tr(f.label))}</div>`);
       continue;
     }
     if (inlinedToggles.has(f.id)) continue;
@@ -1720,10 +1736,15 @@ export function extraFieldsHtml(id) {
     // replaced by the label pill; the parenthetical description becomes a
     // tooltip, like the wizard's short name + HelpTooltip.
     if (f.type === 'checkbox') {
-      const m = /^(.+?)\s*\((.+)\)$/.exec(f.label) || [null, f.label, null];
+      // Translate the WHOLE label first, then split it. Splitting first produced two
+      // halves the dictionary had never seen — "Mintable" out of "Mintable (owner
+      // can mint more)" — so the pill fell back to English, and the tooltip was
+      // raw English either way, since it never went near the translator at all.
+      const full = tr(f.label);
+      const m = /^(.+?)\s*\((.+)\)$/.exec(full) || [null, full, null];
       pills.push(
-        `<label class="toggle-pill" for="${f.id}"${m[2] ? ` title="${m[2]}"` : ''}>` +
-        `<input type="checkbox" id="${f.id}"${f.value ? ' checked' : ''}> ${m[1]}</label>`);
+        `<label class="toggle-pill" for="${f.id}"${m[2] ? ` title="${esc(m[2])}"` : ''}>` +
+        `<input type="checkbox" id="${f.id}"${f.value ? ' checked' : ''}> ${esc(m[1])}</label>`);
       continue;
     }
     if (f.type === 'toggle') {
@@ -1731,7 +1752,7 @@ export function extraFieldsHtml(id) {
       // for completeness if a future toggle has no partner input.
       pills.push(
         `<label class="toggle-pill" for="${f.id}">` +
-        `<input type="checkbox" id="${f.id}"${f.value ? ' checked' : ''}> ${f.label}</label>`);
+        `<input type="checkbox" id="${f.id}"${f.value ? ' checked' : ''}> ${esc(tr(f.label))}</label>`);
       continue;
     }
     if (f.type === 'select') {
@@ -1740,7 +1761,7 @@ export function extraFieldsHtml(id) {
       flushPills();
       out.push(`
       <div class="field">
-        <label for="${f.id}">${f.label}</label>
+        <label for="${f.id}">${esc(tr(f.label))}</label>
         <select class="select" id="${f.id}"${f.disabled ? ' disabled' : ''}>` +
         (f.options || []).map((o) => `          <option value="${o.v}"${o.v === f.value ? ' selected' : ''}>${o.label}</option>`).join('\n') + `
         </select>
@@ -1764,9 +1785,9 @@ export function extraFieldsHtml(id) {
       // One row: pill left, input right — same line, per the report.
       out.push(`
       <div class="field">
-        <label for="${f.id}">${f.label}</label>
+        <label for="${f.id}">${esc(tr(f.label))}</label>
         <div class="field-inline">
-          <label class="toggle-pill" for="${partner.id}"><input type="checkbox" id="${partner.id}"${partner.value ? ' checked' : ''}> ${partner.label}</label>${input}
+          <label class="toggle-pill" for="${partner.id}"><input type="checkbox" id="${partner.id}"${partner.value ? ' checked' : ''}> ${esc(tr(partner.label))}</label>${input}
         </div>
       </div>`);
       continue;
@@ -1774,7 +1795,7 @@ export function extraFieldsHtml(id) {
     out.push(`
       <div class="field">
         ${presets ? `<div class="feature-group" role="group" aria-label="Premint presets">${presets}</div>` : ''}
-        <label for="${f.id}">${f.label}</label>${input}
+        <label for="${f.id}">${esc(tr(f.label))}</label>${input}
       </div>`);
   }
   flushPills();

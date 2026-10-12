@@ -7,6 +7,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { $, toast, confirmTx, escapeHtml, setBtnDots } from './ui.js';
+import { t } from './i18n.js';
 import { get, requireUnlock, addActivity, emit } from './state.js';
 import { getNetworkById, getProvider, getGasPrice } from './network.js';
 import { waitForReceipt } from './safetx.js';
@@ -121,17 +122,30 @@ async function onExportClick(ev) {
 export function renderDeployExtra() {
   const extra = $('#deployExtra');
   if (!extra) return;
-  extra.innerHTML = extraFieldsHtml($('#deployStandard')?.value);
+  extra.innerHTML = extraFieldsHtml($('#deployStandard')?.value, deployLabel);
 }
 
 // Card shown above the Deploy button.
+// Key = slug of the English label; an entry with no translation falls back to the
+// English it already was, so a gap degrades to "still English" and never to a raw
+// key string printed on the screen.
+function labelKey(text) {
+  return 'dep.l.' + String(text).toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
+}
+
+export function deployLabel(text) {
+  const key = labelKey(text);
+  const tr = t(key);
+  return tr === key ? text : tr;
+}
+
 export function renderDeployPreview() {
   const box = $('#deployPreview');
   if (!box) return;
   const std = getStandard($('#deployStandard')?.value);
   box.innerHTML = `<div class="deploy-preview-card">
       <span class="deploy-preview-icon">${std.icon}</span>
-      <span class="deploy-preview-text">${escapeHtml(std.preview)}</span>
+      <span class="deploy-preview-text">${escapeHtml(deployLabel(std.preview))}</span>
     </div>`;
 }
 

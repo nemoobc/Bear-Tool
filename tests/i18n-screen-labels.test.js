@@ -137,3 +137,42 @@ test('no data-i18n element carries child markup that a language switch would era
     assert.deepEqual(offenders, [], `data-i18n menimpa markup: ${offenders.join(' | ')}`);
   }
 });
+
+// The Deploy form is composed at runtime out of label strings in a data table, so
+// those labels never exist in the markup and no amount of data-i18n reaches them.
+// The screenshot 33b-deploy-id.png showed the result: "Standar", "Nama" and
+// "Simbol" in Indonesian, and the card above the button still in English.
+//
+// Key = slug of the English label, so the table stays readable and a missing entry
+// falls back to English rather than printing a key.
+test('the Deploy form labels that are composed at runtime have translations', () => {
+  const contracts = readFileSync(new URL('../js/contracts.js', import.meta.url), 'utf8');
+  const dict = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const slug = (x) => 'dep.l.' + String(x).toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
+
+  const labels = new Set([...contracts.matchAll(/label:\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]));
+  assert.ok(labels.size > 30, `hanya ${labels.size} label ditemukan — polanya berubah?`);
+
+  // In BOTH languages, counted per block. "The key appears somewhere in the file"
+  // was satisfied by the English half alone — deleting the Indonesian line left the
+  // gate green, which is precisely the gap this milestone exists to close.
+  const enDict = dict.slice(dict.indexOf('  en: {'), dict.indexOf('  id: {'));
+  const idDict = dict.slice(dict.indexOf('  id: {'), dict.indexOf('export function __'));
+  const missing = [...labels].filter((l) =>
+    !enDict.includes(`'${slug(l)}':`) || !idDict.includes(`'${slug(l)}':`));
+  assert.deepEqual(missing, [],
+    `label runtime tanpa terjemahan: ${missing.slice(0, 5).join(' | ')}`);
+
+  // The renderer must actually route them through the translator, with a fallback
+  // that keeps English when a key is absent.
+  const deploy = readFileSync(new URL('../js/deploy.js', import.meta.url), 'utf8');
+  // Lazy, not [^)]*: the call is extraFieldsHtml($('#deployStandard')?.value, deployLabel)
+  // and a character class stops at the first ')' — inside the selector — so the
+  // gate reported a missing translator on a call that passes one.
+  assert.match(deploy, /extraFieldsHtml\(.*?,\s*deployLabel\)/,
+    'extraFieldsHtml harus menerima penerjemah — contracts.js sengaja tanpa import');
+  assert.match(deploy, /tr === key \? text : tr/,
+    'kalau kunci hilang, label harus kembali ke bahasa Inggris, bukan menampilkan kunci');
+  assert.match(deploy, /deployLabel\(std\.preview\)/,
+    'kartu preview juga disusun runtime dan punya cacat yang sama');
+});

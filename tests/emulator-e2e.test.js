@@ -566,3 +566,66 @@ test('the driver proves Indonesian renders on the screen that had the most unwir
   assert.match(drv, /Deploy did not render Indonesian while Indonesian was selected/,
     'kegagalan harus menggagalkan run');
 });
+
+// Ten steps — the settings toggles and the Security Center among them — ran with
+// the network picker still open. Nothing failed, because a JS click reaches a node
+// hidden behind an overlay exactly as well as a visible one. The cost was not a
+// red run: it was ten screenshots of the same open picker under different names,
+// which is worse than no screenshot, because it looks like evidence. (43 and 44
+// were byte-identical.)
+test('a step cannot navigate while a modal is covering the screen', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  const openView = drv.slice(drv.indexOf('const openView'), drv.indexOf('const closeModal'));
+  assert.match(openView, /overlayOpen\(\)/,
+    'openView harus memeriksa ada modal yang menutupi layar sebelum menavigasi');
+  assert.match(openView, /a modal is covering the screen/,
+    'dan harus mengatakannya dengan jelas — "kok"');
+});
+
+test('the network picker is closed before the steps that follow it', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  const at = drv.indexOf("await page.shot('34-network-picker')");
+  assert.ok(at > 0, 'langkah picker harus ada');
+  const after = drv.slice(at, at + 3000);
+  assert.match(after, /pressEscape\(\)|closeModal\(\)/,
+    'picker harus ditutup setelah diukur');
+  assert.match(after, /would not close/,
+    'dan kegagalan menutup harus menggagalkan run, bukan diteruskan');
+});
+
+test('the Security Center step can fail', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  const at = drv.indexOf("the Security Center opens and closes");
+  assert.ok(at > 0);
+  const body = drv.slice(at, at + 1400);
+  assert.match(body, /if \(!sec\.found\) throw/,
+    'langkah yang tak bisa gagal bukan bukti — Security Center harus diassert');
+  assert.match(body, /if \(!sec\.open\) throw/,
+    'ditemukan bukan berarti terbuka');
+});
+
+// Run 38302911216 recorded {"found":true,"open":false} and the run passed: the
+// step looked for #securityCenter — the div INSIDE the <details> — found no
+// <summary> within it, and clicked the empty div. It could not open the thing it
+// named, and nothing noticed.
+test('the Security Center step opens the details it means to open', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  const at = drv.indexOf('the Security Center opens and closes');
+  // Wide enough to reach the evaluate block. At 1600 characters the gate's own
+  // window stopped before the querySelector, so pointing the step back at the
+  // inner div — the exact bug this test exists to catch — passed it.
+  const body = drv.slice(at, at + 2600);
+  // The selector, not the bare name: the step's own comment explains the bug and
+  // names both ids, so a gate that looked for #securityCenterDetails anywhere in
+  // the block was satisfied by the explanation while the code pointed at the div.
+  assert.match(body, /querySelector\('#securityCenterDetails'\)/,
+    'harus menargetkan <details>-nya, bukan div di dalamnya');
+  // What matters is what gets CLICKED, not which ids the step mentions: the inner
+  // div is still queried legitimately, to check the panel was painted.
+  assert.match(body, /const summary = d\.querySelector\('summary'\) \|\| d;/,
+    'yang diklik harus summary milik <details>, bukan div kosong di dalamnya');
+  assert.match(body, /d\.open === true/,
+    'keadaan terbuka dibaca dari properti open milik <details>');
+  assert.match(body, /if \(!sec\.painted\) throw/,
+    'terbuka tapi kosong bukan Security Center yang bekerja');
+});

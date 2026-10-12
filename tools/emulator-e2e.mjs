@@ -1206,8 +1206,22 @@ async function main() {
   // on a phone (the sidebar is display:none), but both live in the DOM and a
   // JS .click() works on a hidden node — so try the bar, then the sidebar, then
   // the dashboard quick action.
+  // Is a sheet covering the screen? Used before every navigation: a JS .click()
+  // works perfectly well on a node hidden behind an overlay, so a step can "pass"
+  // while the user is looking at something else entirely. That is not hypothetical
+  // — the network picker was left open and every screenshot after it, through the
+  // settings toggles and the Security Center, was the same unclosed picker wearing
+  // a different filename.
+  const overlayOpen = () => page.evaluate(
+    `!!document.querySelector('#modalOverlay.open') || !!document.querySelector('.dapp-browser-overlay.open')`
+  ).catch(() => false);
+
   const openView = async (view) => {
     if (await viewActive(view)) return true;
+    if (await overlayOpen()) {
+      throw new Error('cannot open "' + view + '": a modal is covering the screen. '
+        + 'A step left a sheet open; close it before navigating, or this step proves nothing.');
+    }
     for (const sel of [
       `#mobileNav .mobile-nav-item[data-view="${view}"]`,
       `.sidebar .nav-item[data-view="${view}"]`,
@@ -1408,6 +1422,20 @@ async function main() {
     throw new Error('network names are clipped in the picker: ' + JSON.stringify(netText.clipped)
       + ' row=' + netText.rowW + 'px — the chain name is what the user reads before switching');
   }
+
+  // Close it here, not "somewhere later". Every step after this one used to run
+  // behind this sheet: the JS assertions still passed (a click works on a covered
+  // node) while the screenshots all showed the same open picker, which is worse
+  // than no screenshot at all — it looks like evidence.
+  await pressEscape();
+  await sleep(500);
+  if (await overlayOpen()) {
+    await closeModal();
+    await sleep(400);
+  }
+  if (await overlayOpen()) throw new Error('feature sweep: the network picker would not close; '
+    + 'everything after this point would be measured through a sheet nobody can see past');
+  sweep.netText = netText;
   console.log('[gate] net-text row=' + netText.rowW + 'px nameCol=' + netText.nameW
     + 'px tightest="' + netText.tightest.text + '" slack=' + netText.tightest.slack + 'px');
   if (!sweep.networks || sweep.networks.rows < 1) {
@@ -1593,12 +1621,29 @@ async function main() {
   step('feature sweep: the Security Center opens and closes (focus returns)');
   await openView('settings');
   const sec = await page.evaluate(`(() => {
-    const d = document.querySelector('#securityCenter') || document.querySelector('[data-security-center]');
-    const summary = d ? (d.querySelector('summary') || d) : null;
-    if (!summary) return { found: false };
+    // The <details> is #securityCenterDetails; #securityCenter is the div INSIDE it.
+    // This step looked for the div, found no <summary> within, and fell back to
+    // clicking the div — which is empty. So it never opened anything, and since it
+    // asserted nothing the run stayed green: {"found":true,"open":false} in run
+    // 38302911216. A step that cannot open the thing it names proves nothing.
+    const d = document.querySelector('#securityCenterDetails');
+    if (!d) return { found: false };
+    const summary = d.querySelector('summary') || d;
     summary.click();
-    return { found: true, open: d.hasAttribute('open') || d.classList.contains('open') };
+    const panel = document.querySelector('#securityCenter');
+    return {
+      found: true,
+      open: d.open === true,
+      painted: !!(panel && panel.childElementCount > 0),
+    };
   })()`);
+  // This step used to assert nothing: it recorded {found, open} and took a picture,
+  // so `found: false` still produced a green run and a screenshot of whatever
+  // happened to be on screen. A step that cannot fail is a step that reports
+  // without knowing.
+  if (!sec.found) throw new Error('feature sweep: the Security Center was not found on the Settings view');
+  if (!sec.open) throw new Error('feature sweep: the Security Center did not open when its summary was activated');
+  if (!sec.painted) throw new Error('feature sweep: the Security Center opened empty — nothing was rendered into it');
   sweep.security = sec;
   await page.shot('44-security-center');
 
