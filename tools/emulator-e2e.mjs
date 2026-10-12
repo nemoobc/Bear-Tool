@@ -1398,22 +1398,61 @@ async function main() {
   step('feature sweep: settings toggles apply immediately (theme, currency, testnet)');
   await openView('settings');
   await page.wait('#setCurrency', 10000).catch(() => false);
+  // Read the APP's own state, not a DOM guess. The theme is a class on <html>
+  // plus `bt-theme` in localStorage (js/theme.js) — there is no data-theme on
+  // the root — so a previous version of this step read an attribute that never
+  // exists and failed on a perfectly working button. Currency lives in
+  // bear.settings.currency. Each toggle is put back afterwards so the run leaves
+  // the wallet as it found it.
   const toggles = await page.evaluate(`(() => {
-    const out = {};
-    const theme = document.querySelector('.theme-btn');
-    if (theme) { const before = document.documentElement.dataset.theme || document.body.dataset.theme || ''; theme.click(); out.theme = { before, after: document.documentElement.dataset.theme || document.body.dataset.theme || '' }; theme.click(); }
+    const read = () => ({
+      theme: localStorage.getItem('bt-theme'),
+      dark: document.documentElement.classList.contains('theme-dark'),
+      currency: (JSON.parse(localStorage.getItem('bear.settings') || '{}')).currency,
+    });
+    const before = read();
+    const out = { before };
+
+    const dark = document.querySelector('.theme-btn[data-theme="dark"]');
+    if (dark) {
+      dark.click();
+      out.themeAfter = read();
+      const light = document.querySelector('.theme-btn[data-theme="light"]');
+      if (light) light.click();   // put it back
+    }
+
     const cur = document.querySelector('#setCurrency');
     if (cur) {
-      const opts = [...cur.options].map((o) => o.value);
-      const other = opts.find((v) => v && v !== cur.value);
-      if (other) { const before = cur.value; cur.value = other; cur.dispatchEvent(new Event('change', { bubbles: true })); out.currency = { before, after: cur.value }; }
+      const other = [...cur.options].map((o) => o.value).find((v) => v && v !== before.currency) || 'idr';
+      cur.value = other;
+      cur.dispatchEvent(new Event('change', { bubbles: true }));
+      out.currencyAfter = read();
+      out.currencyPicked = other;
     }
+
     const testnet = document.querySelector('#setTestnet');
-    if (testnet && testnet.type === 'checkbox') { const before = testnet.checked; testnet.click(); testnet.dispatchEvent(new Event('change', { bubbles: true })); out.testnet = { before, after: testnet.checked }; testnet.click(); testnet.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (testnet && testnet.type === 'checkbox') {
+      const wasOn = testnet.checked;
+      testnet.click();
+      testnet.dispatchEvent(new Event('change', { bubbles: true }));
+      out.testnetFlipped = testnet.checked !== wasOn;
+      if (wasOn) { testnet.click(); testnet.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
     return out;
   })()`);
-  if (toggles.theme && toggles.theme.before === toggles.theme.after) throw new Error('feature sweep: the theme button changed nothing: ' + JSON.stringify(toggles.theme));
-  if (toggles.currency && toggles.currency.before === toggles.currency.after) throw new Error('feature sweep: currency did not switch: ' + JSON.stringify(toggles.currency));
+
+  // The button must move the app's own state. A control that repaints and
+  // changes nothing is the exact defect this app has already been bitten by
+  // twice (the Save button, then the language dropdown).
+  if (toggles.themeAfter && toggles.themeAfter.theme === toggles.before.theme) {
+    throw new Error('feature sweep: the theme button stored nothing: ' + JSON.stringify(toggles));
+  }
+  if (toggles.themeAfter && toggles.themeAfter.theme === 'dark' && !toggles.themeAfter.dark) {
+    throw new Error('feature sweep: bt-theme says dark but the page is not: ' + JSON.stringify(toggles));
+  }
+  if (toggles.currencyPicked && toggles.currencyAfter && toggles.currencyAfter.currency !== toggles.currencyPicked) {
+    throw new Error('feature sweep: the currency dropdown stored something else: ' + JSON.stringify(toggles));
+  }
   sweep.toggles = toggles;
   await page.shot('43-settings-toggles');
 
