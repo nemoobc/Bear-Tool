@@ -110,8 +110,8 @@ async function ensurePlugin() {
     pluginPromise = import('@capacitor/core').then((core) => {
       const raw = core.registerPlugin('BearDappBrowser');
       plugin = new Proxy(raw, {
-        get(t, k) {
-          return k === 'then' ? undefined : Reflect.get(t, k);
+        get(tgt, k) {
+          return k === 'then' ? undefined : Reflect.get(tgt, k);
         },
       });
       return plugin;

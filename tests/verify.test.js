@@ -348,10 +348,10 @@ test('verify: the deploy flow really calls autoVerify and the key field really e
   const deploy = readFileSync(new URL('../js/deploy.js', import.meta.url), 'utf8');
   assert.match(deploy, /await autoVerify\(\{/,
     'the verify runs after a successful deploy, awaited so its line can land in the status');
-  assert.match(deploy, /source, contractName: t\.contractName/,
+  assert.match(deploy, /source, contractName: tgt\.contractName/,
     'it publishes the source that was ACTUALLY compiled — built ONCE, reused by compile + verify');
   assert.match(deploy, /compiler: plan\.compiler/, 'the wizard compiler config travels with it');
-  assert.match(deploy, /creationTxHash: t\.txHash/, 'creation tx helps the indexer find the deploy');
+  assert.match(deploy, /creationTxHash: tgt\.txHash/, 'creation tx helps the indexer find the deploy');
   assert.match(deploy, /setEtherscanKey\(vkey\.value\)/, 'the field saves the key on change');
   assert.match(deploy, /getEtherscanKey\(\)/, 'the field is prefilled from storage');
   assert.match(deploy, /setDeployStatus\(okHtml \+ verifyHtml, 'ok'\)/,

@@ -14,13 +14,13 @@ const price = fs.readFileSync(new URL('../js/price.js', import.meta.url), 'utf8'
 test('dashboard: total balance = sum of holding value, not sum of unit prices', () => {
   assert.match(
     app,
-    /const totalUsd = tokens\.reduce\(\(s, t\) => s \+ holdingUsd\(t\), 0\);/,
+    /const totalUsd = tokens\.reduce\(\(s, tok\) => s \+ holdingUsd\(tok\), 0\);/,
     'home total must use holdingUsd (amount × price)'
   );
-  assert.match(app, /function holdingUsd\(t\)/, 'holdingUsd helper must exist');
+  assert.match(app, /function holdingUsd\(tok\)/, 'holdingUsd helper must exist');
   assert.match(
     app,
-    /ethers\.formatUnits\(t\.balance \|\| '0', t\.decimals \?\? 18\)/,
+    /ethers\.formatUnits\(tok\.balance \|\| '0', tok\.decimals \?\? 18\)/,
     'holdingUsd must convert wei → decimal amount'
   );
   // the old buggy reduction must be gone
@@ -34,7 +34,7 @@ test('dashboard: total balance = sum of holding value, not sum of unit prices', 
 test('dashboard: asset row shows the user holding value, not the unit price', () => {
   assert.match(
     app,
-    /class="usd">\$\{t\.usd != null && !Number\.isNaN\(Number\(t\.usd\)\) \? escapeHtml\(fmtUsd\(holdingUsd\(t\)\)\) : '—'\}/,
+    /class="usd">\$\{tok\.usd != null && !Number\.isNaN\(Number\(tok\.usd\)\) \? escapeHtml\(fmtUsd\(holdingUsd\(tok\)\)\) : '—'\}/,
     'asset row USD cell must be the holding value — known price (incl $0.00) shows the number, unknown shows —'
   );
 });

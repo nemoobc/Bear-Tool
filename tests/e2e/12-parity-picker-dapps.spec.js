@@ -8,9 +8,23 @@
 //   #6  pasting a contract address detects name/symbol/decimals
 //   #7  DApps filter by text and category, cards are keyboard operable
 import { test, expect } from '@playwright/test';
-import { gotoApp, skipIntro, createWallet, appClick, openView, proxyRpc, FORKS } from './helpers.js';
+import { gotoApp, skipIntro, createWallet, appClick, openView, proxyRpc, freshForkResilient, FORKS } from './helpers.js';
 
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // Ethereum mainnet
+
+// One fresh ethereum fork per FILE (workers:1 → one process). 11-onchain-fork
+// runs first and leaves whatever it last restarted behind — by the time THIS
+// file ran, that fork's pinned block was old enough that the upstream no
+// longer served its state: eth_getBalance still answered (cached) while the
+// USDC eth_call reverted, so #6 detection came up "—" every CI run
+// (parity60, the last standing E2E red). Boot our own fork here instead: the
+// first test pays the ~15-60s restart, the rest reuse it — ethereum prunes
+// state slowly, unlike the fast chains 11 restarts per test.
+let forkStarted = false;
+
+// A fork restart plus the UI flow needs more than the 45s default — the same
+// budget 17-max-amount claims for the identical reason.
+test.setTimeout(300_000);
 
 test.describe('Asset list', () => {
   test.beforeEach(async ({ page }) => {
@@ -19,6 +33,7 @@ test.describe('Asset list', () => {
     // came up with an EMPTY list while the GitHub runner was fine), so the
     // app's ethereum hosts are proxied to the local fork — deterministic
     // everywhere, same as the onchain suite already does.
+    if (!forkStarted) { freshForkResilient('ethereum'); forkStarted = true; }
     await proxyRpc(page, FORKS.ethereum);
     await gotoApp(page);
     await skipIntro(page);

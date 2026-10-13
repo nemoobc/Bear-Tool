@@ -16,7 +16,7 @@ import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPasswo
 import { runIntro, initTheme } from './theme.js';
 import { initPullRefresh } from './pull-refresh.js';
 import { get, set, on, off, setUnlockHandler, addActivity, loadActivity,
-         reconcileActivity, activityMatchesSymbol, getCustomTokens, persistCustomToken } from './state.js';
+         reconcileActivity, activityMatchesSymbol, getCustomTokens, persistCustomToken, removeCustomToken } from './state.js';
 import { fetchAllPrices, fetchPriceHistory, fetchOHLC, ensureUsdRate, clearUsdRate, isRateLimit, fitCandles } from './price.js';
 import { bindSendEvents, loadSendTokens } from './send.js';
 import { bindSwapEvents, loadSwapTokens } from './swap.js';
@@ -360,7 +360,7 @@ window.addEventListener('DOMContentLoaded', () => {
           c.balanceOf(get('address') || ethers.ZeroAddress),
         ]);
         const tokens = get('tokens') || [];
-        if (tokens.some(t => t.address?.toLowerCase() === addr.toLowerCase())) return toast('Token already added', 'info');
+        if (tokens.some(tok => tok.address?.toLowerCase() === addr.toLowerCase())) return toast('Token already added', 'info');
         tokens.push({ address: normalized, symbol: sym, decimals: Number(dec), balance: bal.toString(), chainId, usd: null });
         set('tokens', tokens);
         // Persist the typed facts — state.tokens alone dies on refresh.
@@ -722,7 +722,7 @@ let bearProvider = null;
 function scanSignCall(method, params) {
   try {
     const tx = Array.isArray(params) ? (params[0] || {}) : {};
-    const known = (get('tokens') || []).map((t) => t.address).filter(Boolean);
+    const known = (get('tokens') || []).map((tok) => tok.address).filter(Boolean);
     // scanTransaction returns { risk, findings, approval } — an object, not a
     // list. Returning it whole and then calling .find() on it is the kind of
     // mistake the browser test exists to catch: it threw "findings.find is not
@@ -790,7 +790,7 @@ function makeBearProvider(origin) {
       }
       if (kind === 'permission') {
         return confirmTx({
-          title: t('cf.authorise', { m: method }),
+          title: t('cf.authorise.method', { m: method }),
           danger: method === 'eth_sendTransaction',
           rows: [
             { k: t('cf.site'), v: origin },
@@ -2189,10 +2189,10 @@ async function loadDashboard(opts = {}) {
     const custom = getCustomTokens(net.chainId).filter(
       (c) => !popular.some((p) => p.address.toLowerCase() === c.address.toLowerCase()));
     const list = [...popular, ...custom];
-    const results = await Promise.allSettled(list.map(async (t) => {
-      const c = new ethers.Contract(t.address, ERC20_ABI, provider);
+    const results = await Promise.allSettled(list.map(async (tok) => {
+      const c = new ethers.Contract(tok.address, ERC20_ABI, provider);
       const bal = await c.balanceOf(get('address'));
-      return { address: t.address, symbol: t.symbol, decimals: t.decimals, balance: bal.toString(), usd: null };
+      return { address: tok.address, symbol: tok.symbol, decimals: tok.decimals, balance: bal.toString(), usd: null };
     }));
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') tokens.push(r.value);
@@ -2209,9 +2209,9 @@ async function loadDashboard(opts = {}) {
     // USD prices (Binance native + DexScreener batch → DefiLlama → cache)
     try {
       const prices = await fetchAllPrices(tokens, net.chainId);
-      tokens.forEach(t => {
-        const p = prices.get(t.address || 'native');
-        if (p !== undefined && p !== null) t.usd = p;
+      tokens.forEach(tok => {
+        const p = prices.get(tok.address || 'native');
+        if (p !== undefined && p !== null) tok.usd = p;
       });
     } catch {}
     renderAssets(tokens);
@@ -2264,13 +2264,13 @@ async function refreshDashboardBalance() {
 // The home total and each asset row must show this, NOT the token's unit
 // price — summing unit prices made the portfolio total nonsense ($0.99 for
 // 1 ETH) and made the rows read like a price ticker.
-function holdingUsd(t) {
-  if (t.usd === null || t.usd === undefined) return 0;
+function holdingUsd(tok) {
+  if (tok.usd === null || tok.usd === undefined) return 0;
   let amt = 0;
-  try { amt = Number(ethers.formatUnits(t.balance || '0', t.decimals ?? 18)); }
+  try { amt = Number(ethers.formatUnits(tok.balance || '0', tok.decimals ?? 18)); }
   catch { amt = 0; }
   if (!Number.isFinite(amt)) amt = 0;
-  return amt * t.usd;
+  return amt * tok.usd;
 }
 
 // ── token images (DexScreener batch, cached 24h) ──
@@ -2286,7 +2286,7 @@ function renderAssets(tokens) {
   if (!assetList) return;
   // The "+ Add Token" control is an ERC-20 control: it belongs to the EVM
   document.querySelector('.asset-addtoken')?.style.setProperty('display', '');
-  const totalUsd = tokens.reduce((s, t) => s + holdingUsd(t), 0);
+  const totalUsd = tokens.reduce((s, tok) => s + holdingUsd(tok), 0);
   animateValue($('#totalBalance'), totalUsd, { duration: 600, formatter: fmtUsd });
   if (!tokens.length) {
     assetList.innerHTML = `<p class="small text-center">${escapeHtml(t('dash.noAssets'))}</p>`;
@@ -2300,21 +2300,21 @@ function renderAssets(tokens) {
   // is not a blind true — this list also carries tokens the USER added, and
   // only the wallet's own curated registry may wear a brand with no network
   // image (isBundledContract).
-  const getLogo = (t) => tokenLogoHTML(t.symbol, 32, { address: t.address, bundled: isBundledContract(t.address) });
+  const getLogo = (tok) => tokenLogoHTML(tok.symbol, 32, { address: tok.address, bundled: isBundledContract(tok.address) });
   // Store tokens for filtering
   window._assetTokens = tokens;
   const filter = ($('#tokenSearchInput')?.value || '').toLowerCase();
-  const filtered = filter ? tokens.filter(t => (t.symbol || '').toLowerCase().includes(filter)) : tokens;
-  assetList.innerHTML = filtered.map((t, i) => `
-    <div class="asset-row asset-clickable" data-token-idx="${i}" data-symbol="${escapeHtml(t.symbol || '')}" data-address="${escapeHtml(t.address || '')}" data-decimals="${t.decimals || 18}" data-balance="${escapeHtml(t.balance || '0')}" data-usd="${t.usd ?? ''}">
-      <div class="token-icon-svg">${getLogo(t)}</div>
+  const filtered = filter ? tokens.filter(tok => (tok.symbol || '').toLowerCase().includes(filter)) : tokens;
+  assetList.innerHTML = filtered.map((tok, i) => `
+    <div class="asset-row asset-clickable" data-token-idx="${i}" data-symbol="${escapeHtml(tok.symbol || '')}" data-address="${escapeHtml(tok.address || '')}" data-decimals="${tok.decimals || 18}" data-balance="${escapeHtml(tok.balance || '0')}" data-usd="${tok.usd ?? ''}">
+      <div class="token-icon-svg">${getLogo(tok)}</div>
       <div class="asset-info">
-        <div class="asset-name">${escapeHtml(t.symbol)}</div>
-        <div class="asset-symbol">${t.address ? escapeHtml(wallet.shortAddress(t.address)) : 'Native'}</div>
+        <div class="asset-name">${escapeHtml(tok.symbol)}</div>
+        <div class="asset-symbol">${tok.address ? escapeHtml(wallet.shortAddress(tok.address)) : 'Native'}</div>
       </div>
       <div class="asset-balance">
-        <div class="amount">${escapeHtml(fmtAmount(t.balance, t.decimals))}</div>
-        <div class="usd">${t.usd != null && !Number.isNaN(Number(t.usd)) ? escapeHtml(fmtUsd(holdingUsd(t))) : '—'}</div>
+        <div class="amount">${escapeHtml(fmtAmount(tok.balance, tok.decimals))}</div>
+        <div class="usd">${tok.usd != null && !Number.isNaN(Number(tok.usd)) ? escapeHtml(fmtUsd(holdingUsd(tok))) : '—'}</div>
       </div>
       <div class="asset-arrow"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
     </div>`).join('');
@@ -2376,6 +2376,13 @@ function showTokenActions(el) {
        <button class="copy-btn" type="button" data-copy="${escapeHtml(address)}" title="Copy contract address" aria-label="Copy contract address"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`
     : `<span class="tm-addr-k">Contract</span><span class="tm-addr-v">Native asset — no contract</span>`;
 
+  // Custom = the user added it (Add Token / dApp approval — persisted by
+  // state.js). Curated/popular rows are rebuilt by the dashboard on every
+  // refresh (loadDashboard), so a delete button on those would be a button
+  // that LIES — only the persisted list can actually lose a row. Native has
+  // no address and is never deletable.
+  const isCustom = !!(address && net?.chainId && getCustomTokens(Number(net.chainId)).some((c) => c.address.toLowerCase() === address.toLowerCase()));
+
   // One renderer for list and modal (token-logo.js): the modal used to carry
   // its own getLogoSVG map with 13 hardcoded symbols, so a BNB/POL/cached
   // logo that the list showed turned into a peach initial disc here — the
@@ -2434,6 +2441,7 @@ function showTokenActions(el) {
         </button>`).join('') : '<p class="small dim">No transactions for this token yet.</p>'}
     </div>
     <div class="token-modal-footer">
+      ${isCustom ? `<button class="btn btn-danger btn-block" type="button" id="tokenRemove" style="margin-bottom:8px">Remove token</button>` : ''}
       <button class="btn btn-ghost btn-block" type="button" data-close-modal>Close</button>
     </div>
   `, { fullscreen: true });
@@ -2472,6 +2480,23 @@ function showTokenActions(el) {
   $('#tokenReceive').onclick = () => { const s = window._tokenModalSymbol; closeModal(); showReceiveModal(get('address'), s); };
   $('#tokenSwap').onclick = () => { closeModal(); switchView('swap'); };
   $('#tokenHistory').onclick = () => { closeModal(); switchView('activity'); };
+
+  // Delete only touches what delete CAN touch: the persisted custom row and
+  // the in-memory list (the send dropdown reads the same list on next open).
+  // No confirm sheet: removing a custom token is re-addable in ten seconds
+  // and touches no funds — same cost as the registry ✕, and the modal closes
+  // on the same tap so the result is immediately visible in the list.
+  const removeBtn = $('#tokenRemove'); // absent when the row is not custom
+  if (removeBtn) removeBtn.onclick = () => {
+    const dropped = address && net?.chainId ? removeCustomToken(address, Number(net.chainId)) : false;
+    if (dropped) {
+      const list = (get('tokens') || []).filter((tok) => !(tok.address && tok.address.toLowerCase() === address.toLowerCase()));
+      set('tokens', list);
+      if (window._assetTokens) renderAssets(list);
+      toast(`${symbol} removed`, 'success');
+    }
+    closeModal();
+  };
 }
 
 // Receive sheet: ONE address, the active network's, and the QR for it. The
@@ -2600,8 +2625,8 @@ async function drawMiniChart({ symbol, address, timeframe = '24h' }) {
   // is readable off the picture instead of guessed (user: "chart time itu
   // ga akurat"). Range-aware format: clock for 24h, day for 7d/30d, month
   // + year for 1y.
-  const fmtChartTime = (t) => {
-    const d = new Date(t);
+  const fmtChartTime = (ts) => {
+    const d = new Date(ts);
     if (days <= 1) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     if (days >= 365) return d.toLocaleDateString([], { month: 'short', year: '2-digit' });
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -2905,14 +2930,14 @@ function renderActivity() {
   }
   // Activity icon mapping
   const actIcon = (type) => {
-    const t = (type || '').toLowerCase();
-    if (t.includes('send')) return 'send';
-    if (t.includes('receive')) return 'receive';
-    if (t.includes('swap')) return 'swap';
-    if (t.includes('bridge')) return 'bridge';
-    if (t.includes('approve')) return 'approve';
-    if (t.includes('7702') || t.includes('delegate') || t.includes('revoke')) return 'delegate';
-    if (t.includes('rescue') || t.includes('claim') || t.includes('deploy') || t.includes('helper')) return 'deploy';
+    const typ = (type || '').toLowerCase();
+    if (typ.includes('send')) return 'send';
+    if (typ.includes('receive')) return 'receive';
+    if (typ.includes('swap')) return 'swap';
+    if (typ.includes('bridge')) return 'bridge';
+    if (typ.includes('approve')) return 'approve';
+    if (typ.includes('7702') || typ.includes('delegate') || typ.includes('revoke')) return 'delegate';
+    if (typ.includes('rescue') || typ.includes('claim') || typ.includes('deploy') || typ.includes('helper')) return 'deploy';
     return 'send';
   };
   const actSvg = (type) => {

@@ -75,3 +75,40 @@ test('dashboard memuat custom token chain aktif ke pipeline balanceOf', () => {
   assert.match(body, /!popular\.some\(/, 'dedupe vs POPULAR_TOKENS (tak boleh baris dobel)');
   assert.match(body, /address: list\[i\]\.address/, 'fallback gagal balance juga baca list gabungan');
 });
+
+// ── 3. delete — separuh lain dari Add Token (user, 2026-10-13) ─────────
+
+test('removeCustomToken: buang persis (chain, alamat), case-insensitive, return jujur', () => {
+  delete store['bear.customTokens'];
+  st.persistCustomToken({ address: '0xAbC', symbol: 'FOO', decimals: 6, chainId: 8453 });
+  st.persistCustomToken({ address: '0xDeF', symbol: 'BAR', decimals: 18, chainId: 1 });
+  assert.equal(st.removeCustomToken('0xabc', 8453), true, 'alamat beda kapital = entitas sama');
+  assert.equal(st.getCustomTokens(8453).length, 0, 'baris chain 8453 gugur');
+  assert.equal(st.getCustomTokens().length, 1, 'chain lain utuh');
+  assert.equal(st.removeCustomToken('0xabc', 8453), false, 'sudah hilang → false (toast bohong = bug)');
+  assert.equal(st.removeCustomToken('0xdef', 137), false, 'chain 137 tak punya baris itu — kontrak sama di dua chain = dua entitas');
+  assert.equal(st.getCustomTokens(1).length, 1, 'percobaan di 137 tak menyentuh baris chain 1');
+  st.persistCustomToken({ address: '0xDEF', symbol: 'BAZ', decimals: 18, chainId: 137 });
+  assert.equal(st.removeCustomToken('0xdef', 1), true, 'entitas chain 1 memang bisa dihapus lewat chain 1');
+  assert.equal(st.getCustomTokens(1).length, 0, 'baris chain 1 gugur');
+  assert.equal(st.getCustomTokens(137).length, 1, 'alamat sama di chain 137 TIDAK ikut gugur — scoping per chain');
+  assert.equal(st.removeCustomToken('', 1), false, 'alamat kosong → false, tanpa throw');
+  store['bear.customTokens'] = '{oops';
+  assert.equal(st.removeCustomToken('0xabc', 1), false, 'storage rusak → false, tanpa throw');
+  delete store['bear.customTokens'];
+});
+
+test('view: tombol Remove HANYA untuk token custom; handler bersihkan dua layer', () => {
+  assert.match(app, /const isCustom = !!\(address && net\?\.chainId && getCustomTokens\(Number\(net\.chainId\)\)/,
+    'status custom = alamat ada + terdaftar di persist untuk chain aktif');
+  assert.match(app, /\$\{isCustom \? `<button[^>]*id="tokenRemove"/,
+    'tombol dirender kondisional — popular/native tak punya tombol yang berbohong');
+  const at = app.indexOf('removeBtn.onclick');
+  assert.ok(at > -1, 'handler tombol Remove ada');
+  const body = app.slice(at, at + 700);
+  assert.match(body, /removeCustomToken\(address, Number\(net\.chainId\)\)/, 'panggil removeCustomToken dengan chain aktif');
+  assert.match(body, /set\('tokens', list\)/, 'state.tokens (memori) ikut dibersihkan');
+  assert.match(body, /renderAssets\(list\)/, 'daftar aset dirender ulang — hasil langsung terlihat');
+  assert.match(body, /toast\(`\$\{symbol\} removed`/, 'toast hanya setelah baris benar-benar gugur');
+  assert.match(body, /closeModal\(\)/, 'modal menutup sekali di akhir');
+});

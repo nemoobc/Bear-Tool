@@ -34,13 +34,13 @@ export function bindSendEvents() {
       const pct = parseInt(btn.dataset.pct, 10);
       if (!Number.isFinite(pct)) return;
       const sel = $('#sendToken');
-      const t = get('tokens').find(x => (x.address || 'native') === sel.value);
-      if (!t) return;
+      const tkn = get('tokens').find(x => (x.address || 'native') === sel.value);
+      if (!tkn) return;
       document.querySelectorAll('#sendPctBtns .pct-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
       const r = await resolveMax({
-        token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+        token: { balance: tkn.balance, decimals: tkn.decimals, address: tkn.address, symbol: tkn.symbol },
         provider: get('provider'),
         from: get('address'),
         to: ($('#sendTo')?.value || '').trim(),
@@ -94,8 +94,8 @@ function updateSendTokenBalance() {
   const el = $('#sendTokenBalance');
   if (!el) return;
   const sel = $('#sendToken')?.value;
-  const t = (get('tokens') || []).find(x => (x.address || 'native') === sel);
-  el.textContent = t ? fmtAmount(t.balance, t.decimals) : '';
+  const tkn = (get('tokens') || []).find(x => (x.address || 'native') === sel);
+  el.textContent = tkn ? fmtAmount(tkn.balance, tkn.decimals) : '';
 }
 
 export function loadSendTokens() {
@@ -115,8 +115,8 @@ export function loadSendTokens() {
       set('tokens', list);
     }
   }
-  sel.innerHTML = list.map(t =>
-    `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)} (${escapeHtml(fmtAmount(t.balance, t.decimals))})</option>`
+  sel.innerHTML = list.map(tok =>
+    `<option value="${escapeHtml(tok.address || 'native')}">${escapeHtml(tok.symbol)} (${escapeHtml(fmtAmount(tok.balance, tok.decimals))})</option>`
   ).join('');
   // In-app chooser like Swap/Bridge: a native select's option list is an OS
   // popup that escapes the page on a phone (live report: Send's picker did
@@ -140,22 +140,22 @@ export async function refreshSendBalances() {
   const sel = $('#sendToken');
   const before = sel?.value;
   try {
-    const tokens = await Promise.all((get('tokens') || []).map(async (t) => {
+    const tokens = await Promise.all((get('tokens') || []).map(async (tkn) => {
       try {
-        const balance = t.address
-          ? await new ethers.Contract(t.address, ERC20_ABI, provider).balanceOf(address)
+        const balance = tkn.address
+          ? await new ethers.Contract(tkn.address, ERC20_ABI, provider).balanceOf(address)
           : await provider.getBalance(address);
-        return { ...t, balance: balance.toString() };
-      } catch { return t; }          // one unreachable token must not blank the list
+        return { ...tkn, balance: balance.toString() };
+      } catch { return tkn; }          // one unreachable token must not blank the list
     }));
     // Write back to state so anything else reading it sees the same numbers.
     const kept = (get('tokens') || []).map((old) =>
-      tokens.find((t) => (t.address || 'native') === (old.address || 'native')) || old);
+      tokens.find((tkn) => (tkn.address || 'native') === (old.address || 'native')) || old);
     set('tokens', kept);
     const el = $('#sendToken');
     if (!el) return;
-    el.innerHTML = kept.map(t =>
-      `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)} (${escapeHtml(fmtAmount(t.balance, t.decimals))})</option>`
+    el.innerHTML = kept.map(tok =>
+      `<option value="${escapeHtml(tok.address || 'native')}">${escapeHtml(tok.symbol)} (${escapeHtml(fmtAmount(tok.balance, tok.decimals))})</option>`
     ).join('');
     if (before) el.value = before;   // do not move the user's selection
     initTokenPicker('sendToken', kept);
@@ -247,7 +247,7 @@ async function warnSuspiciousDestination(to, net) {
 
   // 2. sending to a known token contract = funds burned
   const tokenContract = (POPULAR_TOKENS[net.chainId] || [])
-    .find(t => t.address.toLowerCase() === to.toLowerCase());
+    .find(tok => tok.address.toLowerCase() === to.toLowerCase());
   if (tokenContract) {
     const ok = await confirmTx({
       title: t('cf.token.contract.destination'),
@@ -293,8 +293,8 @@ export async function doSend() {
   if (!amt || parseFloat(amt) <= 0) return toast('Enter a valid amount', 'error');
 
   const net = getNetworkById(get('networkId'));
-  const t = get('tokens').find(x => (x.address || 'native') === tokenSel);
-  if (!t) return toast('Token not found', 'error');
+  const tkn = get('tokens').find(x => (x.address || 'native') === tokenSel);
+  if (!tkn) return toast('Token not found', 'error');
 
   // Safety warnings come FIRST, before any balance arithmetic. A poisoned
   // address is the thing worth interrupting the user for; an insufficient
@@ -314,7 +314,7 @@ export async function doSend() {
   try {
     spend = await withTimeout(verifySpendable({
       amount: amt,
-      token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+      token: { balance: tkn.balance, decimals: tkn.decimals, address: tkn.address, symbol: tkn.symbol },
       provider: get('provider'),
       from: get('address'),
       to,
@@ -328,7 +328,7 @@ export async function doSend() {
   if (net.type === 'mainnet') {
     const ok = await confirmTx({
       title: t('cf.mainnet.transaction'),
-      rows: [{ k: t('cf.network'), v: net.name }, { k: t('site.to'), v: wallet.shortAddress(to) }, { k: t('cf.amount'), v: `${amt} ${t.symbol}` }],
+      rows: [{ k: t('cf.network'), v: net.name }, { k: t('site.to'), v: wallet.shortAddress(to) }, { k: t('cf.amount'), v: `${amt} ${tkn.symbol}` }],
       confirmText: t('cf.i.understand.send'),
       danger: true
     });
@@ -346,18 +346,18 @@ export async function doSend() {
     if (provider) {
       const feeData = await withTimeout(provider.getFeeData(), RPC_TIMEOUT_MS, 'confirm fee');
       const worst = buildFeeParams(feeData, gasSpeed);
-      signGasWei = (t.address ? 65000n : 21000n) * (worst.maxFeePerGas ?? worst.baseFee);
+      signGasWei = (tkn.address ? 65000n : 21000n) * (worst.maxFeePerGas ?? worst.baseFee);
     }
   } catch { signGasWei = null; }
-  const signSpendUsd = Number(t.usd) > 0 ? parseFloat(amt) * Number(t.usd) : null;
+  const signSpendUsd = Number(tkn.usd) > 0 ? parseFloat(amt) * Number(tkn.usd) : null;
 
   // sign confirmation — show full tx details before signing
   const signOk = await confirmTx({
     title: t('cf.sign.transaction'),
     rows: [
       { k: t('cf.network'), v: net.name },
-      { k: t('cf.token'), v: t.symbol },
-      { k: t('cf.amount'), v: `${amt} ${t.symbol}` },
+      { k: t('cf.token'), v: tkn.symbol },
+      { k: t('cf.amount'), v: `${amt} ${tkn.symbol}` },
       { k: t('site.to'), v: wallet.shortAddress(to) },
       { k: t('cf.gas.speed'), v: gasSpeed }
     ],
@@ -437,11 +437,11 @@ export async function doSend() {
       // Parse ERC-20 amount safely
       let value;
       try {
-        value = ethers.parseUnits(trimmedAmt, t.decimals);
+        value = ethers.parseUnits(trimmedAmt, tkn.decimals);
       } catch (e) {
         return toast(`Invalid amount: ${e.message}`, 'error');
       }
-      const c = new ethers.Contract(t.address, ERC20_ABI, signer);
+      const c = new ethers.Contract(tkn.address, ERC20_ABI, signer);
       // Same fee rule as the native path: this branch used to pass no fee
       // fields, so speed never applied to ERC-20 sends either. undefined
       // fields = ethers estimates, exactly as before on unknown-fee chains.
@@ -458,7 +458,7 @@ export async function doSend() {
       return;
     }
     toast('Transaction sent! ⏳', 'info');
-    addActivity({ hash: tx.hash, type: 'send', status: 'pending', ts: Date.now(), detail: `${amt} ${t.symbol} → ${wallet.shortAddress(to)}`, to, symbol: t.symbol, value: amt });
+    addActivity({ hash: tx.hash, type: 'send', status: 'pending', ts: Date.now(), detail: `${amt} ${tkn.symbol} → ${wallet.shortAddress(to)}`, to, symbol: tkn.symbol, value: amt });
     const v = receiptVerdict(await waitForReceipt(tx));
     if (v.kind === 'pending') {
       // Sent but not confirmed in time. The pending activity entry is left as
@@ -473,7 +473,7 @@ export async function doSend() {
       toast(`Tx ${String(tx.hash).slice(0, 10)}… was replaced in flight${v.replacement ? ` by ${String(v.replacement).slice(0, 10)}…` : ''} — track that one on the explorer.`, 'info');
       return;
     }
-    addActivity({ hash: tx.hash, type: 'send', status: v.kind, ts: Date.now(), detail: `${amt} ${t.symbol} → ${wallet.shortAddress(to)}`, to, symbol: t.symbol, value: amt });
+    addActivity({ hash: tx.hash, type: 'send', status: v.kind, ts: Date.now(), detail: `${amt} ${tkn.symbol} → ${wallet.shortAddress(to)}`, to, symbol: tkn.symbol, value: amt });
     toast(v.kind === 'success' ? 'Transaction confirmed! 🎉' : 'Transaction failed!', v.kind === 'success' ? 'success' : 'error');
     emit('refresh');
   });

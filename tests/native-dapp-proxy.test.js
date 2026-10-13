@@ -28,7 +28,7 @@ const src = readFileSync(path.join(here, '..', 'js', 'native-dapp.js'), 'utf8');
 const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
 test("the plugin proxy hides 'then' — awaiting it must resolve, not freeze", () => {
-  assert.match(code, /k === 'then' \? undefined : Reflect\.get\(t, k\)/,
+  assert.match(code, /k === 'then' \? undefined : Reflect\.get\(tgt, k\)/,
     "GET 'then' wajib undefined: proxy thenable = await membeku selamanya + unhandled rejection per adoption (run 38012047691)");
   assert.match(code, /new Proxy\(raw/,
     'registerPlugin() tidak boleh dipakai telanjang — wajib lewat wrapper');

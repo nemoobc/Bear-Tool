@@ -264,7 +264,7 @@ export async function doDeploy() {
       : 'unknown';
 
     const ok = await confirmTx({
-      title: net.type === 'mainnet' ? 'DEPLOY ON MAINNET!' : `Deploy ${std.contract} on ${net.name}?`,
+      title: net.type === 'mainnet' ? 'DEPLOY ON MAINNET!' : `Deploy ${plan.name} on ${net.name}?`,
       rows: [...plan.summary, { k: t('cf.network'), v: net.name },
         // One signature releases TWO transactions when upgradeable — the
         // dialog must say so, and must not dress tx 1's estimate up as a total.
@@ -370,7 +370,7 @@ export async function doDeploy() {
       tx = contract.deploymentTransaction();
       addActivity({
         hash: tx?.hash, type: 'deploy', status: 'pending', ts: Date.now(),
-        detail: `${std.contract} ${plan.name} (${plan.symbol})`
+        detail: `${plan.name} (${plan.symbol}) — ${std.contract}`
       });
       ({ receipt, timedOut, replaced, replacement } = await waitForReceipt(tx));
       address = await contract.getAddress();
@@ -409,7 +409,7 @@ export async function doDeploy() {
     const status = receipt?.status === 1 ? 'success' : 'failed';
     addActivity({
       hash: tx?.hash, type: 'deploy', status, ts: Date.now(),
-      detail: `${std.contract} ${plan.name} (${plan.symbol}) → ${address}`
+      detail: `${plan.name} (${plan.symbol}) — ${std.contract} → ${address}`
     });
     if (status !== 'success') {
       setDeployStatus('Deploy transaction reverted.', 'error');
@@ -445,12 +445,12 @@ export async function doDeploy() {
         ]
       : [{ tag: '', address, contractName: std.contract, abi: compiled.abi, args: plan.args, txHash: tx?.hash }];
     const lines = [];
-    for (const t of targets) {
-      const prefix = t.tag ? `[${t.tag}] ` : '';
+    for (const tgt of targets) {
+      const prefix = tgt.tag ? `[${tgt.tag}] ` : '';
       try {
         const v = await autoVerify({
-          net, address: t.address, source, contractName: t.contractName,
-          abi: t.abi, args: t.args, compiler: plan.compiler, creationTxHash: t.txHash,
+          net, address: tgt.address, source, contractName: tgt.contractName,
+          abi: tgt.abi, args: tgt.args, compiler: plan.compiler, creationTxHash: tgt.txHash,
           onStatus: (m) => setDeployStatus(`${okHtml}<br><span class="small">${escapeHtml(prefix + m)}</span>`, 'ok'),
         });
         lines.push(prefix + v.line);

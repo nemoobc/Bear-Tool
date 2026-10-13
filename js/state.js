@@ -179,6 +179,26 @@ export function persistCustomToken(tok) {
 }
 
 /**
+ * Remove ONE custom token — the other half of Add Token (user, 2026-10-13:
+ * "tambahin delete token"). Case-insensitive on the address and scoped to the
+ * chain: the same contract on two chains is two entities (see the persist
+ * test), and a delete on the wrong chain must not touch it. Returns true only
+ * when a row was actually dropped — a toast that says "removed" over a no-op
+ * is the same lie class as a failed deploy filed as success.
+ */
+export function removeCustomToken(address, chainId) {
+  if (typeof address !== 'string' || !address || !chainId) return false;
+  try {
+    const arr = getCustomTokens();
+    const next = arr.filter((t) => !(t.address.toLowerCase() === address.toLowerCase()
+      && Number(t.chainId) === Number(chainId)));
+    if (next.length === arr.length) return false;
+    localStorage.setItem(CUSTOM_TOKENS_KEY, JSON.stringify(next));
+    return true;
+  } catch { return false; }
+}
+
+/**
  * Does this activity row belong to the given token symbol? Used by the token
  * modal's Transactions list.
  *

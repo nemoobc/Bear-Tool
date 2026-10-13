@@ -119,12 +119,12 @@ export const HAS_ANVIL = (process.env.PATH || '').split(':')
 // networkId → { port, type, hosts } — hosts mirror the first RPCs in
 // js/network.js for that network (the app tries them in order).
 export const FORKS = {
-  ethereum:          { port: 18545, type: 'mainnet', hosts: ['ethereum-rpc.publicnode.com', 'eth.drpc.org'] },
-  bsc:               { port: 18546, type: 'mainnet', hosts: ['bsc-dataseed.binance.org', 'bsc-rpc.publicnode.com'] },
-  polygon:           { port: 18547, type: 'mainnet', hosts: ['polygon-bor-rpc.publicnode.com', 'polygon.drpc.org'] },
+  ethereum:          { port: 18545, type: 'mainnet', hosts: ['ethereum-rpc.publicnode.com', 'eth.drpc.org', 'rpc.flashbots.net', 'eth-mainnet.public.blastapi.io'] },
+  bsc:               { port: 18546, type: 'mainnet', hosts: ['bsc-dataseed.binance.org', 'bsc-rpc.publicnode.com', 'bsc-dataseed1.defibit.io'] },
+  polygon:           { port: 18547, type: 'mainnet', hosts: ['polygon-bor-rpc.publicnode.com', 'polygon.drpc.org', '1rpc.io/matic'] },
   arbitrum:          { port: 18548, type: 'mainnet', hosts: ['arb1.arbitrum.io', 'arbitrum-one-rpc.publicnode.com'] },
   optimism:          { port: 18549, type: 'mainnet', hosts: ['mainnet.optimism.io', 'optimism-rpc.publicnode.com'] },
-  base:              { port: 18550, type: 'mainnet', hosts: ['mainnet.base.org', 'base-rpc.publicnode.com'] },
+  base:              { port: 18550, type: 'mainnet', hosts: ['mainnet.base.org', 'base-rpc.publicnode.com', 'base.drpc.org'] },
   sepolia:           { port: 18551, type: 'testnet', hosts: ['sepolia.gateway.tenderly.co', 'ethereum-sepolia-rpc.publicnode.com'] },
   amoy:              { port: 18552, type: 'testnet', hosts: ['polygon-amoy.drpc.org', 'polygon-amoy-bor-rpc.publicnode.com'] },
   'arbitrum-sepolia': { port: 18553, type: 'testnet', hosts: ['sepolia-rollup.arbitrum.io', 'arbitrum-sepolia-rpc.publicnode.com'] },

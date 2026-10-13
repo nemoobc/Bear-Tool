@@ -146,7 +146,7 @@ function cacheKey(slug, tokenIn, tokenOut, amountIn) {
 
 // ── token lookup helper
 function tokenInfo(addr) {
-  return get('tokens').find(t => t.address === addr) || null;
+  return get('tokens').find(tok => tok.address === addr) || null;
 }
 
 export function bindSwapEvents() {
@@ -168,10 +168,10 @@ export function bindSwapEvents() {
   // of what is actually sendable, so 20% never rounds up past it.
   const applyPct = async (pct) => {
     const sel = $('#swapFrom');
-    const t = get('tokens').find(x => (x.address || 'native') === sel.value);
-    if (!t) return;
+    const tkn = get('tokens').find(x => (x.address || 'native') === sel.value);
+    if (!tkn) return;
     const r = await resolveMax({
-      token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+      token: { balance: tkn.balance, decimals: tkn.decimals, address: tkn.address, symbol: tkn.symbol },
       provider: get('provider'),
       from: get('address'),
       pct,
@@ -214,7 +214,7 @@ export function loadSwapTokens() {
   // single-option dropdown and swapping was impossible.
   const held = get('tokens') || [];
   const tokens = [...held];
-  const seen = new Set(held.map(t => (t.address || 'native').toLowerCase()));
+  const seen = new Set(held.map(tok => (tok.address || 'native').toLowerCase()));
   for (const p of (POPULAR_TOKENS[net?.chainId] || [])) {
     if (!seen.has(p.address.toLowerCase())) {
       tokens.push({ address: p.address, symbol: p.symbol, decimals: p.decimals, balance: '0', usd: null });
@@ -222,15 +222,15 @@ export function loadSwapTokens() {
     }
   }
   // native gas token must always be selectable
-  if (!tokens.some(t => !t.address)) {
+  if (!tokens.some(tok => !tok.address)) {
     tokens.unshift({
       address: null, symbol: net?.symbol || 'Native',
       decimals: net?.decimals ?? 18, balance: '0', usd: null
     });
   }
 
-  const opts = tokens.map(t =>
-    `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)}</option>`
+  const opts = tokens.map(tok =>
+    `<option value="${escapeHtml(tok.address || 'native')}">${escapeHtml(tok.symbol)}</option>`
   ).join('');
   // Repainting the options must not steal the pair the user already chose —
   // this re-runs on every view switch and on every refresh, and re-entering
@@ -293,8 +293,8 @@ export function flipSwap() {
 }
 
 function debounce(fn, ms) {
-  let t;
-  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  let d;
+  return (...args) => { clearTimeout(d); d = setTimeout(() => fn(...args), ms); };
 }
 
 // ── fetch with timeout (AbortController) ──

@@ -141,7 +141,7 @@ test('the bundled flag comes from the registry check, never a blind true', async
   assert.equal(isBundledContract(FAKE_USDC), false, 'a user-added contract is NOT bundled');
   const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   const picker = readFileSync(new URL('../js/token-picker.js', import.meta.url), 'utf8');
-  assert.match(app, /bundled: isBundledContract\(t\.address\)/, 'asset list checks the registry per token');
+  assert.match(app, /bundled: isBundledContract\(tok\.address\)/, 'asset list checks the registry per token');
   assert.match(app, /bundled: isBundledContract\(address\)/, 'token modal checks the registry');
   assert.match(picker, /bundled: isBundledContract\(token\.address\)/, 'token picker checks the registry');
   assert.doesNotMatch(app, /bundled: true/, 'no blind bundled:true left in app.js');

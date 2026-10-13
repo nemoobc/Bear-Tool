@@ -53,6 +53,26 @@ test('deploy: wizard performs a real deploy (no stub, no simulation)', async () 
   assert.match(deploySrc, /saveDeployed\(/, 'a deployed contract must be recorded in the registry');
 });
 
+test('deploy: confirm dialog + activity lead with the TYPED token name, not the contract class', () => {
+  // Report (2026-10-13): "deploy token tapi kok namanya ga sesuai BearERC20" —
+  // the confirm sheet titled itself with the Solidity class name (always
+  // BearERC20) while the user had typed their own name. The class is an
+  // implementation detail; the typed name is what the signer is approving and
+  // what the activity record must say. On-chain name() was measured clean
+  // (5/5 paths, throwaway anvil repro) — the mismatch was display-side only.
+  assert.match(deploySrc,
+    /title: net\.type === 'mainnet' \? 'DEPLOY ON MAINNET!' : `Deploy \$\{plan\.name\} on \$\{net\.name\}\?`/,
+    'non-mainnet confirm title leads with the typed token name');
+  assert.doesNotMatch(deploySrc, /`Deploy \$\{std\.contract\} on /,
+    'the contract class must not stand in for the token name in the title');
+  const leaders = deploySrc.match(/detail: `\$\{plan\.name\} \(\$\{plan\.symbol\}\)/g) || [];
+  assert.equal(leaders.length, 2, 'both deploy activity rows (pending + final) lead with name (symbol)');
+  assert.match(deploySrc, /\$\{plan\.name\} \(\$\{plan\.symbol\}\) — \$\{std\.contract\}`/,
+    'pending row: name (symbol) — class, provenance kept after the identity');
+  assert.match(deploySrc, /\$\{plan\.name\} \(\$\{plan\.symbol\}\) — \$\{std\.contract\} → \$\{address\}/,
+    'final row: name (symbol) — class → address, same order');
+});
+
 test('deploy: each standard has a self-contained template (no imports to resolve)', () => {
   for (const id of ['erc20', 'erc721', 'erc1155']) {
     const std = contracts.getStandard(id);

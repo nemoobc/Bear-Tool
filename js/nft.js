@@ -282,7 +282,10 @@ function nftCardHtml(nft) {
 function nftEmptyHtml(title, hintHtml) {
   return '<div class="nft-empty" role="status">' +
     '<div class="nft-empty-title">' + escapeHtml(title) + '</div>' +
-    '<div class="nft-empty-hint">' + hintHtml + '</div>' +
+    // An empty hint renders NO div — an empty box under the title is still a
+    // box: dead space, and a target for a CSS rule that never had a sentence
+    // to style.
+    (hintHtml ? '<div class="nft-empty-hint">' + hintHtml + '</div>' : '') +
     '</div>';
 }
 
@@ -335,17 +338,13 @@ export async function loadNfts() {
       grid.innerHTML = items.map(nftCardHtml).join('');
     } else {
       // .nft-empty spans the grid and centres on both axes — see the CSS note.
-      // Two very different situations end up here, so the hint says how many
-      // collections were actually scanned: an undetected contract (the old
-      // curated-only blind spot) no longer hides behind a bare "no NFT".
-      const n = targets.length;
-      const hasKey = !!(get('nftKeyOpenSea') || get('nftKeyAlchemy'));
-      grid.innerHTML = nftEmptyHtml('NFT not found',
-        'This wallet holds no NFT on <span id="nftEmptyNet"></span>. Scanned ' + n +
-        ' collection' + (n === 1 ? '' : 's') + ' on this network (curated + your deployed + imported). ' +
-        (hasKey ? '' : 'Add a free API key in Settings → NFT auto-detect to detect every collection you own, not just these. ') +
-        'An NFT on another chain will not appear here.');
-      wireNftEmpty(netLabel);
+      // Two words, and nothing under them (user, 2026-10-13): the paragraph
+      // that used to list the scanned sources and offer a key turned an empty
+      // gallery into an advertisement for a setup step. The scan this state
+      // describes must work WITHOUT a key, and "NFT not found" says the whole
+      // truth the wallet actually knows. wireNftEmpty goes with the paragraph:
+      // the span it filled (`nftEmptyNet`) is gone with it.
+      grid.innerHTML = nftEmptyHtml('NFT not found', '');
     }
   } catch {
     grid.innerHTML =

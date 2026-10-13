@@ -230,8 +230,8 @@ async function ensureKit() {
       w.on('session_delete', (args) => {
         // Topics WE disconnected during re-approve cleanup are not the dApp
         // closing anything — no toast for those.
-        const t = args && args.topic;
-        if (t && silentDeleteTopics.delete(t)) return;
+        const topicId = args && args.topic;
+        if (topicId && silentDeleteTopics.delete(topicId)) return;
         toast('WalletConnect session closed by the dApp.', 'info');
       });
       kit = w;
@@ -656,7 +656,7 @@ export function openPairWalletConnect(prefill = '') {
   // the manual Paste path below is never blocked by this.
   if (!prefill) {
     navigator.clipboard?.readText()
-      .then((t) => { const s = (t || '').trim(); if (s.startsWith('wc:')) fill(s); })
+      .then((txt) => { const s = (txt || '').trim(); if (s.startsWith('wc:')) fill(s); })
       .catch(() => { /* denied or empty — the Paste button stays the answer */ });
   }
   // Auto-paste when the user RETURNS to this window with the sheet still
@@ -670,10 +670,10 @@ export function openPairWalletConnect(prefill = '') {
   const onWcReturn = async () => {
     if (!document.getElementById('wcPairUri')) { window.removeEventListener('focus', onWcReturn); return; }
     try {
-      const t = (await navigator.clipboard.readText() || '').trim();
-      if (!t.startsWith('wc:') || seenWc.has(t) || !isValidWcUri(t)) return;
-      seenWc.add(t);
-      fill(t);
+      const txt = (await navigator.clipboard.readText() || '').trim();
+      if (!txt.startsWith('wc:') || seenWc.has(txt) || !isValidWcUri(txt)) return;
+      seenWc.add(txt);
+      fill(txt);
       msg.textContent = t('wc.clipboardFound');
       go.click();
     } catch { /* clipboard denied — the Paste button stays the answer */ }

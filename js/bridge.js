@@ -130,10 +130,10 @@ const NATIVE_DENY_CHAINS = new Set([42220]);
 export function bridgeTokenOptions(fromNet, toNet) {
   const fromList = POPULAR_TOKENS[fromNet.chainId] || [];
   const toList = POPULAR_TOKENS[toNet.chainId] || [];
-  const toFam = new Map(toList.map(t => [familyOf(t.symbol), t]));
+  const toFam = new Map(toList.map(tok => [familyOf(tok.symbol), tok]));
   let erc20 = null;
   for (const fam of FAMILY_PRIORITY) {
-    const src = fromList.find(t => familyOf(t.symbol) === fam);
+    const src = fromList.find(tok => familyOf(tok.symbol) === fam);
     const dst = src ? toFam.get(fam) : null;
     if (src && dst) {
       erc20 = { value: src.address, symbol: src.symbol, decimals: src.decimals, toAddress: dst.address };
@@ -176,12 +176,12 @@ export function bindBridgeEvents() {
   // else: subtract the fee when the token being bridged is the one paying it.
   const applyPct = async (pct) => {
     const tokSel = $('#bridgeToken');
-    const t = (get('tokens') || []).find(x => (x.address || 'native') === tokSel?.value);
+    const tkn = (get('tokens') || []).find(x => (x.address || 'native') === tokSel?.value);
     const field = $('#bridgeAmount');
     const note = $('#bridgeMaxNote');
-    if (!t || !field) return;
+    if (!tkn || !field) return;
     const r = await resolveMax({
-      token: { balance: t.balance, decimals: t.decimals, address: t.address, symbol: t.symbol },
+      token: { balance: tkn.balance, decimals: tkn.decimals, address: tkn.address, symbol: tkn.symbol },
       provider: get('provider'),
       from: get('address'),
       pct,
@@ -222,8 +222,8 @@ export function bindBridgeEvents() {
 }
 
 function debounce(fn, ms) {
-  let t;
-  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  let d;
+  return (...args) => { clearTimeout(d); d = setTimeout(() => fn(...args), ms); };
 }
 
 export function loadBridgeChains() {

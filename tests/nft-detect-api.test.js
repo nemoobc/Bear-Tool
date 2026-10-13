@@ -267,8 +267,14 @@ test('gallery wiring: one card template for both paths, keys wired, honest empti
   assert.match(nftJs, /floorSymbol \|\| getNetworkById/, 'floor unit falls back to the network symbol');
   assert.match(nftJs, /det\.items !== null/, 'the null-vs-zero branch is explicit — empty is never faked');
   assert.match(nftJs, /holds no NFT|NFT not found/, 'honest not-found phrasing survives');
-  assert.match(nftJs, /Scanned/, 'the on-chain empty still says how many collections were scanned');
-  assert.match(nftJs, /Add a free API key in Settings/, 'the key-less empty says how to fix it');
+  // The on-chain empty lost its paragraph on request (2026-10-13): the state
+  // stays, the essay under it goes — including the key upsell, which promised
+  // a differentiator the keyless scan is meant to make unnecessary.
+  assert.match(nftJs, /nftEmptyHtml\('NFT not found', ''\)/,
+    'the on-chain empty renders exactly "NFT not found" and nothing else');
+  assert.doesNotMatch(nftJs, /This wallet holds no NFT on/, 'the explanatory paragraph is gone');
+  assert.doesNotMatch(nftJs, /Scanned/, 'the scanned-count line is gone');
+  assert.doesNotMatch(nftJs, /Add a free API key in Settings/, 'no key upsell — detection works keyless');
 
   assert.match(settingsJsx, /id="setNftKeyOpenSea"/, 'OpenSea key field lives in Settings');
   assert.match(settingsJsx, /id="setNftKeyAlchemy"/, 'Alchemy key field lives in Settings');

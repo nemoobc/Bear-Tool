@@ -97,7 +97,7 @@ test('send → spendUsd (amount × harga token) + gasWei (formula preview yang s
   const src = read('send.js');
   assert.match(src, /spendUsd: signSpendUsd/);
   assert.match(src, /gasWei: signGasWei/);
-  assert.match(src, /\(t\.address \? 65000n : 21000n\) \* \(worst\.maxFeePerGas \?\? worst\.baseFee\)/,
+  assert.match(src, /\(tkn\.address \? 65000n : 21000n\) \* \(worst\.maxFeePerGas \?\? worst\.baseFee\)/,
     'gas send memakai limit & fee yang sama dengan baris Est. gas preview');
 });
 
