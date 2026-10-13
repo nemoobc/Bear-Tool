@@ -29,7 +29,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Node 22, matching the other workflows. jsdom (dev-only, used by the
+          # Dex interaction gate) needs >=22.22; on Node 20 it died with
+          # "webidl.util.markAsUncloneable is not a function".
+          node-version: '22'
 
       # The M9 runtime proof (tests/upgradeable-runtime.test.js) compiles the
       # generated contracts and DRIVES them on a throwaway anvil chain — slots,
@@ -209,7 +212,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Node 22, matching the other workflows. jsdom (dev-only, used by the
+          # Dex interaction gate) needs >=22.22; on Node 20 it died with
+          # "webidl.util.markAsUncloneable is not a function".
+          node-version: '22'
           cache: npm
 
       - name: Install dependencies
