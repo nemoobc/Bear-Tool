@@ -328,3 +328,11 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
 @keyframes dex-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .dex-spinner { animation: none; } }
 .dex-img-note { position: absolute; left: 0; right: 0; bottom: 4px; padding: 0 6px; font-size: 0.65rem; opacity: 0.8; }
+
+/* ── launched-token buy/sell screen (the launchpad's other half) ── */
+.dex-trade-head { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.dex-grad { padding: 10px 12px; border: 2px solid var(--ink); border-radius: 12px; background: var(--cream); }
+.dex-grad-bar { height: 12px; margin-top: 8px; border: 2px solid var(--ink); border-radius: 999px; background: var(--white); overflow: hidden; }
+.dex-grad-fill { height: 100%; width: 0%; background: var(--honey); transition: width 0.3s; }
+.dex-trade-stats { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+.dex-trade-input { flex: 1; min-width: 0; display: block; width: 100%; border: none; background: transparent; outline: none; font-family: 'Fredoka', sans-serif; font-size: 1.4rem; font-weight: 700; color: var(--ink); }

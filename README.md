@@ -255,6 +255,7 @@ Bear-Tool/
 │   │   ├── index.js    # Dex view: welcome + gate + tab strip + panel routing (chart inline in Swap)
 │   │   ├── core.js     # shared Dex helpers: the three coins, Sepolia gate, V2 registry, formatting
 │   │   ├── tokens.js   # the live token list (native coins + your launched tokens, graduation progress)
+│   │   ├── trade.js    # launched-token screen: live curve state, buy()/sell() on the bonding curve
 │   │   ├── create.js   # launchpad Create Token panel (image upload → data URI, curve preview, compile+deploy)
 │   │   ├── pump-source.js # the launchpad PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
 │   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over on-chain Swap logs

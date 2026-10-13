@@ -10,7 +10,7 @@
 import { t } from '../i18n.js';
 import { get, set, on, off } from '../state.js';
 import { getNetworkById } from '../network.js';
-import { $, toast, escapeHtml, confirmTx } from '../ui.js';
+import { $, toast, escapeHtml, confirmTx, setBtnDots } from '../ui.js';
 import { withTimeout, waitForReceipt, receiptVerdict } from '../safetx.js';
 import { tokenLogoHTML, guardTokenLogos } from '../token-logo.js';
 import {
@@ -105,6 +105,20 @@ export function poolSinceKey(pair) {
   return 'dex.poolSince.' + [pair.base.address, pair.quote.address].map((a) => a.toLowerCase()).sort().join('-');
 }
 
-// re-exported so a feature module can pull its UI/state helpers from here too
-export { t, get, set, on, off, $, toast, escapeHtml, confirmTx, guardTokenLogos,
+// Every Dex action that broadcasts a transaction runs through here, so the
+// button shows a spinner + the stage name and stays disabled until the tx
+// settles. Without it a 30-second confirm looked like a dead button (user:
+// "loading tx ga ada"). `label` names the stage ("Buying…", "Confirming…").
+// The finally-restore means a rejected/failed/timeout tx still re-enables it.
+export async function withTxButton(btn, label, fn) {
+  if (!btn || btn.disabled) return undefined;
+  setBtnDots(btn, true, label);
+  try {
+    return await fn();
+  } finally {
+    setBtnDots(btn, false);
+  }
+}
+
+export { t, get, set, on, off, $, toast, escapeHtml, confirmTx, guardTokenLogos, setBtnDots,
   V2_ROUTER_ABI, V2_FACTORY_ABI, V2_PAIR_ABI, DEX_ERC20_ABI };

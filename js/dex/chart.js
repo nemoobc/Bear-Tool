@@ -110,7 +110,11 @@ export function loadChartEngine(doc = globalThis.document, win = globalThis) {
 export async function drawCandles(host, candles, opts = {}) {
   const win = opts.win || globalThis;
   const LWC = await loadChartEngine(opts.document || globalThis.document, win);
-  if (!LWC || !candles.length) return null;
+  // Only a missing library falls back to bars. An EMPTY data set still gets a
+  // real chart — an empty grid with price/time axes — because a blank box read
+  // as "the chart is broken" (user: "chart ga keliatan"), whereas an empty chart
+  // clearly says "no trades yet" while still being a chart.
+  if (!LWC) return null;
 
   const chart = LWC.createChart(host, {
     width: host.clientWidth || 320,

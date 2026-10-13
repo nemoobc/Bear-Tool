@@ -19,7 +19,8 @@
 // ═══════════════════════════════════════════════════════════════
 import { tradesToCandles, drawCandles } from './chart.js';
 import { createHtml, bindCreate } from './create.js';
-import { tokensHtml, bindTokens, rememberLaunchedToken } from './tokens.js';
+import { tokensHtml, bindTokens, rememberLaunchedToken, launchedTokens } from './tokens.js';
+import { tokenTradeHtml, bindTokenTrade } from './trade.js';
 import {
   DEX_PRESETS, DEX_NETWORK_ID, DEX_CHAIN_ID,
   dexChainId, dexChainOk, dexPair, provider, ethersLib, sendDexTx, isAddr,
@@ -174,6 +175,8 @@ function bindTabs() {
     // Leaving the Market Maker panel stops the loop: a bot that keeps
     // signing while nobody is watching it is the bug this switch prevents.
     if (get('dex.panel') === 'mm' && btn.dataset.dexTab !== 'mm') stopMM('panel');
+    // Choosing a feature tab leaves any token's buy/sell screen.
+    set('dex.tokenView', null);
     set('dex.panel', btn.dataset.dexTab);
     paintTabs();
     renderPanel();
@@ -270,8 +273,12 @@ export function renderPanel() {
   host.dispatchEvent(new CustomEvent('dex:teardown', { bubbles: false }));
   host.innerHTML = '';
   host.className = 'mt-8 dex-panel';
-  // Create and Tokens are pair-independent: Create BUILDS a token, and
-  // Tokens LISTS them, so neither sits behind "pick a base and a quote".
+  // A launched token's buy/sell screen takes over the panel when you tap it in
+  // the token list; any other state renders the active feature tab.
+  if (get('dex.tokenView')) { panelTokenTrade(host); return; }
+  // Create is the launchpad: it BUILDS a token, so it has no pair yet and must
+  // not sit behind "pick a base and a quote" — the pair appears when buyers
+  // start trading the token it deploys.
   if (kind === 'create') { PANEL_RENDERERS.create(host); return; }
   if (kind === 'tokens') { PANEL_RENDERERS.tokens(host); return; }
   if (!pair) {
@@ -301,6 +308,15 @@ const PANEL_RENDERERS = {
 function panelTokens(host) {
   host.innerHTML = tokensHtml();
   bindTokens(host, (address) => {
+    // A launched curve token has no V2 pair — it trades on its own bonding
+    // curve, so tapping it opens the buy/sell panel (the launchpad's other
+    // half). A native coin becomes the pair and opens Swap.
+    const launched = launchedTokens().find((x) => x.address.toLowerCase() === String(address).toLowerCase());
+    if (launched) {
+      set('dex.tokenView', launched.address);
+      renderPanel();
+      return;
+    }
     if (!chooseCoin(address)) {
       toast(t('dex.tokens.noPair'), 'info');
       return;
@@ -311,6 +327,15 @@ function panelTokens(host) {
     const fromEl = $('#dexSwapFrom');
     if (fromEl) fromEl.value = address;
   });
+}
+
+// The buy/sell screen for one launched curve token.
+function panelTokenTrade(host) {
+  const address = get('dex.tokenView');
+  const token = launchedTokens().find((x) => x.address.toLowerCase() === String(address).toLowerCase());
+  if (!token) { set('dex.tokenView', null); PANEL_RENDERERS.tokens(host); return; }
+  host.innerHTML = tokenTradeHtml(token);
+  bindTokenTrade(host, token, () => { set('dex.tokenView', null); renderPanel(); });
 }
 
 // The launchpad builds a NEW token, so it is the one panel that does not need
@@ -457,7 +482,8 @@ function bindSwap(host, pair) {
   amountEl.addEventListener('input', quote);
   fromEl.addEventListener('change', () => { syncFaces(); quote(); mountChart(); });
 
-  $('#dexSwapGo', host).addEventListener('click', async () => {
+  const swapGo = $('#dexSwapGo', host);
+  swapGo.addEventListener('click', () => withTxButton(swapGo, t('dex.swap.sending'), async () => {
     const signer = needSigner();
     if (!signer) return;
     const raw = amountEl.value.trim();
@@ -512,7 +538,7 @@ function bindSwap(host, pair) {
       amountEl.value = '';
       quoteEl.textContent = '';
     } catch (e) { toast((e && (e.shortMessage || e.message)) || String(e), 'error'); }
-  });
+  }));
 }
 
 // ── M4: chart (real Swap logs from the pair contract) ──────────
@@ -528,6 +554,16 @@ const CHART_LOOKBACK = 5000;
 // screen, not a tab), so there is no standalone chartHtml — paintChart() owns
 // the drawing and the honest empty states. It is re-entrant on purpose: the
 // live wrapper calls it again on a timer to pick up new trades.
+// Even with no trades we draw a real (empty) chart — grid + price/time axes —
+// so the panel reads as "a chart with no trades yet", not a blank void. Only a
+// missing library falls back to the bars.
+async function drawEmptyChart(host) {
+  const canvas = $('#dexChartCanvas', host);
+  const teardown = await drawCandles(canvas, [], { height: 240 });
+  if (teardown) { host._dexChartTeardown = teardown; const b = $('#dexChartBars', host); if (b) b.hidden = true; }
+  return teardown;
+}
+
 async function paintChart(host, pair) {
   const E = ethersLib();
   const p = provider();
@@ -544,7 +580,7 @@ async function paintChart(host, pair) {
   if (!p) { emptyEl.textContent = t('dex.needWallet'); done(); return; }
 
   const pool = await poolFor(pair);
-  if (!pool) { emptyEl.textContent = t('dex.chart.noPool'); done(); return; }
+  if (!pool) { emptyEl.textContent = t('dex.chart.noPool'); await drawEmptyChart(host); done(); return; }
 
   try {
     const latest = await p.getBlockNumber();
@@ -560,7 +596,7 @@ async function paintChart(host, pair) {
     if (!logs.length) {
       emptyEl.textContent = since > 0 ? t('dex.chart.none') : t('dex.chart.noTrades');
       if (since === 0) statsEl.textContent = t('dex.chart.scanned', { n: String(CHART_LOOKBACK) });
-      done(); return;
+      await drawEmptyChart(host); done(); return;
     }
 
     const baseIs0 = (await new E.Contract(pool, V2_PAIR_ABI, p).token0()).toLowerCase()
@@ -583,7 +619,7 @@ async function paintChart(host, pair) {
       if (price == null || !Number.isFinite(price) || price <= 0) continue;
       trades.push({ price, volQuote, block: l.blockNumber });
     }
-    if (!trades.length) { emptyEl.textContent = t('dex.chart.none'); done(); return; }
+    if (!trades.length) { emptyEl.textContent = t('dex.chart.none'); await drawEmptyChart(host); done(); return; }
     emptyEl.textContent = '';
 
     const vol = trades.reduce((s, x) => s + x.volQuote, 0n);
@@ -824,7 +860,7 @@ function bindLiqForm(host, pair, probeRow, pairIdx) {
   showBalance(pair.base, '#dexLiqBalA', '#dexLiqAmountA', '#dexLiqMaxA');
   showBalance(pair.quote, '#dexLiqBalB', '#dexLiqAmountB', '#dexLiqMaxB');
 
-  $('#dexLiqAdd', host).addEventListener('click', async () => {
+  addBtn.addEventListener('click', () => withTxButton(addBtn, t('dex.liq.sending'), async () => {
     const signer = needSigner();
     if (!signer) return;
     const aRaw = $('#dexLiqAmountA', host).value.trim();
@@ -882,7 +918,7 @@ function bindLiqForm(host, pair, probeRow, pairIdx) {
       showReserves();
       if (typeof probeRow === 'function' && pairIdx >= 0) probeRow(pairIdx, pair);
     } catch (e) { status.textContent = (e && (e.shortMessage || e.message)) || String(e); }
-  });
+  }));
 }
 
 // ── M6: market maker (real swaps on a timer, gas-capped) ───────

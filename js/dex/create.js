@@ -23,15 +23,17 @@ import {
 import { PUMP_TOKEN_SOURCE, PUMP_ABI } from './pump-source.js';
 import { rememberLaunchedToken } from './tokens.js';
 
-// Images: the user may upload a big file (10 MB, per the user), but a 10 MB
-// data URI can NEVER go on-chain — the constructor would blow the block gas
-// limit, and the app would fail at deploy while blaming "compile". So we
-// accept a large upload and DOWNSCALE it in the browser to an on-chain-safe
-// square JPEG before storing it. What lands on-chain is always feasible; the
-// user still gets to drop the big original.
+// Images: the user may upload a big file (10 MB), but a data URI can NEVER go
+// on-chain as-is — the constructor calldata explodes the deploy gas past what
+// the wallet can pay, and a 60 KB image failed the deploy with "insufficient
+// funds" (user: "gabisa create token, compile bisa" — the compile is fine, the
+// IMAGE was the problem). So: accept a big upload, then DOWNSCALE it in the
+// browser, re-encoding at lower size/quality until the data URI fits an
+// on-chain budget. What lands on-chain is always deployable.
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB — what we accept
-const ONCHAIN_IMAGE_MAX = 512;             // px, longest side, stored on-chain
-const ONCHAIN_JPEG_QUALITY = 0.72;
+const ONCHAIN_IMAGE_MAX_PX = 512;          // start here
+const ONCHAIN_MAX_BYTES = 12 * 1024;       // hard cap on the stored data URI
+const ONCHAIN_QUALITY_START = 0.72;
 const chainOk = () => (getNetworkById(get('networkId'))?.chainId === 11155111);
 
 export function createHtml() {
@@ -77,19 +79,30 @@ export function bindCreate(host) {
   const imgEmpty = $('#dexCreateImgEmpty', host);
   let image = '';
 
-  // Downscale any upload to an on-chain-safe square JPEG. The original may be
-  // 10 MB; the chain gets something deployable. Returns a data URI.
+  // Downscale + re-encode until the data URI fits the on-chain byte budget.
+  // Tries shrinking the square and lowering JPEG quality in turn; returns a
+  // data URI under ONCHAIN_MAX_BYTES (or the smallest we could reach).
   const toOnchainImage = (src) => new Promise((resolve, reject) => {
     const im = new Image();
     im.onload = () => {
-      const side = Math.min(ONCHAIN_IMAGE_MAX, im.width || ONCHAIN_IMAGE_MAX, im.height || ONCHAIN_IMAGE_MAX);
-      const cv = document.createElement('canvas');
-      cv.width = side; cv.height = side;
-      const ctx = cv.getContext('2d');
-      // centre-crop to a square so every coin has a square face, like a launchpad
-      const crop = Math.min(im.width, im.height);
-      ctx.drawImage(im, (im.width - crop) / 2, (im.height - crop) / 2, crop, crop, 0, 0, side, side);
-      try { resolve(cv.toDataURL('image/jpeg', ONCHAIN_JPEG_QUALITY)); } catch (e) { reject(e); }
+      const base = Math.min(im.width || ONCHAIN_IMAGE_MAX_PX, im.height || ONCHAIN_IMAGE_MAX_PX);
+      let best = '';
+      for (const px of [ONCHAIN_IMAGE_MAX_PX, 384, 256, 192, 128]) {
+        const side = Math.min(px, base);
+        const cv = document.createElement('canvas');
+        cv.width = side; cv.height = side;
+        const ctx = cv.getContext('2d');
+        const crop = Math.min(im.width, im.height);
+        // centre-crop to a square so every coin has a square face, like a launchpad
+        ctx.drawImage(im, (im.width - crop) / 2, (im.height - crop) / 2, crop, crop, 0, 0, side, side);
+        for (const q of [ONCHAIN_QUALITY_START, 0.6, 0.5, 0.4, 0.3]) {
+          let out = '';
+          try { out = cv.toDataURL('image/jpeg', q); } catch { break; }
+          if (out.length <= ONCHAIN_MAX_BYTES) { resolve(out); return; }
+          best = out;
+        }
+      }
+      resolve(best); // smallest attempt, still shown so the user sees a face
     };
     im.onerror = () => reject(new Error('decode'));
     im.src = src;
