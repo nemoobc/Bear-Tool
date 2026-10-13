@@ -16,7 +16,7 @@ import { $, toast, escapeHtml, confirmTx } from '../ui.js';
 import { waitForReceipt, receiptVerdict } from '../safetx.js';
 import { sendDexTx, provider, ethersLib, dexChainOk, needSigner, fmtTok, withTxButton } from './core.js';
 import { PUMP_ABI } from './pump-source.js';
-import { quoteBuy, quoteSell, graduationProgress, fmtEth, GRADUATION_ETH } from './curve.js';
+import { quoteBuy, quoteSell, graduationProgress, fmtEth, GRADUATION_ETH, VIRTUAL_ETH, VIRTUAL_TOKENS } from './curve.js';
 
 const ACTIVE_TOKEN_KEY = 'dex.tokenView';
 
@@ -60,6 +60,12 @@ export function tokenTradeHtml(token) {
       <div id="dexTradeHold"></div>
     </div>
 
+    <div class="dex-chart-block mt-8">
+      <div class="small"><strong>${escapeHtml(t('dex.trade.curve'))}</strong></div>
+      <canvas id="dexTradeCurve" height="150"></canvas>
+      <div class="small" id="dexTradeCurveInfo"></div>
+    </div>
+
     <div class="dex-swapbox mt-8">
       <div class="dex-swapbox-label">${escapeHtml(t('dex.trade.buy'))}</div>
       <div class="dex-swapbox-row">
@@ -79,6 +85,9 @@ export function tokenTradeHtml(token) {
       <div class="dex-swapbox-usd small" id="dexTradeSellQuote"></div>
     </div>
     <button id="dexTradeSell" type="button" class="btn btn-secondary btn-block mt-8">${escapeHtml(t('dex.trade.sell'))}</button>
+
+    <button id="dexTradeClaim" type="button" class="btn btn-secondary btn-block mt-8" hidden>${escapeHtml(t('dex.trade.claimFees'))}</button>
+    <button id="dexTradeGraduate" type="button" class="btn btn-primary btn-block mt-8" hidden>${escapeHtml(t('dex.trade.graduate'))}</button>
 
     <div class="dex-loading" id="dexTradeLoading" hidden><span class="dex-spinner"></span><span>${escapeHtml(t('dex.chart.loading'))}</span></div>
     <div id="dexTradeStatus" class="small mt-8"></div>
@@ -176,6 +185,50 @@ export function bindTokenTrade(host, token, onBack) {
     await refresh();
   }));
 
+  // Creator pulls the fees accrued to this token. Shown only when the connected
+  // wallet IS the creator AND there is something to take — a claim, not a
+  // decoration.
+  const claimBtn = $('#dexTradeClaim', host);
+  if (claimBtn) {
+    c.creator().then((cr) => {
+      const me = String(get('address') || '').toLowerCase();
+      if (String(cr).toLowerCase() !== me) { claimBtn.hidden = true; return; }
+      c.totalFeesCreator().then((fees) => {
+        claimBtn.hidden = fees <= 0n;
+        if (fees > 0n) claimBtn.textContent = `${t('dex.trade.claimFees')} (${fmtEth(fees)} ETH)`;
+      }).catch(() => { claimBtn.hidden = true; });
+    }).catch(() => { claimBtn.hidden = true; });
+    claimBtn.addEventListener('click', () => withTxButton(claimBtn, t('dex.trade.sending'), async () => {
+      const signer = needSigner();
+      if (!signer) return;
+      const cs2 = new E.Contract(token.address, PUMP_ABI, signer);
+      const rc = await sendDexTx(() => cs2.claimFees(), t('dex.trade.claimFees'));
+      if (!rc) return;
+      toast(t('dex.trade.feesClaimed'), 'success');
+      await refresh();
+    }));
+  }
+
+  // After graduation the curve stops; the creator moves the ETH backing on to a
+  // V2 pool. Offered only once graduated, and only to the creator.
+  const gradBtn = $('#dexTradeGraduate', host);
+  if (gradBtn) {
+    c.creator().then((cr) => {
+      const me = String(get('address') || '').toLowerCase();
+      if (String(cr).toLowerCase() !== me) { gradBtn.hidden = true; return; }
+      c.graduated().then((g) => { gradBtn.hidden = !g; }).catch(() => { gradBtn.hidden = true; });
+    }).catch(() => { gradBtn.hidden = true; });
+    gradBtn.addEventListener('click', () => withTxButton(gradBtn, t('dex.trade.sending'), async () => {
+      const signer = needSigner();
+      if (!signer) return;
+      const cs2 = new E.Contract(token.address, PUMP_ABI, signer);
+      const rc = await sendDexTx(() => cs2.withdraw(), t('dex.trade.graduate'));
+      if (!rc) return;
+      toast(t('dex.trade.graduated'), 'success');
+      await refresh();
+    }));
+  }
+
   // Sell: hand tokens back, get ETH.
   sellBtn.addEventListener('click', () => withTxButton(sellBtn, t('dex.trade.sending'), async () => {
     const signer = needSigner();
@@ -210,8 +263,51 @@ export function bindTokenTrade(host, token, onBack) {
     if (el) el.textContent = t('dex.trade.creator', { addr: String(cr).slice(0, 6) + '…' + String(cr).slice(-4) });
   }).catch(() => {});
 
-  refresh().then(quoteBuyLive).then(quoteSellLive);
-  // keep the numbers live while the panel is open
-  const timer = setInterval(() => { refresh().then(() => { quoteBuyLive(); quoteSellLive(); }); }, 5000);
+  // The signature launchpad visual: the token's own bonding curve, price in
+  // ETH against ETH poured in, with a marker at where the curve currently
+  // sits. Same quote math the contract runs (curve.js), so the drawn shape is
+  // the shape buyers will actually walk. Re-plotted on every live refresh.
+  const curveCv = $('#dexTradeCurve', host);
+  const curveInfo = $('#dexTradeCurveInfo', host);
+  const drawCurve = () => {
+    if (!curveCv || !curveCv.getContext) return;
+    const ctx = curveCv.getContext('2d');
+    if (!ctx) return;
+    const w = curveCv.width = curveCv.clientWidth || 320;
+    const h = curveCv.height = 150;
+    ctx.clearRect(0, 0, w, h);
+    // Walk cumulative buys from the launch reserves to the graduation line,
+    // recording price (ETH per token) at each point.
+    const startE = VIRTUAL_ETH, startT = VIRTUAL_TOKENS;
+    const pts = [];
+    let ve = startE, vt = startT;
+    const steps = 80;
+    for (let i = 0; i <= steps; i++) {
+      pts.push({ eth: Number(ve), price: Number(ve) / Number(vt) });
+      const q = quoteBuy(ve, vt, GRADUATION_ETH / BigInt(steps));
+      ve = q.nextVirtualEth; vt = q.nextVirtualTokens;
+    }
+    const max = Math.max(...pts.map((p) => p.price), 1e-12);
+    const x = (eth) => (eth / Math.max(Number(ve), 1e-12)) * w;
+    const y = (price) => h - (price / max) * (h - 8) - 4;
+    // fill under the curve
+    ctx.beginPath(); ctx.moveTo(0, h);
+    pts.forEach((p) => ctx.lineTo(x(p.eth), y(p.price)));
+    ctx.lineTo(w, h); ctx.closePath();
+    ctx.fillStyle = 'rgba(232,150,60,0.18)'; ctx.fill();
+    // the curve
+    ctx.beginPath();
+    pts.forEach((p, i) => { const px = x(p.eth), py = y(p.price); if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
+    ctx.strokeStyle = '#E8963C'; ctx.lineWidth = 2; ctx.stroke();
+    // "now" marker at the current virtual reserve
+    const nowX = x(Number(ve)), nowY = y(Number(ve) / Number(vt));
+    ctx.beginPath(); ctx.arc(nowX, nowY, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#1B8F4E'; ctx.fill();
+    ctx.strokeStyle = '#2D2A32'; ctx.lineWidth = 2; ctx.stroke();
+  };
+
+  refresh().then(() => { drawCurve(); return quoteBuyLive(); }).then(quoteSellLive);
+  // keep the numbers + curve live while the panel is open
+  const timer = setInterval(() => { refresh().then(() => { drawCurve(); quoteBuyLive(); quoteSellLive(); }); }, 5000);
   host.addEventListener('dex:teardown', () => clearInterval(timer), { once: true });
 }

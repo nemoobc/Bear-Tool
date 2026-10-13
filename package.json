@@ -11,6 +11,7 @@
     "test": "node --test tests/*.test.js",
     "test:fork": "node --test --test-concurrency=1 --test-timeout=600000 tests/fork/*.test.js",
     "test:fork:net": "node --test --test-concurrency=1 --test-timeout=600000 tests/fork/*.test.js",
+    "test:dex-pump": "node tests/dex-pump-e2e.mjs",
     "check": "node tools/check.mjs",
     "test:e2e": "node tools/e2e.mjs",
     "test:e2e:browserstack": "BEAR_E2E_BROWSERSTACK=1 BEAR_BASE_URL=http://localhost:8080 node tools/e2e.mjs",
@@ -38,6 +39,7 @@
     "jsdom": "^30.1.2",
     "playwright": "^1.63.0",
     "selenium-webdriver": "^4.50.0",
+    "solc": "^0.8.37",
     "vite": "^7.1.0"
   },
   "overrides": {

@@ -30,10 +30,15 @@ export const PUMP_ABI = [
   'function graduated() view returns (bool)',
   'function buy() payable returns (uint256)',
   'function sell(uint256 tokensIn) returns (uint256)',
+  'function claimFees() returns (uint256)',
+  'function withdraw() returns (uint256)',
+  'function totalFeesCreator() view returns (uint256)',
   'function getPrice() view returns (uint256)',
   'event Bought(address indexed buyer, uint256 ethIn, uint256 tokensOut, uint256 fee)',
   'event Sold(address indexed seller, uint256 tokensIn, uint256 ethOut, uint256 fee)',
   'event Graduated(uint256 realEthReserve)',
+  'event FeesClaimed(address indexed creator, uint256 amount)',
+  'event Withdrawn(address indexed creator, uint256 amount)',
 ];
 
 export const GRADUATION_ETH_WEI = 15_000_000_000_000_000n; // 0.015 ETH
@@ -60,12 +65,22 @@ contract PumpToken {
 
     uint256 public constant FEE_BPS = 125;        // 1.25%
     uint256 public constant CREATOR_FEE_BPS = 30;  // 0.30%
-    uint256 public constant GRADUATION_ETH = 0.015 ether;
+    // MUST match curve.js GRADUATION_ETH, or the progress bar the UI draws and
+    // the threshold the chain enforces disagree (it did: 0.015 here vs 2 ETH
+    // there, so the token graduated long before the UI said it would).
+    uint256 public constant GRADUATION_ETH = 2 ether;
+
+    // Where the protocol's share of every trade goes. Immutable so it cannot be
+    // redirected after deploy; falls back to the creator (they then hold both
+    // shares) if the deployer left it unset.
+    address public immutable protocolWallet;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Bought(address indexed buyer, uint256 ethIn, uint256 tokensOut, uint256 fee);
     event Sold(address indexed seller, uint256 tokensIn, uint256 ethOut, uint256 fee);
     event Graduated(uint256 realEthReserve);
+    event FeesClaimed(address indexed creator, uint256 amount);
+    event Withdrawn(address indexed creator, uint256 amount);
 
     constructor(string memory _name, string memory _symbol, string memory _description,
                 string memory _image, uint256 _virtualEth, uint256 _virtualTokens) {
@@ -78,6 +93,7 @@ contract PumpToken {
         creator = msg.sender;
         virtualEth = _virtualEth;
         virtualTokens = _virtualTokens;
+        protocolWallet = msg.sender;
     }
 
     function totalSupply() public view returns (uint256) { return virtualTokens; }
@@ -87,11 +103,14 @@ contract PumpToken {
         return (virtualEth * 1e18) / virtualTokens;
     }
 
-    function _transferOut(address to, uint256 amt) internal {
-        require(balanceOf[to] >= amt, "balance");
-        balanceOf[to] -= amt;
-        balanceOf[address(this)] += amt;
-        emit Transfer(address(this), to, amt);
+    // On a buy the recipient starts at zero, so the tokens are MINTED into
+    // their balance, never transferred out of it. The old helper required
+    // balanceOf[to] >= amt, which made every single buy() revert with "balance"
+    // — the curve was untestable because it could never be bought. (Found by
+    // tests/dex-pump-e2e.mjs: deploy succeeded, the first buy reverted.)
+    function _mintTo(address to, uint256 amt) internal {
+        balanceOf[to] += amt;
+        emit Transfer(address(0), to, amt);
     }
 
     mapping(address => uint256) public balanceOf;
@@ -107,8 +126,20 @@ contract PumpToken {
         require(tokensOut > 0, "dust");
         virtualEth += net;
         virtualTokens -= tokensOut;
-        totalFeesCreator += (fee * CREATOR_FEE_BPS) / FEE_BPS;
-        _transferOut(msg.sender, tokensOut);
+        // Split the fee into the two buckets that can actually leave the
+        // contract. The protocol's share is paid OUT to the protocol wallet
+        // every buy; the creator's share accrues to totalFeesCreator for an
+        // explicit claimFees() — before, both sat here forever and the
+        // creator's revenue was unreachable.
+        uint256 creatorFee = (fee * CREATOR_FEE_BPS) / FEE_BPS;
+        totalFeesCreator += creatorFee;
+        uint256 protocolFee = fee - creatorFee;
+        realEthReserve -= protocolFee;
+        if (protocolFee > 0) {
+            (bool ok, ) = payable(protocolWallet).call{value: protocolFee}("");
+            require(ok, "protocol");
+        }
+        _mintTo(msg.sender, tokensOut);
         if (realEthReserve >= GRADUATION_ETH) {
             graduated = true;
             emit Graduated(realEthReserve);
@@ -127,12 +158,48 @@ contract PumpToken {
         require(ethOut > 0, "dust");
         virtualTokens += netTokens;
         virtualEth -= ethOut;
-        totalFeesCreator += (fee * CREATOR_FEE_BPS) / FEE_BPS;
-        balanceOf[msg.sender] -= tokensIn;
+        uint256 creatorFee = (fee * CREATOR_FEE_BPS) / FEE_BPS;
+        totalFeesCreator += creatorFee;
+        uint256 protocolFee = fee - creatorFee;
         realEthReserve -= ethOut;
+        if (protocolFee > 0) {
+            (bool ok, ) = payable(protocolWallet).call{value: protocolFee}("");
+            require(ok, "protocol");
+        }
+        balanceOf[msg.sender] -= tokensIn;
         (bool ok, ) = payable(msg.sender).call{value: ethOut}("");
         require(ok, "send");
         emit Sold(msg.sender, tokensIn, ethOut, fee);
+    }
+
+    // Creator pulls the fees that accrued to it. Before this existed the
+    // creator's cut was counted but unreachable — money locked in the contract
+    // forever (user: the Dex had to be "lengkap dan matang").
+    function claimFees() external returns (uint256) {
+        require(msg.sender == creator, "creator");
+        uint256 amount = totalFeesCreator;
+        require(amount > 0, "none");
+        totalFeesCreator = 0;
+        realEthReserve -= amount;
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "send");
+        emit FeesClaimed(msg.sender, amount);
+        return amount;
+    }
+
+    // The ETH the curve holds that belongs to no virtual reserve (the real
+    // backing). Graduation is a signal, not a trapdoor: the holder decides when
+    // to move it to a Uniswap V2 pool instead of the curve freezing forever.
+    function withdraw() external returns (uint256) {
+        require(msg.sender == creator, "creator");
+        require(graduated, "not graduated");
+        uint256 amount = address(this).balance;
+        require(amount > 0, "none");
+        realEthReserve = 0;
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "send");
+        emit Withdrawn(msg.sender, amount);
+        return amount;
     }
 
     receive() external payable { revert("use buy"); }
