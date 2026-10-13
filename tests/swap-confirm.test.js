@@ -7,12 +7,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { t } from '../js/i18n.js';
 
 const swapSrc = fs.readFileSync(new URL('../js/swap.js', import.meta.url), 'utf8');
 
 test('the sign dialog button reads Confirm, not Confirm & Swap', () => {
-  assert.match(swapSrc, /confirmText: 'Confirm',/,
+  // The key carries the word now (M14): pin the call AND its English value —
+  // the user request was about the text on the button, not about the syntax.
+  assert.match(swapSrc, /confirmText: t\('cf\.confirm'\),/,
     'the SIGN SWAP dialog confirms');
+  assert.equal(t('cf.confirm'), 'Confirm', 'tombol sign tetap "Confirm" di en');
   assert.doesNotMatch(swapSrc, /Confirm & Swap/,
     'the extra verb is gone (user request 2026-10-06)');
 });

@@ -287,8 +287,8 @@ async function ensureDeployedHelper(type, label, chainId, predicate, provider, d
   if (existing) return { ...existing, reused: true };
   const ok = await confirmTx({
     title: `${label} helper not deployed — deploy it now?`,
-    rows: [{ k: 'Action', v: `Deploy ${label} helper (saved, reused on later runs)` }],
-    confirmText: 'Deploy',
+    rows: [{ k: t('cf.action'), v: `Deploy ${label} helper (saved, reused on later runs)` }],
+    confirmText: t('cf.deploy'),
   });
   if (!ok) {
     toast(`${label} helper is required — deploy it now or from Helper Contracts.`, 'info');
@@ -354,13 +354,13 @@ async function executeBatch() {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'BATCH CALL ON MAINNET!' : `Batch ${valid.length} calls on ${net.name}?`,
       rows: [
-        { k: 'Calls', v: String(valid.length) },
-        { k: 'Total value', v: `${ethers.formatEther(totalValue)} ETH` },
-        { k: 'Transactions', v: '1) helper deploy if missing  2) delegate  3) execute' },
-        { k: 'Network', v: net.name },
-        { k: 'Delegation', v: 'Permanent until revoked (Tools → Revoke)' },
+        { k: t('cf.calls'), v: String(valid.length) },
+        { k: t('cf.total.value'), v: `${ethers.formatEther(totalValue)} ETH` },
+        { k: t('cf.transactions'), v: '1) helper deploy if missing  2) delegate  3) execute' },
+        { k: t('cf.network'), v: net.name },
+        { k: t('cf.delegation'), v: t('cf.permanent.until.revoked.tools.revoke') },
       ],
-      confirmText: 'Execute', danger: net.type === 'mainnet'
+      confirmText: t('cf.execute'), danger: net.type === 'mainnet'
     });
     if (!ok) return;
   }
@@ -674,13 +674,13 @@ async function executeRescue() {
       toast('Using the pasted rescue contract: ' + wallet.shortAddress(manualHelperRaw), 'info');
     } else {
       const okProbe = await confirmTx({
-        title: 'Pasted contract unusable — deploy a new one?',
+        title: t('cf.pasted.contract.unusable.deploy.a.new.one'),
         rows: [
-          { k: 'Contract', v: manualHelperRaw },
-          { k: 'Detected', v: det.reason },
-          { k: 'Action', v: 'Deploy a fresh rescue helper (saved, reused on later runs)' },
+          { k: t('cf.contract'), v: manualHelperRaw },
+          { k: t('cf.detected'), v: det.reason },
+          { k: t('cf.action'), v: t('cf.deploy.a.fresh.rescue.helper.saved.reused.on.later.runs') },
         ],
-        confirmText: 'Deploy baru',
+        confirmText: t('cf.deploy.baru'),
       });
       if (!okProbe) return toast('Rescue cancelled — paste a matching contract or leave the field empty.', 'info');
       // fall through to the registry/ensure-deploy path below
@@ -691,16 +691,16 @@ async function executeRescue() {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'RESCUE ON MAINNET!' : `Rescue from ${wallet.shortAddress(target)}?`,
       rows: [
-        { k: 'Locked wallet', v: wallet.shortAddress(target) },
-        { k: 'SAFE destination', v: wallet.shortAddress(safe) },
-        { k: 'Token type', v: type.toUpperCase() },
-        ...(type === 'erc20' ? [{ k: 'Amount', v: `${rescueAmtRaw} ${rescueSymbol}` }] : []),
-        { k: 'Authorization', v: targetKey ? 'Target private key (validated)' : 'Unlocked target wallet' },
-        { k: 'Gas sponsor (executor)', v: wallet.shortAddress(sponsorAddress) },
-        { k: 'Network', v: net.name },
-        { k: 'Delegation', v: 'Permanent until revoked (Tools → Revoke)' },
+        { k: t('cf.locked.wallet'), v: wallet.shortAddress(target) },
+        { k: t('cf.safe.destination'), v: wallet.shortAddress(safe) },
+        { k: t('cf.token.type'), v: type.toUpperCase() },
+        ...(type === 'erc20' ? [{ k: t('cf.amount'), v: `${rescueAmtRaw} ${rescueSymbol}` }] : []),
+        { k: t('cf.authorization'), v: targetKey ? 'Target private key (validated)' : 'Unlocked target wallet' },
+        { k: t('cf.gas.sponsor.executor'), v: wallet.shortAddress(sponsorAddress) },
+        { k: t('cf.network'), v: net.name },
+        { k: t('cf.delegation'), v: t('cf.permanent.until.revoked.tools.revoke') },
       ],
-      confirmText: 'Rescue', danger: net.type === 'mainnet'
+      confirmText: t('cf.rescue'), danger: net.type === 'mainnet'
     });
     if (!ok) return;
   }
@@ -867,16 +867,16 @@ async function executeClaim() {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'CLAIM AIRDROP ON MAINNET!' : `Claim on ${net.name}?`,
       rows: [
-        { k: 'Airdrop contract', v: wallet.shortAddress(contractAddr) },
-        { k: 'Token', v: `${symbol} (${wallet.shortAddress(tokenAddr)})` },
-        { k: 'Minimum (on-chain)', v: `${amountRaw} ${symbol} = ${minWei.toString()} units` },
-        { k: 'Forward to', v: wallet.shortAddress(safe) },
-        { k: 'Target', v: wallet.shortAddress(targetAddress) + (targetKeyField ? ' (pasted key)' : ' (active wallet)') },
-        { k: 'Gas sponsor', v: wallet.shortAddress(sponsorAddress) },
-        { k: 'Network', v: net.name },
-        { k: 'Delegation', v: 'Permanent until revoked (Tools → Revoke)' },
+        { k: t('cf.airdrop.contract'), v: wallet.shortAddress(contractAddr) },
+        { k: t('cf.token'), v: `${symbol} (${wallet.shortAddress(tokenAddr)})` },
+        { k: t('cf.minimum.on.chain'), v: `${amountRaw} ${symbol} = ${minWei.toString()} units` },
+        { k: t('cf.forward.to'), v: wallet.shortAddress(safe) },
+        { k: t('cf.target'), v: wallet.shortAddress(targetAddress) + (targetKeyField ? ' (pasted key)' : ' (active wallet)') },
+        { k: t('cf.gas.sponsor'), v: wallet.shortAddress(sponsorAddress) },
+        { k: t('cf.network'), v: net.name },
+        { k: t('cf.delegation'), v: t('cf.permanent.until.revoked.tools.revoke') },
       ],
-      confirmText: 'Claim', danger: net.type === 'mainnet'
+      confirmText: t('cf.claim'), danger: net.type === 'mainnet'
     });
     if (!ok) return;
   }
@@ -1114,11 +1114,11 @@ export async function deployBatchHelper() {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'DEPLOY HELPER ON MAINNET!' : 'Deploy batch helper?',
       rows: [
-        { k: 'Contract', v: 'batch' },
-        { k: 'Network', v: net.name },
-        { k: 'From', v: get('address') },
+        { k: t('cf.contract'), v: 'batch' },
+        { k: t('cf.network'), v: net.name },
+        { k: t('cf.from'), v: get('address') },
       ],
-      confirmText: 'Confirm',
+      confirmText: t('cf.confirm'),
       danger: net.type === 'mainnet',
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
@@ -1170,13 +1170,13 @@ export async function deployRescueHelper() {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'DEPLOY HELPER ON MAINNET!' : 'Deploy rescue helper?',
       rows: [
-        { k: 'Contract', v: 'rescue' },
-        { k: 'Network', v: net.name },
-        { k: 'SAFE', v: safe },
-        { k: 'Rescue target', v: target },
-        { k: 'Sponsor (executor / RESCUER)', v: wallet.shortAddress(sponsorSigner.address) },
+        { k: t('cf.contract'), v: 'rescue' },
+        { k: t('cf.network'), v: net.name },
+        { k: t('cf.safe'), v: safe },
+        { k: t('cf.rescue.target'), v: target },
+        { k: t('cf.sponsor.executor.rescuer'), v: wallet.shortAddress(sponsorSigner.address) },
       ],
-      confirmText: 'Confirm',
+      confirmText: t('cf.confirm'),
       danger: net.type === 'mainnet',
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
@@ -1218,12 +1218,12 @@ export async function deployAirdropClaimer() {
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'DEPLOY HELPER ON MAINNET!' : 'Deploy airdrop claimer?',
       rows: [
-        { k: 'Contract', v: 'airdropClaimer' },
-        { k: 'Network', v: net.name },
-        { k: 'Target', v: targetAddress },
-        { k: 'Sponsor', v: wallet.shortAddress(sponsorSigner.address) },
+        { k: t('cf.contract'), v: 'airdropClaimer' },
+        { k: t('cf.network'), v: net.name },
+        { k: t('cf.target'), v: targetAddress },
+        { k: t('cf.sponsor'), v: wallet.shortAddress(sponsorSigner.address) },
       ],
-      confirmText: 'Confirm',
+      confirmText: t('cf.confirm'),
       danger: net.type === 'mainnet',
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
@@ -1373,14 +1373,14 @@ export async function revokeDelegation() {
   if (!delegate) return toast('No active delegation on this address — nothing to revoke.', 'info');
 
   const ok = await confirmTx({
-    title: 'Revoke EIP-7702 Delegation',
+    title: t('cf.revoke.eip.7702.delegation'),
     rows: [
-      { k: 'Target', v: target },
-      { k: 'Current delegation', v: delegate },
-      { k: 'Gas sponsor (executor)', v: wallet.shortAddress(sponsorAddress) },
-      { k: 'Action', v: 'Revoke (back to plain EOA)' }
+      { k: t('cf.target'), v: target },
+      { k: t('cf.current.delegation'), v: delegate },
+      { k: t('cf.gas.sponsor.executor'), v: wallet.shortAddress(sponsorAddress) },
+      { k: t('cf.action'), v: t('cf.revoke.back.to.plain.eoa') }
     ],
-    confirmText: 'Revoke', danger: true
+    confirmText: t('cf.revoke'), danger: true
   });
   if (!ok) return;
 

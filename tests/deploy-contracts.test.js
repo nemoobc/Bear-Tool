@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
+import { t } from '../js/i18n.js';
 import { fileURLToPath } from 'node:url';
 import { appSource } from './helpers/app-source.mjs';
 
@@ -457,8 +458,10 @@ test('P1 teks baris helper: binding sebenarnya (SAFE+sponsor), bukan locked wall
   const view = fs.readFileSync(new URL('../src/views/deploy.jsx', import.meta.url), 'utf8');
   assert.match(view, /sponsor pays gas and executes the sweep/, 'paragraf rescue menyentuh sponsor sbg eksekutor');
   assert.match(view, /The sponsor pays gas/, 'paragraf claim menyentuh sponsor sbg pembayar gas');
-  assert.match(tools, /\{ k: 'SAFE destination', v: /, 'konfirmasi rescue menampilkan SAFE destination');
-  assert.match(tools, /\{ k: 'Gas sponsor \(executor\)', v: /, 'konfirmasi rescue menampilkan gas sponsor');
+  assert.match(tools, /\{ k: t\('cf\.safe\.destination'\), v: /, 'konfirmasi rescue menampilkan SAFE destination');
+  assert.match(tools, /\{ k: t\('cf\.gas\.sponsor\.executor'\), v: /, 'konfirmasi rescue menampilkan gas sponsor');
+  assert.equal(t('cf.safe.destination'), 'SAFE destination', 'label tetap "SAFE destination" di en');
+  assert.equal(t('cf.gas.sponsor.executor'), 'Gas sponsor (executor)', 'label tetap sama di en');
   assert.doesNotMatch(tools + view, /takes your locked wallet/, 'teks keliru "locked wallet" pada rescue dihapus');
   assert.doesNotMatch(tools + view, /locked wallet as rescuer/, 'teks keliru "locked wallet as rescuer" pada claim dihapus');
 });
@@ -479,6 +482,8 @@ test('P1 peringatan delegasi permanen di ketiga flow sebelum execute', () => {
   const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
   // Referensi memperingatkan "delegasi PERMANEN + tutup dgn revoke" di batch,
   // rescue, dan claim (ref:1699-1701, 1851-1857, 2066-2076) — Bear tidak.
-  assert.ok((tools.match(/Permanent until revoked/g) || []).length >= 3,
+  assert.ok((tools.match(/t\('cf\.permanent\.until\.revoked\.tools\.revoke'\)/g) || []).length >= 3,
     'batch, rescue, dan claim masing-masing membawa baris peringatan permanen');
+  assert.equal(t('cf.permanent.until.revoked.tools.revoke'),
+    'Permanent until revoked (Tools → Revoke)', 'peringatan permanen tetap sama di en');
 });

@@ -773,9 +773,9 @@ async function doBridgeExecInner() {
   // Mainnet safety confirmation at EXECUTION time (not quote time)
   if (fromNet.type === 'mainnet' || toNet.type === 'mainnet') {
     const ok = await confirmTx({
-      title: 'EXECUTE BRIDGE ON MAINNET!',
-      rows: [{ k: 'From', v: `${fromNet.name} (${fromNet.chainId})` }, { k: 'To', v: `${toNet.name} (${toNet.chainId})` }, { k: 'Amount', v: `${context.amount} ${context.tokenSymbol || ''}` }],
-      confirmText: 'Bridge', danger: true
+      title: t('cf.execute.bridge.on.mainnet'),
+      rows: [{ k: t('cf.from'), v: `${fromNet.name} (${fromNet.chainId})` }, { k: t('site.to'), v: `${toNet.name} (${toNet.chainId})` }, { k: t('cf.amount'), v: `${context.amount} ${context.tokenSymbol || ''}` }],
+      confirmText: t('cf.bridge'), danger: true
     });
     if (!ok) return;
   }
@@ -790,16 +790,16 @@ async function doBridgeExecInner() {
 
   // sign confirmation — show full bridge details before signing
   const signOk = await confirmTx({
-    title: '✍️ SIGN BRIDGE',
+    title: t('cf.sign.bridge'),
     rows: [
-      { k: 'From chain', v: `${fromNet.name} (${fromNet.chainId})` },
-      { k: 'To chain', v: `${toNet.name} (${toNet.chainId})` },
-      { k: 'Amount', v: `${context.amount} ${context.tokenSymbol || ''}` },
-      { k: 'Router', v: q.routerName || 'Auto' },
-      { k: 'Est. time', v: '~2-10 min' }
+      { k: t('cf.from.chain'), v: `${fromNet.name} (${fromNet.chainId})` },
+      { k: t('cf.to.chain'), v: `${toNet.name} (${toNet.chainId})` },
+      { k: t('cf.amount'), v: `${context.amount} ${context.tokenSymbol || ''}` },
+      { k: t('cf.router'), v: q.routerName || 'Auto' },
+      { k: t('cf.est.time'), v: '~2-10 min' }
     ],
-    confirmText: 'Confirm',
-    cancelText: 'Cancel',
+    confirmText: t('cf.confirm'),
+    cancelText: t('cf.cancel'),
     danger: false,
     tx: { to: boundTx.to, data: boundTx.data, value: boundTx.value },
     spendUsd: bridgeSpendUsd,

@@ -658,3 +658,19 @@ test('the Security Center shot is taken of the Security Center', () => {
   assert.match(before, /has no text to show/,
     'dan panel kosong harus menggagalkan run, bukan lolos dengan state benar');
 });
+
+// Eight emulator runs photographed a Send form whose token dropdown showed "—"
+// and reported success, because the step typed an address and checked the
+// preview without ever looking at what the user would have to pick from.
+test('the Send step checks there is a token to send before it types', () => {
+  const drv = readFileSync(new URL('../tools/emulator-e2e.mjs', import.meta.url), 'utf8');
+  const at = drv.indexOf("await page.type('#sendTo', '0x000000000000000000000000000000000000dEaD')");
+  assert.ok(at > 0, 'langkah kirim tidak ditemukan');
+  const before = drv.slice(Math.max(0, at - 1200), at);
+  // The call, not the word: this file has now been fooled three times by
+  // comments that name the very thing the code stopped doing.
+  assert.match(before, /#sendToken'\)\?\.options\.length/,
+    'langkah harus menghitung opsi #sendToken sendiri');
+  assert.match(before, /if \(!sweep\.sendTokenOptions\) \{[\s\S]*?throw new Error/,
+    'daftar kosong harus menggagalkan run, bukan direkam sebagai angka lewat');
+});

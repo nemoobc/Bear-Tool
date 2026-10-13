@@ -55,9 +55,20 @@ test.describe('Casing — static', () => {
     expect(ui).toMatch(/charAt\(0\)\.toUpperCase\(\) \+ t\.slice\(1\)/);
   });
 
-  test('network-type badges are title-cased at every render site', () => {
-    // Two badge sites in the network modal + the Add-network picker.
-    expect(app).toMatch(/badge-mainnet[^`]*titleCase\(n\.type\)/);
+  test('the network type is title-cased wherever it is still shown', () => {
+    // 540b2bc removed the per-row tag from the network modal: it repeated the
+    // MAINNET/TESTNET header directly above it, and on a custom row the
+    // trailing slot became the remove control — netRow() spells out both
+    // reasons in its comment. What still renders the type: those headers
+    // (pinned here in their correct case), the Add-network preset row, and the
+    // network picker's row sub-label.
+    expect(app).toMatch(/<span class="badge badge-mainnet">MAINNET<\/span>/);
+    expect(app).toMatch(/<span class="badge badge-testnet">TESTNET<\/span>/);
+    // …and not ONE header may fall back to the data's lower-case value — there
+    // are two MAINNET headers, so a positive match alone let a mutation of the
+    // second one through (proved: changed one, the test stayed green).
+    expect(app).not.toMatch(/badge badge-mainnet">mainnet</);
+    expect(app).not.toMatch(/badge badge-testnet">testnet</);
     expect(app).toMatch(/badge-mainnet[^`]*titleCase\(p\.type\)/);
     // The network picker's row sub-label.
     expect(tp).toMatch(/titleCase\(n\.type\)/);

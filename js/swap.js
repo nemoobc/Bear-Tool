@@ -624,9 +624,9 @@ export async function doSwap() {
 
   if (net.type === 'mainnet') {
     const ok = await confirmTx({
-      title: 'MAINNET SWAP!',
-      rows: [{ k: 'From', v: `${amt} ${dispSym(from)}` }, { k: 'To', v: dispSym(to) }, { k: 'Network', v: net.name }, { k: 'Route', v: quote.source || '?' }],
-      confirmText: 'Swap', danger: true
+      title: t('cf.mainnet.swap'),
+      rows: [{ k: t('cf.from'), v: `${amt} ${dispSym(from)}` }, { k: t('site.to'), v: dispSym(to) }, { k: t('cf.network'), v: net.name }, { k: t('cf.route'), v: quote.source || '?' }],
+      confirmText: t('cf.swap'), danger: true
     });
     if (!ok) return;
   }
@@ -640,16 +640,16 @@ export async function doSwap() {
 
   // sign confirmation — show full swap details before signing
   const signOk = await confirmTx({
-    title: '✍️ SIGN SWAP',
+    title: t('cf.sign.swap'),
     rows: [
-      { k: 'Network', v: net.name },
-      { k: 'From', v: `${amt} ${dispSym(from)}` },
-      { k: 'To', v: `→ ${dispSym(to)}` },
-      { k: 'Router', v: quote.source || 'Auto' },
-      { k: 'Slippage', v: `${slipPct}%` }
+      { k: t('cf.network'), v: net.name },
+      { k: t('cf.from'), v: `${amt} ${dispSym(from)}` },
+      { k: t('site.to'), v: `→ ${dispSym(to)}` },
+      { k: t('cf.router'), v: quote.source || 'Auto' },
+      { k: t('cf.slippage'), v: `${slipPct}%` }
     ],
-    confirmText: 'Confirm',
-    cancelText: 'Cancel',
+    confirmText: t('cf.confirm'),
+    cancelText: t('cf.cancel'),
     danger: false,
     spendUsd: swapSpendUsd,
   });

@@ -1309,6 +1309,16 @@ async function main() {
   if (!(await openView('send'))) throw new Error('feature sweep: the Send view did not open');
   await page.wait('#sendTo', 15000);
   await page.wait('#sendAmount', 15000);
+  // Something to send, before anything is typed. This step used to type an
+  // address and check the preview, and eight runs walked past a dropdown whose
+  // only choice was "—": refreshView('send') had lost loadSendTokens() in
+  // f7a7ec5, so the form could not send anything at all. A sweep that never
+  // looks at the field it is about to fill proves nothing about it.
+  sweep.sendTokenOptions = await page.evaluate(
+    `document.querySelector('#sendToken')?.options.length || 0`);
+  if (!sweep.sendTokenOptions) {
+    throw new Error('feature sweep: the Send token dropdown is empty — there is nothing to send');
+  }
   await page.type('#sendTo', '0x000000000000000000000000000000000000dEaD');
   await page.type('#sendAmount', '0.0001');
   await sleep(1500);

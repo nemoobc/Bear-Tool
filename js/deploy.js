@@ -265,12 +265,12 @@ export async function doDeploy() {
 
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'DEPLOY ON MAINNET!' : `Deploy ${std.contract} on ${net.name}?`,
-      rows: [...plan.summary, { k: 'Network', v: net.name },
+      rows: [...plan.summary, { k: t('cf.network'), v: net.name },
         // One signature releases TWO transactions when upgradeable — the
         // dialog must say so, and must not dress tx 1's estimate up as a total.
-        { k: 'Transactions', v: upg ? '2 — implementation, then proxy (estimate above is tx 1 only)' : '1' },
+        { k: t('cf.transactions'), v: upg ? '2 — implementation, then proxy (estimate above is tx 1 only)' : '1' },
         { k: upg ? 'Est. cost (implementation)' : 'Est. cost', v: costLabel }],
-      confirmText: 'Confirm',
+      confirmText: t('cf.confirm'),
       danger: net.type === 'mainnet',
       // Money line: gas already estimated above, spend is 0 (contract
       // creation moves no value) — the $ figure is gas × native USD price.

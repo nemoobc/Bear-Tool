@@ -667,11 +667,13 @@ export function refreshView(view) {
   if (view === 'discord') renderDiscord($('#discordRoot'));
   if (!get('address')) return;
   if (view === 'dashboard') loadDashboard();
-  if (view === 'send') {
-    // hidden while one of them is active, not deleted, so switching back to an
-    // EVM network restores it exactly as it was.
-
-  }
+  // Regression f7a7ec5 -> ebc2c8a: this branch held `loadSendTokens()` until the
+  // non-EVM Send work emptied it, and the empty block survived because the
+  // comment above it still read like an explanation. Nothing else calls that
+  // function — so the dropdown was born empty: emulator shot 40-send-invalid.png
+  // shows "—" where the token should be, and 11 Playwright specs timed out on
+  // `#sendToken` options for eight runs in a row.
+  if (view === 'send') loadSendTokens();
   if (view === 'swap') loadSwapTokens();
   if (view === 'bridge') loadBridgeChains();
   if (view === 'deploy') { loadEip7702(); bindOpenSeaPanel(); }
@@ -741,18 +743,18 @@ function scanSignCall(method, params) {
 // Describe what is being asked for, in words, before anyone signs it.
 function describeSignCall(method, params) {
   const p = Array.isArray(params) ? (params[0] || {}) : {};
-  const rows = [{ k: 'Method', v: method }];
+  const rows = [{ k: t('cf.method'), v: method }];
   if (method === 'personal_sign') {
     let text = '';
     try { text = String(typeof p === 'string' ? p : (p && p.message) || ''); } catch { /* not a string */ }
-    rows.push({ k: 'Message', v: text ? text.slice(0, 160) : '(binary)' });
+    rows.push({ k: t('cf.message'), v: text ? text.slice(0, 160) : '(binary)' });
   } else if (String(method).startsWith('eth_signTypedData')) {
-    rows.push({ k: 'Typed data', v: typeof p === 'string' ? p.slice(0, 160) + '…' : JSON.stringify(p).slice(0, 160) + '…' });
+    rows.push({ k: t('cf.typed.data'), v: typeof p === 'string' ? p.slice(0, 160) + '…' : JSON.stringify(p).slice(0, 160) + '…' });
   } else {
-    if (p.to) rows.push({ k: 'To', v: String(p.to) });
-    if (p.value && BigInt(p.value) > 0n) rows.push({ k: 'Value', v: formatNativeValue(p.value) });
-    if (p.data && p.data !== '0x') rows.push({ k: 'Calldata', v: String(p.data).slice(0, 74) + '…' });
-    else rows.push({ k: 'Calldata', v: 'none — a plain transfer' });
+    if (p.to) rows.push({ k: t('site.to'), v: String(p.to) });
+    if (p.value && BigInt(p.value) > 0n) rows.push({ k: t('cf.value'), v: formatNativeValue(p.value) });
+    if (p.data && p.data !== '0x') rows.push({ k: t('cf.calldata'), v: String(p.data).slice(0, 74) + '…' });
+    else rows.push({ k: t('cf.calldata'), v: t('cf.none.a.plain.transfer') });
   }
   return rows;
 }
@@ -774,28 +776,28 @@ function makeBearProvider(origin) {
     onRequest: async ({ method, params, kind, origin }) => {
       if (kind === 'consent') {
         return confirmTx({
-          title: '🔗 Connect this site?',
+          title: t('cf.connect.this.site'),
           rows: [
-            { k: 'Site', v: origin },
+            { k: t('cf.site'), v: origin },
             // Which account the site is about to see. Without this the sheet
             // names the site and the method but not the address being exposed —
             // and a multi-account wallet must show WHICH key it is handing over.
-            { k: 'Account', v: wallet.shortAddress(get('address')) },
-            { k: 'Gets', v: method === 'eth_requestAccounts' ? 'your address (read-only)' : String(method) },
+            { k: t('cf.account'), v: wallet.shortAddress(get('address')) },
+            { k: t('cf.gets'), v: method === 'eth_requestAccounts' ? 'your address (read-only)' : String(method) },
           ],
-          confirmText: 'Connect',
+          confirmText: t('cf.connect'),
         });
       }
       if (kind === 'permission') {
         return confirmTx({
-          title: '⚠️ Authorise ' + method + '?',
+          title: t('cf.authorise', { m: method }),
           danger: method === 'eth_sendTransaction',
           rows: [
-            { k: 'Site', v: origin },
-            { k: 'Method', v: method },
-            { k: 'Grant', v: 'Stays until you revoke it in Settings → Security' },
+            { k: t('cf.site'), v: origin },
+            { k: t('cf.method'), v: method },
+            { k: t('cf.grant'), v: t('cf.stays.until.you.revoke.it.in.settings.security') },
           ],
-          confirmText: 'Authorise',
+          confirmText: t('cf.authorise'),
         });
       }
       if (kind === 'sign') {
@@ -809,15 +811,15 @@ function makeBearProvider(origin) {
           title: worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') + method + '?' : '✍️ ' + method + '?',
           danger: !!(worst && worst.level === 'fail'),
           rows: [
-            { k: 'Site', v: origin },
+            { k: t('cf.site'), v: origin },
             ...describeSignCall(method, params),
             ...(findings.length
-              ? [{ k: 'Flags', v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }]
+              ? [{ k: t('cf.flags'), v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }]
               : []),
-            ...(worst ? [{ k: 'Why', v: worst.detail }] : []),
+            ...(worst ? [{ k: t('cf.why'), v: worst.detail }] : []),
           ],
           confirmText: worst && worst.level === 'fail' ? 'Send anyway' : 'Confirm',
-          cancelText: 'Cancel',
+          cancelText: t('cf.cancel'),
           // Money line for spending calls: the request's own tx object
           // carries value + calldata, so the dialog can price what the site
           // is asking for (user, 2026-10-06). Read-only signs add no row.
@@ -839,14 +841,14 @@ function makeBearProvider(origin) {
         origin,
         activateNetwork,
         confirmAsset: (info) => confirmTx({
-          title: '➕ Watch ' + (info.symbol || 'this token') + '?',
+          title: t('cf.watch', { s: info.symbol || t('cf.this.token') }),
           rows: [
-            { k: 'Site', v: info.site },
-            { k: 'Symbol', v: info.symbol || 'TOKEN' },
-            { k: 'Decimals', v: String(info.decimals ?? 18) },
-            { k: 'Address', v: info.address },
+            { k: t('cf.site'), v: info.site },
+            { k: t('cf.symbol'), v: info.symbol || 'TOKEN' },
+            { k: t('cf.decimals'), v: String(info.decimals ?? 18) },
+            { k: t('cf.address'), v: info.address },
           ],
-          confirmText: 'Add',
+          confirmText: t('cf.add'),
         }),
       });
       if (local.done) return local.value;
@@ -1990,11 +1992,11 @@ function showAccountModal() {
     const ok = await confirmTx({
       title: `Remove ${name} from the list?`,
       rows: [
-        { k: 'Wallet', v: name },
-        { k: 'Address', v: target.address },
-        { k: 'Keys stay yours', v: 'Your recovery phrase still controls this address — copy it first if the wallet holds funds.' },
+        { k: t('cf.wallet'), v: name },
+        { k: t('cf.address'), v: target.address },
+        { k: t('cf.keys.stay.yours'), v: t('cf.phrase.warning') },
       ],
-      confirmText: 'Remove',
+      confirmText: t('cf.remove'),
       danger: true,
     });
     if (!ok) return;

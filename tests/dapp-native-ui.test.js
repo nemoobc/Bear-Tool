@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { t } from '../js/i18n.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(here, '..', 'js', 'native-dapp.js'), 'utf8');
@@ -108,9 +109,17 @@ test('the connect sheet names the account it is exposing, and makes the page beh
   // because it used to "pass" only by scraping unrelated wallet token addresses
   // out of the same accessibility dump.
   const app = readFileSync(path.join(here, '..', 'js', 'app.js'), 'utf8');
-  const consent = app.slice(app.indexOf("title: '🔗 Connect this site?'"));
-  assert.match(consent, /k: 'Account', v: wallet\.shortAddress\(get\('address'\)\)/,
+  // The title is a key since M14. indexOf() returning -1 used to slice ONE
+  // trailing character, and every assertion below it would then have been made
+  // against nothing — so the anchor is asserted first, out loud.
+  const anchor = "title: t('cf.connect.this.site')";
+  const at = app.indexOf(anchor);
+  assert.ok(at > 0, 'jangkar judul sheet connect tidak ada di app.js');
+  const consent = app.slice(at);
+  assert.match(consent, /k: t\('cf\.account'\), v: wallet\.shortAddress\(get\('address'\)\)/,
     'sheet connect wajib menampilkan alamat akun yang diekspos (format 0x1234…5678)');
+  assert.equal(t('cf.account'), 'Account', 'label akun tetap "Account" di en');
+  assert.equal(t('cf.connect.this.site'), '🔗 Connect this site?', 'judul tetap sama di en');
   // 2) A consent sheet is a MODAL: what is behind it must stop being reachable
   // for a screen reader exactly as it stops being touchable behind the scrim.
   assert.match(java, /private void setBackgroundA11yInert\(boolean inert\)/, 'satu helper untuk mode inert/aktif');

@@ -101,7 +101,21 @@ function updateSendTokenBalance() {
 export function loadSendTokens() {
   const sel = $('#sendToken');
   if (!sel) return;
-  sel.innerHTML = get('tokens').map(t =>
+  // The native coin of the active chain always exists, even when the dashboard
+  // has not finished — or cannot reach a node, which is the state the emulator
+  // photographed (a Send form whose only choice was "—"). The dashboard list
+  // needs a working provider; this one needs only the network we are on. The
+  // balance starts null (fmtAmount reads it as UNREADABLE, honestly) and
+  // refreshSendBalances below fills it from the chain the moment it answers.
+  let list = get('tokens') || [];
+  if (!list.length) {
+    const net = getNetworkById(get('networkId'));
+    if (net) {
+      list = [{ address: null, symbol: net.symbol, decimals: net.decimals, balance: null, usd: null }];
+      set('tokens', list);
+    }
+  }
+  sel.innerHTML = list.map(t =>
     `<option value="${escapeHtml(t.address || 'native')}">${escapeHtml(t.symbol)} (${escapeHtml(fmtAmount(t.balance, t.decimals))})</option>`
   ).join('');
   // In-app chooser like Swap/Bridge: a native select's option list is an OS
@@ -219,13 +233,13 @@ async function warnSuspiciousDestination(to, net) {
   }
   if (similar.length) {
     const ok = await confirmTx({
-      title: '⚠️ ADDRESS POISONING WARNING!',
+      title: t('cf.address.poisoning.warning'),
       rows: [
-        { k: 'Warning', v: 'This address looks similar to a previous recipient. Common scam — double-check every character.' },
-        { k: 'Target', v: wallet.shortAddress(to) },
-        { k: 'Similar to', v: similar[0] }
+        { k: t('cf.warning'), v: 'This address looks similar to a previous recipient. Common scam — double-check every character.' },
+        { k: t('cf.target'), v: wallet.shortAddress(to) },
+        { k: t('cf.similar.to'), v: similar[0] }
       ],
-      confirmText: 'I understand the risk',
+      confirmText: t('cf.i.understand.the.risk'),
       danger: true
     });
     if (!ok) return false;
@@ -236,12 +250,12 @@ async function warnSuspiciousDestination(to, net) {
     .find(t => t.address.toLowerCase() === to.toLowerCase());
   if (tokenContract) {
     const ok = await confirmTx({
-      title: '⚠️ TOKEN CONTRACT DESTINATION!',
+      title: t('cf.token.contract.destination'),
       rows: [
-        { k: 'Warning', v: `This address is the ${tokenContract.symbol} token contract. Sending tokens here burns them.` },
-        { k: 'Target', v: wallet.shortAddress(to) }
+        { k: t('cf.warning'), v: `This address is the ${tokenContract.symbol} token contract. Sending tokens here burns them.` },
+        { k: t('cf.target'), v: wallet.shortAddress(to) }
       ],
-      confirmText: 'I understand the risk',
+      confirmText: t('cf.i.understand.the.risk'),
       danger: true
     });
     if (!ok) return false;
@@ -253,12 +267,12 @@ async function warnSuspiciousDestination(to, net) {
     const m = String(prev.detail || '').match(/0x[a-fA-F0-9]{40}/);
     if (m && m[0].toLowerCase() === to.toLowerCase()) {
       const ok = await confirmTx({
-        title: '⚠️ LOCKED / RESCUE ADDRESS!',
+        title: t('cf.locked.rescue.address'),
         rows: [
-          { k: 'Warning', v: 'This address was previously used as a rescue target or claim token. Funds sent here may be unrecoverable.' },
-          { k: 'Target', v: wallet.shortAddress(to) }
+          { k: t('cf.warning'), v: 'This address was previously used as a rescue target or claim token. Funds sent here may be unrecoverable.' },
+          { k: t('cf.target'), v: wallet.shortAddress(to) }
         ],
-        confirmText: 'I understand the risk',
+        confirmText: t('cf.i.understand.the.risk'),
         danger: true
       });
       if (!ok) return false;
@@ -313,9 +327,9 @@ export async function doSend() {
   // mainnet safety
   if (net.type === 'mainnet') {
     const ok = await confirmTx({
-      title: 'MAINNET TRANSACTION!',
-      rows: [{ k: 'Network', v: net.name }, { k: 'To', v: wallet.shortAddress(to) }, { k: 'Amount', v: `${amt} ${t.symbol}` }],
-      confirmText: 'I understand, send',
+      title: t('cf.mainnet.transaction'),
+      rows: [{ k: t('cf.network'), v: net.name }, { k: t('site.to'), v: wallet.shortAddress(to) }, { k: t('cf.amount'), v: `${amt} ${t.symbol}` }],
+      confirmText: t('cf.i.understand.send'),
       danger: true
     });
     if (!ok) return;
@@ -339,16 +353,16 @@ export async function doSend() {
 
   // sign confirmation — show full tx details before signing
   const signOk = await confirmTx({
-    title: '✍️ SIGN TRANSACTION',
+    title: t('cf.sign.transaction'),
     rows: [
-      { k: 'Network', v: net.name },
-      { k: 'Token', v: t.symbol },
-      { k: 'Amount', v: `${amt} ${t.symbol}` },
-      { k: 'To', v: wallet.shortAddress(to) },
-      { k: 'Gas speed', v: gasSpeed }
+      { k: t('cf.network'), v: net.name },
+      { k: t('cf.token'), v: t.symbol },
+      { k: t('cf.amount'), v: `${amt} ${t.symbol}` },
+      { k: t('site.to'), v: wallet.shortAddress(to) },
+      { k: t('cf.gas.speed'), v: gasSpeed }
     ],
-    confirmText: 'Confirm & Send',
-    cancelText: 'Cancel',
+    confirmText: t('cf.confirm.send'),
+    cancelText: t('cf.cancel'),
     danger: false,
     spendUsd: signSpendUsd,
     gasWei: signGasWei,

@@ -115,13 +115,50 @@ test('every t() key used by a module resolves in both languages', () => {
 // textContent/innerHTML scan above cannot see: nothing is assigned to the DOM
 // there, a value is handed to a renderer. Screenshot 06-dapp-connect-sheet.png
 // showed the whole family in English on a wallet that speaks Indonesian.
-test('the dApp confirmation sheets carry no unwired literal of their own', () => {
-  for (const mod of ['native-dapp', 'walletconnect']) {
+//
+// The pattern takes ANY first character. Its earlier form asked for a capital
+// letter, and that single choice let "\u270d\ufe0f SIGN BRIDGE" through — four warning
+// titles and every `k: 'To'` (two letters, and the pattern wanted three) stayed
+// English while the gate stayed green. A gate that cannot see the thing it names
+// is worse than no gate: it is a claim.
+//
+// `v:` is scanned too. Labels are not the only prose in a row: "none — a plain
+// transfer" explained what the empty calldata meant, in English, to everyone.
+const SHEET_MODULES = ['app', 'bridge', 'swap', 'eip7702-tools', 'send', 'deploy',
+                       'native-dapp', 'walletconnect'];
+// Proper nouns that are the same in both languages. Small and named, so a new
+// entry is a visible decision rather than an escape hatch.
+const SHEET_ALLOW = ['SAFE'];
+
+test('the confirmation sheets carry no unwired literal of their own', () => {
+  const bare = [];
+  const prose = [];
+  for (const mod of SHEET_MODULES) {
     const src = readFileSync(new URL(`../js/${mod}.js`, import.meta.url), 'utf8');
-    const bare = [...src.matchAll(/\b(title|confirmText|cancelText|k):\s*'([A-Z][^']{1,40})'/g)]
-      .map((m) => `${m[1]}: '${m[2]}'`);
-    assert.deepEqual(bare, [], `${mod}.js masih punya kalimat Inggris di sheet konfirmasi: ${bare.join(' | ')}`);
+    for (const m of src.matchAll(/\b(title|confirmText|cancelText|k):\s*'([^']{2,90})'/g)) {
+      if (SHEET_ALLOW.includes(m[2])) continue;
+      bare.push(`${mod}.js ${m[1]}: '${m[2]}'`);
+    }
+    for (const m of src.matchAll(/\bv:\s*'([A-Za-z(][^']{6,90})'/g)) {
+      const words = m[1].match(/[A-Za-z]{3,}/g) || [];
+      if (words.length >= 2 && !m[1].startsWith('0x')) prose.push(`${mod}.js v: '${m[1]}'`);
+    }
   }
+  assert.deepEqual(bare, [], `sheet konfirmasi masih punya literal: ${bare.join(' | ')}`);
+  assert.deepEqual(prose, [], `baris konfirmasi masih berisi kalimat Inggris: ${prose.join(' | ')}`);
+});
+
+// A row label that is a sentence has to go through t() as well, or the label is
+// translated and its explanation is not — half an Indonesian screen.
+test('every confirmation sheet module imports the translator it calls', () => {
+  const missing = [];
+  for (const mod of SHEET_MODULES) {
+    const src = readFileSync(new URL(`../js/${mod}.js`, import.meta.url), 'utf8');
+    if (src.includes("t('cf.") || src.includes("t('site.") || src.includes("t('sign.")) {
+      if (!/from '\.\/i18n\.js'/.test(src)) missing.push(`${mod}.js`);
+    }
+  }
+  assert.deepEqual(missing, [], `memanggil t() tanpa mengimpor penerjemah: ${missing.join(', ')}`);
 });
 
 // The connect sheet's capability list used to be one CSV line — "accounts, sign,
