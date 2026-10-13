@@ -245,8 +245,16 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const addrEl = document.getElementById('customTokenAddr');
     const netEl = document.getElementById('tdNetwork');
-    const activeChainId = () => getNetworkById(get('networkId'))?.chainId || currentChain;
+    const activeChainId = () => getNetworkById(get('networkId'))?.chainId || 0;
     const activeNetName = () => getNetworkById(get('networkId'))?.name || 'this network';
+    // Label jaringan aktif untuk sheet Add Token + catatan "Read from ...".
+    // ebc2c8a (hapus non-EVM) menghapus definisi ini tapi meninggalkan dua
+    // pemanggilannya: ReferenceError membunuh setup modal tepat SEBELUM
+    // listener 'input' terpasang — paste alamat tak pernah memicu deteksi.
+    // Itulah "add token bug" yang dilaporkan (E2E 12-parity #6 merah
+    // sejak commit itu, kini terbaca dari trace: console error
+    // 'activeChainLabel is not defined').
+    const activeChainLabel = () => `${activeNetName()} (chain ${activeChainId()})`;
 
     if (netEl) netEl.textContent = t('net.label') + ' ' + activeChainLabel();
     const box = document.getElementById('tokenDetect');
