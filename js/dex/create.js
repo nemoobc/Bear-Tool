@@ -23,7 +23,15 @@ import {
 import { PUMP_TOKEN_SOURCE, PUMP_ABI } from './pump-source.js';
 import { rememberLaunchedToken } from './tokens.js';
 
-const MAX_IMAGE_BYTES = 128 * 1024; // a data URI has to fit in the constructor
+// Images: the user may upload a big file (10 MB, per the user), but a 10 MB
+// data URI can NEVER go on-chain — the constructor would blow the block gas
+// limit, and the app would fail at deploy while blaming "compile". So we
+// accept a large upload and DOWNSCALE it in the browser to an on-chain-safe
+// square JPEG before storing it. What lands on-chain is always feasible; the
+// user still gets to drop the big original.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB — what we accept
+const ONCHAIN_IMAGE_MAX = 512;             // px, longest side, stored on-chain
+const ONCHAIN_JPEG_QUALITY = 0.72;
 const chainOk = () => (getNetworkById(get('networkId'))?.chainId === 11155111);
 
 export function createHtml() {
@@ -38,6 +46,7 @@ export function createHtml() {
           <input id="dexCreateFile" type="file" accept="image/*" class="sr-file"
                  aria-label="${escapeHtml(t('dex.create.pickImage'))}">
           <div id="dexCreateImgEmpty" class="small">${escapeHtml(t('dex.create.noImage'))}</div>
+          <div id="dexCreateImgNote" class="small dex-img-note"></div>
         </div>
         <div class="dex-create-fields">
           <label class="field-label" for="dexCreateName">${escapeHtml(t('dex.create.name'))}</label>
@@ -68,17 +77,43 @@ export function bindCreate(host) {
   const imgEmpty = $('#dexCreateImgEmpty', host);
   let image = '';
 
-  fileEl.addEventListener('change', () => {
+  // Downscale any upload to an on-chain-safe square JPEG. The original may be
+  // 10 MB; the chain gets something deployable. Returns a data URI.
+  const toOnchainImage = (src) => new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => {
+      const side = Math.min(ONCHAIN_IMAGE_MAX, im.width || ONCHAIN_IMAGE_MAX, im.height || ONCHAIN_IMAGE_MAX);
+      const cv = document.createElement('canvas');
+      cv.width = side; cv.height = side;
+      const ctx = cv.getContext('2d');
+      // centre-crop to a square so every coin has a square face, like a launchpad
+      const crop = Math.min(im.width, im.height);
+      ctx.drawImage(im, (im.width - crop) / 2, (im.height - crop) / 2, crop, crop, 0, 0, side, side);
+      try { resolve(cv.toDataURL('image/jpeg', ONCHAIN_JPEG_QUALITY)); } catch (e) { reject(e); }
+    };
+    im.onerror = () => reject(new Error('decode'));
+    im.src = src;
+  });
+
+  fileEl.addEventListener('change', async () => {
     const f = fileEl.files && fileEl.files[0];
     if (!f) return;
-    if (f.size > MAX_IMAGE_BYTES) return toast(t('dex.create.imageBig'), 'error');
+    if (f.size > MAX_UPLOAD_BYTES) return toast(t('dex.create.imageBig', { mb: '10' }), 'error');
     if (!/^image\//.test(f.type)) return toast(t('dex.create.imageType'), 'error');
     const r = new FileReader();
-    r.onload = () => {
-      image = String(r.result || '');
-      imgEl.src = image;
-      imgEl.hidden = false;
-      imgEmpty.hidden = true;
+    r.onload = async () => {
+      try {
+        const full = String(r.result || '');
+        // Show the original immediately, then swap in the compressed one.
+        imgEl.src = full; imgEl.hidden = false; imgEmpty.hidden = true;
+        image = await toOnchainImage(full);
+        imgEl.src = image;
+        const kb = Math.round((image.length * 0.75) / 1024);
+        const note = $('#dexCreateImgNote', host);
+        if (note) note.textContent = t('dex.create.imageStored', { kb: String(kb) });
+      } catch {
+        return toast(t('dex.create.imageType'), 'error');
+      }
     };
     r.readAsDataURL(f);
   });

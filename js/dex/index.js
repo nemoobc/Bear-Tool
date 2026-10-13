@@ -337,6 +337,7 @@ function swapHtml(pair) {
   return `
     <div class="dex-chart-block">
       <div id="dexChartCanvas" style="height:240px"></div>
+      <div class="dex-loading" id="dexChartLoading"><span class="dex-spinner"></span><span id="dexChartLoadingText"></span></div>
       <div id="dexChartStats" class="small"></div>
       <div id="dexChartEmpty" class="small"></div>
       <div id="dexChartBars" style="display:flex; align-items:flex-end; gap:2px; height:120px; margin-top:8px" hidden></div>
@@ -533,10 +534,17 @@ async function paintChart(host, pair) {
   const statsEl = $('#dexChartStats', host);
   const bars = $('#dexChartBars', host);
   const emptyEl = $('#dexChartEmpty', host);
-  if (!p) { emptyEl.textContent = t('dex.needWallet'); return; }
+  // A loading animation while the chain is read — the user asked for one; a
+  // blank box for a few seconds reads as "broken", a spinner reads as "working".
+  const loadEl = $('#dexChartLoading', host);
+  const loadText = $('#dexChartLoadingText', host);
+  if (loadEl) loadEl.hidden = false;
+  if (loadText) loadText.textContent = t('dex.chart.loading');
+  const done = () => { if (loadEl) loadEl.hidden = true; };
+  if (!p) { emptyEl.textContent = t('dex.needWallet'); done(); return; }
 
   const pool = await poolFor(pair);
-  if (!pool) { emptyEl.textContent = t('dex.chart.noPool'); return; }
+  if (!pool) { emptyEl.textContent = t('dex.chart.noPool'); done(); return; }
 
   try {
     const latest = await p.getBlockNumber();
@@ -552,7 +560,7 @@ async function paintChart(host, pair) {
     if (!logs.length) {
       emptyEl.textContent = since > 0 ? t('dex.chart.none') : t('dex.chart.noTrades');
       if (since === 0) statsEl.textContent = t('dex.chart.scanned', { n: String(CHART_LOOKBACK) });
-      return;
+      done(); return;
     }
 
     const baseIs0 = (await new E.Contract(pool, V2_PAIR_ABI, p).token0()).toLowerCase()
@@ -575,7 +583,7 @@ async function paintChart(host, pair) {
       if (price == null || !Number.isFinite(price) || price <= 0) continue;
       trades.push({ price, volQuote, block: l.blockNumber });
     }
-    if (!trades.length) { emptyEl.textContent = t('dex.chart.none'); return; }
+    if (!trades.length) { emptyEl.textContent = t('dex.chart.none'); done(); return; }
     emptyEl.textContent = '';
 
     const vol = trades.reduce((s, x) => s + x.volQuote, 0n);
@@ -618,6 +626,8 @@ async function paintChart(host, pair) {
     }
   } catch (e) {
     statsEl.textContent = (e && e.message) || 'error';
+  } finally {
+    done();
   }
 }
 
@@ -891,6 +901,7 @@ function mmHtml(pair) {
     <div class="dex-chart-block">
       <div class="small"><strong>${escapeHtml(t('dex.mm.liveChart'))}</strong></div>
       <div id="dexChartCanvas" style="height:200px"></div>
+      <div class="dex-loading" id="dexChartLoading"><span class="dex-spinner"></span><span id="dexChartLoadingText"></span></div>
       <div id="dexChartStats" class="small"></div>
       <div id="dexChartEmpty" class="small"></div>
       <div id="dexChartBars" style="display:flex; align-items:flex-end; gap:2px; height:110px; margin-top:8px" hidden></div>
