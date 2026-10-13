@@ -2,7 +2,7 @@
 
 **The cartoon wallet that means business.**
 
-Self-custody crypto wallet — 100% client-side: **23 EVM networks** (mainnet + testnet) **plus native Bitcoin, Solana and XRP sending**, a full **EIP-7702** suite, and an interface in **English + Bahasa Indonesia**. Original code, no copying. Cartoon theme built from scratch.
+Self-custody crypto wallet — 100% client-side: **23 EVM networks** built in — 17 mainnet + 6 testnet, with Moonbeam, Cronos, Aurora, Polygon zkEVM, Mode, Metis and Hoodi one more tap away in Add Network — a full **EIP-7702** suite, and an interface in **English + Bahasa Indonesia**. Original code, no copying. Cartoon theme built from scratch.
 
 > ⚠️ **Educational / self-custody tool.** Keys never leave your browser. Always verify addresses. Mainnet transactions require extra confirmation (type `YA` to proceed).
 
@@ -16,8 +16,8 @@ Self-custody crypto wallet — 100% client-side: **23 EVM networks** (mainnet + 
 | Area | What it does |
 |---|---|
 | 🐻 **Wallet** | Create (12-word seed) / import (seed or private key) with optional wallet name (auto-names Wallet, Wallet 1, …), PBKDF2-310k + AES-GCM encrypted keystore in localStorage, multi-account (m/44'/60'/0'/0/i), auto-lock, export secret. Refresh keeps the wallet unlocked (sessionStorage); closing the tab locks it again |
-| 🌐 **Networks** | 23 EVM networks built in: 17 mainnet (Ethereum, BSC, Polygon, Arbitrum, OP, Base, Avalanche, Gnosis, Celo, Sonic, Linea, Scroll, Blast, Mantle, zkSync Era, Unichain, World Chain) + 6 testnet (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet), RPC fallback chain — each mainnet carries ≥2 probe-verified RPC endpoints (2026-10-05 pass). **Add Network is a picker, not a form** — 7 further EVM chains (Moonbeam, Cronos, Aurora, Polygon zkEVM, Mode, Metis, Hoodi) are one tap and fill themselves in; every preset RPC was probed to confirm it answers `eth_chainId` with the chain it claims, and saving re-checks that live. Custom RPC still supported, and it is **used exactly as entered** — if it stops answering, the app says so by name and stops, rather than quietly falling through to a different node. That failure mode was real: a fork endpoint that was slow to answer got skipped, the wallet connected to a public node instead, and the only symptom was a funded account reporting a balance it never had. Settings → **Testnet mode** toggle hides testnets. See the `EIP-7702 support` probe in Settings for a read-only per-chain check.` |
-| 🪙 **Assets** | Native balance plus a bundled ERC-20 watchlist: **23 tokens on Ethereum mainnet** (USDT, USDC, DAI, WETH, WBTC, LINK, UNI, AAVE, SHIB, MATIC, ARB, OP, PEPE, CRV, SNX, SUSHI, COMP, MKR, LDO, rETH, cbETH, wstETH, FRAX) and a curated 3–5 on every OTHER shipped mainnet (each address probe-verified on-chain 2026-10-05 — `eth_getCode` + `decimals()` + `symbol()`, `docs/research/bridge-tokens-2026-10-05.md`; testnets carry 1–3, BSC Testnet stays native-only — no curated source exists, and a wrong address is a burnt transfer) — the list is a convenience, not a limit. **+ Add Token** sits under the list; paste an ERC-20 contract address and its name, symbol and decimals are read off the contract and shown before you commit, so a wrong paste is obvious instead of landing as an unlabelled row |
+| 🌐 **Networks** | 23 EVM networks built in: 17 mainnet (Ethereum, BSC, Polygon, Arbitrum, OP, Base, Avalanche, Gnosis, Celo, Sonic, Linea, Scroll, Blast, Mantle, zkSync Era, Unichain, World Chain) + 6 testnet (Sepolia, Amoy, Arbitrum Sepolia, OP Sepolia, Base Sepolia, BSC Testnet), RPC fallback chain — each mainnet carries ≥2 probe-verified RPC endpoints (2026-10-05 pass). **Add Network is a picker, not a form** — 7 further EVM chains (Moonbeam, Cronos, Aurora, Polygon zkEVM, Mode, Metis, Hoodi) are one tap and fill themselves in; every preset RPC was probed to confirm it answers `eth_chainId` with the chain it claims, and saving re-checks that live. Custom RPC still supported, and it is **used exactly as entered** — if it stops answering, the app says so by name and stops, rather than quietly falling through to a different node. That failure mode was real: a fork endpoint that was slow to answer got skipped, the wallet connected to a public node instead, and the only symptom was a funded account reporting a balance it never had. Settings → **Testnet mode** toggle hides testnets. See the `EIP-7702 support` probe in Settings for a read-only per-chain check. |
+| 🪙 **Assets** | Native balance plus a bundled ERC-20 watchlist: **23 tokens on Ethereum mainnet** (USDT, USDC, DAI, WETH, WBTC, LINK, UNI, AAVE, SHIB, MATIC, ARB, OP, PEPE, CRV, SNX, SUSHI, COMP, MKR, LDO, rETH, cbETH, wstETH, FRAX) and a curated 3–5 on every OTHER shipped mainnet (each address probe-verified on-chain 2026-10-05 — `eth_getCode` + `decimals()` + `symbol()`, `docs/research/bridge-tokens-2026-10-05.md`; testnets carry 1–3, BSC Testnet stays native-only — no curated source exists, and a wrong address is a burnt transfer) — the list is a convenience, not a limit. **+ Add Token** sits under the list; paste an ERC-20 contract address and its name, symbol and decimals are read off the contract and shown before you commit, so a wrong paste is obvious instead of landing as an unlabelled row. A row you added yourself carries **Remove token** on its detail sheet, matched case-insensitively against your own custom entries only — a curated list row cannot be deleted |
 | ✈️ **Send** | Native + ERC-20, gas speed (slow/normal/fast), live preview + est. gas, paste button, address validation + poisoning detection |
 | 🔄 **Swap** | Real quotes only. The try-order is **derived from the router registry**, not a hard-coded ladder: aggregators first (KyberSwap, ParaSwap), then every on-chain venue listed for the chain (Uniswap V3, Uniswap V2, SushiSwap, QuickSwap, BaseSwap). Every address in the registry was verified on-chain per chain — see `js/routers.js`. Slippage control, flip. No simulation: no route = honest error. The Swap nav button is also the Bridge entry (tap it twice to choose) |
 | 🌉 **Bridge** | LI.FI quotes (real API, fetch timeout), **native + ONE curated ERC-20** — the picker offers **up to** two options: native, plus the best common stable (USDC > USDT > USDB > DAI > WETH > WBTC) curated on BOTH the source and destination chain, so a destination twin address always exists before anything is offered (458 of 506 ordered chain pairs carry a curated ERC-20 row; the other 48 share no stable family and stay native-only). Native drops out when LI.FI deny-lists that chain's native token — live-probed 2026-10-05: Celo's native answers HTTP 400 code 1011 at every amount, while Celo ERC-20 quotes fine — so the pair shows the ERC-20 row only. ERC-20 execution is the real three-step: on-chain allowance read against the quote-bound spender → exact-amount approve (stale partial allowance is reset to 0 first, USDT-style) → re-quote with full re-validation before the bridge tx; a fresh quote naming a different spender aborts honestly, and one execution runs at a time (double-click cannot run a second flow). Anything unmappable fails closed before any network call. Fail-closed on the networks Bear Tool actually supports — the registry does not claim chains the app cannot open (2026-10-05: LI.FI rejects BSC Testnet/Amoy with HTTP 400 code 1011, so they were removed from the router list). Measured 2026-09-27: LI.FI, KyberSwap and ParaSwap all answer with no credential; 1inch (401) and Bungee/Socket (403) need a key and are not offered. **M2 (2026-10-06): the token picker is TWO columns — source token → destination twin, painted from one option list so the pair cannot disagree (the same "eth token = bnb token" shape as Swap), and the router list is now LI.FI + **Gas.zip** + **Relay**, all measured unauthenticated (Gas.zip `/v2/quotes` 200 → a ready-to-send `contractDepositTxn`, native-only by design; Relay `/quote/v2` 200 → ordered steps, the spender read out of the `approve` calldata). "Auto (Best Route)" quotes every router covering the chain pair in parallel and binds the one with the largest destination output; each adapter validates its response field-by-field against the quote context before anything can be signed. Superbridge is deliberately absent: `api.superbridge.app` answers 401 and grants access case by case — same rule that keeps 1inch out. Any router that fails is named in the error box instead of being silently dropped — reaches `#view-bridge` from the Swap chooser, no separate nav item |
@@ -137,7 +137,7 @@ is reachable (`CI=1`, or `FORK_RPC_URL` / `FORK_PORT`), so on a machine with no
 foundry the gate reports skips rather than pretending to have passed.
 
 **The browser suite needs Playwright browsers installed** (`npx playwright install
-chromium`). The 22 specs are driven by `tools/e2e.mjs`, which serves the app itself
+chromium`). The 23 specs are driven by `tools/e2e.mjs`, which serves the app itself
 and works on any platform. It is in `verify`, and it exits **5** — neither pass nor
 failure — on a machine with no browser, rather than passing without running.
 
@@ -233,25 +233,32 @@ Bear-Tool/
 │   ├── app.js          # entry: boot, router, topbar, mobile nav, wallet modals,
 │   │                   #        dashboard, network picker, add-token autodetect
 │   ├── state.js        # singleton state + pub/sub + activity persistence
+│   ├── update-guard.js # stale-tab detector: an old tab says so instead of acting
 │   ├── network.js      # networks, CHAIN_PRESETS (verified), tokens, ABIs,
 │   │                   #        EIP-7702 constants, delegation, gas price
 │   ├── wallet.js       # create/import/encrypt/decrypt/derive/sign
 │   ├── ui.js           # modal/toast/spinner/confirm/format/escape helpers
 │   ├── i18n.js         # EN/ID translations + t() + data-i18n scanning
+│   ├── errors.js       # machine failure → one sentence a person can act on
 │   ├── price.js        # keyless price cache (Binance/DexScreener/DefiLlama)
 │   ├── safetx.js       # double-submit lock + error boundary + button loading
 │   ├── send.js         # send view: preview, gas estimate, poisoning warnings
+│   ├── fee-params.js   # pure construction of the fee fields for a chosen gas speed
 │   ├── swap.js         # swap view: auto-route over the registry (real quotes only)
 │   ├── bridge.js       # bridge view: quote + execute over the router registry (no simulation)
 │   ├── bridge-routes.js# Gas.zip + Relay quote adapters (validated field-by-field)
 │   ├── eip7702.js      # delegate/revoke (chainId guard); batch/rescue/claim in tools
 │   ├── eip7702-tools.js# helper-contract batch/rescue/airdrop flows
+│   ├── eip7702-support.js # "does this node understand 7702?" probe, asked of every chain
 │   ├── deploy.js       # deploy wizard: solc compile → gas → deploy (+ 2-tx proxy) → auto-verify
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder
+│   ├── solc-worker.js  # the same compile, off the main thread
 │   ├── verify.js       # auto-verify: Sourcify v2 (keyless) then Etherscan V2 (user's key), same input
 │   ├── dapps.js        # DApps catalogue: filterable grid, category chips
+│   ├── discord.js      # the Discord view: connect, servers, channels, leave, send
 │   ├── nft.js          # NFT gallery (best-effort enumeration)
+│   ├── nft-detect.js   # owner-wide NFT auto-detect + floor price (BYO key, keyless fallback)
 │   ├── opensea.js      # NFT market actions
 │   ├── opensea-api.js  # OpenSea v2 client (needs a user-supplied API key)
 │   ├── seaport-abi.js  # Seaport ABI for list/cancel/fulfill
@@ -263,6 +270,10 @@ Bear-Tool/
 │   ├── dapp-browser.js # the in-app browser: tabs, history, omnibox, bookmarks,
 │   │                   #        pre-load gate sheet, external-open notice
 │   ├── dapp-bridge.js  # window.ethereum for same-origin pages, with refusals
+│   ├── dapp-exec.js    # wallet-side RPC answered by the WALLET, never by a node
+│   ├── walletconnect.js# WalletConnect v2 pairing & signing (Reown WalletKit)
+│   ├── native-provider.js # EIP-1193 provider injected into the Android WebView pre-page
+│   ├── native-dapp.js  # wallet-side glue for the native (Capacitor) dApp browser
 │   ├── security.js     # calldata decoding, unlimited-approval detection, URL secret hygiene
 │   ├── security-center.js # the Settings page that makes all of the above visible
 │   ├── max-amount.js   # MAX arithmetic: reserve the fee, truncate, never round up
@@ -273,7 +284,8 @@ Bear-Tool/
 ├── js/vendor/          # vendored runtime deps: ethers.umd.min.js (SRI), qrcode.min.js
 ├── assets/             # original bear + logo SVG
 ├── docs/               # PROMPT, ARCHITECTURE-FIX, DESIGN-AUDIT, SECURITY-AUDIT*,
-│                       # CHAIN-PRESETS (RPC verification table)
+│                       # CHAIN-PRESETS (RPC verification table), WC-REGISTRY-LISTING,
+│                       # research/ (dated measurement notes)
 ├── tests/              # node:test unit tests
 │   ├── e2e/            # Playwright browser suite (npm run test:e2e)
 │   └── fork/           # Anvil mainnet/testnet fork tests (run-fork-all.sh)
