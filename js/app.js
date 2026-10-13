@@ -32,6 +32,7 @@ import { renderDapps, POPULAR_DAPPS } from './dapps.js';
 import { dappBrowserOnLock } from './dapp-browser.js';
 import { renderSecurityCenter } from './security-center.js';
 import { renderDiscord, bindDiscordPanel, finishOAuthRedirect } from './discord.js';
+import { renderDex } from './dex.js';
 // scanTransaction finally has a caller. It has been written and tested since
 // before the Security Center existed, and nothing invoked it — which is why
 // that panel had to be rewritten to say the checks are not applied.
@@ -517,6 +518,7 @@ const REACHABLE_ON_MOBILE = {
   nft: 'Dashboard quick action',
   bridge: 'Second press of Swap',
   discord: 'Dashboard quick action (Discord)',
+  dex: 'Dashboard quick action (Dex)',
 };
 
 function syncMobileNav() {
@@ -673,6 +675,10 @@ export function refreshView(view) {
   // catalogue it renders before the address guard, or a locked wallet shows
   // an empty page with no way to connect.
   if (view === 'discord') renderDiscord($('#discordRoot'));
+  // The Dex renders before the guard too: the Sepolia gate and the pair form
+  // are the explanation for why nothing works, and a locked wallet showing an
+  // empty card explains nothing (same reasoning as the two branches above).
+  if (view === 'dex') renderDex($('#dexRoot'));
   if (!get('address')) return;
   if (view === 'dashboard') loadDashboard();
   // Regression f7a7ec5 -> ebc2c8a: this branch held `loadSendTokens()` until the
@@ -1953,7 +1959,7 @@ function showAccountModal() {
     <button class="modal-close" type="button" data-close-modal>✕</button>
     <h2>🐻 Accounts</h2>
     ${accounts.map((a, i) => `
-      <div class="asset-row ${i === idx ? 'active' : ''}" data-acc="${i}">
+      <div class="asset-row ${i === idx ? 'active' : ''}" data-acc="${i}"${i === idx ? ' aria-current="true"' : ''}>
         <div class="asset-icon"><svg class="asset-wallet" viewBox="0 0 32 32" width="26" height="26" aria-hidden="true" focusable="false"><g transform="translate(0,-4.5)"><rect x="3" y="12" width="26" height="17" rx="4.5" fill="#E8963C" stroke="#2D2A32" stroke-width="2"/><rect x="21.5" y="18" width="7.5" height="7" rx="2.5" fill="#FFD97A" stroke="#2D2A32" stroke-width="2"/><circle cx="25.25" cy="21.5" r="1.3" fill="#2D2A32"/></g></svg></div>
         <div class="asset-info">
           <div class="asset-name">${escapeHtml(a.name || `Account ${i + 1}`)}</div>
@@ -1967,6 +1973,14 @@ function showAccountModal() {
   `);
   $all('[data-acc]').forEach(el => el.addEventListener('click', async () => {
     const i = Number(el.dataset.acc);
+    if (i === wallet.getActiveAccountIndex()) {
+      // The row IS the live account. Running the switch flow here asked for a
+      // password, toasted "Switched account", pushed accountsChanged to every
+      // connected dApp and reloaded the dashboard — for an account that never
+      // moved (live report: "bug bisa switch wallet yang sama").
+      toast(t('acc.same'), 'info');
+      return;
+    }
     const pw = await promptPassword('Unlock to switch account');
     if (!pw) return;
     try {

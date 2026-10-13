@@ -473,6 +473,16 @@ const dynamicSkip = new Set([
   // #discordInvite (invite join row, painted with the Servers card).
   'discordStatus','discordClientId','discordToken','btnDiscordLeaveConfirm','discordInvite',
 
+  // Dex view (js/dex.js): only #dexRoot is static in dex.jsx — the chain
+  // gate, the base/quote picker, the tab strip and the panel host are all
+  // PAINTED by renderDex, because the gate and the picker depend on the
+  // live chainId and on which preset is selected. Audited: every id below
+  // has id="…" in dex.js (dexGate/dexGateTitle/dexGateHow/dexPairLabel/
+  // dexPairInfo/dexPresets/dexTabs/dexPanelHost are created by renderDex's
+  // innerHTML; dexMmStatus is created by mmHtml).
+  'dexGate','dexGateTitle','dexGateHow','dexPairLabel','dexPairInfo',
+  'dexPresets','dexTabs','dexPanelHost','dexMmStatus',
+
 ]);
 
 test('E2E-probe: every $(\'#id\') reference across ALL js files exists in the page markup', async () => {

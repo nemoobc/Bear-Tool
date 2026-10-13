@@ -32,10 +32,10 @@ function duplicateIds(ids) {
 }
 
 test.describe('Sidebar — static', () => {
-  test('order is Dashboard, Activity, Swap, NFT, DApps, then Tools, Discord, then Settings', () => {
+  test('order is Dashboard, Activity, Swap, NFT, DApps, then Tools, Discord, Dex, then Settings', () => {
     expect(sidebarViews()).toEqual([
       'dashboard', 'activity', 'swap', 'nft', 'dapps',
-      'deploy', 'discord', 'settings',
+      'deploy', 'discord', 'dex', 'settings',
     ]);
   });
 
@@ -116,7 +116,7 @@ test.describe('Sidebar — in the browser', () => {
       const s = e.querySelector('[data-i18n]');
       return s ? s.textContent.trim() : e.textContent.trim();
     }));
-    expect(labels).toEqual(['Dashboard', 'Activity', 'Swap', 'NFT', 'DApps', 'Tools', 'Discord', 'Settings']);
+    expect(labels).toEqual(['Dashboard', 'Activity', 'Swap', 'NFT', 'DApps', 'Tools', 'Discord', 'Dex', 'Settings']);
   });
 
   test('DApps opens from the sidebar', async ({ page }) => {

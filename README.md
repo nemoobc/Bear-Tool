@@ -251,6 +251,8 @@ Bear-Tool/
 │   ├── eip7702-tools.js# helper-contract batch/rescue/airdrop flows
 │   ├── eip7702-support.js # "does this node understand 7702?" probe, asked of every chain
 │   ├── deploy.js       # deploy wizard: solc compile → gas → deploy (+ 2-tx proxy) → auto-verify
+│   ├── dex.js          # Dex view: swap/chart/liquidity/market-maker over three preset Sepolia ERC-20s
+│   ├── dex-contract.js # Uniswap V2 registry (factory/router/pair ABIs) + the ERC-20 ABI the Dex uses
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder
 │   ├── solc-worker.js  # the same compile, off the main thread

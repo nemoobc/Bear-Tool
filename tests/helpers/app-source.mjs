@@ -19,7 +19,7 @@ import path from 'node:path';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 // Urutan dokumen index.html HEAD = urutan view di src/App.jsx.
-const VIEW_ORDER = ['dashboard', 'send', 'swap', 'bridge', 'discord', 'deploy', 'activity', 'nft', 'dapps', 'settings'];
+const VIEW_ORDER = ['dashboard', 'send', 'swap', 'bridge', 'discord', 'dex', 'deploy', 'activity', 'nft', 'dapps', 'settings'];
 
 export function jsxToHtmlSpelling(src) {
   return src
