@@ -8,9 +8,10 @@
 // silently start rewriting responses again. See lessons.md.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { jsModules, jsModulePaths } from './helpers/js-files.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -32,7 +33,8 @@ const BANNED = [
 ];
 
 function listJs(dir) {
-  return readdirSync(dir).filter((n) => n.endsWith('.js')).map((n) => join(dir, n));
+  // Recursive — js/dex/*.js must be audited for relay/SW code like the rest.
+  return jsModulePaths(dir);
 }
 
 test('no dead public relay or deleted proxy piece appears in js/', () => {
@@ -56,7 +58,7 @@ test('the deleted proxy modules stay deleted', () => {
 });
 
 test('no service worker registration in shipped js/ (a SW could rewrite responses silently)', () => {
-  const files = readdirSync(join(root, 'js')).filter((n) => n.endsWith('.js'));
+  const files = jsModules(); // recursive — a folder must not hide a listener
   const regs = files
     .filter((n) => readFileSync(join(root, 'js', n), 'utf8').includes('serviceWorker'))
     .map((n) => 'js/' + n);

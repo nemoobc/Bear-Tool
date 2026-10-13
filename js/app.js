@@ -32,7 +32,7 @@ import { renderDapps, POPULAR_DAPPS } from './dapps.js';
 import { dappBrowserOnLock } from './dapp-browser.js';
 import { renderSecurityCenter } from './security-center.js';
 import { renderDiscord, bindDiscordPanel, finishOAuthRedirect } from './discord.js';
-import { renderDex } from './dex.js';
+import { renderDex } from './dex/index.js';
 // scanTransaction finally has a caller. It has been written and tested since
 // before the Security Center existed, and nothing invoked it — which is why
 // that panel had to be rewritten to say the checks are not applied.
@@ -678,7 +678,7 @@ export function refreshView(view) {
   // The Dex renders before the guard too: the Sepolia gate and the pair form
   // are the explanation for why nothing works, and a locked wallet showing an
   // empty card explains nothing (same reasoning as the two branches above).
-  if (view === 'dex') renderDex($('#dexRoot'));
+  if (view === 'dex') renderDex($('#dexRoot'), { fresh: true });
   if (!get('address')) return;
   if (view === 'dashboard') loadDashboard();
   // Regression f7a7ec5 -> ebc2c8a: this branch held `loadSendTokens()` until the
@@ -1499,7 +1499,7 @@ function resetLock() {
  * @param {boolean} on
  * @param {() => void} [redraw] re-render whatever is showing the filtered list
  */
-function setTestnetVisible(on, redraw) {
+export function setTestnetVisible(on, redraw) {
   const settings = get('settings');
   settings.testnet = on;
   set('settings', { ...settings });

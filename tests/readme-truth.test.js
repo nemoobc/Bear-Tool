@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { jsModules } from './helpers/js-files.mjs';
 
 // network.js touches localStorage at import time (testnet-mode preference).
 const store = new Map();
@@ -30,8 +31,17 @@ const readme = readFileSync(join(root, 'README.md'), 'utf8');
 const { NETWORKS, CHAIN_PRESETS } = await import(join(root, 'js/network.js'));
 
 test('every js/ module is named in the README structure tree', () => {
-  const modules = readdirSync(join(root, 'js')).filter((f) => f.endsWith('.js'));
-  const missing = modules.filter((f) => !readme.includes(f));
+  // Recursive walk (js/dex/* included). The tree prints a nested module as a
+  // basename indented under its folder line, so a flat `readme.includes(rel)`
+  // would never match 'dex/index.js' — and would report a healthy README as
+  // broken. Validate the way the tree actually prints: basename present, and
+  // for a nested module the folder present too.
+  const modules = jsModules();
+  const missing = modules.filter((f) => {
+    if (!readme.includes(f.split('/').pop())) return true; // basename missing
+    const dir = f.includes('/') ? `${f.slice(0, f.indexOf('/'))}/` : null;
+    return dir ? !readme.includes(dir) : false; // folder line missing
+  });
   assert.deepEqual(missing, [],
     `README structure tree lost these modules: ${missing.join(', ')}`);
 });

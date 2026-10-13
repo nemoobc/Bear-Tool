@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { appSource } from './helpers/app-source.mjs';
+import { jsModules } from './helpers/js-files.mjs';
 
 // ── minimal DOM stub (enough for modules that touch document) ──
 const store = new Map();
@@ -289,7 +290,9 @@ test('E2E-probe: network icons share ONE renderer (bridge picker == network list
   const fs = await import('node:fs');
   const path = await import('node:path');
   const dir = new URL('../js/', import.meta.url);
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));
+  // Recursive: a flat walk stopped seeing the Dex once it moved into js/dex/,
+  // which would have quietly dropped this check off the module it guards.
+  const files = jsModules();
   // Exactly one definition, in token-logo.js — the network LIST (app.js) and
   // the Bridge chain PICKER (token-picker.js) must render the same marks.
   // The picker used to paint the raw emoji `n.icon` field instead, so the
@@ -473,15 +476,16 @@ const dynamicSkip = new Set([
   // #discordInvite (invite join row, painted with the Servers card).
   'discordStatus','discordClientId','discordToken','btnDiscordLeaveConfirm','discordInvite',
 
-  // Dex view (js/dex.js): only #dexRoot is static in dex.jsx — the chain
-  // gate, the base/quote picker, the tab strip and the panel host are all
-  // PAINTED by renderDex, because the gate and the picker depend on the
-  // live chainId and on which preset is selected. Audited: every id below
-  // has id="…" in dex.js (dexGate/dexGateTitle/dexGateHow/dexPairLabel/
-  // dexPairInfo/dexPresets/dexTabs/dexPanelHost are created by renderDex's
-  // innerHTML; dexMmStatus is created by mmHtml).
-  'dexGate','dexGateTitle','dexGateHow','dexPairLabel','dexPairInfo',
-  'dexPresets','dexTabs','dexPanelHost','dexMmStatus',
+  // Dex view (js/dex/*): only #dexRoot is static in dex.jsx — the welcome
+  // screen, the chain gate, the tab strip and every panel body are PAINTED by
+  // renderDex / the panel renderers, because they depend on the live chainId,
+  // the welcome dismissal and which feature is active. Audited: each id below
+  // is created by renderDex's innerHTML (welcome + gate + tabs + host) or by a
+  // panel's markup (mm status). Nothing here is a typo — each is assigned via
+  // an id="…" string in js/dex/index.js.
+  'dexWelcome','dexWelcomeTitle','dexWelcomeSub','dexStartHere','dexWorkspace',
+  'dexGate','dexGateTitle','dexGateHow','dexGateGo','dexPairInfo',
+  'dexTabs','dexPanelHost','dexMmStatus','dexSwapFrom',
 
 ]);
 
@@ -491,7 +495,9 @@ test('E2E-probe: every $(\'#id\') reference across ALL js files exists in the pa
   const html = appSource();
   const htmlIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
   const dir = path.resolve(fileURLToPath(new URL('../js/', import.meta.url)));
-  const files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
+  // Recursive, so js/dex/index.js is held to the same "every $() id exists"
+  // rule as the flat modules — a folder must not exempt its contents.
+  const files = jsModules();
   const missing = [];
   for (const f of files) {
     const content = fs.readFileSync(path.join(dir, f), 'utf8');

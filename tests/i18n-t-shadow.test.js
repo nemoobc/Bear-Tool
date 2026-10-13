@@ -10,7 +10,8 @@
 // itself, never a shadow.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { jsModules } from './helpers/js-files.mjs';
 
 const dir = new URL('../js/', import.meta.url);
 const IMPORTS_T = /import\s*\{[^}]*\bt\b[^}]*\}\s*from\s*'\.\/i18n\.js'/;
@@ -24,7 +25,8 @@ const SHADOWS = [
 ];
 
 test('i18n: a module that imports t never shadows it with a local binding', () => {
-  const files = readdirSync(dir).filter((f) => f.endsWith('.js'));
+  // Recursive: js/dex/index.js imports t and must not shadow it either.
+  const files = jsModules();
   const importing = files.filter((f) => IMPORTS_T.test(readFileSync(new URL(f, dir), 'utf8')));
   assert.ok(importing.length >= 8,
     `expected the known i18n modules, found ${importing.length}: ${importing.join(', ')}`);

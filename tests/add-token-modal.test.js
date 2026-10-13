@@ -16,7 +16,8 @@
 // boleh dirujuk lagi: hanya currentChainId (dapp-exec) yang boleh ada.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { jsModules } from './helpers/js-files.mjs';
 
 const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 
@@ -45,8 +46,9 @@ test('add-token: bekas global non-EVM tidak dirujuk lagi', () => {
   const bare = [...app.matchAll(/\bcurrentChain(?!Id)\b/g)];
   assert.deepEqual(bare.map((m) => m.input.slice(m.index - 40, m.index + 30)), [],
     'currentChain (bukan currentChainId) masih dirujuk di app.js');
-  // Seluruh js/: nama yang sudah mati tidak boleh hidup lagi.
-  for (const f of readdirSync(new URL('../js/', import.meta.url)).filter((x) => x.endsWith('.js'))) {
+  // Seluruh js/ (rekursif — js/dex/ ikut diperiksa): nama yang sudah mati
+  // tidak boleh hidup lagi.
+  for (const f of jsModules()) {
     const src = readFileSync(new URL(`../js/${f}`, import.meta.url), 'utf8');
     for (const dead of ['isNonEvmNetwork', 'NON_EVM_CHAINS', 'nonEvmSend', 'chain-btc', 'chain-sol', 'chain-xrp']) {
       assert.ok(!src.includes(dead), `${f}: bekas non-EVM "${dead}" masih muncul`);

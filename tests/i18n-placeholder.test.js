@@ -13,6 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { jsModules } from './helpers/js-files.mjs';
 
 const i18nSrc = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
 
@@ -38,7 +39,9 @@ function paramCalls(src) {
 }
 
 function jsFiles() {
-  return readdirSync(new URL('../js/', import.meta.url)).filter((f) => f.endsWith('.js'));
+  // Recursive — js/dex/*.js carries t() calls that must be held to the same
+  // placeholder contract as every other module.
+  return jsModules();
 }
 
 test('i18n: setiap t(key, params) punya {{param}} lengkap di value en', () => {

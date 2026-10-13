@@ -94,14 +94,21 @@ jobs:
           echo "Sections: $SECTIONS_OPEN open, $SECTIONS_CLOSE close"
           [ "$SECTIONS_OPEN" -eq "$SECTIONS_CLOSE" ] || { echo "FAIL: Section tag mismatch"; exit 1; }
 
-          # Check all views have IDs (in index.html or the React views)
+          # Every view file must carry exactly its own id — set equality, not a
+          # hardcoded count. A number here rots the moment a view is added: the
+          # Dex view landed as the 11th and this step failed every run on master
+          # while claiming 10 was "intentional". The files are the truth.
           VIEWS=$(grep -h -oP 'id="view-\K[^"]+' index.html src/views/*.jsx | sort)
           echo "Views found: $(echo $VIEWS | tr '\n' ' ')"
-          VIEW_COUNT=$(echo "$VIEWS" | wc -l)
-          # 10 views: view-eip7702 was intentionally removed — its suite lives in
-          # view-deploy now (comment at index.html:505 "moved here from the old
-          # separate view-eip7702"). The old 11 was stale and blocked every run.
-          [ "$VIEW_COUNT" -eq 10 ] || { echo "FAIL: Expected 10 views, got $VIEW_COUNT"; exit 1; }
+          VIEW_FILES=$(ls src/views/*.jsx | xargs -n1 basename | sed 's/\.jsx$//' | sort)
+          DIFF=$(comm -3 <(echo "$VIEWS") <(echo "$VIEW_FILES") | tr -d ' \t')
+          if [ -n "$DIFF" ]; then
+            echo "FAIL: view id= and src/views/*.jsx disagree: $DIFF"
+            echo "  (a view file without id=\"view-…\", or an id with no file)"
+            exit 1
+          fi
+          VIEW_COUNT=$(echo "$VIEWS" | grep -c .)
+          echo "Views: $VIEW_COUNT (one per src/views/*.jsx)"
 
           # Check nav items match views
           NAV_VIEWS=$(grep -oP 'data-view="\K[^"]+' index.html | sort -u)

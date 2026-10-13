@@ -1,0 +1,315 @@
+/* ═══════════════════════════════════════════════════════════════
+   DEX — the Sepolia AMM view.
+   The three rows used to be one undifferentiated pile of chunky
+   buttons: pair chips and feature tabs wore the SAME teal pill, so
+   nothing read as primary and "tombol polos" was the honest report.
+   Now there is a spine:
+     section label → segmented tab strip (jejeran pilihan) → panel.
+   Chips pick a coin; the strip picks a FEATURE; only one is loud.
+   ═══════════════════════════════════════════════════════════════ */
+
+.dex-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  opacity: 0.65;
+  margin: 18px 0 8px;
+}
+.dex-section::after {
+  content: "";
+  flex: 1;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--ink) 0 6px, transparent 6px 12px);
+  opacity: 0.25;
+}
+.dex-section:first-child { margin-top: 0; }
+
+/* Feature tabs — a segmented strip, NOT a row of separate buttons.
+   Every option sits in one bordered rail; the active one is the only
+   filled cell, so the eye reads "a choice of one", not "five buttons". */
+.dex-tabstrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  background: var(--cream);
+  border: var(--border-thick);
+  border-radius: 14px;
+}
+.dex-tab {
+  flex: 1 1 auto;
+  min-width: 96px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.08s;
+}
+.dex-tab:hover { background: rgba(45, 42, 50, 0.07); }
+.dex-tab[aria-pressed="true"] {
+  background: var(--honey);
+  border-color: var(--ink);
+  box-shadow: var(--shadow);
+  font-weight: 700;
+}
+.dex-tab:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+
+/* Coin chips — a palette of choices, deliberately FLatter and smaller
+   than the tabs so a chip can never be mistaken for a feature switch. */
+.dex-chiprow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dex-chiplabel {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--ink);
+  opacity: 0.7;
+  width: 54px;
+  flex: 0 0 auto;
+}
+.dex-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--white);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.08s, background 0.15s, box-shadow 0.15s;
+}
+.dex-chip:hover { transform: translateY(-1px); }
+.dex-chip[aria-pressed="true"] {
+  background: var(--mint);
+  box-shadow: var(--shadow);
+}
+.dex-chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.dex-chip img, .dex-chip svg { width: 18px; height: 18px; }
+
+/* Pair / feature separation + the live pair strip. */
+.dex-pairbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-top: 10px;
+  border: 2px dashed var(--ink);
+  border-radius: 10px;
+  background: var(--white);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.82rem;
+}
+.dex-pairbar .addr { opacity: 0.55; font-size: 0.72rem; word-break: break-all; }
+.dex-empty {
+  padding: 22px 16px;
+  text-align: center;
+  border: 2px dashed var(--ink);
+  border-radius: 12px;
+  background: var(--cream);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.88rem;
+  opacity: 0.85;
+}
+.dex-panel { animation: dex-fade 0.18s ease; }
+@keyframes dex-fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .dex-panel { animation: none; } }
+
+/* .field-label marks every Dex form label (11 uses across the panels) and
+   had NO rule at all, so those labels rendered as raw inline text sitting on
+   the inputs — the "gajelas" look. One consistent block-level label fixes
+   every panel's spacing and weight at once. */
+.field-label {
+  display: block;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  opacity: 0.8;
+  margin-bottom: 6px;
+}
+
+/* ── launchpad / Create panel ─────────────────────────────────── */
+.dex-create-top { display: flex; gap: 16px; align-items: flex-start; }
+.dex-create-preview {
+  position: relative; flex: 0 0 132px; width: 132px; height: 132px;
+  border: 3px dashed var(--ink); border-radius: 16px; background: var(--cream);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.dex-create-preview img { width: 100%; height: 100%; object-fit: cover; }
+.dex-create-preview #dexCreateImgEmpty { padding: 10px; text-align: center; }
+.sr-file {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer;
+}
+/* The fields own the remaining width: on a desktop row the inputs must span
+   it, otherwise a 132px picture sits beside three 180px boxes and half the
+   card is empty — the "gajelas" look. */
+.dex-create-fields { flex: 1 1 auto; min-width: 0; }
+.dex-create-fields input,
+.dex-create-fields textarea { display: block; width: 100%; }
+.dex-create-curve {
+  margin-top: 16px; padding: 12px;
+  border: 2px solid var(--ink); border-radius: 12px; background: var(--cream);
+}
+/* Fixed box height: the canvas paints 90px of curve, the caption one line.
+   Left to stretch, the card grew a ~200px void under the chart. */
+.dex-create-curve canvas {
+  display: block; width: 100%; height: 90px; margin: 8px 0;
+}
+@media (max-width: 640px) {
+  .dex-create-top { flex-direction: column; }
+  .dex-create-preview { align-self: center; }
+}
+
+/* ── swap: the two-box Sell ↑ flip ↓ Buy shape ────────────────── */
+/* Studied on Uniswap/Jupiter: both sides visible at once, amount typed
+   inside each box, coin chosen on the right. A single "From ▾ + amount"
+   form hides what you are buying — the "gajelas" complaint. */
+.dex-swapbox {
+  border: 2px solid var(--ink); border-radius: 14px;
+  background: var(--cream); padding: 12px;
+}
+.dex-swapbox-label {
+  font-family: 'Fredoka', sans-serif; font-size: 0.72rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.6; margin-bottom: 6px;
+}
+.dex-swapbox-row { display: flex; align-items: center; gap: 10px; }
+.dex-swapbox input, .dex-swapbox-amount {
+  flex: 1; min-width: 0; display: block; width: 100%;
+  border: none; background: transparent; outline: none;
+  font-family: 'Fredoka', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--ink);
+}
+.dex-swapbox input::placeholder { opacity: 0.35; }
+.dex-swapbox-token {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 12px; border: 2px solid var(--ink); border-radius: 999px;
+  background: var(--white); font-family: 'Fredoka', sans-serif; font-weight: 700;
+  color: var(--ink); font-size: 0.9rem;
+}
+.dex-swapbox-token select, .dex-swapbox-token--fixed { cursor: pointer; }
+.dex-swapbox-token img, .dex-swapbox-token svg { width: 20px; height: 20px; }
+select.dex-swapbox-token { appearance: none; padding-right: 12px; }
+.dex-swapbox-usd { margin-top: 4px; min-height: 1.1em; opacity: 0.7; }
+.dex-swap-flip {
+  display: block; margin: -6px auto; position: relative; z-index: 1;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 2px solid var(--ink); background: var(--white);
+  font-size: 1.1rem; line-height: 1; cursor: pointer; color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.dex-swap-flip:hover { background: var(--honey); }
+.dex-swap-flip:focus-visible { outline: 3px solid var(--accent); }
+
+/* ── liquidity list ──────────────────────────────────────────── */
+/* The panel IS the list: three possible pools, each stating its real
+   on-chain state (reserves, or "no pool yet") before you open it. */
+.dex-pool-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; width: 100%; text-align: left;
+  padding: 12px 14px; margin-bottom: 8px;
+  border: 2px solid var(--ink); border-radius: 12px; background: var(--white);
+  font-family: 'Fredoka', sans-serif; color: var(--ink); cursor: pointer;
+  transition: transform 0.08s, box-shadow 0.15s, background 0.15s;
+}
+.dex-pool-row:hover { transform: translateY(-1px); box-shadow: var(--shadow); background: var(--cream); }
+.dex-pool-row:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.dex-pool-pair { display: inline-flex; align-items: center; gap: 10px; font-size: 0.95rem; }
+.dex-pool-logos { display: inline-flex; }
+.dex-pool-logos > * + * { margin-left: -8px; }
+.dex-pool-logos img, .dex-pool-logos svg { width: 24px; height: 24px; }
+.dex-pool-state { opacity: 0.75; text-align: right; }
+.dex-subhead {
+  font-family: 'Fredoka', sans-serif; font-weight: 700; font-size: 1rem;
+  margin: 14px 0 8px; padding-top: 12px; border-top: 2px dashed var(--ink);
+}
+
+/* The chart now sits inside the Swap screen, above the Sell/Buy boxes. */
+.dex-chart-block {
+  border: 2px solid var(--ink); border-radius: 14px;
+  background: var(--white); padding: 10px; margin-bottom: 14px;
+}
+.dex-chart-block #dexChartCanvas { width: 100%; }
+.dex-chart-block #dexChartStats, .dex-chart-block #dexChartEmpty { padding: 4px 6px 0; }
+
+/* ── live token list (the Dex home screen) ───────────────────── */
+.dex-token-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 12px; margin-bottom: 8px;
+  border: 2px solid var(--ink); border-radius: 12px; background: var(--white);
+  font-family: 'Fredoka', sans-serif; color: var(--ink); cursor: pointer;
+  transition: transform 0.08s, box-shadow 0.15s, background 0.15s;
+}
+.dex-token-row:hover { transform: translateY(-1px); box-shadow: var(--shadow); background: var(--cream); }
+.dex-token-row:focus-visible { outline: 3px solid var(--accent); }
+.dex-token-face {
+  flex: 0 0 40px; width: 40px; height: 40px; border-radius: 50%; overflow: hidden;
+  border: 2px solid var(--ink); background: var(--cream);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.dex-token-face img { width: 100%; height: 100%; object-fit: cover; }
+.dex-token-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dex-token-meta strong { font-size: 0.95rem; }
+.dex-token-bar { font-size: 0.72rem; opacity: 0.75; }
+.dex-token-tag {
+  flex: 0 0 auto; padding: 4px 10px; border-radius: 999px;
+  background: var(--cream); border: 2px solid var(--ink);
+  font-weight: 700; font-size: 0.7rem;
+}
+.dex-token-tag--curve { background: var(--honey); }
+
+/* add-liquidity: amount + Max on one row, balance under it, live price. */
+.dex-amount-row { display: flex; gap: 8px; align-items: stretch; }
+.dex-amount-row .input { flex: 1; min-width: 0; }
+.dex-max { flex: 0 0 auto; white-space: nowrap; }
+.dex-balance { margin-top: 4px; opacity: 0.7; }
+.dex-price-preview {
+  margin-top: 12px; padding: 10px 12px;
+  border: 2px dashed var(--ink); border-radius: 10px; background: var(--cream);
+  font-family: 'Fredoka', sans-serif; font-size: 0.85rem;
+}
+
+/* ── the coin picker: one row of choice buttons, at the very top ── */
+/* User: "tombol pilihan taro paling aja berjejer". Tap a coin to make it the
+   base; the other side follows automatically. No base/quote dance. */
+.dex-coinstrip {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 6px; border: var(--border-thick); border-radius: 14px;
+  background: var(--cream);
+}
+.dex-coin {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border: 2px solid var(--ink); border-radius: 999px;
+  background: var(--white); font-family: 'Fredoka', sans-serif; font-weight: 700;
+  color: var(--ink); cursor: pointer;
+  transition: transform 0.08s, background 0.15s, box-shadow 0.15s;
+}
+.dex-coin:hover { transform: translateY(-1px); }
+.dex-coin[aria-pressed="true"] { background: var(--mint); box-shadow: var(--shadow); }
+.dex-coin:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.dex-coin img, .dex-coin svg { width: 22px; height: 22px; }
+.dex-pairbar-coin { display: inline-flex; align-items: center; gap: 6px; }
+.dex-pairbar-note { margin-left: auto; opacity: 0.6; font-size: 0.75rem; }
+
+.dex-mm-balances {
+  padding: 8px 12px; margin-bottom: 12px;
+  border: 2px dashed var(--ink); border-radius: 10px; background: var(--cream);
+}

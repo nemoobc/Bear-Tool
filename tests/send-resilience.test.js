@@ -8,9 +8,12 @@ import fs from 'node:fs';
 import { withTimeout, waitForReceipt, RPC_TIMEOUT_MS, CONFIRM_TIMEOUT_MS } from '../js/safetx.js';
 import { getNetworkById } from '../js/network.js';
 import { appSource } from './helpers/app-source.mjs';
+import { jsModules } from './helpers/js-files.mjs';
 
 const read = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
-const jsFiles = fs.readdirSync(new URL('../js', import.meta.url)).filter(f => f.endsWith('.js'));
+// Recursive: js/dex/index.js must be covered by these checks too. A flat
+// readdir would silently stop seeing the Dex the moment it got a folder.
+const jsFiles = jsModules();
 
 // ── runtime: withTimeout ──
 test('withTimeout rejects with BEAR_TIMEOUT instead of hanging forever', async () => {
@@ -106,7 +109,10 @@ test('every module that waits for a receipt imports waitForReceipt', () => {
     if (f === 'safetx.js') continue; // it is the module that defines it
     const src = read('js/' + f);
     if (!src.includes('waitForReceipt(')) continue;
-    assert.match(src, /import \{[^}]*waitForReceipt[^}]*\} from '\.\/safetx\.js'/,
+    // Any depth: '../safetx.js' from js/dex/ is the same import as
+    // './safetx.js' from js/. Pinning './' alone would have failed the Dex
+    // module for moving into a folder.
+    assert.match(src, /import \{[^}]*waitForReceipt[^}]*\} from '\.{1,2}\/safetx\.js'/,
       `js/${f} uses waitForReceipt but does not import it`);
   }
 });
