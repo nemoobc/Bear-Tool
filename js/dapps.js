@@ -131,7 +131,7 @@ async function renderTabsEntry(container) {
   const info = await nativeTabs();          // null on web, or with no session
   const tabs = (info && info.tabs) || [];
   if (!tabs.length) return;
-  const label = (t) => t.title || t.url || 'New tab';
+  const label = (tab) => tab.title || tab.url || 'New tab';
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.id = 'dappTabsBtn';
@@ -148,9 +148,9 @@ async function renderTabsEntry(container) {
       <h3>Browser tabs</h3>
       <p class="small">The in-app browser still has ${list.length} tab${list.length === 1 ? '' : 's'} open. Pick one to go back.</p>
       <div class="dapp-tabs-list" role="list">
-        ${list.map((t, i) => `<button type="button" class="dapp-tabs-row" role="listitem" data-i="${i}">
-          <span class="dapp-tabs-row-t">${escapeHtml(label(t))}</span>
-          <span class="dapp-tabs-row-u">${escapeHtml(t.url || '')}</span>
+        ${list.map((tab, i) => `<button type="button" class="dapp-tabs-row" role="listitem" data-i="${i}">
+          <span class="dapp-tabs-row-t">${escapeHtml(label(tab))}</span>
+          <span class="dapp-tabs-row-u">${escapeHtml(tab.url || '')}</span>
         </button>`).join('')}
       </div>`, { wide: true });
     const box = document.getElementById('modalBox');

@@ -96,6 +96,20 @@ function shortAddr(a) {
   return s ? s.slice(0, 6) + '…' + s.slice(-4) : '?';
 }
 
+// wei (hex 0x… or decimal string) → "0.123 native". Pure BigInt, no ethers
+// import (native-dapp.js stays lean); an unparseable value falls back to the
+// raw string so the user still sees the number the dApp sent, never a blank.
+function formatWeiNative(wei) {
+  if (wei == null || wei === '' || wei === '0x' ) return '0';
+  try {
+    const w = BigInt(wei);
+    if (w === 0n) return '0';
+    const whole = w / 10n ** 18n;
+    const frac = (w % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
+    return (frac ? `${whole}.${frac}` : `${whole}`) + ' native';
+  } catch { return String(wei).slice(0, 40); }
+}
+
 function hexToBytes(hex) {
   const s = String(hex || '');
   if (!/^0x[0-9a-fA-F]*$/.test(s)) return s;
@@ -522,14 +536,20 @@ async function handleNativeRpc({ id, origin, payload }) {
     }
     const provider = get('provider');
     if (!provider) return respondError({ code: -32000, message: 'No provider for the current network.' });
+    // Money line for the native sheet, matching the iframe path's
+    // describeSignCall: value in native units (not raw hex) and the calldata
+    // itself (truncated, not just a byte count) — a user signing a swap must
+    // see what the dApp is spending, not "0x2386f26fc10000" and "244 bytes".
     const ok = await askConfirm({
       title: t('sign.txTitle'),
       rows: [
         { k: t('site.chain'), v: chainId },
         { k: t('site.site'), v: site },
-        { k: t('site.to'), v: shortAddr(txReq.to || '') },
-        { k: t('site.value'), v: String(txReq.value || '0x0') },
-        { k: t('site.data'), v: txReq.data && txReq.data !== '0x' ? (String(txReq.data).length / 2 - 1) + ' bytes' : 'none' },
+        { k: t('site.to'), v: txReq.to ? shortAddr(txReq.to) : t('sign.contractCreation') },
+        { k: t('site.value'), v: formatWeiNative(txReq.value) },
+        { k: t('site.data'), v: txReq.data && txReq.data !== 'x' && txReq.data !== '0x'
+            ? String(txReq.data).slice(0, 74) + (String(txReq.data).length > 74 ? '…' : '')
+            : t('cf.none.a.plain.transfer') },
       ],
       confirmText: t('sign.action'),
     });

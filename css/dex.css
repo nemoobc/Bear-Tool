@@ -24,6 +24,13 @@
   font-size: 0.88rem;
   opacity: 0.85;
 }
+/* Richer empty state: a glyph, a headline, the message, and a hint. The old
+   one was a single line, which read as "broken" rather than "nothing here yet".
+   Layout is a small vertical stack, all centred. */
+.dex-empty-ic { display: block; font-size: 1.8rem; line-height: 1; margin-bottom: 6px; opacity: 0.7; }
+.dex-empty-title { display: block; font-family: 'Fredoka', sans-serif; font-weight: 700; font-size: 1rem; margin-bottom: 4px; }
+.dex-empty-msg { display: block; margin: 0 0 4px; font-size: 0.86rem; }
+.dex-empty-hint { display: block; margin: 0; font-size: 0.78rem; opacity: 0.7; }
 .dex-panel { animation: dex-fade 0.18s ease; }
 @keyframes dex-fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .dex-panel { animation: none; } }
@@ -169,7 +176,20 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
   border-left: 4px solid var(--mint);
   background: var(--cream);
   font-size: 0.8rem;
+  position: relative;   /* the depth bar is painted behind the row's cells */
+  overflow: hidden;
 }
+/* Fill depth: a faint bar sized to this trade vs the largest on the tape, so
+   size is readable at a glance. aria-hidden in the markup — decorative. */
+.dex-trade-depth {
+  position: absolute; left: 0; top: 0; bottom: 0; z-index: 0;
+  background: currentColor; opacity: 0.07; pointer-events: none;
+}
+.dex-trade-row > .dex-trade-side,
+.dex-trade-row > .dex-trade-tok,
+.dex-trade-row > .dex-trade-price,
+.dex-trade-row > .dex-trade-eth,
+.dex-trade-row > .dex-trade-when { position: relative; z-index: 1; }
 .dex-trade-row.sell { border-left-color: var(--berry); }
 .dex-trade-side { font-family: 'Fredoka', sans-serif; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
 .dex-trade-row.buy .dex-trade-side { color: var(--mint); }

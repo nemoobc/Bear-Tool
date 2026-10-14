@@ -228,3 +228,29 @@ test('the reserve and the ETH actually held cannot drift apart', async () => {
   assert.equal(reserve, held,
     'reserve + unpaid creator fees must equal the ETH held — this is the identity claimFees() depends on');
 });
+
+test('quoteSell matches the contract sell() EXACTLY — fee off the OUTPUT, not the input', () => {
+  // Regression guard for the ~0.42% over-quote: an earlier quoteSell took the
+  // fee off tokensIn and priced the net, while the contract (pump-source.js
+  // sell()) runs the curve on the FULL tokensIn and subtracts the fee from the
+  // QUOTE OUTPUT. The two orderings are not algebraically equal under floor
+  // division — the local preview paid the seller more than sell() ever would,
+  // and the gap widened on larger sells. Pin it to the contract's numbers.
+  const onChainSell = (vE, vT, tokensIn) => {
+    const gross = (vE * tokensIn) / (vT + tokensIn);      // quoteOut pre-fee
+    const fee = (gross * FEE_TOTAL_BPS) / BPS;
+    return gross - fee;                                    // net quoteOut
+  };
+  for (const size of [ETH(0.01), ETH(1), ETH(5), ETH(50)]) {
+    const vE = VIRTUAL_QUOTE, vT = VIRTUAL_TOKENS;
+    const s = quoteSell(vE, vT, size);
+    assert.equal(s.quoteOut, onChainSell(vE, vT, size),
+      `quoteSell must equal sell()'s payout for ${size} wei — a preview that over-quotes is a preview that lies`);
+    // And the full tokensIn (not a net) rejoins the pool, per sell().
+    assert.equal(s.nextVirtualTokens, vT + size,
+      'the full tokensIn must rejoin the virtualTokens reserve');
+    // Only the payout leaves the quote reserve — the fee's protocol share is
+    // settled against realQuoteReserve separately, not the virtual reserve.
+    assert.equal(s.nextVirtualQuote, vE - s.quoteOut);
+  }
+});

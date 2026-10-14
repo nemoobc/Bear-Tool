@@ -86,10 +86,21 @@ export async function verifyEngineIntegrity(win = globalThis) {
 /**
  * Load the pinned build once. Returns the global, or null when the CDN is
  * unreachable — the caller falls back to bars, it does not lie about data.
+ *
+ * The attempt is CACHED (module-scoped per-window): when the CDN is blocked,
+ * chartEngine(win) never becomes truthy, so without this cache the 15s history
+ * repaint re-appended a fresh <script> on every tick — a pile of dead script
+ * tags and a repeated network hit for a CDN that is never going to answer.
+ * Now a blocked CDN is tried exactly once and every later call returns the
+ * cached null (bars fallback) immediately.
  */
+let loadAttempt = null;
+
 export function loadChartEngine(doc = globalThis.document, win = globalThis) {
-  if (chartEngine(win)) return Promise.resolve(chartEngine(win));
-  return new Promise((resolve) => {
+  const engine = chartEngine(win);
+  if (engine) return Promise.resolve(engine);
+  if (loadAttempt) return loadAttempt;
+  loadAttempt = new Promise((resolve) => {
     const s = doc.createElement('script');
     s.src = LWC_URL;
     s.integrity = LWC_SRI;
@@ -121,30 +132,45 @@ export async function drawCandles(host, candles, opts = {}) {
   // clearly says "no trades yet" while still being a chart.
   if (!LWC) return null;
 
+  if (!LWC) return null;
+
+  // Two themes, one palette per theme in ONE place. The coin page moved onto a
+  // near-black exchange surface (css/exchange.css) and the old hardcoded
+  // #2D2A32 axes were drawn in the cartoon ink colour: near-black on
+  // near-black, i.e. an empty-looking chart on the Dex's central screen.
+  // `theme: 'dark'` is the same chart with the exchange palette; nothing about
+  // the data or the series changes.
+  const dark = opts.theme === 'dark';
+  const theme = dark
+    ? { text: '#848e9c', grid: 'rgba(132,142,156,0.10)', border: 'rgba(30,35,41,1)',
+        up: '#0ecb81', down: '#f6465d', volUp: 'rgba(14,203,129,0.32)', volDown: 'rgba(246,70,93,0.32)' }
+    : { text: '#2D2A32', grid: 'rgba(45,42,50,0.08)', border: 'rgba(45,42,50,0.2)',
+        up: '#1B8F4E', down: '#D64545', volUp: 'rgba(27,143,78,0.5)', volDown: 'rgba(214,69,69,0.5)' };
+
   const chart = LWC.createChart(host, {
     width: host.clientWidth || 320,
     height: opts.height || 220,
     layout: {
       background: { color: 'transparent' },
-      textColor: opts.textColor || '#2D2A32',
+      textColor: opts.textColor || theme.text,
     },
     grid: {
-      vertLines: { color: 'rgba(45,42,50,0.08)' },
-      horzLines: { color: 'rgba(45,42,50,0.08)' },
+      vertLines: { color: theme.grid },
+      horzLines: { color: theme.grid },
     },
-    rightPriceScale: { borderColor: 'rgba(45,42,50,0.2)' },
-    timeScale: { borderColor: 'rgba(45,42,50,0.2)' },
+    rightPriceScale: { borderColor: theme.border },
+    timeScale: { borderColor: theme.border },
     autoSize: true,
   });
 
   // v5 API: addSeries(CandlestickSeries, opts) — v4's addCandlestickSeries is
   // gone. Pinned by a test so an upstream rename cannot land silently.
   const candleSeries = chart.addSeries(LWC.CandlestickSeries, {
-    upColor: '#1B8F4E',
-    downColor: '#D64545',
+    upColor: theme.up,
+    downColor: theme.down,
     borderVisible: false,
-    wickUpColor: '#1B8F4E',
-    wickDownColor: '#D64545',
+    wickUpColor: theme.up,
+    wickDownColor: theme.down,
   });
   candleSeries.setData(candles.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
 
@@ -155,7 +181,7 @@ export async function drawCandles(host, candles, opts = {}) {
     });
     volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     volSeries.setData(candles.map(({ time, volume, close, open }) => ({
-      time, value: volume, color: close >= open ? 'rgba(27,143,78,0.5)' : 'rgba(214,69,69,0.5)',
+      time, value: volume, color: close >= open ? theme.volUp : theme.volDown,
     })));
   }
 

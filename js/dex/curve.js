@@ -131,13 +131,14 @@ export function quoteBuy(virtualQuote, virtualTokens, ethIn) {
  *
  * @param {bigint} virtualQuote
  * @param {bigint} virtualTokens
- * @param {bigint} tokensIn token wei the seller hands back (pre-fee)
+ * @param {bigint} tokensIn token wei the seller hands back
  * @returns {{quoteOut: bigint, netTokens: bigint, fee: bigint,
  *            nextVirtualQuote: bigint, nextVirtualTokens: bigint,
  *            executionPrice: bigint}}
  *
- * Symmetric to quoteBuy: the fee comes off the tokens, and only the net
- * tokens rejoin the reserves.
+ * NOT symmetric to quoteBuy: the contract takes the sell fee off the QUOTE
+ * output (not off the input tokens) and the full tokensIn rejoins the pool —
+ * see the comment inside for why matching sell()'s ordering matters.
  */
 export function quoteSell(virtualQuote, virtualTokens, tokensIn) {
   const vE = BigInt(virtualQuote);
@@ -149,15 +150,20 @@ export function quoteSell(virtualQuote, virtualTokens, tokensIn) {
       nextVirtualQuote: vE, nextVirtualTokens: vT, executionPrice: 0n,
     };
   }
-  const { net, fee } = takeFee(in_, FEE_TOTAL_BPS);
-  // Same rule as quoteBuy: floor the ETH out, so the dust stays in the pool
-  // and k only grows. quoteOut is algebraically vE - k/(vT+net).
-  const nextVirtualTokens = vT + net;
-  const quoteOut = (vE * net) / nextVirtualTokens;
-  const nextVirtualQuote = vE - quoteOut;
-  const executionPrice = quoteOut > 0n ? (quoteOut * WAD) / net : 0n;
+  // Mirrors the contract's sell() EXACTLY (js/dex/pump-source.js:219): the
+  // curve runs on the FULL tokensIn, and the fee is taken off the QUOTE OUTPUT
+  // — not off the input tokens. An earlier version subtracted the fee from
+  // tokensIn first and priced the net, which over-quoted the seller by up to
+  // ~0.42% versus what sell() actually pays (the two orderings are not
+  // algebraically equal under floor division, and the gap only widened on
+  // larger sells). The on-chain number is the truth; this must match it.
+  const gross = (vE * in_) / (vT + in_);          // quoteOut before fee
+  const { net, fee } = takeFee(gross, FEE_TOTAL_BPS);  // fee off the output
+  const nextVirtualTokens = vT + in_;             // FULL tokens rejoin the pool
+  const nextVirtualQuote = vE - net;              // only the payout leaves
+  const executionPrice = net > 0n ? (net * WAD) / in_ : 0n;
   return {
-    quoteOut, netTokens: net, fee,
+    quoteOut: net, netTokens: in_, fee,
     nextVirtualQuote, nextVirtualTokens, executionPrice,
   };
 }
@@ -217,4 +223,37 @@ export function fmtTokens(tokenWei, digits = 4) {
 export function fmtEth(ethWei, digits = 6) {
   const eth = Number(ethWei) / Number(WAD);
   return eth.toLocaleString('en-US', { maximumFractionDigits: digits });
+}
+
+/**
+ * A price, for display only, at a fixed number of SIGNIFICANT digits.
+ *
+ * A bonding curve starts near 1e-13 quote per token, and `toFixed(4)` renders
+ * every price a fresh coin will ever have as "0.0000" — on a page that also
+ * shows the real signed trades, that reads as a broken feed rather than a tiny
+ * number. `toExponential(4)` replaced the zeros but not the confusion:
+ * "1.2345e-13" is developer notation, not a ticker.
+ *
+ * Significant digits instead of fixed ones keeps the price readable at ANY
+ * scale the curve can reach (1e-13 … 1e3) without ever falling back to
+ * exponent notation. Nothing here feeds a trade — the contract's own integer
+ * maths does — so this is a display helper and says so.
+ *
+ * @param {number} n
+ * @param {number} [sig] significant digits, 1–18
+ * @returns {string}
+ */
+export function fmtPrice(n, sig = 4) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v === 0) return '0';
+  const s = Math.min(18, Math.max(1, Math.round(Number(sig) || 4)));
+  const exp = Math.floor(Math.log10(Math.abs(v)));
+  // Strip what we already spent on the integer part (none below 1) and cap at
+  // the 18 decimals a wei-denominated price can meaningfully carry.
+  const decimals = Math.min(18, Math.max(0, s - 1 - exp));
+  const out = v.toLocaleString('en-US', { maximumFractionDigits: decimals });
+  // A sub-1 price that still rounds to zero would be worse than the zeros we
+  // set out to remove: say so with a bound instead of printing "0".
+  if (Number(out.replace(/,/g, '')) === 0) return `<${(10 ** -decimals).toLocaleString('en-US', { maximumFractionDigits: 18 })}`;
+  return out;
 }

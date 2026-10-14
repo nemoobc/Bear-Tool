@@ -60,12 +60,11 @@ export function renderDex(root, opts = {}) {
   if (!get('dex.route')) set('dex.route', 'feed');
   if (!bound) {
     root.innerHTML = `
-      <div id="dexWelcome" class="card mb-8">
-        <div style="text-align:center; padding:20px 12px">
-          <h2 id="dexWelcomeTitle" style="margin:0 0 14px"></h2>
-          <img src="assets/bear.svg" alt="Bear Tool" id="dexWelcomeLogo"
-               style="width:104px;height:104px;display:block;margin:0 auto 14px">
-          <p id="dexWelcomeSub" class="small" style="max-width:46ch;margin:0 auto 18px"></p>
+      <div id="dexWelcome" class="card mb-8 dex-welcome">
+        <div class="dex-welcome-in">
+          <h2 id="dexWelcomeTitle" class="dex-welcome-title"></h2>
+          <img src="assets/bear.svg" alt="Bear Tool" id="dexWelcomeLogo" class="dex-welcome-logo">
+          <p id="dexWelcomeSub" class="small dex-welcome-sub"></p>
           <button type="button" class="btn btn-primary" id="dexStartHere"></button>
         </div>
       </div>
@@ -177,7 +176,10 @@ export function renderPanel() {
 function renderFeed(host) {
   host.innerHTML = `
     <div class="dex-launchbar">
-      <div class="dex-launchbar-title">${escapeHtml(t('dex.tokens.title'))}</div>
+      <div class="dex-launchbar-txt">
+        <div class="dex-launchbar-title">${escapeHtml(t('dex.tokens.title'))}</div>
+        <div class="dex-launchbar-sub">${escapeHtml(t('dex.tokens.hint'))}</div>
+      </div>
       <button type="button" class="btn btn-primary" id="dexGoCreate">
         + ${escapeHtml(t('dex.tab.create'))}
       </button>
@@ -192,7 +194,12 @@ function renderFeed(host) {
   let scope = 'all';
   const paint = async () => { await refreshFeed(host, scope); };
 
-  host.addEventListener('click', async (e) => {
+  // `host` is #dexPanelHost, a PERSISTENT node — renderPanel() clears its
+  // innerHTML but that does NOT detach listeners attached to the host itself.
+  // Attaching this click handler per-render therefore stacked a new one on
+  // every feed paint (leak + duplicated work). Define it once, attach once,
+  // and remove it on teardown so the next render attaches exactly one again.
+  const onScopeClick = async (e) => {
     // "Restore all" lives on the hidden tab only, and it is the single button
     // that makes a whole session of hiding recoverable in one press.
     if (e.target.closest('#dexUnhideAll')) {
@@ -207,7 +214,7 @@ function renderFeed(host) {
       b.setAttribute('aria-pressed', String(b === btn));
     }
     paint();
-  });
+  };
 
   bindTokens(host, (address) => openCoin(address));
 
@@ -216,6 +223,8 @@ function renderFeed(host) {
   // exists: without one the pass has nothing to query, and an interval that can
   // never do useful work is one more timer the tab (or a test runner) holds open.
   paint();
+  host.addEventListener('click', onScopeClick);
+  host.addEventListener('dex:teardown', () => host.removeEventListener('click', onScopeClick), { once: true });
   if (!dexChainOk() || !provider()) return;
   const timer = setInterval(paint, 20_000);
   host.addEventListener('dex:teardown', () => clearInterval(timer), { once: true });

@@ -123,15 +123,22 @@ export function tokensHtml() {
     </div>
     <div id="dexTokenList" class="dex-grid">${rows}</div>
     <div id="dexFeedStatus" class="small mt-8"></div>
-    ${launched.length ? '' : `<div class="dex-empty mt-8">${escapeHtml(t('dex.tokens.none'))}</div>`}`;
+    <div class="dex-empty mt-8" ${rows ? 'hidden' : ''}>
+      <span class="dex-empty-ic" aria-hidden="true">◎</span>
+      <strong class="dex-empty-title">${escapeHtml(t('dex.tokens.emptyTitle'))}</strong>
+      <p class="dex-empty-msg">${escapeHtml(t('dex.tokens.none'))}</p>
+      <p class="dex-empty-hint">${escapeHtml(t('dex.tokens.emptyHint'))}</p>
+    </div>`;
 }
 
 // One row renderer, shared by the instant local paint and the chain refresh, so
 // a coin cannot look different depending on which pass found it.
-// One card. Measured against pump.fun's own feed rather than invented: the
-// square face is the hero, the name and ticker sit under it, and the bonding
-// curve's progress bar is the last thing on the card — because on a launchpad
-// that bar is the single fact that matters: how close the coin is to graduating.
+//
+// The row is a MARKET row, not a poster: a 40px face on the left, name over
+// ticker in the middle, and the graduation bar on the right where a pair's
+// change column sits on an exchange. Rows are one line tall on purpose — a feed
+// you scan should fit five coins where the old square-grid card fit one, and the
+// bar is still the single fact that matters: how close the coin is to graduating.
 function rowHtml(tk) {
   const short = `${tk.address.slice(0, 4)}…${tk.address.slice(-4)}`;
   return `
@@ -141,14 +148,18 @@ function rowHtml(tk) {
           ? `<img src="${escapeHtml(tk.image)}" alt="" loading="lazy">`
           : `<span class="dex-card-face-fallback" aria-hidden="true">${escapeHtml((tk.symbol || '?').slice(0, 2).toUpperCase())}</span>`}
       </span>
-      <span class="dex-card-name">${escapeHtml(tk.name)}</span>
-      <span class="dex-card-ticker">${escapeHtml(tk.symbol)}</span>
+      <span class="dex-card-id">
+        <span class="dex-card-name">${escapeHtml(tk.name)}</span>
+        <span class="dex-card-ticker">${escapeHtml(tk.symbol)}</span>
+        <span class="dex-card-addr">${escapeHtml(short)}</span>
+      </span>
       <span class="dex-card-curve" id="dexProg_${escapeHtml(tk.address.slice(2, 10))}"
             role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
             aria-label="${escapeHtml(t('dex.tokens.progressAria', { name: tk.name || tk.symbol }))}">
         <span class="dex-card-curve-fill"></span>
         <span class="dex-card-curve-text">—</span>
       </span>
+      <span class="dex-card-go" aria-hidden="true">›</span>
     </button>`;
 }
 
@@ -183,13 +194,18 @@ export async function refreshFeed(host, scope = 'all') {
   // next to an "empty" message — a feed that claimed to be empty while still
   // listing three coins.
   const box = host.querySelector('.dex-empty');
+  // The message is its own node now: the empty state is a shape (icon + title +
+  // hint), so rewriting the whole box's textContent would flatten it back into a
+  // single line the moment the chain answered.
+  const msg = box ? box.querySelector('.dex-empty-msg') : null;
+  const say = (text) => { if (msg) msg.textContent = text; };
 
   if (ok) {
     list.innerHTML = shown.map(rowHtml).join('');
     if (box) {
       box.hidden = shown.length > 0;
       if (!shown.length) {
-        box.textContent = scope === 'hidden' ? t('dex.tokens.noneHidden') : t('dex.tokens.noneOnChain');
+        say(scope === 'hidden' ? t('dex.tokens.noneHidden') : t('dex.tokens.noneOnChain'));
       }
     }
   } else {
@@ -198,7 +214,8 @@ export async function refreshFeed(host, scope = 'all') {
     // "No coins yet — launch one" AND "could not read the chain" at once: an
     // empty state asserted next to a read that failed, which is the same lie as
     // the old "empty message beside a populated grid", inverted.
-    if (box) { box.hidden = true; box.textContent = ''; }
+    if (box) box.hidden = true;
+    say(t('dex.tokens.none'));
     if (status) status.textContent = t('dex.tokens.scanFailed', { err: reason || '' });
     // The local list stays on screen — it is not wrong, just not confirmed.
     return { coins, ok: false };

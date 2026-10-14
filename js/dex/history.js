@@ -14,7 +14,7 @@ import { t } from '../i18n.js';
 import { escapeHtml } from '../ui.js';
 import { tradesToCandles, PRICE_SCALE } from './chart.js';
 import { PUMP_ABI } from './pump-source.js';
-import { fmtEth, fmtTokens } from './curve.js';
+import { fmtEth, fmtTokens, fmtPrice } from './curve.js';
 
 // The three events the tape reads, taken from the ABI that ships with the
 // bytecode they belong to — a second copy of an event name would be a second
@@ -219,17 +219,29 @@ export function historyCandles(trades) {
 //
 // Each row reads the way a fill actually happened — someone spent X ETH and got
 // Y tokens at Z per token — so a sell shows the price it GOT, not today's.
-export function tradesHtml(trades, symbol = '') {
+export function tradesHtml(trades, symbol = '', quoteSym = 'ETH') {
   if (!trades.length) return `<div class="dex-empty small">${escapeHtml(t('dex.trades.none'))}</div>`;
   const sym = escapeHtml(symbol);
+  // The money side of every fill is the coin's OWN quote coin, never the chain's
+  // native token: a curve quoted in USDC settling in "ETH" would misreport the
+  // size of every trade on the tape. The caller passes it; the default keeps
+  // the two-argument call sites (and the tests) working.
+  const q = escapeHtml(quoteSym || 'ETH');
+  // Depth: how big this fill was next to the biggest one on the tape. An
+  // exchange prints a faint bar behind its biggest rows so size is visible at a
+  // glance; kept relative to the LIST rather than absolute, because one whale
+  // trade would otherwise flatten every other row to nothing.
+  const sizes = trades.map((x) => Number(x.eth) || 0);
+  const max = Math.max(...sizes, 0);
   // A LIST, not a pile of divs: a screen reader should hear "list, 5 items" and
   // get one item per fill, which is what the tape actually is.
-  const rows = trades.map((x) => `
+  const rows = trades.map((x, i) => `
     <li class="dex-trade-row ${x.kind}">
+      <span class="dex-trade-depth" aria-hidden="true" style="width:${max > 0 ? Math.max(4, Math.round((sizes[i] / max) * 100)) : 0}%"></span>
       <span class="dex-trade-side">${escapeHtml(x.kind === 'buy' ? t('dex.trades.buy') : t('dex.trades.sell'))}</span>
-      <span class="dex-trade-eth mono">${escapeHtml(fmtEth(x.eth))} ETH</span>
       <span class="dex-trade-tok mono">${escapeHtml(fmtTokens(x.tokens))} ${sym}</span>
-      <span class="dex-trade-price mono">${escapeHtml(x.price.toExponential(3))} ETH</span>
+      <span class="dex-trade-price mono">${escapeHtml(fmtPrice(x.price, 4))} ${q}</span>
+      <span class="dex-trade-eth mono">${escapeHtml(fmtEth(x.eth))} ${q}</span>
       <span class="dex-trade-when">${escapeHtml(ago(x.time))}</span>
     </li>`).join('');
   return `<ul class="dex-trades" aria-label="${escapeHtml(t('dex.trades.title'))}">${rows}</ul>`;
