@@ -1320,33 +1320,22 @@ async function main() {
     const j = await probe.json();
     anvilReachable = typeof j.result === 'string';
   } catch (e) { anvilReachable = false; }
-  let anvilSwitched = false; let anvilError = null;
+  // PROBE ONLY — never mutate the app from here. An earlier version of this
+  // stage wrote bear.rpcOverrides/bear.networkId and called location.reload();
+  // the reload orphaned the CDP session this driver is attached to, so every
+  // later evaluate (including the Dex step's own openView) failed and the run
+  // died at "Dex: tidak terjangkau" — a DRIVER bug, not an app bug (run
+  // 38631206692). The deep on-chain Dex journey (import anvil #0 via the UI,
+  // add the custom RPC through Settings, switch network via the picker) is the
+  // correct way to exercise it and is deliberately NOT done inline here: it
+  // needs its own re-attach-safe harness. Until then this stage only records
+  // whether a host chain was up, and the run stays green.
   if (anvilReachable) {
-    step('anvil: switch the app to the local Sepolia-shaped chain');
-    try {
-      await page.evaluate(`
-        (function (u, chainId) {
-          try { localStorage.setItem('bear.rpcOverrides', JSON.stringify({ sepolia: [u] })); } catch (e) {}
-          try { localStorage.setItem('bear.networkId', chainId); } catch (e) {}
-        })('http://10.0.2.2:8607', 'sepolia');
-      `);
-      await page.evaluate('location.reload()');
-      await sleep(3000);
-      // re-unlock — session storage is gone after reload
-      const hasPw = await page.wait('#unlockPw', 8000).catch(() => false);
-      if (hasPw) {
-        await page.type('#unlockPw', PASSWORD);
-        await jsClick('#unlockBtn');
-        await sleep(1500);
-      }
-      anvilSwitched = await page.evaluate(`document.querySelector('#totalBalance, #balance, #balanceCard, #totalBalanceUsdc') !== null`).catch(() => true);
-      report.anvilStage = { reachable: true, switched: anvilSwitched };
-      console.log('[anvil] switched=', anvilSwitched);
-    } catch (e) { anvilError = String(e && e.message || e); report.anvilStage = { reachable: true, switched: false, error: anvilError }; }
+    report.anvilStage = { reachable: true, note: 'probe only — deep on-chain Dex journey is a separate, re-attach-safe stage' };
+    console.log('[anvil] host chain reachable (probe only, no app mutation)');
   } else {
     report.anvilStage = { reachable: false, note: 'no anvil on host — stage skipped' };
   }
-  await page.shot('30b-anvil-network').catch(() => {});
 
   step('dex: the launchpad is reachable and paints its shell');
   if (!(await openView('dex'))) {
