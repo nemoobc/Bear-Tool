@@ -21,7 +21,7 @@
 import { t } from '../i18n.js';
 import { getAccounts, getSession } from '../wallet.js';
 import { $, toast, escapeHtml, confirmTx } from '../ui.js';
-import { sendDexTx, provider, ethersLib, dexChainOk, fmtTok, ERC20_ABI } from './core.js';
+import { sendDexTx, provider, ethersLib, dexChainOk, fmtTok, ERC20_ABI, get } from './core.js';
 import { PUMP_ABI } from './pump-source.js';
 import { quoteBuy, quoteSell, fmtEth } from './curve.js';
 import { decide, nextAccount, budgetBps, bandUsable, stopReason, BUY, SELL, STOP, WHY } from './bot-engine.js';
@@ -239,7 +239,13 @@ export async function start(token) {
   if (!secret) return toast(t('dex.bot.locked'), 'error');
   if (!canDerive(secret)) return toast(t('dex.bot.seedRequired'), 'error');
 
-  const master = token.signer;
+  // The signer lives in app state, NOT on the coin. The token object handed to
+  // this panel is the coin's metadata — address, name, symbol, creator — and it
+  // has no signer on it, so reading one from there returned undefined every
+  // single time and the bot refused to start with "the wallet is locked" even
+  // with the wallet open. That failure is invisible to every gate that drives
+  // the engine directly, which is how it survived a green on-chain run.
+  const master = get('signer');
   if (!master) return toast(t('dex.bot.locked'), 'error');
   const masterAddr = await master.getAddress();
 

@@ -176,3 +176,64 @@ test('the engine cannot spend, sign, or know about a wallet key', () => {
     assert.ok(!src.includes(forbidden), `the engine must never mention ${forbidden}`);
   }
 });
+
+// ── the wiring between the panel and the app ────────────────────────
+// Every gate above drives the engine directly, which is exactly why a broken
+// link between the PANEL and the engine can stay green forever. The market
+// maker shipped for a full test cycle with `token.signer` — a property no
+// launched coin has — so start() refused with "the wallet is locked" on every
+// device, while 12/12 on-chain checks reported success. These assertions are
+// about wiring: what the panel reads, and from where.
+test('the panel gets the signer from app state, never from the coin', () => {
+  const src = readFileSync(new URL('../js/dex/bot.js', import.meta.url), 'utf8');
+  assert.ok(!/token\.signer/.test(src),
+    'a launched coin is metadata (address, name, symbol, creator) and carries NO signer — '
+    + 'reading one from it is always undefined and the bot can never start');
+  assert.match(src, /const master = get\('signer'\)/,
+    'the signer comes from app state, which is where the app actually keeps it');
+});
+
+test('the panel reads nothing off the coin that a launched coin does not carry', () => {
+  // Anything read as token.X must be a field the Dex genuinely stores. If a new
+  // property appears here, the coin shape has to grow with it or the bot reads
+  // undefined at runtime — quietly, and only when a user presses Start.
+  const src = readFileSync(new URL('../js/dex/bot.js', import.meta.url), 'utf8');
+  const used = new Set([...src.matchAll(/\btoken\.([a-zA-Z_$][\w$]*)/g)].map((m) => m[1]));
+  // What js/dex/index.js and js/dex/tokens.js put on a coin object.
+  const KNOWN = new Set(['address', 'name', 'symbol', 'creator', 'image', 'quoteToken']);
+  for (const prop of used) {
+    assert.ok(KNOWN.has(prop),
+      `bot.js reads token.${prop}, which no launched coin carries — `
+      + `a coin only ever has: ${[...KNOWN].join(', ')}`);
+  }
+});
+
+test('every module the bot imports is actually exported by it', () => {
+  // An import of a name that is not exported is a hard error at load time, but
+  // only when that panel is first rendered — i.e. in the app, never in a test
+  // that drives the engine directly.
+  const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const bot = read('../js/dex/bot.js');
+  const exportsOf = (src) => {
+    const names = new Set();
+    for (const m of src.matchAll(/export\s+(?:async\s+)?(?:function|const|let|class)\s+([A-Za-z_$][\w$]*)/g)) names.add(m[1]);
+    for (const m of src.matchAll(/export\s*\{([^}]+)\}/g)) {
+      for (const part of m[1].split(',')) {
+        const n = part.split(/\s+as\s+/).pop().trim();
+        if (n) names.add(n);
+      }
+    }
+    return names;
+  };
+  for (const m of bot.matchAll(/import\s*\{([^}]+)\}\s*from\s*'(\.[^']+)'/g)) {
+    const rel = m[2];
+    const target = new URL(rel, new URL('../js/dex/bot.js', import.meta.url)).pathname;
+    const names = exportsOf(readFileSync(new URL(`file://${target}`), 'utf8'));
+    for (const part of m[1].split(',')) {
+      const n = part.trim();
+      if (!n) continue;
+      assert.ok(names.has(n),
+        `bot.js imports { ${n} } from ${rel}, which does not export it — the panel throws the first time a coin is opened`);
+    }
+  }
+});
