@@ -201,7 +201,12 @@ function die(msg) {
   } catch { /* report half-built — the plain message below still has to print */ }
   try {
     if (report) {
-      report.fatal = msg + diagnosis;
+      // The FIRST fatal is the real one. `die` used to overwrite report.fatal
+      // on every call, so a report could carry the LAST symptom instead of the
+      // cause: run 38613712299 recorded "Dex: tab Hidden tidak ada" while the
+      // same report's own dexView field said "no-host" — that run's actual
+      // failure, hidden behind a later check that never had a chance to be true.
+      if (!report.fatal) report.fatal = msg + diagnosis;
       report.pass = false;
       writeFileSync(path.join(OUT, 'emulator-report.json'), JSON.stringify(report, null, 2));
     }
@@ -574,11 +579,17 @@ async function main() {
 
   if (process.env.E2E_SKIP_VIEWS !== '1') {
     step('walk the bottom nav (UI/UX pass)');
-    // 'dex' was missing from this list, so the emulator run walked the whole app
-    // and never once opened the launchpad — the largest feature in it, and the
-    // one with the most shipped-broken-UI history. Its panels must be rendered
-    // on a real Android runtime, not only in a desktop browser.
-    for (const view of ['activity', 'swap', 'dapps', 'dex', 'settings', 'dashboard']) {
+    // The bottom bar is FIVE FIXED SLOTS (js/app.js MOBILE_PRIMARY) and 'dex'
+    // is not one of them, so `.mobile-nav-item[data-view="dex"]` can never exist
+    // on a phone. The first version of this pass clicked that selector inside a
+    // .catch(()=>{}), which swallowed the miss: the walk reported success, the
+    // launchpad was never opened, and the Dex assertion right below blamed the
+    // APP for the driver's own broken selector (run 38613712299:
+    // "Dex: tab Hidden tidak ada", report.dexView = "no-host" — no host because
+    // the view never opened). Views outside the five slots are reached through
+    // the dashboard quick action, which is exactly what openView() below tries;
+    // the Dex is walked there, not here.
+    for (const view of ['activity', 'swap', 'dapps', 'settings', 'dashboard']) {
       await page.click(`.mobile-nav-item[data-view="${view}"]`).catch(() => {});
       await sleep(1400);
       await page.shot(`05-view-${view}`);
@@ -594,29 +605,6 @@ async function main() {
         report.dappLogos = counts;
         const [cardsN, imgsN] = String(counts).split('/').map(Number);
         if (!cardsN || imgsN !== cardsN) die('dapp logos: tiap kartu harus punya <img> logo — kartu/img = ' + counts);
-      }
-      if (view === 'dex') {
-        // The launchpad must mount on a phone. Sepolia-only by design, so the
-        // feed will usually say the chain is wrong — but it must SAY that, with
-        // the feed chrome present, not render a blank panel.
-        await page.wait('#dexPanelHost', 10000).catch(() => {});
-        const dex = await page.evaluate(`(() => {
-          const h = document.querySelector('#dexPanelHost');
-          if (!h) return 'no-host';
-          const txt = (h.innerText || '').trim();
-          return [
-            'len=' + txt.length,
-            'empty=' + !!h.querySelector('.dex-empty'),
-            'createBtn=' + !!document.querySelector('#dexGoCreate'),
-            'tabs=' + document.querySelectorAll('[data-dex-scope]').length,
-            'hiddenTab=' + !!document.querySelector('[data-dex-scope="hidden"]'),
-          ].join(' ');
-        })()`).catch(() => 'evaluate-failed');
-        report.dexView = dex;
-        if (String(dex).startsWith('no-host')) die('Dex: #dexPanelHost tidak ada di build ini');
-        if (String(dex).includes('len=0')) die('Dex: panel ter-render tapi kosong');
-        if (String(dex).includes('tabs=0')) die('Dex: scope tab tidak ada — feed tidak punya All/Mine/Hidden');
-        if (!String(dex).includes('hiddenTab=true')) die('Dex: tab Hidden tidak ada — delisting tidak terjangkau dari UI');
       }
     }
   }
@@ -1277,6 +1265,137 @@ async function main() {
     if (!(await openView(view))) throw new Error(`feature sweep: view "${view}" did not open`);
     await sleep(800);
     await page.shot(`30-view-${view}`);
+  }
+
+  // ── the Dex, end to end, on the device ────────────────────────────────────
+  // The launchpad is NOT one of the bottom bar's five fixed slots, so a phone
+  // reaches it only through the dashboard quick action — the last selector
+  // openView() tries. Reaching it at all is therefore a real assertion, and the
+  // one the previous run silently skipped: the old code clicked the bottom-bar
+  // selector inside a .catch(()=>{}) and reported the app broken when its own
+  // selector could never match.
+  step('dex: the launchpad is reachable and paints its shell');
+  if (!(await openView('dex'))) {
+    die('Dex: tidak terjangkau dari HP — tidak ada slot bar bawah maupun quick action yang membukanya');
+    throw new Error('dex unreachable from the phone');
+  }
+  await page.wait('#dexRoot', 12000).catch(() => {});
+  await sleep(600);
+  const shellInfo = await page.evaluate(`(() => {
+    const root = document.querySelector('#dexRoot');
+    return JSON.stringify({
+      hasRoot: !!root,
+      rootLen: root ? (root.innerText || '').trim().length : -1,
+      welcome: !!document.querySelector('#dexWelcome:not([hidden])'),
+      startBtn: !!document.querySelector('#dexStartHere'),
+      host: !!document.querySelector('#dexPanelHost'),
+      gate: !!document.querySelector('#dexGate:not([hidden])'),
+    });
+  })()`).catch(() => 'evaluate-failed');
+  report.dexShell = shellInfo;
+  if (String(shellInfo) === 'evaluate-failed') die('Dex: tidak bisa membaca #dexRoot');
+  if (String(shellInfo).includes('"hasRoot":false')) die('Dex: #dexRoot tidak ada — shell view tidak dirender');
+  if (String(shellInfo).includes('"rootLen":0')) die('Dex: #dexRoot kosong — renderDex() tidak melukis apa pun');
+  await page.shot('31-dex-welcome');
+
+  // First visit shows the welcome card and nothing else (deliberate: the
+  // workspace is hidden until the user says they are ready). Pass it the way a
+  // user does, then the feed chrome must be there.
+  step('dex: the welcome gate opens the workspace, and the feed has its tabs');
+  if (String(shellInfo).includes('"startBtn":true')) {
+    await jsClick('#dexStartHere');
+    await sleep(800);
+  }
+  const welcomeGone = await page.evaluate(
+    `!document.querySelector('#dexWelcome') || document.querySelector('#dexWelcome').hidden === true`
+  ).catch(() => false);
+  if (!welcomeGone) die('Dex: tombol "Start here" tidak menutup kartu sambutan — workspace tak pernah terbuka');
+
+  // The Sepolia gate dims the whole panel AND sets pointer-events:none on it, so
+  // a JS .click() below would fire a handler that a finger could not reach —
+  // a false pass of exactly the kind this driver keeps getting bitten by. The
+  // gate ships its own way out (#dexGateGo → setTestnetVisible + activateNetwork),
+  // so take it, and RECORD whether it landed instead of pretending it did.
+  const gateUp = String(shellInfo).includes('"gate":true');
+  let gateCleared = !gateUp;
+  if (gateUp) {
+    await jsClick('#dexGateGo');
+    for (let i = 0; i < 32; i++) {
+      gateCleared = await page.evaluate(
+        `!document.querySelector('#dexGate') || document.querySelector('#dexGate').hidden === true`
+      ).catch(() => false);
+      if (gateCleared) break;
+      await sleep(250);
+    }
+    report.dexGate = { gateUp: true, cleared: gateCleared };
+    await page.shot('31b-dex-gate');
+  }
+
+  // Wait for the panel, then for the scope tabs. The feed paints the tabs on
+  // its first synchronous pass, so a missing tab after this wait is a real
+  // structural failure rather than a race.
+  await page.wait('#dexPanelHost', 12000).catch(() => {});
+  let tabs = 0;
+  let hiddenTab = false;
+  let coinCards = 0;
+  for (let i = 0; i < 40; i++) {
+    const snap = await page.evaluate(`JSON.stringify({
+      tabs: document.querySelectorAll('#dexPanelHost [data-dex-scope]').length,
+      hidden: !!document.querySelector('#dexPanelHost [data-dex-scope="hidden"]'),
+      cards: document.querySelectorAll('#dexPanelHost [data-dex-token]').length,
+      text: (document.querySelector('#dexPanelHost') || {}).innerText ? (document.querySelector('#dexPanelHost').innerText || '').trim().length : 0,
+    })`).catch(() => '{}');
+    const o = JSON.parse(snap || '{}');
+    tabs = o.tabs || 0; hiddenTab = !!o.hidden; coinCards = o.cards || 0;
+    if (tabs > 0) break;
+    await sleep(250);
+  }
+  report.dex = { shell: shellInfo, tabs, hiddenTab, coinCards, gateUp, gateCleared };
+  await page.shot('32-dex-feed');
+  if (!tabs) die('Dex: #dexPanelHost tidak punya satu pun scope tab — feed tidak ter-render');
+  if (!hiddenTab) die('Dex: tab Hidden tidak ada — delisting tidak terjangkau dari UI');
+
+  // The launch form is a second screen of the same view. It must open from the
+  // feed and paint its own fields — a control that exists in source but cannot
+  // be reached is not a feature.
+  step('dex: the launch form opens from the feed');
+  const createOpened = await jsClick('#dexGoCreate');
+  if (!createOpened) die('Dex: tombol "+ Create Token" tidak ada di feed');
+  await sleep(900);
+  const createInfo = await page.evaluate(`JSON.stringify({
+    host: (document.querySelector('#dexPanelHost') || {}).innerText ? (document.querySelector('#dexPanelHost').innerText || '').trim().length : 0,
+    fields: document.querySelectorAll('#dexPanelHost input, #dexPanelHost textarea, #dexPanelHost select').length,
+    back: !!document.querySelector('#dexPanelHost [data-dex-back], #dexPanelHost .dex-back'),
+  })`).catch(() => '{}');
+  report.dexCreate = createInfo;
+  // Say out loud when this tap could not have been a finger: the gate dims the
+  // panel and disables pointer events, so the click below proves the FORM is
+  // wired, not that a user could have reached it.
+  report.dexCreateSynthetic = !gateCleared;
+  await page.shot('33-dex-create');
+  if (!String(createInfo).includes('"fields"') || JSON.parse(createInfo || '{}').fields === 0) {
+    die('Dex: form launch terbuka tanpa satu pun input — tidak ada yang bisa diterbitkan');
+  }
+
+  // ── Tools: the sponsor picker must not be an empty box ────────────────────
+  // Live bug report 2026-10-14 ("fitur tools list sponsor wallet kosong"): the
+  // picker was filled only at boot — before a fresh install has any wallet —
+  // and entering the view never refilled it. A wallet exists by now (this run
+  // created and confirmed one), so the box must be populated. This is the
+  // end-to-end proof of the fix, on a device, not in jsdom.
+  step('tools: the sponsor wallet picker lists the wallets we actually have');
+  if (await openView('deploy')) {
+    await sleep(1200);
+    const sponsor = await page.evaluate(`JSON.stringify({
+      present: !!document.querySelector('#rescueSponsorFrom'),
+      options: (document.querySelector('#rescueSponsorFrom') || {}).options ? document.querySelector('#rescueSponsorFrom').options.length : -1,
+      first: (document.querySelector('#rescueSponsorFrom') || {}).options && document.querySelector('#rescueSponsorFrom').options.length ? document.querySelector('#rescueSponsorFrom').options[0].textContent.trim() : '',
+    })`).catch(() => '{}');
+    report.sponsorPicker = sponsor;
+    await page.shot('34-tools-sponsor');
+    const sp = JSON.parse(sponsor || '{}');
+    if (!sp.present) die('Tools: #rescueSponsorFrom tidak ada — kartu Rescue hilang dari build');
+    if (!(sp.options > 0)) die('Tools: daftar sponsor wallet KOSONG padahal dompet sudah dibuat — bug 2026-10-14 kembali');
   }
 
   // Bridge has no nav item of its own — it lives behind the Swap chooser modal,
