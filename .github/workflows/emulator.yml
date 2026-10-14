@@ -33,6 +33,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install foundry (anvil on host — reachable from emulator as 10.0.2.2:8607)
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Start anvil on host
+        # Single process, detached: the driver runs on this same host at
+        # 127.0.0.1:8607 (anvil) — nothing to set up between HTTP hops. The
+        # setup-android / emulator steps that follow still inherit it, because
+        # it stays alive across steps as a detached child of the runner shell
+        # (single command line, no cross-line variables).
+        run: nohup anvil --host 0.0.0.0 --port 8607 --chain-id 11155111 --balance 10000 --accounts 10 > /tmp/anvil.log 2>&1 & sleep 3; cat /tmp/anvil.log | head -3
+
       - name: Install JDK 21
         uses: actions/setup-java@v4
         with:
