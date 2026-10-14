@@ -1,0 +1,168 @@
+/* ═══════════════════════════════════════════════════════════════
+   EXCHANGE — dark surface vocabulary for panels that land on a dark
+   canvas (DApps Discover, Dex launchpad). The rest of the app keeps
+   the cartoon light theme (cartoon.css). Only these surfaces re-paint
+   themselves, so the wallet shell stays friendly.
+   ═══════════════════════════════════════════════════════════════ */
+
+.dapps-browser {
+  --ex-bg: #0b0e11;
+  --ex-surf: #161a1e;
+  --ex-surf-2: #20252b;
+  --ex-surf-3: #282c33;
+  --ex-border: #2b3139;
+  --ex-text: #eaecee;
+  --ex-dim: #858b92;
+  --ex-accent: #EF476F;        /* okx-style pink accent */
+  --ex-accent-2: #F59E0B;
+  --ex-radius: 16px;
+  --ex-radius-lg: 20px;
+  background: linear-gradient(180deg, #0d1114 0%, #0b0e11 100%);
+  color: var(--ex-text);
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--ex-border);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+.dapps-browser .dapps-hero {
+  padding: 14px 12px 18px;
+  margin-bottom: 8px;
+}
+.dapps-hero-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.3px;
+  margin-bottom: 6px;
+}
+.dapps-hero-sub { color: var(--ex-dim) !important; font-size: 12.5px; opacity: 1 !important; padding: 0 !important; }
+
+/* Featured horizontal rail */
+.dapp-featured {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 4px 4px 14px;
+  margin-bottom: 6px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.dapp-featured::-webkit-scrollbar { display: none; }
+.dapp-feat-card {
+  flex: 0 0 130px;
+  scroll-snap-align: start;
+  background: linear-gradient(135deg, var(--ex-surf) 0%, var(--ex-surf-2) 100%);
+  border: 1px solid var(--ex-border);
+  border-radius: var(--ex-radius);
+  padding: 14px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.dapp-feat-card:hover, .dapp-feat-card:focus-visible {
+  transform: translateY(-3px);
+  border-color: var(--ex-accent);
+  box-shadow: 0 6px 18px rgba(239, 71, 111, .18);
+  outline: none;
+}
+.dapp-feat-icon {
+  width: 52px; height: 52px;
+  position: relative;
+  border-radius: 14px;
+  background: var(--cat, var(--ex-surf-3));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px;
+  border: 1.5px solid var(--ex-border);
+  overflow: hidden;
+}
+.dapp-feat-icon .dapp-logo-img { border-radius: 14px; }
+.dapp-feat-name { font-size: 12px; font-weight: 600; color: var(--ex-text); text-align: center; }
+
+/* Omni search */
+.dapps-browser .dapps-omni { margin: 8px 0 12px; }
+.dapps-browser .dapps-omni-input {
+  width: 100%;
+  padding: 12px 14px 12px 40px;
+  border-radius: 14px;
+  border: 1px solid var(--ex-border);
+  background: var(--ex-surf) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23858b92' stroke-width='2'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cline x1='11' y1='11' x2='15' y2='15'/%3E%3C/svg%3E") 14px center no-repeat;
+  color: var(--ex-text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.dapps-browser .dapps-omni-input:focus {
+  border-color: var(--ex-accent);
+  box-shadow: 0 0 0 3px rgba(239, 71, 111, .18);
+}
+.dapps-browser .dapps-omni-input::placeholder { color: var(--ex-dim); }
+
+/* Category tile chips (OKX-style) */
+.dapps-browser .dapp-chips {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 0 12px;
+  margin: 8px 0;
+  scrollbar-width: none;
+}
+.dapps-browser .dapp-chips::-webkit-scrollbar { display: none; }
+.dapps-browser .dapp-chip {
+  background: var(--ex-surf);
+  border: 1px solid var(--ex-border);
+  border-radius: 14px;
+  padding: 4px 10px;
+  color: var(--ex-text);
+}
+.dapps-browser .dapp-chip.active { border-color: var(--ex-accent); background: var(--ex-surf-2); }
+.dapps-browser .dapp-chip-ic {
+  background: var(--cat, var(--ex-surf-3));
+  border-color: var(--ex-border);
+  box-shadow: none;
+}
+.dapps-browser .dapp-chip.active .dapp-chip-ic { background: var(--honey, #F5A623); border-color: var(--ex-accent); }
+.dapps-browser .dapp-chip-lb { color: var(--ex-text); font-size: 11.5px; }
+.dapps-browser .dapp-chip:hover .dapp-chip-ic { transform: translateY(-2px); }
+
+/* Grid cards */
+.dapps-browser .dapp-grid { margin-top: 4px; }
+.dapps-browser .dapp-sec-h { color: var(--ex-dim); }
+.dapps-browser .dapp-sec-n { background: var(--ex-surf-3); border-color: var(--ex-border); color: var(--ex-text); }
+.dapps-browser .dapp-card {
+  background: var(--ex-surf);
+  border: 1px solid var(--ex-border);
+  border-radius: var(--ex-radius);
+  padding: 12px 8px;
+  gap: 6px;
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.dapps-browser .dapp-card:hover,
+.dapps-browser .dapp-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--ex-accent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+}
+.dapps-browser .dapp-icon {
+  border-color: var(--ex-border);
+  border-radius: 14px;
+  width: 54px; height: 54px;
+  overflow: hidden;
+}
+.dapps-browser .dapp-name { color: #fff; font-size: 12.5px; }
+.dapps-browser .dapp-category { color: var(--ex-dim); }
+.dapps-browser .dapp-frame-note { color: var(--ex-dim); }
+.dapps-browser .dapp-card[data-frameable="1"] .dapp-frame-note { color: #34d399; }
+.dapps-browser .dapp-no-match { color: var(--ex-dim); }
+
+/* Loading state */
+.dapps-browser .dapps-omni-input[disabled] { opacity: .6; }
+
+@media (max-width: 480px) {
+  .dapps-browser .dapp-sec { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+  .dapp-featured { padding: 2px 2px 12px; }
+  .dapp-feat-card { flex: 0 0 118px; }
+}

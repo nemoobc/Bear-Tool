@@ -10,6 +10,7 @@ import { openDappBrowser as openInBrowser, openDappHome, openExternalNotice, ini
 import { classifyInput, inspectUrl, baseHost, VERDICT } from './dapp-safety.js';
 import { listBlocked, listTrusted } from './dapp-sessions.js';
 import { isNativeDappBrowser, nativeTabs, openNativeTab } from './native-dapp.js';
+import { t } from './i18n.js';
 
 // frameable:false → the site ships clickjacking protection (X-Frame-Options or
 // frame-ancestors), so NO in-app browser can embed it. Re-probed live against
@@ -195,8 +196,19 @@ export function renderDapps(container) {
 
   container.innerHTML = `
     <div class="dapps-browser">
+      <div class="dapps-hero">
+        <div class="dapps-hero-title">${escapeHtml(t('dapps.browser'))}</div>
+        <div class="dapps-hero-sub small">${escapeHtml(t('dapps.hero.sub'))}</div>
+      </div>
+      <div class="dapp-featured" aria-label="Most popular" role="list">
+        ${POPULAR_DAPPS.slice(0, 6).map((d) => `
+          <div class="dapp-feat-card" role="listitem" data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}" data-frameable="1">
+            <div class="dapp-feat-icon" style="--cat:${catStyle(d.category).color}">${dappMark(d.name, catStyle(d.category).color, 36)}${dappLogo(d.url)}}</div>
+            <div class="dapp-feat-name">${escapeHtml(d.name)}</div>
+          </div>`).join('')}
+      </div>
       <div class="dapps-omni">
-        <input type="text" id="dappSearch" placeholder="Search ${POPULAR_DAPPS.length} DApps or paste a URL…" class="dapps-omni-input" autocomplete="off" spellcheck="false" aria-label="Search DApps or paste a URL" />
+        <input type="text" id="dappSearch" placeholder="${escapeHtml(t('dapps.search', { n: POPULAR_DAPPS.length }))}" class="dapps-omni-input" autocomplete="off" spellcheck="false" aria-label="Search DApps or paste a URL" />
         <button id="dappGo" class="btn btn-primary btn-sm" hidden>Open</button>
       </div>
       <div class="dapp-chips" role="group" aria-label="Filter by category">
@@ -211,6 +223,11 @@ export function renderDapps(container) {
     </div>`;
 
   const openCard = (el) => openDappBrowser(el.dataset.url, el.dataset.name, el.dataset.frameable === '1');
+  container.querySelectorAll('.dapp-feat-card').forEach((el) => {
+    el.addEventListener('click', () => openCard(el));
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openCard(el); } });
+    el.tabIndex = 0; el.role = 'button'; el.setAttribute('aria-label', el.dataset.name);
+  });
   container.querySelectorAll('.dapp-card').forEach((el) => {
     el.addEventListener('click', () => openCard(el));
     // Cards are divs with role="button", so Enter/Space must be wired by hand.
