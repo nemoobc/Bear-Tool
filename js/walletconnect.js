@@ -204,7 +204,7 @@ async function ensureKit() {
           name: 'Bear Tool',
           description: 'Self-custody wallet with a hardened dApp browser',
           url: WC_PUBLIC_URL,
-          icons: [new URL('assets/bear.svg', WC_PUBLIC_URL).href],
+          icons: [new URL('assets/bear-512.png', WC_PUBLIC_URL).href, new URL('assets/bear.svg', WC_PUBLIC_URL).href],
         },
       });
       w.on('session_proposal', (args) => { handleProposal(args).catch((e) => toast('WalletConnect: ' + e.message, 'error')); });

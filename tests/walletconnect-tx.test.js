@@ -55,8 +55,8 @@ test('session metadata points at a PUBLIC url, never the WebView origin', () => 
   assert.doesNotMatch(meta, /location\.origin/,
     'metadata url/icons tidak boleh pakai location.origin (https://localhost di app)');
   assert.match(meta, /url: WC_PUBLIC_URL/, 'url = konstanta publik');
-  assert.match(meta, /icons: \[new URL\('assets\/bear\.svg', WC_PUBLIC_URL\)\.href\]/,
-    'icon dibangun dari konstanta publik yang sama');
+  assert.match(meta, /icons: \[new URL\('assets\/bear-512\.png', WC_PUBLIC_URL\)\.href, new URL\('assets\/bear\.svg', WC_PUBLIC_URL\)\.href\]/,
+    'icon dibangun dari konstanta publik yang sama — PNG 512 (logo app) dulu, SVG fallback');
 });
 
 test('the pair sheet auto-picks a copied wc: link, never blocking on the clipboard', () => {
