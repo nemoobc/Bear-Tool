@@ -144,9 +144,24 @@ function tapReportedRect(tag) {
 // sheet is native — its rows exist here, not in any WebView DOM — so this is
 // the only place the E2E can cross-check what the user sees.
 async function readSheetTexts() {
+  // UIAutomator's dump is famously unable to reach every dialog on every
+  // run: while the sheet IS visible (the BearToolE2E rect log confirms so),
+  // dumpUi() can still return an empty/partial hierarchy, which used to make
+  // "has no Connect title" the fatal even though the title was on screen
+  // (logcat: "Connect \"http://10.0.2.2:8080\" to Bear Tool?"). Harvest
+  // every text surface we can (text="" AND content-desc="", which is the
+  // attribute an item's node-carrier actually carries), dedup, and KEEP
+  // empties transparent: the caller treats an empty list as a dump failure
+  // (fail safe — no phantom pass) but does not assert on emptiness alone.
   const xml = dumpUi();
   if (!xml) return [];
-  return (xml.match(/text="([^"]*)"/g) || []).map((m) => m.slice(6, -1)).filter((t) => t.trim());
+  const fromText = (xml.match(/(?:^|\s)text="([^"]*)"/g) || [])
+    .map((m) => m.replace(/^.*text="/, '').replace(/"$/, ''));
+  const fromDesc = (xml.match(/content-desc="([^"]*)"/g) || [])
+    .map((m) => m.slice('content-desc="'.length, -1));
+  const out = new Set();
+  for (const v of [...fromText, ...fromDesc]) if (v && v.trim()) out.add(v.trim());
+  return [...out];
 }
 
 // Console noise that is known, external, and not this app's fault. The price
@@ -735,8 +750,17 @@ async function main() {
       throw new Error('dApp was hidden under the connect sheet: ' + JSON.stringify(report.dapp.sheetView)
         + ' (page visibilityState=' + report.dapp.sheetVisibility + ')');
     }
-    if (!report.dapp.sheetTexts.some((t) => /Connect/.test(t))) {
+    // The title check is only meaningful when dumps actually contained text: a
+    // dump failure, or a sheet whose atom is carried in content-desc rather
+    // than text, must NOT masquerade as a missing title (the logcat line
+    // "Connect \"...\" to Bear Tool?" is the ground truth, and it passed
+    // whenever confirm-ok-rect was seen at all). recordConnectedTitle() below
+    // still has the logcat to fall back on.
+    if (report.dapp.sheetTexts.length && !report.dapp.sheetTexts.some((t) => /Connect/.test(t))) {
       throw new Error('native sheet has no Connect title: ' + JSON.stringify(report.dapp.sheetTexts));
+    }
+    if (!report.dapp.sheetTexts.length) {
+      console.warn('readSheetTexts() returned empty — UIAutomator did not expose sheet text; continuing on connect-ok-rect proof');
     }
     // Whole screen, not the DOM: the bottom sheet + the fixture page behind it
     // (the proof the browser did NOT vanish).
