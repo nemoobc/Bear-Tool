@@ -132,15 +132,21 @@ test('a coin page is never gated behind a pair or a pool', async () => {
       'the only empty box allowed on a coin page is the trade tape saying "no trades yet"');
   }
   const text = panel().textContent;
-  for (const ghost of ['pair', 'quote', 'pool']) {
-    assert.ok(!new RegExp(ghost, 'i').test(text),
-      `the coin page must never mention a "${ghost}" — a launchpad has none`);
-  }
-  // The graduation button must describe the withdrawal it actually performs. It
-  // used to say "Move liquidity out", which reads as a pool migration the
-  // contract never does — withdraw() just pays the creator's own wallet.
-  assert.ok(!/liquidity|migrat/i.test(text),
+  // "pair" is still a ghost: this launchpad has no pairs and never had a
+  // concept of one. "pool" and "quote" are NOT ghosts any more — the curve
+  // really does accept liquidity deposits, and it really is quoted in one of the
+  // three Dex coins — so banning those words would be banning the truth.
+  assert.ok(!/pair/i.test(text),
+    'the coin page must never mention a "pair" — a launchpad has none');
+
+  // The claim worth protecting is the PROMISE, not the vocabulary. The bot
+  // panel has to be able to say out loud that it adds no real liquidity, so
+  // banning the word would force the app to lie about itself. What must never
+  // appear is a promise of a migration the contract does not perform.
+  assert.ok(!/migrat/i.test(text),
     'the coin page must not promise a liquidity migration — withdraw() is not one');
+  assert.ok(!/(move|withdraw|pindah)[^.]{0,20}liquidity (out|migration)/i.test(text),
+    'no button may promise to move liquidity out — withdraw() pays the creator\'s fee only');
   assert.ok(/backing|withdraw/i.test(text),
     'the coin page must say plainly that the backing is withdrawn to your wallet');
 });

@@ -14,10 +14,11 @@ import { t } from '../i18n.js';
 import { get } from '../state.js';
 import { $, toast, escapeHtml, confirmTx } from '../ui.js';
 import { waitForReceipt, receiptVerdict } from '../safetx.js';
-import { sendDexTx, provider, ethersLib, dexChainOk, needSigner, fmtTok, withTxButton } from './core.js';
+import { sendDexTx, provider, ethersLib, dexChainOk, needSigner, fmtTok, withTxButton, ERC20_ABI, quoteBy } from './core.js';
 import { PUMP_ABI } from './pump-source.js';
-import { quoteBuy, quoteSell, graduationProgress, fmtEth, GRADUATION_ETH, VIRTUAL_ETH, VIRTUAL_TOKENS } from './curve.js';
+import { quoteBuy, quoteSell, graduationProgress, fmtEth, GRADUATION_QUOTE, VIRTUAL_QUOTE, VIRTUAL_TOKENS } from './curve.js';
 import { drawCandles } from './chart.js';
+import { botHtml, bindBot } from './bot.js';
 import { loadHistory, historyCandles, tradesHtml } from './history.js';
 
 function readToken(token) {
@@ -84,7 +85,7 @@ export function tokenTradeHtml(token) {
       <div class="dex-swapbox-label">${escapeHtml(t('dex.trade.buy'))}</div>
       <div class="dex-swapbox-row">
         <input id="dexTradeBuyEth" class="dex-trade-input" type="number" min="0" step="any" inputmode="decimal" placeholder="0" aria-label="${escapeHtml(t('dex.trade.ethIn'))}">
-        <span class="dex-swapbox-token">ETH</span>
+        <span class="dex-swapbox-token" id="dexTradeQuoteToken">ETH</span>
       </div>
       <div class="dex-swapbox-usd small" id="dexTradeBuyQuote"></div>
       <!-- Percentages of what you actually hold. Without them the buy box makes
@@ -114,6 +115,8 @@ export function tokenTradeHtml(token) {
 
     <button id="dexTradeClaim" type="button" class="btn btn-secondary btn-block mt-8" hidden>${escapeHtml(t('dex.trade.claimFees'))}</button>
     <button id="dexTradeGraduate" type="button" class="btn btn-primary btn-block mt-8" hidden>${escapeHtml(t('dex.trade.graduate'))}</button>
+
+    ${botHtml()}
 
     <div class="dex-loading" id="dexTradeLoading" hidden><span class="dex-spinner"></span><span>${escapeHtml(t('dex.chart.loading'))}</span></div>
     <div id="dexTradeStatus" class="small mt-8"></div>
@@ -171,7 +174,7 @@ export function bindTokenTrade(host, token, onBack) {
   // so the quote and the tx cannot disagree.
   const state = {
     vE: 0n, vT: 0n, reserve: 0n, graduated: false, mine: 0n, readable: false,
-    sym: token.symbol || '', ethBal: 0n,
+    sym: token.symbol || '', quoteBal: 0n, quoteAddr: '', quoteSym: '', quoteDec: 18,
   };
   const refresh = async () => {
     // balanceOf needs a real 20-byte address. '0x0' is NOT one — it made ethers
@@ -182,13 +185,13 @@ export function bindTokenTrade(host, token, onBack) {
     const me = get('address');
     // NOTE: this order MUST match the Promise.all below it. It did not, once:
     // ethBal was bound to the ticker's string and the balance rendered as NaN.
-    const [vE, vT, reserve, graduated, mine, ethBal, name, sym] = await Promise.all([
-      c.virtualEth(), c.virtualTokens(), c.realEthReserve(), c.graduated(),
+    const [vE, vT, reserve, graduated, mine, quoteAddr, name, sym] = await Promise.all([
+      c.virtualQuote(), c.virtualTokens(), c.realQuoteReserve(), c.graduated(),
       me ? c.balanceOf(me) : Promise.resolve(0n),
-      // The quote balance is what the buy percentages divide, so it is read with
-      // the same pass. A failure here must not blank the price, so it falls back
-      // to zero and the buttons simply do nothing rather than filling a guess.
-      me && p ? p.getBalance(me).catch(() => 0n) : Promise.resolve(0n),
+      // Which coin this curve is quoted in. Everything else — the balance, the
+      // percentage buttons, the unit on every price — comes from HERE, not from
+      // the chain's native token: Sepolia ETH pays gas only.
+      c.quoteToken().catch(() => ''),
       // The contract, not the local index, is the authority on what this coin
       // IS. A coin discovered from the chain (another device, or before a storage
       // wipe) arrives with an empty name/symbol, and every label on the page has
@@ -210,6 +213,24 @@ export function bindTokenTrade(host, token, onBack) {
     if (!vE) return;
     state.readable = true;
 
+    // Resolve the quote coin once: its symbol labels every price, and its
+    // balance is what the percentage buttons divide. A failure here leaves the
+    // price intact and the buttons inert — never a guess.
+    state.quoteAddr = String(quoteAddr || '');
+    if (state.quoteAddr && E) {
+      const qc = new E.Contract(state.quoteAddr, ERC20_ABI, p);
+      const [symRaw, decRaw, balRaw] = await Promise.all([
+        qc.symbol().catch(() => ''),
+        qc.decimals().catch(() => 18),
+        me ? qc.balanceOf(me).catch(() => 0n) : Promise.resolve(0n),
+      ]);
+      state.quoteSym = String(symRaw || (quoteBy(state.quoteAddr)?.symbol || ''));
+      state.quoteDec = Number(decRaw) || 18;
+      state.quoteBal = balRaw || 0n;
+      const label = $('#dexTradeQuoteToken', host);
+      if (label) label.textContent = state.quoteSym || '';
+    }
+
     // Prefer the on-chain identity; fall back to the local index only when the
     // contract could not be asked.
     // One ticker for the whole screen, taken from the contract. Every label and
@@ -228,13 +249,13 @@ export function bindTokenTrade(host, token, onBack) {
     state.vE = vE; state.vT = vT; state.reserve = reserve;
     state.graduated = graduated; state.mine = mine;
     // graduation bar
-    const { bps } = graduationProgress(reserve, GRADUATION_ETH);
+    const { bps } = graduationProgress(reserve, GRADUATION_QUOTE);
     const fill = $('#dexTradeGradFill', host);
     if (fill) fill.style.width = Math.min(100, Number(bps) / 100) + '%';
     const gtext = $('#dexTradeGradText', host);
     if (gtext) gtext.textContent = graduated ? t('dex.tokens.graduated') : t('dex.tokens.progress', { pct: String(Math.round(Number(bps) / 100)) });
-    // price & mcap & holding
-    const priceEth = Number(vE) / Number(vT); // ETH per token
+    // price & mcap & holding — both denominated in the coin's OWN quote coin
+    const priceEth = Number(vE) / Number(vT); // quote per token
     const pEl = $('#dexTradePrice', host);
     if (pEl) pEl.textContent = t('dex.trade.price', { price: priceEth.toExponential(4), sym: state.sym });
     const mEl = $('#dexTradeMcap', host);
@@ -245,9 +266,8 @@ export function bindTokenTrade(host, token, onBack) {
     // Balances, on the boxes they belong to. Without these the percentage row
     // has nothing to divide and the user is asked to type a number they cannot
     // know.
-    state.ethBal = ethBal || 0n;
     const qb = $('#dexTradeQuoteBal', host);
-    if (qb) qb.textContent = t('dex.trade.balance', { amt: fmtEth(state.ethBal) });
+    if (qb) qb.textContent = t('dex.trade.balance', { amt: fmtEth(state.quoteBal, 6) });
     const tb = $('#dexTradeTokenBal', host);
     if (tb) tb.textContent = t('dex.trade.balance', { amt: fmtTok(mine, 18, 2) });
   };
@@ -255,7 +275,10 @@ export function bindTokenTrade(host, token, onBack) {
   const quoteBuyLive = () => {
     const raw = (buyEthEl.value || '').trim();
     if (!raw) { buyQuote.textContent = ''; return; }
-    let eth; try { eth = E.parseEther(raw); } catch { buyQuote.textContent = ''; return; }
+    // Parsed with the QUOTE coin's own decimals, not a hardcoded 18: the three
+    // Dex coins are probed at 18 today, but a coin that is not would otherwise
+    // be bought at 1e6 times the intended size.
+    let eth; try { eth = E.parseUnits(raw, state.quoteDec || 18); } catch { buyQuote.textContent = ''; return; }
     // No live read means no quote: a price computed off the last-known reserves
     // is a guess, and a guess rendered as a number is how someone gets hurt.
     if (!state.readable) { buyQuote.textContent = t('dex.trade.quoteStale'); return; }
@@ -270,7 +293,7 @@ export function bindTokenTrade(host, token, onBack) {
     if (!state.readable) { sellQuote.textContent = t('dex.trade.quoteStale'); return; }
     if (tok <= 0n || state.graduated) { sellQuote.textContent = state.graduated ? t('dex.trade.graduated') : ''; return; }
     const q = quoteSell(state.vE, state.vT, tok);
-    sellQuote.textContent = t('dex.trade.youGetEth', { amt: fmtEth(q.ethOut) });
+    sellQuote.textContent = t('dex.trade.youGetEth', { amt: fmtEth(q.quoteOut, 6) });
   };
   if (buyEthEl) buyEthEl.addEventListener('input', quoteBuyLive);
   if (sellTokEl) sellTokEl.addEventListener('input', quoteSellLive);
@@ -289,11 +312,11 @@ export function bindTokenTrade(host, token, onBack) {
     const buy = e.target.closest('[data-dex-pct]');
     if (buy) {
       const pct = BigInt(buy.dataset.dexPct);
-      if (state.ethBal <= 0n) return;
-      const amt = (state.ethBal * pct) / 100n;
+      if (state.quoteBal <= 0n) return;
+      const amt = (state.quoteBal * pct) / 100n;
       buyEthEl.value = pct >= 100n
-        ? E.formatEther(state.ethBal)
-        : E.formatEther(amt);
+        ? E.formatUnits(state.quoteBal, state.quoteDec)
+        : E.formatUnits(amt, state.quoteDec);
       quoteBuyLive();
       return;
     }
@@ -310,40 +333,60 @@ export function bindTokenTrade(host, token, onBack) {
   const buyBtn = $('#dexTradeBuy', host);
   const sellBtn = $('#dexTradeSell', host);
 
-  // Buy: pay native ETH, get tokens on the curve.
+  // Buy: spend the coin's OWN quote token, receive curve tokens.
+  //
+  // Two transactions, not one: the contract pulls funds with transferFrom, so it
+  // needs an allowance first. The approval is granted only when it is missing or
+  // too small, and only for the amount being bought — never an unlimited one,
+  // which would let a compromised contract empty the wallet later.
   buyBtn.addEventListener('click', () => withTxButton(buyBtn, t('dex.trade.sending'), async () => {
     const signer = needSigner();
     if (!signer) return;
     const raw = (buyEthEl.value || '').trim();
     if (!state.readable) return toast(t('dex.trade.quoteStale'), 'error');
+    if (!state.quoteAddr) return toast(t('dex.trade.quoteStale'), 'error');
     if (!raw) return toast(t('dex.trade.needEth'), 'error');
-    let eth; try { eth = E.parseEther(raw); } catch { return toast(t('dex.trade.needEth'), 'error'); }
-    if (eth <= 0n) return toast(t('dex.trade.needEth'), 'error');
+    let amount;
+    try { amount = E.parseUnits(raw, state.quoteDec || 18); } catch { return toast(t('dex.trade.needEth'), 'error'); }
+    if (amount <= 0n) return toast(t('dex.trade.needEth'), 'error');
     if (state.graduated) return toast(t('dex.trade.graduated'), 'error');
-    const q = quoteBuy(state.vE, state.vT, eth);
+    if (amount > state.quoteBal) return toast(t('dex.trade.insufficient', { sym: state.quoteSym }), 'error');
+
+    const q = quoteBuy(state.vE, state.vT, amount);
     // The floor goes ON-CHAIN, not just on screen. The contract reverts if the
     // curve moved past it, so a front-runner costs the buyer gas instead of
-    // tokens — which is the whole point of computing it.
-    // 1% tolerance means "at least 99% of the quote", NOT "1% of the quote".
-    // The first version of this line divided the amount by 100 directly, so the
-    // floor was 1% of the quote — a 99% slippage tolerance — while the dialog
-    // cheerfully labelled it "1% slippage guard". Caught by reading the actual
-    // numbers in the confirm box (504,865 against a quote of 50,486,599).
+    // tokens. 1% tolerance means "at least 99% of the quote" — the first
+    // version divided the quote by 100 and shipped a 99% tolerance under a
+    // label that said 1%.
     const minOut = (q.tokensOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
+
+    // Approve only what this trade needs, and only when the current allowance
+    // is short. An existing allowance is reused rather than re-granted.
+    const quote = new E.Contract(state.quoteAddr, ERC20_ABI, signer);
+    const allowed = await quote.allowance(signer.getAddress?.() || get('address'), token.address).catch(() => 0n);
+    if (allowed < amount) {
+      const approved = await sendDexTx(
+        () => quote.approve(token.address, amount),
+        t('dex.trade.approving', { sym: state.quoteSym }),
+      );
+      if (!approved) return;
+    }
+
     const ok = await confirmTx({
       title: t('dex.trade.buyTitle', { sym: state.sym }),
       rows: [
-        { k: t('dex.trade.ethIn'), v: raw + ' ETH' },
+        { k: t('dex.trade.ethIn'), v: `${raw} ${state.quoteSym}` },
         { k: t('dex.trade.youGet'), v: fmtTok(q.tokensOut, 18, 2) + ' ' + state.sym },
         { k: t('dex.trade.worstCase'), v: fmtTok(minOut, 18, 2) + ' ' + state.sym },
+        { k: t('dex.trade.gas'), v: state.quoteSym },
       ],
       confirmText: t('dex.trade.buy'),
       danger: true,
-      valueWei: eth,
+      valueWei: 0n,
     });
     if (!ok) return;
     const cs = new E.Contract(token.address, PUMP_ABI, signer);
-    const rc = await sendDexTx(() => cs.buy(minOut, { value: eth }), t('dex.trade.buy'));
+    const rc = await sendDexTx(() => cs.buy(amount, minOut), t('dex.trade.buy'));
     if (!rc) return;
     toast(t('dex.trade.bought', { sym: state.sym }), 'success');
     buyEthEl.value = ''; quoteBuyLive();
@@ -402,16 +445,17 @@ export function bindTokenTrade(host, token, onBack) {
     if (!state.readable) return toast(t('dex.trade.quoteStale'), 'error');
     if (!raw) return toast(t('dex.trade.needTok'), 'error');
     let tok; try { tok = E.parseUnits(raw, 18); } catch { return toast(t('dex.trade.needTok'), 'error'); }
+    if (tok > state.mine) return toast(t('dex.trade.insufficient', { sym: state.sym }), 'error');
     if (tok <= 0n) return toast(t('dex.trade.needTok'), 'error');
     if (state.graduated) return toast(t('dex.trade.graduated'), 'error');
     const q = quoteSell(state.vE, state.vT, tok);
     // Same floor, mirrored: the contract reverts rather than pay less than this.
-    const minOut = (q.ethOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
+    const minOut = (q.quoteOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
     const ok = await confirmTx({
       title: t('dex.trade.sellTitle', { sym: state.sym }),
       rows: [
         { k: t('dex.trade.tokIn'), v: raw + ' ' + state.sym },
-        { k: t('dex.trade.youGet'), v: fmtEth(q.ethOut) + ' ETH' },
+        { k: t('dex.trade.youGet'), v: fmtEth(q.quoteOut, 6) + ' ' + state.quoteSym },
         { k: t('dex.trade.worstCase'), v: fmtEth(minOut) + ' ETH' },
       ],
       confirmText: t('dex.trade.sell'),
@@ -447,14 +491,14 @@ export function bindTokenTrade(host, token, onBack) {
     ctx.clearRect(0, 0, w, h);
     // Walk cumulative buys from the launch reserves to the graduation line,
     // recording price (ETH per token) at each point.
-    const startE = VIRTUAL_ETH, startT = VIRTUAL_TOKENS;
+    const startE = VIRTUAL_QUOTE, startT = VIRTUAL_TOKENS;
     const pts = [];
     let ve = startE, vt = startT;
     const steps = 80;
     for (let i = 0; i <= steps; i++) {
       pts.push({ eth: Number(ve), price: Number(ve) / Number(vt) });
-      const q = quoteBuy(ve, vt, GRADUATION_ETH / BigInt(steps));
-      ve = q.nextVirtualEth; vt = q.nextVirtualTokens;
+      const q = quoteBuy(ve, vt, GRADUATION_QUOTE / BigInt(steps));
+      ve = q.nextVirtualQuote; vt = q.nextVirtualTokens;
     }
     const max = Math.max(...pts.map((p) => p.price), 1e-12);
     const x = (eth) => (eth / Math.max(Number(ve), 1e-12)) * w;
@@ -476,6 +520,10 @@ export function bindTokenTrade(host, token, onBack) {
   };
 
   paintHistory();
+
+  // The market maker. It subscribes to the runner rather than owning it, so
+  // leaving this page leaves the bot trading.
+  bindBot(host, token);
 
   refresh().then(() => { drawCurve(); return quoteBuyLive(); }).then(quoteSellLive);
   // Keep the numbers, the tape and the curve live while the panel is open. The

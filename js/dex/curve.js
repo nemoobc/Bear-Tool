@@ -3,7 +3,7 @@
 // The pricing half of a pump.fun-style launchpad, as pure functions.
 //
 // The model is a constant-product market maker (x*y=k) over VIRTUAL reserves.
-// A fresh token starts with a virtual ETH reserve and a virtual token reserve
+// A fresh token starts with a virtual quote reserve and a virtual token reserve
 // that no one owns — they exist only to set the opening price and to make the
 // curve steep at the start and flat near graduation. What a buyer actually
 // takes home is the DIFFERENCE between the virtual token reserve before and
@@ -50,16 +50,16 @@ export const FEE_TOTAL_BPS = FEE_CREATOR_BPS + FEE_PROTOCOL_BPS; // 1.25%
  * the phase — the price roughly triples too, which is the curve a buyer
  * expects to walk — and 1–2 ETH is still faucet-sized on Sepolia.
  */
-export const VIRTUAL_ETH = 1n * WAD;
+export const VIRTUAL_QUOTE = 1n * WAD;
 export const VIRTUAL_TOKENS = 1_073_000_000n * WAD; // 1.073B, opening mcap ~1 ETH
 
 /**
  * Real ETH (in wei) that must sit in the contract before the curve graduates
- * to a Uniswap V2 pool. Same order as VIRTUAL_ETH so the price really climbs
+ * to a Uniswap V2 pool. Same order as VIRTUAL_QUOTE so the price really climbs
  * during the phase, and small enough that a graduation can actually be
  * exercised on Sepolia instead of being an unreachable constant.
  */
-export const GRADUATION_ETH = 2n * WAD; // 2 ETH
+export const GRADUATION_QUOTE = 2n * WAD; // 2 ETH
 
 /**
  * Apply a fee to an input amount, flooring the fee the way Solidity does.
@@ -89,25 +89,25 @@ export function splitFee(fee) {
 /**
  * How many tokens a buy of `ethIn` wei yields, and the reserves after.
  *
- * @param {bigint} virtualEth   current virtual ETH reserve (wei)
+ * @param {bigint} virtualQuote   current virtual quote reserve (wei)
  * @param {bigint} virtualTokens current virtual token reserve (wei)
  * @param {bigint} ethIn        ETH the buyer sends (wei, pre-fee)
  * @returns {{tokensOut: bigint, netEth: bigint, fee: bigint,
- *            nextVirtualEth: bigint, nextVirtualTokens: bigint,
+ *            nextVirtualQuote: bigint, nextVirtualTokens: bigint,
  *            executionPrice: bigint}} executionPrice is wei-per-token-scaled
  *   by WAD (token wei per ETH wei * WAD), i.e. tokens per 1 ETH in WAD.
  *
  * The fee is taken OFF THE TOP: only the net ETH joins the reserves. A trade
  * of exactly 0 returns 0 rather than dividing by zero.
  */
-export function quoteBuy(virtualEth, virtualTokens, ethIn) {
-  const vE = BigInt(virtualEth);
+export function quoteBuy(virtualQuote, virtualTokens, ethIn) {
+  const vE = BigInt(virtualQuote);
   const vT = BigInt(virtualTokens);
   const in_ = BigInt(ethIn);
   if (in_ <= 0n || vE <= 0n || vT <= 0n) {
     return {
       tokensOut: 0n, netEth: 0n, fee: 0n,
-      nextVirtualEth: vE, nextVirtualTokens: vT, executionPrice: 0n,
+      nextVirtualQuote: vE, nextVirtualTokens: vT, executionPrice: 0n,
     };
   }
   const { net, fee } = takeFee(in_, FEE_TOTAL_BPS);
@@ -115,65 +115,65 @@ export function quoteBuy(virtualEth, virtualTokens, ethIn) {
   // hand the buyer the dust and shrink k; flooring tokensOut leaves the dust
   // in the pool, so the product only ever grows. (tokensOut is algebraically
   // vT - k/(vE+net); floored as a whole it is <= that, i.e. pool-favouring.)
-  const nextVirtualEth = vE + net;
-  const tokensOut = (vT * net) / nextVirtualEth;
+  const nextVirtualQuote = vE + net;
+  const tokensOut = (vT * net) / nextVirtualQuote;
   const nextVirtualTokens = vT - tokensOut;
   // price in token-wei per ETH-wei, scaled by WAD so it stays readable
   const executionPrice = tokensOut > 0n ? (tokensOut * WAD) / net : 0n;
   return {
     tokensOut, netEth: net, fee,
-    nextVirtualEth, nextVirtualTokens, executionPrice,
+    nextVirtualQuote, nextVirtualTokens, executionPrice,
   };
 }
 
 /**
  * How much ETH a sell of `tokensIn` yields, and the reserves after.
  *
- * @param {bigint} virtualEth
+ * @param {bigint} virtualQuote
  * @param {bigint} virtualTokens
  * @param {bigint} tokensIn token wei the seller hands back (pre-fee)
- * @returns {{ethOut: bigint, netTokens: bigint, fee: bigint,
- *            nextVirtualEth: bigint, nextVirtualTokens: bigint,
+ * @returns {{quoteOut: bigint, netTokens: bigint, fee: bigint,
+ *            nextVirtualQuote: bigint, nextVirtualTokens: bigint,
  *            executionPrice: bigint}}
  *
  * Symmetric to quoteBuy: the fee comes off the tokens, and only the net
  * tokens rejoin the reserves.
  */
-export function quoteSell(virtualEth, virtualTokens, tokensIn) {
-  const vE = BigInt(virtualEth);
+export function quoteSell(virtualQuote, virtualTokens, tokensIn) {
+  const vE = BigInt(virtualQuote);
   const vT = BigInt(virtualTokens);
   const in_ = BigInt(tokensIn);
   if (in_ <= 0n || vE <= 0n || vT <= 0n) {
     return {
-      ethOut: 0n, netTokens: 0n, fee: 0n,
-      nextVirtualEth: vE, nextVirtualTokens: vT, executionPrice: 0n,
+      quoteOut: 0n, netTokens: 0n, fee: 0n,
+      nextVirtualQuote: vE, nextVirtualTokens: vT, executionPrice: 0n,
     };
   }
   const { net, fee } = takeFee(in_, FEE_TOTAL_BPS);
   // Same rule as quoteBuy: floor the ETH out, so the dust stays in the pool
-  // and k only grows. ethOut is algebraically vE - k/(vT+net).
+  // and k only grows. quoteOut is algebraically vE - k/(vT+net).
   const nextVirtualTokens = vT + net;
-  const ethOut = (vE * net) / nextVirtualTokens;
-  const nextVirtualEth = vE - ethOut;
-  const executionPrice = ethOut > 0n ? (ethOut * WAD) / net : 0n;
+  const quoteOut = (vE * net) / nextVirtualTokens;
+  const nextVirtualQuote = vE - quoteOut;
+  const executionPrice = quoteOut > 0n ? (quoteOut * WAD) / net : 0n;
   return {
-    ethOut, netTokens: net, fee,
-    nextVirtualEth, nextVirtualTokens, executionPrice,
+    quoteOut, netTokens: net, fee,
+    nextVirtualQuote, nextVirtualTokens, executionPrice,
   };
 }
 
 /**
  * Graduation progress in basis points, and whether the curve has graduated.
  *
- * @param {bigint} realEthReserve wei of real ETH actually held
- * @param {bigint} [threshold] defaults to GRADUATION_ETH
+ * @param {bigint} realQuoteReserve wei of real ETH actually held
+ * @param {bigint} [threshold] defaults to GRADUATION_QUOTE
  * @returns {{bps: bigint, graduated: boolean}}
  *
  * Capped at 10000 so a reserve past the threshold reads as "done", not as
  * 137% — a progress bar that can overflow is a progress bar that lies.
  */
-export function graduationProgress(realEthReserve, threshold = GRADUATION_ETH) {
-  const held = BigInt(realEthReserve);
+export function graduationProgress(realQuoteReserve, threshold = GRADUATION_QUOTE) {
+  const held = BigInt(realQuoteReserve);
   const cap = BigInt(threshold);
   if (cap <= 0n) return { bps: BPS, graduated: held > 0n };
   const raw = (held * BPS) / cap;
@@ -184,12 +184,12 @@ export function graduationProgress(realEthReserve, threshold = GRADUATION_ETH) {
 /**
  * The live price on the curve in token-wei per ETH-wei, scaled by WAD.
  *
- * @param {bigint} virtualEth
+ * @param {bigint} virtualQuote
  * @param {bigint} virtualTokens
  * @returns {bigint} tokens per 1 ETH, in WAD (1e18 = 1:1)
  */
-export function spotPrice(virtualEth, virtualTokens) {
-  const vE = BigInt(virtualEth);
+export function spotPrice(virtualQuote, virtualTokens) {
+  const vE = BigInt(virtualQuote);
   const vT = BigInt(virtualTokens);
   if (vE <= 0n) return 0n;
   return (vT * WAD) / vE;

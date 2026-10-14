@@ -15,8 +15,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-const distDir = fileURLToPath(new URL('../dist', import.meta.url));
+const rootDir = fileURLToPath(new URL('..', import.meta.url));
+const distDir = join(rootDir, 'dist');
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
 // The build is not part of `npm test` (it takes ~60s), so the gate asserts the
@@ -55,11 +57,20 @@ test('a folder feature must never be dropped by the build again', (t) => {
     assert.ok(existsSync(`${distDir}/${dir}`), `dist/${dir} is missing — dist/ is the APK, and this folder did not reach it`);
   }
 
-  // Spot-check the Dex module set, because "the folder exists" and "the feature
-  // shipped" are different claims.
-  for (const f of ['index.js', 'tokens.js', 'trade.js', 'create.js', 'discover.js',
-                   'history.js', 'chart.js', 'curve.js', 'core.js', 'pump-source.js']) {
-    assert.ok(existsSync(`${distDir}/js/dex/${f}`), `dist/js/dex/${f} is missing`);
+  // Read the Dex module list off disk rather than repeating it here. A
+  // hardcoded list is a list that goes stale: bot.js, bot-engine.js,
+  // bot-wallets.js and list.js were all added after this gate was written, and
+  // a build that silently dropped the whole market maker would have passed it
+  // every single run. The gate has to fail when a NEW module is missing, which
+  // it cannot do if it does not know the new module exists.
+  const sourceModules = readdirSync(join(rootDir, 'js/dex'))
+    .filter((f) => f.endsWith('.js'))
+    .sort();
+  assert.ok(sourceModules.length >= 10,
+    `js/dex should hold the whole launchpad; found only ${sourceModules.length}`);
+  for (const f of sourceModules) {
+    assert.ok(existsSync(`${distDir}/js/dex/${f}`),
+      `dist/js/dex/${f} is missing — every module in js/dex must reach the APK`);
   }
 
   // The vendored library is the one thing that must load before any screen

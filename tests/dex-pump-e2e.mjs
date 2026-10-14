@@ -60,6 +60,27 @@ async function compilePumpToken() {
 const V = 10n ** 18n;
 const VT = 1073000000n * 10n ** 18n;
 
+
+const MOCK_ERC20 = `contract MockQuote {
+  string public name="Bear Test"; string public symbol="TST"; uint8 public constant decimals=18;
+  mapping(address=>uint256) public balanceOf; mapping(address=>mapping(address=>uint256)) public allowance;
+  uint256 public totalSupply;
+  function mint(address t,uint256 a) external { balanceOf[t]+=a; totalSupply+=a; }
+  function approve(address s,uint256 a) external returns (bool){ allowance[msg.sender][s]=a; return true; }
+  function transfer(address t,uint256 a) external returns (bool){ _m(msg.sender,t,a); return true; }
+  function transferFrom(address f,address t,uint256 a) external returns (bool){ require(allowance[f][msg.sender]>=a,"allow"); allowance[f][msg.sender]-=a; _m(f,t,a); return true; }
+  function _m(address f,address t,uint256 a) internal { require(balanceOf[f]>=a,"bal"); balanceOf[f]-=a; balanceOf[t]+=a; }
+}`;
+
+const solc = (await import('solc')).default;
+function compileMock() {
+  const o = JSON.parse(solc.compile(JSON.stringify({ language:'Solidity', sources:{ 'Q.sol':{content:MOCK_ERC20} },
+    settings:{ outputSelection:{ '*':{ '*':['evm.bytecode.object','abi'] } } } })));
+  const e = (o.errors||[]).filter(x=>x.severity==='error');
+  if (e.length) throw new Error('solc mock: ' + e.map(x=>x.formattedMessage).join('\n'));
+  return { abi: o.contracts['Q.sol'].MockQuote.abi, bytecode: '0x'+o.contracts['Q.sol'].MockQuote.evm.bytecode.object };
+}
+
 let failures = 0;
 function check(name, cond, extra = '') {
   if (cond) console.log(`  ok  ${name}`);
@@ -74,53 +95,64 @@ try {
   const [creator, buyer, seller] = signers;
   const cAddr = await creator.getAddress();
 
+  // The curve is quoted in an ERC-20 now, and Sepolia native ETH is gas only —
+  // so the coin this runs against has to exist before the curve does.
+  const mq = compileMock();
+  const quote = await (await new ethers.ContractFactory(mq.abi, mq.bytecode, creator)).deploy({ gasLimit: 2_000_000 });
+  await quote.deploymentTransaction().wait();
+  const quoteAddr = await quote.getAddress();
+  for (const s of [buyer, seller]) await (await quote.mint(await s.getAddress(), ethers.parseEther('100'))).wait();
+
   const factory = new ethers.ContractFactory(abi, bytecode, creator);
-  const token = await factory.deploy('Bear Moon', 'BMOON', 'a test coin', '', V, VT, { gasLimit: 5_000_000 });
+  const token = await factory.deploy('Bear Moon', 'BMOON', 'a test coin', '', quoteAddr, V, VT, { gasLimit: 5_000_000 });
   const rc = await token.deploymentTransaction().wait();
   check('deploy succeeds', token.target && rc.status === 1, `status=${rc.status}`);
   const t = new ethers.Contract(await token.getAddress(), abi, creator);
 
   const read = async () => ({
-    vE: await t.virtualEth(), vT: await t.virtualTokens(),
-    reserve: await t.realEthReserve(), graduated: await t.graduated(),
+    vE: await t.virtualQuote(), vT: await t.virtualTokens(),
+    reserve: await t.realQuoteReserve(), graduated: await t.graduated(),
     fees: await t.totalFeesCreator(),
     bal: await t.balanceOf(await buyer.getAddress()),
-    held: await provider.getBalance(await token.getAddress()),
+    held: await quote.balanceOf(await token.getAddress()),
   });
 
-  // buy: buyer pays ETH, gets tokens, creator fee accrues
+  // buy: buyer pays the QUOTE coin, gets tokens, creator fee accrues.
+  // Native ETH is refused outright by the contract, so it is never even an option.
   const buyAmt = ethers.parseEther('0.01');
-  await (await t.connect(buyer).buy(0n, { value: buyAmt, gasLimit: 500_000 })).wait();
+  const qBuyer = new ethers.Contract(quoteAddr, mq.abi, buyer);
+  await (await qBuyer.approve(await token.getAddress(), buyAmt)).wait();
+  await (await t.connect(buyer).buy(buyAmt, 0n, { gasLimit: 900_000 })).wait();
   let s = await read();
-  check('buy moves the curve (virtualEth up)', s.vE > V, `vE=${s.vE}`);
+  check('buy moves the curve (virtualQuote up)', s.vE > V, `vE=${s.vE}`);
   check('buy credits the buyer', s.bal > 0n, `bal=${s.bal}`);
   check('creator fees accrued on buy', s.fees > 0n, `fees=${s.fees}`);
   // the contract keeps creator-fee + curve backing; the protocol's share was
   // paid out, so it holds slightly LESS than msg.value
-  check('contract holds the curve ETH (minus protocol share)', s.held > 0n && s.held < buyAmt, `held=${s.held}`);
+  check('contract holds the quote coin (minus protocol share)', s.held > 0n && s.held < buyAmt, `held=${s.held}`);
 
   // sell: buyer trades tokens back for ETH
   const balNow = await t.balanceOf(await buyer.getAddress());
   const sellAmt = balNow / 2n;
-  const before = await provider.getBalance(await buyer.getAddress());
-  const gasBefore = await provider.getBlock('latest');
-  await (await t.connect(buyer).sell(sellAmt, 0n, { gasLimit: 500_000 })).wait();
-  const after = await provider.getBalance(await buyer.getAddress());
+  const before = await quote.balanceOf(await buyer.getAddress());
+  await (await t.connect(buyer).sell(sellAmt, 0n, { gasLimit: 900_000 })).wait();
+  const after = await quote.balanceOf(await buyer.getAddress());
   const balAfter = await t.balanceOf(await buyer.getAddress());
   check('sell burns the tokens handed back', balAfter === balNow - sellAmt, `${balNow} -> ${balAfter} sold ${sellAmt}`);
-  check('sell pays the buyer ETH back', after > before, `before=${before} after=${after}`);
+  check('sell pays the buyer the quote coin back', after > before, `before=${before} after=${after}`);
 
   // creator claims the accrued fees — the hole this closes
   const feesBefore = await t.totalFeesCreator();
-  const creatorBefore = await provider.getBalance(cAddr);
+  const creatorBefore = await quote.balanceOf(cAddr);
   const feesWei = feesBefore;
   await (await t.connect(creator).claimFees({ gasLimit: 300_000 })).wait();
   const feesAfter = await t.totalFeesCreator();
-  const creatorAfter = await provider.getBalance(cAddr);
+  const creatorAfter = await quote.balanceOf(cAddr);
   check('claimFees() zeroes the accrued fees', feesBefore > 0n && feesAfter === 0n, `before=${feesBefore} after=${feesAfter}`);
   // the creator pays gas to claim, so the net delta is (fees - gas): allow the
   // receipt to prove fees actually left the contract rather than guessing
-  check('creator actually received the fees', feesWei > 0n && creatorAfter !== creatorBefore, `${creatorBefore} -> ${creatorAfter}`);
+  check('creator actually received the fees', creatorAfter > creatorBefore && feesAfter === 0n,
+    `${await ethers.formatEther(creatorBefore)} -> ${await ethers.formatEther(creatorAfter)}`);
 
   // a non-creator cannot claim
   let nonCreatorBlocked = false;
@@ -138,27 +170,40 @@ try {
   check('withdraw blocked before graduation', preGradWithdrawBlocked);
 
   // push the curve to graduation by buying a lot, then the creator can move it
-  // (GRADUATION_ETH is 2 ETH; buy in chunks until graduated)
+  // (GRADUATION_QUOTE is 2 ETH; buy in chunks until graduated)
   for (let i = 0; i < 20; i++) {
     if ((await t.graduated())) break;
-    try { await (await t.connect(buyer).buy(0n, { value: ethers.parseEther('0.2'), gasLimit: 900_000 })).wait(); } catch { break; }
+    // Approve per chunk: an unlimited approval is never what the app sends, and
+    // the gate should never bless a path the app does not use.
+    const chunk = ethers.parseEther('0.2');
+    try {
+      const allowed = await qBuyer.allowance(await buyer.getAddress(), await token.getAddress());
+      if (allowed < chunk) await (await qBuyer.approve(await token.getAddress(), chunk)).wait();
+      await (await t.connect(buyer).buy(chunk, 0n, { gasLimit: 900_000 })).wait();
+    } catch { break; }
   }
   s = await read();
   check('curve graduates at the threshold', s.graduated === true, `reserve=${s.reserve} graduated=${s.graduated}`);
 
   const heldBeforeWd = s.held;
-  const creatorBeforeWd = await provider.getBalance(cAddr);
+  const creatorBeforeWd = await quote.balanceOf(cAddr);
   await (await t.connect(creator).withdraw({ gasLimit: 300_000 })).wait();
-  const heldAfterWd = await provider.getBalance(await token.getAddress());
-  check('withdraw() empties the contract after graduation', heldAfterWd === 0n && heldBeforeWd > 0n, `before=${heldBeforeWd} after=${heldAfterWd}`);
-  check('creator receives the backing', (await provider.getBalance(cAddr)) > creatorBeforeWd);
+  const heldAfterWd = await quote.balanceOf(await token.getAddress());
+  // withdraw() pays the creator their accrued FEE, not the whole balance: with
+// liquidity in the pool, paying out everything would be theft.
+const wdCheck = (await t.totalFeesCreator()) === 0n
+  && heldAfterWd < heldBeforeWd
+  && (await quote.balanceOf(cAddr)) - creatorBeforeWd > 0n;
+check('withdraw() pays the creator their fee and leaves the pool alone',
+    wdCheck, `before=${heldBeforeWd} after=${heldAfterWd}`);
+  check('creator receives their fee', (await quote.balanceOf(cAddr)) > creatorBeforeWd);
 
   // no ETH stranded anywhere: contract balance is zero and fees are claimable-to-zero
   const final = await read();
-  check('no ETH left stranded in the contract', final.held === 0n, `held=${final.held}`);
+  check('nothing is stranded in the contract', final.held === 0n, `held=${final.held}`);
 } catch (e) {
   failures++;
-  console.error('  ERROR', e && (e.shortMessage || e.message) || String(e));
+  console.error('  ERROR', e && (e.shortMessage || e.message) || String(e)); if (e && e.revert) console.error('  revert=', e.revert); if (e && e.error && e.error.data) console.error('  data=', e.error.data);
 } finally {
   try { p.kill(); } catch { /* already gone */ }
 }

@@ -71,6 +71,27 @@ function check(name, cond, extra = '') {
   else { failures++; console.log(`  FAIL ${name} ${extra}`); }
 }
 
+
+const MOCK_ERC20 = `contract MockQuote {
+  string public name="Bear Test"; string public symbol="TST"; uint8 public constant decimals=18;
+  mapping(address=>uint256) public balanceOf; mapping(address=>mapping(address=>uint256)) public allowance;
+  uint256 public totalSupply;
+  function mint(address t,uint256 a) external { balanceOf[t]+=a; totalSupply+=a; }
+  function approve(address s,uint256 a) external returns (bool){ allowance[msg.sender][s]=a; return true; }
+  function transfer(address t,uint256 a) external returns (bool){ _m(msg.sender,t,a); return true; }
+  function transferFrom(address f,address t,uint256 a) external returns (bool){ require(allowance[f][msg.sender]>=a,"allow"); allowance[f][msg.sender]-=a; _m(f,t,a); return true; }
+  function _m(address f,address t,uint256 a) internal { require(balanceOf[f]>=a,"balance"); balanceOf[f]-=a; balanceOf[t]+=a; }
+}`;
+
+const solcLib = (await import('solc')).default;
+function compileMock() {
+  const o = JSON.parse(solcLib.compile(JSON.stringify({ language:'Solidity', sources:{ 'Q.sol':{content:MOCK_ERC20} },
+    settings:{ outputSelection:{ '*':{ '*':['evm.bytecode.object','abi'] } } } })));
+  const e = (o.errors||[]).filter(x=>x.severity==='error');
+  if (e.length) throw new Error('solc mock: ' + e.map(x=>x.formattedMessage).join('\n'));
+  return { abi: o.contracts['Q.sol'].MockQuote.abi, bytecode: '0x'+o.contracts['Q.sol'].MockQuote.evm.bytecode.object };
+}
+
 const { p, provider } = await startAnvil();
 try {
   console.log(`Dex on-chain: quote \u2194 chain agreement (anvil, port ${PORT})`);
@@ -84,11 +105,24 @@ try {
   const buyerAddr = await buyer.getAddress();
   const creatorAddr = await creator.getAddress();
 
+  // The curve is quoted in an ERC-20; Sepolia native ETH is gas only. The coin
+  // has to exist and be funded before the curve can be asked to trade.
+  const mq = compileMock();
+  const mock = await (await new ethers.ContractFactory(mq.abi, mq.bytecode, creator)).deploy({ gasLimit: 2_000_000 });
+  await mock.deploymentTransaction().wait();
+  const quoteAddr = await mock.getAddress();
+  for (const s of [buyer, other]) await (await mock.mint(await s.getAddress(), ETH(500))).wait();
+  const qBuyer = new ethers.Contract(quoteAddr, mq.abi, buyer);
+  const qOther = new ethers.Contract(quoteAddr, mq.abi, other);
+  const approveFor = async (who, addr) => { await (await who.approve(addr, ETH(500))).wait(); };
+
   const factory = new ethers.ContractFactory(abi, bytecode, creator);
-  const deployed = await factory.deploy('Quote Test', 'QTEST', '', '', C.VIRTUAL_ETH, C.VIRTUAL_TOKENS, { gasLimit: 5_000_000 });
+  const deployed = await factory.deploy('Quote Test', 'QTEST', '', '', quoteAddr, C.VIRTUAL_QUOTE, C.VIRTUAL_TOKENS, { gasLimit: 5_000_000 });
   await deployed.deploymentTransaction().wait();
   const addr = await deployed.getAddress();
   const t = new ethers.Contract(addr, abi, creator);
+  await approveFor(qBuyer, addr);
+  await approveFor(qOther, addr);
   console.log(`  coin ${addr}`);
 
   // ── the slippage guard, proved by trying to break it ──────────
@@ -97,17 +131,18 @@ try {
   // looks dead) and too loose (a front-runner takes 99% and the trade still
   // succeeds). Only a chain can tell which one shipped.
   {
-    const [vE, vT] = await Promise.all([t.virtualEth(), t.virtualTokens()]);
+    const [vE, vT] = await Promise.all([t.virtualQuote(), t.virtualTokens()]);
     const q = C.quoteBuy(vE, vT, ETH(0.01));
+    await approveFor(qBuyer, addr);
     const balBefore = await t.balanceOf(buyerAddr);
 
     // 1. an impossible floor must revert, leaving the curve untouched
     let blocked = false;
     try {
-      await (await t.connect(buyer).buy(q.tokensOut * 2n, { value: ETH(0.01), gasLimit: 900_000 })).wait();
+      await (await t.connect(buyer).buy(ETH(0.01), q.tokensOut * 2n, { gasLimit: 900_000 })).wait();
     } catch { blocked = true; }
     check('a buy whose floor is above the quote reverts', blocked);
-    const [vEAfter, vTAfter] = await Promise.all([t.virtualEth(), t.virtualTokens()]);
+    const [vEAfter, vTAfter] = await Promise.all([t.virtualQuote(), t.virtualTokens()]);
     check('the refused buy left the curve exactly as it was',
       vEAfter === vE && vTAfter === vT, `eth ${vEAfter} vs ${vE}`);
     check('the refused buy moved no tokens', (await t.balanceOf(buyerAddr)) === balBefore);
@@ -126,7 +161,7 @@ try {
     // 3. and the app's real floor must actually pass
     let passed = true;
     try {
-      await (await t.connect(buyer).buy(floor, { value: ETH(0.01), gasLimit: 900_000 })).wait();
+      await (await t.connect(buyer).buy(ETH(0.01), floor, { gasLimit: 900_000 })).wait();
     } catch { passed = false; }
     check("a buy at the app's real floor succeeds", passed);
   }
@@ -178,11 +213,11 @@ try {
     const ethIn = ethers.parseEther(size);
 
     // What the coin page would put on screen right now.
-    const [vE, vT] = await Promise.all([t.virtualEth(), t.virtualTokens()]);
+    const [vE, vT] = await Promise.all([t.virtualQuote(), t.virtualTokens()]);
     const q = C.quoteBuy(vE, vT, ethIn);
 
     const before = await t.balanceOf(buyerAddr);
-    await (await t.connect(buyer).buy((q.tokensOut * 9_900n) / 10_000n, { value: ethIn, gasLimit: 900_000 })).wait();
+    await (await t.connect(buyer).buy(ethIn, (q.tokensOut * 9_900n) / 10_000n, { gasLimit: 900_000 })).wait();
     const after = await t.balanceOf(buyerAddr);
     const got = after - before;
 
@@ -194,10 +229,10 @@ try {
       got <= q.tokensOut + 1n, `quoted ${q.tokensOut} got ${got}`);
 
     // 3. the reserves must land exactly where the quote said they would
-    const [nE, nT] = await Promise.all([t.virtualEth(), t.virtualTokens()]);
+    const [nE, nT] = await Promise.all([t.virtualQuote(), t.virtualTokens()]);
     check(`buy ${size} ETH moves reserves to the quoted next values`,
-      nE === q.nextVirtualEth && nT === q.nextVirtualTokens,
-      `eth ${nE} vs ${q.nextVirtualEth}, tokens ${nT} vs ${q.nextVirtualTokens}`);
+      nE === q.nextVirtualQuote && nT === q.nextVirtualTokens,
+      `eth ${nE} vs ${q.nextVirtualQuote}, tokens ${nT} vs ${q.nextVirtualTokens}`);
 
     // 4. the fee must match the split the screen shows. totalFeesCreator is
     // CUMULATIVE, so this compares the DELTA this buy accrued — comparing the
@@ -217,12 +252,12 @@ try {
   let holding = await t.balanceOf(buyerAddr);
   for (const frac of [3n, 2n]) {
     const tokensIn = holding / frac;
-    const [vE, vT] = await Promise.all([t.virtualEth(), t.virtualTokens()]);
+    const [vE, vT] = await Promise.all([t.virtualQuote(), t.virtualTokens()]);
     const q = C.quoteSell(vE, vT, tokensIn);
 
-    const balBefore = await provider.getBalance(buyerAddr);
-    await (await t.connect(buyer).sell(tokensIn, (q.ethOut * 9_900n) / 10_000n, { gasLimit: 900_000 })).wait();
-    const balAfter = await provider.getBalance(buyerAddr);
+    const balBefore = await mock.balanceOf(buyerAddr);
+    await (await t.connect(buyer).sell(tokensIn, (q.quoteOut * 9_900n) / 10_000n, { gasLimit: 900_000 })).wait();
+    const balAfter = await mock.balanceOf(buyerAddr);
     const received = balAfter - balBefore;
 
     check(`sell 1/${frac} of the holding burns exactly the tokens handed back`,
@@ -230,7 +265,7 @@ try {
     // The user must not receive MORE than quoted (they pay gas, so the delta is
     // received minus gas — comparing against the quote needs the gas allowance).
     check(`sell 1/${frac} pays no more ETH than quoted`,
-      received <= q.ethOut, `quoted ${q.ethOut}, wallet moved ${received}`);
+      received <= q.quoteOut, `quoted ${q.quoteOut}, wallet moved ${received}`);
     // …and must receive something real: a sell that silently rounds to zero
     // reads as a successful trade that paid nothing.
     check(`sell 1/${frac} pays a real amount`,
@@ -241,34 +276,34 @@ try {
   // ── the contract's own ETH bookkeeping ────────────────────────
   //
   // This is where a real money bug lived. sell() used to drop the reserve by
-  // the payout but NOT by the protocol's share, so realEthReserve crept ABOVE
+  // the payout but NOT by the protocol's share, so realQuoteReserve crept ABOVE
   // the ETH actually held — and claimFees() then underflowed and reverted,
   // locking the creator's revenue forever.
   //
-  // The invariant, stated correctly: realEthReserve IS the whole balance. The
+  // The invariant, stated correctly: realQuoteReserve IS the whole balance. The
   // unpaid creator fees are a CLAIM ON that balance, not a separate pot beside
   // it — which is why claiming them drops both the owed amount and the balance by
   // the same figure, and why the two must line up exactly at the end.
-  const reserve = await t.realEthReserve();
+  const reserve = await t.realQuoteReserve();
   const owed = await t.totalFeesCreator();
-  const held = await provider.getBalance(addr);
-  check('the reserve claims no more ETH than the contract holds',
+  const held = await mock.balanceOf(addr);
+  check('the reserve claims no more the quote coin than the contract holds',
     reserve <= held, `reserve ${reserve} vs held ${held}`);
-  check('the reserve equals the ETH held exactly',
+  check('the reserve equals the the quote coin held exactly',
     reserve === held, `reserve ${reserve} vs held ${held}`);
-  check('the unpaid creator fees are a claim on that balance, not extra ETH',
+  check('the unpaid creator fees are a claim on that balance, not extra the quote coin',
     owed <= held, `owed ${owed} vs held ${held}`);
 
   // …and the money must actually come out, which is what the drift used to
   // prevent: claim the whole accrued fee and watch the reserve track the balance.
-  const creatorBefore = await provider.getBalance(creatorAddr);
+  const creatorBefore = await mock.balanceOf(creatorAddr);
   await (await t.connect(creator).claimFees({ gasLimit: 400_000 })).wait();
-  const creatorAfter = await provider.getBalance(creatorAddr);
+  const creatorAfter = await mock.balanceOf(creatorAddr);
   check('claiming the accrued fees succeeds', creatorAfter !== creatorBefore,
     `${creatorBefore} -> ${creatorAfter}`);
   check('the accrued fee is now zero', (await t.totalFeesCreator()) === 0n);
-  const reserve2 = await t.realEthReserve();
-  const held2 = await provider.getBalance(addr);
+  const reserve2 = await t.realQuoteReserve();
+  const held2 = await mock.balanceOf(addr);
   check('after the claim the reserve exactly equals what is held',
     reserve2 === held2, `reserve ${reserve2} vs held ${held2}`);
 

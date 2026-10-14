@@ -325,3 +325,23 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
 /* A percentage of a zero balance would be a zero, so the row says so rather
    than offering a button that cannot do anything useful. */
 .dex-pct:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* ── market maker ─────────────────────────────────────────────────── */
+.dex-bot { margin-top: 12px; border: 1px solid var(--border-thick); border-radius: var(--radius-lg); overflow: hidden; }
+.dex-bot-toggle {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 10px 12px; background: var(--cream); border: 0; cursor: pointer;
+  font: inherit; font-weight: 700; text-align: start; color: var(--ink);
+}
+.dex-bot-toggle:hover { background: var(--white); }
+.dex-bot-toggle .small { font-weight: 400; margin-inline-start: auto; }
+.dex-bot-body { padding: 12px; display: grid; gap: 8px; }
+.dex-bot-truth { margin: 0; border-inline-start: 3px solid var(--honey); padding-inline-start: 8px; }
+.dex-bot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; align-items: center; }
+.dex-bot-grid .field-label { grid-column: 1; font-size: 0.85em; margin: 0; }
+.dex-bot-grid .input { grid-column: 2; margin: 0; }
+.dex-bot-actions { display: flex; gap: 8px; }
+.dex-bot-actions .btn { flex: 1; }
+.dex-bot-meter { display: grid; gap: 4px; }
+.dex-bot-meter-head { display: flex; justify-content: space-between; }
+.dex-bot-log { max-height: 7em; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.8em; white-space: pre-wrap; }

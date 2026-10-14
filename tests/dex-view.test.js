@@ -105,7 +105,7 @@ test('the launchpad has ONE way to trade — the Uniswap V2 layer is gone', () =
   }
 });
 
-test('there is no pair, no pool, and no second ETH anywhere in the Dex', () => {
+test('there is no pair, no pool, and no second ETH anywhere in the Dex', async () => {
   // dex.pair was the global pair selector. With it gone, nothing may write it.
   assert.ok(!/dex\.pair/.test(dexJs) && !/dex\.pair/.test(coreJs),
     'nothing may write or read dex.pair — a launchpad has no pair');
@@ -117,17 +117,25 @@ test('there is no pair, no pool, and no second ETH anywhere in the Dex', () => {
   // Sepolia ETH was the gas token: two ETHs, one screen. That is the ambiguity
   // the rebuild was commissioned to remove, so the preset table must not come
   // back in any form.
-  const presetsGone = ['0x8847346f20aCe5bd4619B7fbF3467D001E269fE9',
-                       '0x8719D774726b11497FAddCFdf7bc369C56F6B5d3',
-                       '0x4669689d94991bb4ab6A6e071f9af9CC42d9deef'];
-  for (const f of readdirSync(new URL('../js/dex', import.meta.url))) {
-    if (!f.endsWith('.js')) continue;
-    const src = readFileSync(new URL(`../js/dex/${f}`, import.meta.url), 'utf8');
-    for (const a of presetsGone) {
-      assert.ok(!src.includes(a),
-        `js/dex/${f} still hardcodes preset ${a} — the three-coin preset table must stay deleted`);
-    }
+  // The three coins came BACK — as the currency the launchpad is QUOTED in,
+  // which is what they were always for. Sepolia native ETH is gas only, and the
+  // curve contract refuses it outright, so the two can never be confused again:
+  // one is the money you trade in, the other is the money you pay fees with.
+  const core = await import('../js/dex/core.js');
+  assert.equal(core.QUOTE_PRESETS.length, 3, 'the Dex has exactly three coins');
+  const addrs = core.QUOTE_PRESETS.map((q) => q.address.toLowerCase());
+  for (const a of ['0x8847346f20ace5bd4619b7fbf3467d001e269fe9',
+                   '0x8719d774726b11497faddcfdf7bc369c56f6b5d3',
+                   '0x4669689d94991bb4ab6a6e071f9af9cc42d9deef']) {
+    assert.ok(addrs.includes(a), `the Dex must carry coin ${a}`);
   }
+  // …and none of them may be the chain's native token standing in for it.
+  assert.ok(!addrs.includes('0x0000000000000000000000000000000000000000'),
+    'no coin may be a native-coin stand-in');
+  assert.equal(core.defaultQuote().symbol, 'ETH', 'the first coin is the default quote');
+  // Exactly one place defines them, so an address is never written twice.
+  assert.ok(!/0x8847346f20aCe5bd4619B7fbF3467D001E269fE9/.test(dexJs),
+    'the addresses live in core.js only');
 });
 
 test('the launchpad has ONE way to read a coin — swap/liquidity/mm panels are gone', () => {
@@ -369,9 +377,10 @@ test('every contract read the coin page makes must exist in the ABI', () => {
   // the price, market cap and graduation bar all went blank with it.
   const abi = read('../js/dex/pump-source.js');
   for (const sig of ['function balanceOf(address owner) view returns (uint256)',
-                     'function virtualEth() view returns (uint256)',
+                     'function quoteToken() view returns (address)',
+                     'function virtualQuote() view returns (uint256)',
                      'function virtualTokens() view returns (uint256)',
-                     'function realEthReserve() view returns (uint256)',
+                     'function realQuoteReserve() view returns (uint256)',
                      'function graduated() view returns (uint256)',
                      'function creator() view returns (address)',
                      'function totalFeesCreator() view returns (uint256)']) {
@@ -381,8 +390,12 @@ test('every contract read the coin page makes must exist in the ABI', () => {
   // The floor is enforced by the contract, so the ABI must carry it too — and
   // the app must send a floor, not just display one.
   const trade = read('../js/dex/trade.js');
-  assert.match(trade, /cs\.buy\(minOut, \{ value: eth \}\)/,
-    'the buy must send the floor to the contract');
+  assert.match(trade, /cs\.buy\(amount, minOut\)/,
+    'the buy must send the quote amount AND the floor to the contract');
+  assert.match(trade, /quote\.approve\(token\.address, amount\)/,
+    'an ERC-20 curve needs an allowance before it can pull funds — approve exactly this trade\'s amount');
+  assert.ok(!/approve\([^)]*MaxUint256|approve\([^)]*MAX_UINT/.test(trade),
+    'never an unlimited approval');
   assert.match(trade, /cs\.sell\(tok, minOut\)/,
     'the sell must send the floor to the contract');
   assert.match(trade, /dex\.trade\.worstCase/,
@@ -408,8 +421,27 @@ test('graduation says what actually happens, and what it does not', () => {
 
   // So the claim must be checkable: withdraw() pays the caller, and the
   // graduation exit must stay gated on both graduation AND the creator.
-  assert.match(contract, /function withdraw\(\) external returns \(uint256\) \{\s*require\(msg\.sender == creator, "creator"\);\s*require\(graduated, "not graduated"\);/,
-    'withdraw must remain creator-only and post-graduation — the button is gated on the same facts');
+  assert.match(contract, /function withdraw\(\) external nonReentrant returns \(uint256\) \{\s*require\(msg\.sender == creator, "creator"\);\s*require\(graduated, "not graduated"\);\s*uint256 fees = totalFeesCreator;/,
+    'withdraw must remain creator-only and post-graduation');
+
+  // What the creator may take has two cases, and the difference is other
+  // people's money. With providers in the pool, the backing is a promise made to
+  // strangers. With nobody in it there is no promise to keep — and paying out
+  // only the fee would lock every buyer's quote in the contract for ever.
+  assert.match(contract, /uint256 backing = totalLpShares == 0 \? lpValue\(\) : 0;/,
+    'the backing may only leave when there is no liquidity provider to owe it to');
+  assert.match(contract, /uint256 amount = fees \+ backing;\s*totalFeesCreator = 0;\s*realQuoteReserve -= backing;/,
+    'the fee and the backing are taken together, and the fee is cleared last so lpValue still subtracts it');
+
+  // The failure this guards against is silent: the contract holds more than the
+  // creator is owed, the creator claims it, and a buyer who sold earlier cannot
+  // get their money out. So the check is on the ORDER, not just the arithmetic.
+  const withdrawBody = contract.slice(contract.indexOf('function withdraw()'), contract.indexOf('function _mintTo'));
+  assert.ok(withdrawBody.indexOf('lpValue()') < withdrawBody.indexOf('totalFeesCreator = 0;'),
+    'lpValue must be read BEFORE the fee is zeroed — read after, the fee is counted twice and the payout exceeds the balance');
+
+  // …and the same in every language: a button that says "take it out" while
+  // paying out the pool is the kind of lie this test exists to catch.
 });
 
 // ── the two things that make a buy box usable ──────────────────
@@ -429,16 +461,18 @@ test('the buy box shows a balance and can fill itself by percentage', () => {
 
   // The buttons divide a balance that was READ. A percentage of a stale or
   // invented number is how someone ends up sending an amount they did not mean.
-  assert.match(tradeJs, /p\.getBalance\(me\)/,
-    'the quote balance must be read from the chain, not remembered');
-  assert.match(tradeJs, /if \(state\.ethBal <= 0n\) return;/,
+  assert.match(tradeJs, /qc\.balanceOf\(me\)/,
+    'the balance must be the QUOTE COIN\'s, read from chain — native ETH is gas only');
+  assert.match(tradeJs, /if \(state\.quoteBal <= 0n\) return;/,
     'a zero balance must leave the box alone rather than fill zero');
   assert.match(tradeJs, /if \(state\.mine <= 0n\) return;/,
     'and the same for the sell side');
 
   // …and the percentage must come off the balance, not out of thin air.
-  assert.match(tradeJs, /state\.ethBal \* pct\) \/ 100n/,
+  assert.match(tradeJs, /state\.quoteBal \* pct\) \/ 100n/,
     'a quick-fill must be that fraction of the balance held');
+  assert.ok(!/getBalance\(me\)/.test(tradeJs),
+    'nothing may read a NATIVE balance as the trading balance again');
 });
 
 test('the read order cannot silently swap two values', () => {
@@ -454,14 +488,16 @@ test('the read order cannot silently swap two values', () => {
   const list = fn.slice(fn.indexOf('await Promise.all(['), fn.indexOf('])', fn.indexOf('await Promise.all([')));
 
   // Each name the destructuring claims must appear in that position in the list.
-  const slots = ['virtualEth', 'virtualTokens', 'realEthReserve', 'graduated',
-                 'balanceOf', 'getBalance', 'name', 'symbol'];
+  const slots = ['virtualQuote', 'virtualTokens', 'realQuoteReserve', 'graduated',
+                 'balanceOf', 'quoteToken', 'name', 'symbol'];
   let cursor = 0;
   for (const slot of slots) {
     const at = list.indexOf(slot + '(', cursor);
     assert.ok(at > -1, `the read list must contain ${slot}`);
     cursor = at + 1;
   }
-  assert.ok(destructured.includes('ethBal') && destructured.includes('name') && destructured.includes('sym'),
-    'the destructuring must claim the balance, the name and the ticker');
+  assert.ok(destructured.includes('quoteAddr') && destructured.includes('name') && destructured.includes('sym'),
+    'the destructuring must claim the quote token, the name and the ticker');
+  assert.ok(!destructured.includes('ethBal'),
+    'there is no native balance on a curve quoted in an ERC-20');
 });

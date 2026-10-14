@@ -18,11 +18,11 @@ import { waitForReceipt, receiptVerdict } from '../safetx.js';
 import { compileContract } from '../solc.js';
 import {
   quoteBuy, graduationProgress, spotPrice, fmtEth,
-  VIRTUAL_ETH, VIRTUAL_TOKENS, GRADUATION_ETH, FEE_TOTAL_BPS,
+  VIRTUAL_QUOTE, VIRTUAL_TOKENS, GRADUATION_QUOTE, FEE_TOTAL_BPS,
 } from './curve.js';
 import { PUMP_TOKEN_SOURCE, PUMP_ABI } from './pump-source.js';
 import { rememberLaunchedToken } from './tokens.js';
-import { withTxButton } from './core.js';
+import { withTxButton, QUOTE_PRESETS } from './core.js';
 
 // Images: the user may upload a big file (10 MB), but a data URI can NEVER go
 // on-chain as-is — the constructor calldata explodes the deploy gas past what
@@ -60,6 +60,14 @@ export function createHtml() {
           <textarea id="dexCreateDesc" class="textarea" rows="2" maxlength="200"
                     placeholder="${escapeHtml(t('dex.create.descPh'))}"></textarea>
         </div>
+      </div>
+
+      <div class="dex-create-fields mt-8">
+        <label class="field-label" for="dexCreateQuote">${escapeHtml(t('dex.create.quote'))}</label>
+        <select id="dexCreateQuote" class="input" aria-describedby="dexCreateQuoteWhy">
+          ${QUOTE_PRESETS.map((q, i) => `<option value="${escapeHtml(q.address)}"${i === 0 ? ' selected' : ''}>${escapeHtml(q.symbol)} — ${escapeHtml(q.name)}</option>`).join('')}
+        </select>
+        <div class="small mt-8" id="dexCreateQuoteWhy">${escapeHtml(t('dex.create.quoteWhy'))}</div>
       </div>
 
       <div class="dex-create-curve">
@@ -144,9 +152,9 @@ export function bindCreate(host, onLaunched) {
     // purpose: the i18n placeholder-checker parses object literals inside a
     // t(key, {...}) argument as {{params}}, so an inline
     // { maximumFractionDigits: 0 } would look like a missing placeholder.
-    const open = Number(spotPrice(VIRTUAL_ETH, VIRTUAL_TOKENS)) / 1e18; // tokens per ETH
+    const open = Number(spotPrice(VIRTUAL_QUOTE, VIRTUAL_TOKENS)) / 1e18; // tokens per ETH
     const openText = open.toLocaleString('en-US', { maximumFractionDigits: 0 });
-    const gradText = fmtEth(GRADUATION_ETH);
+    const gradText = fmtEth(GRADUATION_QUOTE);
     infoEl.textContent = t('dex.create.curveInfo', { open: openText, grad: gradText });
   }
 
@@ -176,7 +184,8 @@ export function bindCreate(host, onLaunched) {
       const provider = await getProvider(net.chainId);
       const signer = get('signer').connect(provider);
       const factory = new E.ContractFactory(compiled.abi, compiled.bytecode, signer);
-      const args = [name, symbol, desc, image, VIRTUAL_ETH, VIRTUAL_TOKENS];
+      const quoteAddr = $('#dexCreateQuote', host).value || QUOTE_PRESETS[0].address;
+      const args = [name, symbol, desc, image, quoteAddr, VIRTUAL_QUOTE, VIRTUAL_TOKENS];
       const deployTx = await factory.getDeployTransaction(...args);
       let gasEstimate;
       try {
@@ -200,7 +209,7 @@ export function bindCreate(host, onLaunched) {
           // unit test did. BigInt division would also have been wrong (125n/100n
           // is 1, not 1.25), so this converts deliberately.
           { k: t('dex.create.fee'), v: `${(Number(FEE_TOTAL_BPS) / 100).toFixed(2)}% on every trade` },
-          { k: t('dex.create.gradAt'), v: fmtEth(GRADUATION_ETH) + ' ' + net.symbol },
+          { k: t('dex.create.gradAt'), v: fmtEth(GRADUATION_QUOTE) + ' ' + net.symbol },
           { k: t('cf.transactions'), v: '1' },
           { k: t('dex.create.cost'), v: gasPrice > 0n
             ? `${E.formatEther(cost)} ${net.symbol} (${gasEstimate} gas)`
@@ -297,14 +306,14 @@ function drawCurve(canvas) {
   // the reciprocal, tokens-per-ETH, and falls — plotting it draws a curve
   // that goes the wrong way and looks broken.)
   const prices = [];
-  let ve = VIRTUAL_ETH;
+  let ve = VIRTUAL_QUOTE;
   let vt = VIRTUAL_TOKENS;
   const steps = 60;
   for (let i = 0; i <= steps; i++) {
     prices.push(Number(ve) / Number(vt)); // ETH wei per token wei
-    const add = GRADUATION_ETH / BigInt(steps);
+    const add = GRADUATION_QUOTE / BigInt(steps);
     const q = quoteBuy(ve, vt, add);
-    ve = q.nextVirtualEth;
+    ve = q.nextVirtualQuote;
     vt = q.nextVirtualTokens;
   }
   const max = Math.max(...prices, 1e-12);

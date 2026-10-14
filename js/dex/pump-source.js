@@ -1,59 +1,36 @@
 // Bear Tool — js/dex/pump-source.js
+// The launchpad coin: an ERC-20 that trades on its own bonding curve, quoted in
+// one of the Dex's OWN coins.
 //
-// The launchpad token contract: a self-contained ERC-20 that trades on its OWN
-// bonding curve (constant product over two virtual reserves), exactly the pump.fun
-// shape. Kept inside js/dex/ because it exists only for the launchpad.
+// WHY THE CURVE IS QUOTED IN AN ERC-20, NOT NATIVE ETH
+// User order: "coin native eth itu buat gas fee aja only, yang ku kasih 3
+// contract erc jadiin coin nativenya". So Sepolia ETH pays gas and nothing else,
+// and the curve is denominated in one of the three contracts that were deployed
+// as the Dex's coins. This is why buy() has no msg.value and why receive()
+// reverts: there is no path by which native ETH can enter this contract, so
+// "gas only" is a property of the code rather than a promise in a label.
 //
-// Mechanics (all on-chain, no off-chain trust):
-//  - A virtual reserve pair (VIRTUAL_ETH / VIRTUAL_TOKENS) sets the opening
-//    price so early buys don't blow up the first trade.
-//  - buy() pays native ETH, gets tokens along the curve; sell() does the reverse.
-//  - A 1.25% fee splits 0.30% creator / 0.95% protocol (matches curve.js).
-//  - When the REAL ETH reserve crosses GRADUATION_ETH the token "graduates":
-//    curve trading shuts and the creator is told to move liquidity to the Dex.
-//  - The image is stored as metadata (data URI) so the token has a face, the
-//    way a launchpad coin is expected to.
+// One quote per curve, chosen at launch. Two quotes would mean two prices for
+// the same token — which is not a feature, it is an ambiguity — so the coin
+// page shows the quote it trades in and the choice happens on the launch form.
 //
-// The contract is compiled in the browser by the same solc pipeline deploy.js
-// uses (js/solc.js); nothing is deployed until the user signs.
-
-export const PUMP_ABI = [
-  'function name() view returns (string)',
-  'function symbol() view returns (string)',
-  'function decimals() view returns (uint8)',
-  'function image() view returns (string)',
-  'function description() view returns (string)',
-  'function creator() view returns (address)',
-  'function virtualEth() view returns (uint256)',
-  'function virtualTokens() view returns (uint256)',
-  'function realEthReserve() view returns (uint256)',
-  // balanceOf is the public mapping on the contract, and the coin page reads it
-  // for "You hold". It was missing from this list, so ethers had no such method:
-  // the read threw and the whole Promise.all in refresh() died — taking the
-  // price, market cap and graduation bar with it, because they shared one read.
-  'function balanceOf(address owner) view returns (uint256)',
-  'function graduated() view returns (bool)',
-  'function buy(uint256 minTokensOut) payable returns (uint256)',
-  'function sell(uint256 tokensIn, uint256 minEthOut) returns (uint256)',
-  'function claimFees() returns (uint256)',
-  'function withdraw() returns (uint256)',
-  'function totalFeesCreator() view returns (uint256)',
-  'function getPrice() view returns (uint256)',
-  'event Launched(address indexed creator, address indexed token, string name, string symbol)',
-  'event Bought(address indexed buyer, uint256 ethIn, uint256 tokensOut, uint256 fee)',
-  'event Sold(address indexed seller, uint256 tokensIn, uint256 ethOut, uint256 fee)',
-  'event Graduated(uint256 realEthReserve)',
-  'event FeesClaimed(address indexed creator, uint256 amount)',
-  'event Withdrawn(address indexed creator, uint256 amount)',
-];
-
-export const GRADUATION_ETH_WEI = 15_000_000_000_000_000n; // 0.015 ETH
-
-// Constructor args are appended by the deploy step; this string is the whole
-// program. Written for solc 0.8.x, no external imports, no OpenZeppelin —
-// it must compile standalone in the browser from one source string.
+// The maths is unchanged from the native-ETH version (see curve.js, which
+// imports nothing from here and is the single source for the numbers): same
+// constant-product curve, same fee split, same graduation threshold, same
+// floor-the-output rule.
 export const PUMP_TOKEN_SOURCE = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+
+interface IERC20 {
+    // Solidity >=0.5 requires an explicit visibility on interface members; the
+    // first draft omitted it and the contract would not compile at all.
+    function balanceOf(address owner) external view returns (uint256);
+    function transfer(address to, uint256 amount) external returns (bool);
+    function transferFrom(address from, address to, uint256 amount) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function decimals() external view returns (uint8);
+}
 
 contract PumpToken {
     string public name;
@@ -63,188 +40,304 @@ contract PumpToken {
     address public immutable creator;
     uint8 public constant decimals = 18;
 
-    uint256 public virtualEth;
+    // The coin this curve is priced and paid in. Immutable: a curve that could
+    // be re-quoted after launch would have had its price change under the people
+    // holding it.
+    address public immutable quoteToken;
+    uint8 public immutable quoteDecimals;
+
+    uint256 public virtualQuote;
     uint256 public virtualTokens;
-    uint256 public realEthReserve;
+    uint256 public realQuoteReserve;
     bool public graduated;
     uint256 public totalFeesCreator;
 
     uint256 public constant FEE_BPS = 125;        // 1.25%
     uint256 public constant CREATOR_FEE_BPS = 30;  // 0.30%
-    // MUST match curve.js GRADUATION_ETH, or the progress bar the UI draws and
-    // the threshold the chain enforces disagree (it did: 0.015 here vs 2 ETH
-    // there, so the token graduated long before the UI said it would).
-    uint256 public constant GRADUATION_ETH = 2 ether;
+    // MUST match curve.js GRADUATION_QUOTE, or the progress bar the UI draws and
+    // the threshold the chain enforces disagree.
+    uint256 public constant GRADUATION_QUOTE = 2 ether;
 
-    // Where the protocol's share of every trade goes. Immutable so it cannot be
-    // redirected after deploy; falls back to the creator (they then hold both
-    // shares) if the deployer left it unset.
     address public immutable protocolWallet;
+
+    // ERC-20 calls back into the contract (a malicious token can), so every
+    // state-changing entry point is guarded. Without it the fee payout and the
+    // buy's own transfers could re-enter before the reserves were updated.
+    uint256 private _entered = 1;
+    modifier nonReentrant() {
+        require(_entered == 1, "locked");
+        _entered = 2;
+        _;
+        _entered = 1;
+    }
 
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Launched(address indexed creator, address indexed token, string name, string symbol);
-    event Bought(address indexed buyer, uint256 ethIn, uint256 tokensOut, uint256 fee);
-    event Sold(address indexed seller, uint256 tokensIn, uint256 ethOut, uint256 fee);
-    event Graduated(uint256 realEthReserve);
+    event Bought(address indexed buyer, uint256 quoteIn, uint256 tokensOut, uint256 fee);
+    event Sold(address indexed seller, uint256 tokensIn, uint256 quoteOut, uint256 fee);
+    event Graduated(uint256 realQuoteReserve);
     event FeesClaimed(address indexed creator, uint256 amount);
     event Withdrawn(address indexed creator, uint256 amount);
+    event LiquidityAdded(address indexed provider, uint256 quoteIn, uint256 shares);
+    event LiquidityRemoved(address indexed provider, uint256 quoteOut, uint256 shares);
 
     constructor(string memory _name, string memory _symbol, string memory _description,
-                string memory _image, uint256 _virtualEth, uint256 _virtualTokens) {
+                string memory _image, address _quoteToken,
+                uint256 _virtualQuote, uint256 _virtualTokens) {
         require(bytes(_name).length > 0 && bytes(_name).length <= 32, "name");
         require(bytes(_symbol).length > 0 && bytes(_symbol).length <= 12, "symbol");
+        // A curve quoted in nothing, or in itself, is not a curve. Both are
+        // refused here rather than producing a coin nobody can trade.
+        require(_quoteToken != address(0), "quote");
+        require(_quoteToken != address(this), "self quote");
         name = _name;
         symbol = _symbol;
         description = _description;
         image = _image;
         creator = msg.sender;
-        virtualEth = _virtualEth;
+        quoteToken = _quoteToken;
+        quoteDecimals = IERC20(_quoteToken).decimals();
+        virtualQuote = _virtualQuote;
         virtualTokens = _virtualTokens;
         protocolWallet = msg.sender;
-        // The launch's own record, on chain.
-        //
-        // Without this a coin had NO discoverable trace: the constructor emitted
-        // nothing, so the only way to find one was to scan every contract-creation
-        // transaction the creator ever sent — unreliable and ruinously expensive.
-        // The feed was therefore only ever as good as one browser's localStorage,
-        // and clearing it (or opening another device) erased real, paid-for coins.
-        //
-        // One indexed log per coin is what every launchpad indexes on, and it
-        // makes the feed a VIEW of the chain rather than a private notebook. The
-        // image is deliberately left out of the event: it is large, and it is
-        // already readable from the contract.
+        // One indexed log per coin: what makes the launchpad indexable at all.
+        // The image is left out — it is large, and readable from this contract.
         emit Launched(msg.sender, address(this), _name, _symbol);
-    }
-
-    function totalSupply() public view returns (uint256) { return virtualTokens; }
-
-    function getPrice() public view returns (uint256) {
-        // wei of ETH per one whole token, scaled by 1e18 for display math
-        return (virtualEth * 1e18) / virtualTokens;
-    }
-
-    // On a buy the recipient starts at zero, so the tokens are MINTED into
-    // their balance, never transferred out of it. The old helper required
-    // balanceOf[to] >= amt, which made every single buy() revert with "balance"
-    // — the curve was untestable because it could never be bought. (Found by
-    // tests/dex-pump-e2e.mjs: deploy succeeded, the first buy reverted.)
-    function _mintTo(address to, uint256 amt) internal {
-        balanceOf[to] += amt;
-        emit Transfer(address(0), to, amt);
     }
 
     mapping(address => uint256) public balanceOf;
 
-    // minTokensOut is the buyer's floor, and it is ENFORCED HERE, on chain.
+    // ── LIQUIDITY ─────────────────────────────────────────────────
+    // Adding liquidity here is NOT buying. A buy moves the price curve and mints
+    // tokens to you; adding liquidity only DEEPENS the pool's backing — the price
+    // does not move and you receive no tokens, you receive a claim on the quote
+    // coin the curve holds. That is the difference between being a trader and
+    // being a liquidity provider, and conflating them is how a "pool" ends up
+    // being a disguised buy that looks like investment.
     //
-    // The screen quotes a price, the user signs, and the transaction sits in the
-    // mempool where anyone can move the curve before it mines. A quote that is
-    // only advisory is a price the user cannot rely on: the old buy() took no
-    // argument, so the app computed a 1% slippage floor, displayed it, and then
-    // never passed it — a protection that existed only on screen. require() is
-    // the only thing that makes it real; if the curve moved too far the trade
-    // reverts and the user keeps their ETH instead of silently receiving less.
-    function buy(uint256 minTokensOut) external payable returns (uint256 tokensOut) {
+    // Shares are 1:1 with quote deposited, which is honest for a single-sided
+    // pool: one share always means one unit of the quote coin. When more than
+    // one provider is in, everyone keeps their exact pro-rata claim, and a
+    // provider can always leave with everything they put in plus their share of
+    // what trading earned.
+    mapping(address => uint256) public lpShares;
+    uint256 public totalLpShares;
+
+    function totalSupply() public view returns (uint256) { return virtualTokens; }
+
+    /// Quote the totalLpShares is currently worth: what the pool actually holds,
+    /// minus what is owed to nobody (creator fees accrue to the creator and are
+    /// withdrawable through claimFees, so they are excluded here).
+    function lpValue() public view returns (uint256) {
+        return IERC20(quoteToken).balanceOf(address(this)) - totalFeesCreator;
+    }
+
+    /// Add backing to the curve without buying any tokens.
+    function addLiquidity(uint256 quoteIn) external nonReentrant returns (uint256 shares) {
+        require(quoteIn > 0, "zero");
+        require(IERC20(quoteToken).allowance(msg.sender, address(this)) >= quoteIn, "approve");
+        require(IERC20(quoteToken).transferFrom(msg.sender, address(this), quoteIn), "pull");
+
+        shares = quoteIn;                       // 1:1
+        lpShares[msg.sender] += shares;
+        totalLpShares += shares;
+        realQuoteReserve += quoteIn;
+        emit LiquidityAdded(msg.sender, quoteIn, shares);
+        return shares;
+    }
+
+    /// Take back a share of the pool. Pro-rata against the CURRENT value, so a
+    /// provider leaves with their deposit plus their share of the fees the pool
+    /// earned while they were in it.
+    function removeLiquidity(uint256 shares) external nonReentrant returns (uint256 quoteOut) {
+        require(shares > 0, "zero");
+        require(lpShares[msg.sender] >= shares, "balance");
+        require(totalLpShares > 0, "none");
+
+        // Floor, so rounding can never pay out more than the pool holds and the
+        // last withdrawer cannot drain someone else's share to zero.
+        quoteOut = (lpValue() * shares) / totalLpShares;
+        require(quoteOut > 0, "dust");
+
+        lpShares[msg.sender] -= shares;
+        totalLpShares -= shares;
+        realQuoteReserve -= quoteOut;
+        require(IERC20(quoteToken).transfer(msg.sender, quoteOut), "send");
+        emit LiquidityRemoved(msg.sender, quoteOut, shares);
+        return quoteOut;
+    }
+
+    /// This wallet's position, and what it is worth right now.
+    function positionOf(address provider) external view returns (uint256 shares, uint256 value) {
+        shares = lpShares[provider];
+        value = totalLpShares > 0 ? (lpValue() * shares) / totalLpShares : 0;
+    }
+
+    /// Buy with the quote coin. The caller must have approved this contract for
+    /// quoteIn first — the UI does that in the same flow, and a purchase that
+    /// cannot pull its funds reverts with "approve" instead of failing silently.
+    function buy(uint256 quoteIn, uint256 minTokensOut)
+        external nonReentrant returns (uint256 tokensOut)
+    {
         require(!graduated, "graduated");
-        require(msg.value > 0, "zero");
-        uint256 fee = (msg.value * FEE_BPS) / 10000;
-        uint256 net = msg.value - fee;
-        realEthReserve += msg.value;
+        require(quoteIn > 0, "zero");
+        require(IERC20(quoteToken).allowance(msg.sender, address(this)) >= quoteIn, "approve");
+
+        uint256 fee = (quoteIn * FEE_BPS) / 10000;
+        uint256 net = quoteIn - fee;
+        require(IERC20(quoteToken).transferFrom(msg.sender, address(this), quoteIn), "pull");
+
+        realQuoteReserve += quoteIn;
         // floor the OUTPUT so the rounding dust stays in the pool (k only grows)
-        tokensOut = (virtualTokens * net) / (virtualEth + net);
+        tokensOut = (virtualTokens * net) / (virtualQuote + net);
         require(tokensOut > 0, "dust");
-        // The floor is checked BEFORE any state moves, so a failed slippage
-        // leaves the curve exactly as it was and costs the buyer only gas.
+        // The floor is checked BEFORE any state moves, so a refused trade leaves
+        // the curve exactly as it was and costs the buyer only gas.
         require(tokensOut >= minTokensOut, "slippage");
-        virtualEth += net;
+
+        virtualQuote += net;
         virtualTokens -= tokensOut;
-        // Split the fee into the two buckets that can actually leave the
-        // contract. The protocol's share is paid OUT to the protocol wallet
-        // every buy; the creator's share accrues to totalFeesCreator for an
-        // explicit claimFees() — before, both sat here forever and the
-        // creator's revenue was unreachable.
+
+        // Creator fees accrue here and leave through claimFees(); the protocol
+        // share is paid OUT on every trade.
         uint256 creatorFee = (fee * CREATOR_FEE_BPS) / FEE_BPS;
         totalFeesCreator += creatorFee;
         uint256 protocolFee = fee - creatorFee;
-        realEthReserve -= protocolFee;
+        realQuoteReserve -= protocolFee;
         if (protocolFee > 0) {
-            (bool ok, ) = payable(protocolWallet).call{value: protocolFee}("");
-            require(ok, "protocol");
+            require(IERC20(quoteToken).transfer(protocolWallet, protocolFee), "protocol");
         }
+
         _mintTo(msg.sender, tokensOut);
-        if (realEthReserve >= GRADUATION_ETH) {
+        if (realQuoteReserve >= GRADUATION_QUOTE) {
             graduated = true;
-            emit Graduated(realEthReserve);
+            emit Graduated(realQuoteReserve);
         }
-        emit Bought(msg.sender, msg.value, tokensOut, fee);
+        emit Bought(msg.sender, quoteIn, tokensOut, fee);
     }
 
-    // minEthOut is the seller's floor, enforced for the same reason buy() has
-    // one: between the quote and the mining the curve can move against you.
-    function sell(uint256 tokensIn, uint256 minEthOut) external returns (uint256 ethOut) {
+    function sell(uint256 tokensIn, uint256 minQuoteOut)
+        external nonReentrant returns (uint256 quoteOut)
+    {
         require(!graduated, "graduated");
         require(tokensIn > 0, "zero");
         require(balanceOf[msg.sender] >= tokensIn, "balance");
-        uint256 netTokens = tokensIn;
-        ethOut = (virtualEth * netTokens) / (virtualTokens + netTokens);
-        uint256 fee = (ethOut * FEE_BPS) / 10000;
-        ethOut -= fee;
-        require(ethOut > 0, "dust");
-        require(ethOut >= minEthOut, "slippage");
-        virtualTokens += netTokens;
-        virtualEth -= ethOut;
+
+        quoteOut = (virtualQuote * tokensIn) / (virtualTokens + tokensIn);
+        uint256 fee = (quoteOut * FEE_BPS) / 10000;
+        quoteOut -= fee;
+        require(quoteOut > 0, "dust");
+        require(quoteOut >= minQuoteOut, "slippage");
+
+        virtualTokens += tokensIn;
+        virtualQuote -= quoteOut;
+
         uint256 creatorFee = (fee * CREATOR_FEE_BPS) / FEE_BPS;
         totalFeesCreator += creatorFee;
         uint256 protocolFee = fee - creatorFee;
         // The reserve must fall by exactly what LEFT the contract, which on a
         // sell is the payout AND the protocol's share. It used to fall by the
-        // payout alone, so realEthReserve crept ABOVE the ETH actually held —
-        // one protocol-fee per sell. That is not a cosmetic number: claimFees
-        // subtracts the accrued fee from this same reserve, so once the drift
-        // passed the real balance that subtraction underflowed, claimFees
-        // reverted, and the creator could never withdraw their revenue again.
-        // buy() already subtracted its protocol share; this makes sell symmetric.
-        realEthReserve -= ethOut + protocolFee;
+        // payout alone, so realQuoteReserve crept ABOVE the balance actually
+        // held — and claimFees() then underflowed and reverted, locking the
+        // creator's revenue forever.
+        realQuoteReserve -= quoteOut + protocolFee;
         if (protocolFee > 0) {
-            (bool ok, ) = payable(protocolWallet).call{value: protocolFee}("");
-            require(ok, "protocol");
+            require(IERC20(quoteToken).transfer(protocolWallet, protocolFee), "protocol");
         }
+
         balanceOf[msg.sender] -= tokensIn;
-        (bool ok, ) = payable(msg.sender).call{value: ethOut}("");
-        require(ok, "send");
-        emit Sold(msg.sender, tokensIn, ethOut, fee);
+        require(IERC20(quoteToken).transfer(msg.sender, quoteOut), "send");
+        emit Sold(msg.sender, tokensIn, quoteOut, fee);
     }
 
-    // Creator pulls the fees that accrued to it. Before this existed the
-    // creator's cut was counted but unreachable — money locked in the contract
-    // forever (user: the Dex had to be "lengkap dan matang").
-    function claimFees() external returns (uint256) {
+    /// Creator pulls the fees that accrued to it. Fees only — the backing is
+    /// the curve's, and taking it here would drain the pool out from under every
+    /// buyer still holding tokens.
+    function claimFees() external nonReentrant returns (uint256) {
         require(msg.sender == creator, "creator");
         uint256 amount = totalFeesCreator;
         require(amount > 0, "none");
         totalFeesCreator = 0;
-        realEthReserve -= amount;
-        (bool ok, ) = payable(msg.sender).call{value: amount}("");
-        require(ok, "send");
+        realQuoteReserve -= amount;
+        require(IERC20(quoteToken).transfer(msg.sender, amount), "send");
         emit FeesClaimed(msg.sender, amount);
         return amount;
     }
 
-    // The ETH the curve holds that belongs to no virtual reserve (the real
-    // backing). Graduation is a signal, not a trapdoor: the holder decides when
-    // to move it to a Uniswap V2 pool instead of the curve freezing forever.
-    function withdraw() external returns (uint256) {
+    /// The quote coin the curve holds, once the coin has graduated. Graduation
+    /// is a signal, not a trapdoor: the creator decides when to move it on.
+    // The creator's exit after graduation is THEIRS ALONE — their accrued fee,
+    // never the pool's money. When this paid out the contract's whole balance it
+    // looked correct until anyone added liquidity: one deposit and the creator
+    // could withdraw every provider's coins and call it a payout. The LP claim is
+    // a promise made to strangers, so it is not the creator's to spend.
+    function withdraw() external nonReentrant returns (uint256) {
         require(msg.sender == creator, "creator");
         require(graduated, "not graduated");
-        uint256 amount = address(this).balance;
-        require(amount > 0, "none");
-        realEthReserve = 0;
-        (bool ok, ) = payable(msg.sender).call{value: amount}("");
-        require(ok, "send");
+        uint256 fees = totalFeesCreator;
+        require(fees > 0 || totalLpShares == 0, "none");
+        // lpValue() is read BEFORE the fee is zeroed. It subtracts the unpaid
+        // fees to work out what is actually the pool's — so zeroing first makes
+        // it return the whole balance, the fee gets counted twice, and the
+        // transfer asks for money the contract does not have. Read, then clear.
+        uint256 backing = totalLpShares == 0 ? lpValue() : 0;
+        uint256 amount = fees + backing;
+        totalFeesCreator = 0;
+        realQuoteReserve -= backing;
+        require(IERC20(quoteToken).transfer(msg.sender, amount), "send");
         emit Withdrawn(msg.sender, amount);
         return amount;
     }
 
-    receive() external payable { revert("use buy"); }
+    // Buy credit is a MINT into the buyer's own balance. The helper this replaced
+    // required balanceOf[to] >= amount, which made every single buy revert —
+    // a buyer starts at zero.
+    function _mintTo(address to, uint256 amt) internal {
+        balanceOf[to] += amt;
+        emit Transfer(address(0), to, amt);
+    }
+
+    // Native ETH is gas only. This contract refuses it outright, so the promise
+    // cannot rot into an accident: nothing can be sent here with value.
+    receive() external payable { revert("gas only"); }
 }
 `;
+
+// The human-readable ABI the app calls through. Kept beside the source it
+// describes: a function the UI invokes but the ABI omits fails at runtime, in
+// the browser, only when a user clicks.
+export const PUMP_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+  'function image() view returns (string)',
+  'function description() view returns (string)',
+  'function creator() view returns (address)',
+  'function quoteToken() view returns (address)',
+  'function quoteDecimals() view returns (uint8)',
+  'function virtualQuote() view returns (uint256)',
+  'function virtualTokens() view returns (uint256)',
+  'function realQuoteReserve() view returns (uint256)',
+  'function graduated() view returns (bool)',
+  'function buy(uint256 quoteIn, uint256 minTokensOut) payable returns (uint256)',
+  'function sell(uint256 tokensIn, uint256 minQuoteOut) returns (uint256)',
+  'function claimFees() returns (uint256)',
+  'function withdraw() returns (uint256)',
+  'function totalFeesCreator() view returns (uint256)',
+  'function totalSupply() view returns (uint256)',
+  'function balanceOf(address owner) view returns (uint256)',
+  'function lpShares(address provider) view returns (uint256)',
+  'function totalLpShares() view returns (uint256)',
+  'function lpValue() view returns (uint256)',
+  'function positionOf(address provider) view returns (uint256 shares, uint256 value)',
+  'function addLiquidity(uint256 quoteIn) returns (uint256 shares)',
+  'function removeLiquidity(uint256 shares) returns (uint256 quoteOut)',
+  'event Launched(address indexed creator, address indexed token, string name, string symbol)',
+  'event Bought(address indexed buyer, uint256 quoteIn, uint256 tokensOut, uint256 fee)',
+  'event Sold(address indexed seller, uint256 tokensIn, uint256 quoteOut, uint256 fee)',
+  'event Graduated(uint256 realQuoteReserve)',
+  'event FeesClaimed(address indexed creator, uint256 amount)',
+  'event Withdrawn(address indexed creator, uint256 amount)',
+  'event LiquidityAdded(address indexed provider, uint256 quoteIn, uint256 shares)',
+  'event LiquidityRemoved(address indexed provider, uint256 quoteOut, uint256 shares)',
+];

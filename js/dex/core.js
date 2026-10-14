@@ -20,6 +20,46 @@ import { withTimeout, waitForReceipt, receiptVerdict } from '../safetx.js';
 export const DEX_NETWORK_ID = 'sepolia';
 export const DEX_CHAIN_ID = 11155111;
 
+// The Dex's OWN coins — the three contracts, not the chain's native token.
+//
+// These were deleted during the pure-launchpad rebuild because they were being
+// used as POOL SIDES beside native ETH, which is how "which coin do I trade?"
+// became ambiguous: two things called ETH on one screen, and no rule saying
+// which. The fix was not to throw them away but to give them the job they were
+// always for: the currency the launchpad is QUOTED in.
+//
+// Sepolia native ETH now pays gas and nothing else. The curve contract refuses
+// it outright (receive() reverts), so "gas only" is enforced by code rather
+// than promised in a label.
+export const QUOTE_PRESETS = [
+  { address: '0x8847346f20aCe5bd4619B7fbF3467D001E269fE9', symbol: 'ETH', name: 'Bear ETH', decimals: 18 },
+  { address: '0x8719D774726b11497FAddCFdf7bc369C56F6B5d3', symbol: 'USDT', name: 'USDT', decimals: 18 },
+  { address: '0x4669689d94991bb4ab6A6e071f9af9CC42d9deef', symbol: 'USDC', name: 'USDC', decimals: 18 },
+];
+
+export function quoteBy(address) {
+  const a = String(address || '').toLowerCase();
+  return QUOTE_PRESETS.find((p) => p.address.toLowerCase() === a) || null;
+}
+
+export function defaultQuote() { return QUOTE_PRESETS[0]; }
+
+// The slice of ERC-20 the launchpad needs: pull funds in, pay them out, read a
+// balance, and grant/inspect the allowance a buy requires. Nothing else, and no
+// transferFrom without an explicit allowance — the contract checks it and
+// reverts with "approve" rather than pulling something the user did not agree to.
+export const ERC20_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+  'function totalSupply() view returns (uint256)',
+  'function balanceOf(address owner) view returns (uint256)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function transfer(address to, uint256 amount) returns (bool)',
+  'function transferFrom(address from, address to, uint256 amount) returns (bool)',
+];
+
 export function dexChainId() { return getNetworkById(get('networkId'))?.chainId || 0; }
 export function dexChainOk() { return dexChainId() === DEX_CHAIN_ID; }
 

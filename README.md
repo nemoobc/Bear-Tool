@@ -276,6 +276,10 @@ Bear-Tool/
 │   │   ├── create.js   # the launch form (image upload → data URI, curve preview, compile+deploy)
 │   │   ├── pump-source.js # the PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
 │   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over those same logs
+│   │   ├── list.js     # per-coin delisting: hide/restore a coin from your own feed, per chain, reversible
+│   │   ├── bot.js      # the market maker: fund once, it derives its own addresses and trades until stopped
+│   │   ├── bot-engine.js  # the bot's rules, pure: when to buy/sell/hold/stop, and which address pays
+│   │   ├── bot-wallets.js # the addresses the bot makes for itself, derived from your own seed, never colliding
 │   │   └── curve.js    # bonding-curve math (constant-product, virtual reserves, fees, graduation)
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder

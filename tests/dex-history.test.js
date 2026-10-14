@@ -81,7 +81,7 @@ test('the slippage floor is a percentage OF the quote, never a fraction of it', 
   const src = readFileSync(new URL('../js/dex/trade.js', import.meta.url), 'utf8');
   assert.match(src, /q\.tokensOut \* \(10_000n - SLIPPAGE_BPS\)\)? \/ 10_000n/,
     'the buy floor must be (100% - 1%) of the quote');
-  assert.match(src, /q\.ethOut \* \(10_000n - SLIPPAGE_BPS\)\)? \/ 10_000n/,
+  assert.match(src, /q\.quoteOut \* \(10_000n - SLIPPAGE_BPS\)\)? \/ 10_000n/,
     'the sell floor must be (100% - 1%) of the quote');
 
   // …and it must not be expressible the wrong way round any more.

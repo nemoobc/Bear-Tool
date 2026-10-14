@@ -13,7 +13,7 @@ import { get, set } from '../state.js';
 import { $, escapeHtml } from '../ui.js';
 import { dexChainOk, provider, ethersLib, DEX_CHAIN_ID } from './core.js';
 import { PUMP_ABI } from './pump-source.js';
-import { graduationProgress, GRADUATION_ETH } from './curve.js';
+import { graduationProgress, GRADUATION_QUOTE } from './curve.js';
 
 // Where the launched-coin index is KEPT, and why it is not in state.js.
 //
@@ -200,7 +200,7 @@ export function bindTokens(host, onOpen) {
   }
 }
 
-// Reads realEthReserve + graduated from the live contract. Any failure is
+// Reads realQuoteReserve + graduated from the live contract. Any failure is
 // reported as "unread", never as a made-up progress number.
 async function readProgress(tk) {
   const p = provider();
@@ -208,9 +208,9 @@ async function readProgress(tk) {
   try {
     const E = ethersLib();
     const c = new E.Contract(tk.address, PUMP_ABI, p);
-    const [reserve, graduated] = await Promise.all([c.realEthReserve(), c.graduated()]);
+    const [reserve, graduated] = await Promise.all([c.realQuoteReserve(), c.graduated()]);
     if (graduated) return t('dex.tokens.graduated');
-    const { bps } = graduationProgress(reserve, GRADUATION_ETH);
+    const { bps } = graduationProgress(reserve, GRADUATION_QUOTE);
     return t('dex.tokens.progress', { pct: String(Math.round(Number(bps) / 100)) });
   } catch {
     return t('dex.tokens.unread');
