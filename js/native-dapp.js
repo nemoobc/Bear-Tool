@@ -45,6 +45,18 @@ const READ_DEADLINE_MS = 20000;
 // wallet: revisiting the site inside the app does not re-prompt, closing the
 // app does.
 const connectedOrigins = new Set();
+// A connection is a per-ORIGIN grant (MetaMask semantics), never per-page:
+// approving "https://example.com/swap" must silently cover
+// "https://example.com/account" without re-prompting. Keying the consent on
+// the full URL of the page that asked made every in-page navigation return
+// 4100 ("not connected — call eth_requestAccounts first"), which made every
+// real dApp think the wallet had vanished. The grant is recorded against
+// the origin; everything else (UI text, sheet title) stays useful by
+// falling back to the raw value when URL parsing fails.
+function originOf(raw) {
+  try { return new URL(raw).origin; } catch { return String(raw || 'this site'); }
+}
+
 let plugin = null;
 
 export function isNativeDappBrowser() {
@@ -365,7 +377,7 @@ async function handleNativeRpc({ id, origin, payload }) {
   }).catch(() => { /* dApp view gone */ });
 
   const method = msg.method;
-  const site = String(origin || 'this site');
+  const site = originOf(origin);
   // BTC/SOL/XRP are pickable networks now (2026-10-11) and have NO EVM chain id.
   // `Number(n.chainId)` on one of those is 0, so the old answers were '0x0' and
   // 'null' — a corrupted chain id, not even the '1' fallback. The session label
