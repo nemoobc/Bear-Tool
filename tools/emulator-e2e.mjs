@@ -414,7 +414,7 @@ async function main() {
   //                 step marker, so the failing step arrives with its own
   //                 evidence attached instead of the whole run's noise,
   //   lastStep    — the step that was in flight, which the fatal path quotes.
-  report = { steps: [], consoleErrors: [], consoleTrail: [], exceptions: [], netFailures: [], stepCtx: [], lastStep: '', native: null, dapp: null, pass: false };
+  report = { dexView: null, steps: [], consoleErrors: [], consoleTrail: [], exceptions: [], netFailures: [], stepCtx: [], lastStep: '', native: null, dapp: null, pass: false };
   const step = (name) => {
     report.steps.push(name);
     report.lastStep = name;
@@ -574,7 +574,11 @@ async function main() {
 
   if (process.env.E2E_SKIP_VIEWS !== '1') {
     step('walk the bottom nav (UI/UX pass)');
-    for (const view of ['activity', 'swap', 'dapps', 'settings', 'dashboard']) {
+    // 'dex' was missing from this list, so the emulator run walked the whole app
+    // and never once opened the launchpad — the largest feature in it, and the
+    // one with the most shipped-broken-UI history. Its panels must be rendered
+    // on a real Android runtime, not only in a desktop browser.
+    for (const view of ['activity', 'swap', 'dapps', 'dex', 'settings', 'dashboard']) {
       await page.click(`.mobile-nav-item[data-view="${view}"]`).catch(() => {});
       await sleep(1400);
       await page.shot(`05-view-${view}`);
@@ -590,6 +594,29 @@ async function main() {
         report.dappLogos = counts;
         const [cardsN, imgsN] = String(counts).split('/').map(Number);
         if (!cardsN || imgsN !== cardsN) die('dapp logos: tiap kartu harus punya <img> logo — kartu/img = ' + counts);
+      }
+      if (view === 'dex') {
+        // The launchpad must mount on a phone. Sepolia-only by design, so the
+        // feed will usually say the chain is wrong — but it must SAY that, with
+        // the feed chrome present, not render a blank panel.
+        await page.wait('#dexPanelHost', 10000).catch(() => {});
+        const dex = await page.evaluate(`(() => {
+          const h = document.querySelector('#dexPanelHost');
+          if (!h) return 'no-host';
+          const txt = (h.innerText || '').trim();
+          return [
+            'len=' + txt.length,
+            'empty=' + !!h.querySelector('.dex-empty'),
+            'createBtn=' + !!document.querySelector('#dexGoCreate'),
+            'tabs=' + document.querySelectorAll('[data-dex-scope]').length,
+            'hiddenTab=' + !!document.querySelector('[data-dex-scope="hidden"]'),
+          ].join(' ');
+        })()`).catch(() => 'evaluate-failed');
+        report.dexView = dex;
+        if (String(dex).startsWith('no-host')) die('Dex: #dexPanelHost tidak ada di build ini');
+        if (String(dex).includes('len=0')) die('Dex: panel ter-render tapi kosong');
+        if (String(dex).includes('tabs=0')) die('Dex: scope tab tidak ada — feed tidak punya All/Mine/Hidden');
+        if (!String(dex).includes('hiddenTab=true')) die('Dex: tab Hidden tidak ada — delisting tidak terjangkau dari UI');
       }
     }
   }
