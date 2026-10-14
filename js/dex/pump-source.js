@@ -39,6 +39,7 @@ export const PUMP_ABI = [
   'function withdraw() returns (uint256)',
   'function totalFeesCreator() view returns (uint256)',
   'function getPrice() view returns (uint256)',
+  'event Launched(address indexed creator, address indexed token, string name, string symbol)',
   'event Bought(address indexed buyer, uint256 ethIn, uint256 tokensOut, uint256 fee)',
   'event Sold(address indexed seller, uint256 tokensIn, uint256 ethOut, uint256 fee)',
   'event Graduated(uint256 realEthReserve)',
@@ -81,6 +82,7 @@ contract PumpToken {
     address public immutable protocolWallet;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
+    event Launched(address indexed creator, address indexed token, string name, string symbol);
     event Bought(address indexed buyer, uint256 ethIn, uint256 tokensOut, uint256 fee);
     event Sold(address indexed seller, uint256 tokensIn, uint256 ethOut, uint256 fee);
     event Graduated(uint256 realEthReserve);
@@ -99,6 +101,19 @@ contract PumpToken {
         virtualEth = _virtualEth;
         virtualTokens = _virtualTokens;
         protocolWallet = msg.sender;
+        // The launch's own record, on chain.
+        //
+        // Without this a coin had NO discoverable trace: the constructor emitted
+        // nothing, so the only way to find one was to scan every contract-creation
+        // transaction the creator ever sent — unreliable and ruinously expensive.
+        // The feed was therefore only ever as good as one browser's localStorage,
+        // and clearing it (or opening another device) erased real, paid-for coins.
+        //
+        // One indexed log per coin is what every launchpad indexes on, and it
+        // makes the feed a VIEW of the chain rather than a private notebook. The
+        // image is deliberately left out of the event: it is large, and it is
+        // already readable from the contract.
+        emit Launched(msg.sender, address(this), _name, _symbol);
     }
 
     function totalSupply() public view returns (uint256) { return virtualTokens; }

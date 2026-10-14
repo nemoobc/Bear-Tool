@@ -30,11 +30,11 @@
 //  - Everything is a real transaction. No simulation, no invented fills.
 // ═══════════════════════════════════════════════════════════════
 import { createHtml, bindCreate } from './create.js';
-import { tokensHtml, bindTokens } from './tokens.js';
+import { tokensHtml, bindTokens, refreshFeed } from './tokens.js';
 import { tokenTradeHtml, bindTokenTrade } from './trade.js';
 import {
   DEX_NETWORK_ID, DEX_CHAIN_ID, dexChainOk,
-  provider, ethersLib,
+  provider,
   t, get, set, on, $, escapeHtml,
 } from './core.js';
 
@@ -176,17 +176,41 @@ export function renderPanel() {
 function renderFeed(host) {
   host.innerHTML = `
     <div class="dex-launchbar">
-      <div>
-        <div class="dex-launchbar-title">${escapeHtml(t('dex.tokens.title'))}</div>
-        <div class="small">${escapeHtml(t('dex.tokens.hint'))}</div>
-      </div>
+      <div class="dex-launchbar-title">${escapeHtml(t('dex.tokens.title'))}</div>
       <button type="button" class="btn btn-primary" id="dexGoCreate">
         + ${escapeHtml(t('dex.tab.create'))}
       </button>
     </div>
     ${tokensHtml()}`;
   $('#dexGoCreate', host).addEventListener('click', () => go('create'));
+
+  // The feed is the SCREEN, not a preamble to one: a grid of coins, with the
+  // launch button a single compact action in the corner. An empty feed scoped to
+  // one wallet is empty for every new visitor, which is what made this look like
+  // nothing but a create form.
+  let scope = 'all';
+  const paint = async () => { await refreshFeed(host, scope); };
+
+  host.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-dex-scope]');
+    if (!btn) return;
+    scope = btn.dataset.dexScope;
+    for (const b of host.querySelectorAll('[data-dex-scope]')) {
+      b.setAttribute('aria-pressed', String(b === btn));
+    }
+    paint();
+  });
+
   bindTokens(host, (address) => openCoin(address));
+
+  // One paint now, so the feed is never blank — and it reports honestly when it
+  // cannot read the chain. The recurring refresh only starts when a provider
+  // exists: without one the pass has nothing to query, and an interval that can
+  // never do useful work is one more timer the tab (or a test runner) holds open.
+  paint();
+  if (!dexChainOk() || !provider()) return;
+  const timer = setInterval(paint, 20_000);
+  host.addEventListener('dex:teardown', () => clearInterval(timer), { once: true });
 }
 
 function renderCreate(host) {
@@ -225,5 +249,11 @@ function coinByAddress(address) {
   const a = String(address || '').toLowerCase();
   if (!a) return null;
   const list = Array.isArray(get('dex.launched')) ? get('dex.launched') : [];
-  return list.find((x) => String(x.address).toLowerCase() === a) || null;
+  const local = list.find((x) => String(x.address).toLowerCase() === a);
+  if (local) return local;
+  // A coin the chain told us about but this browser never stored (launched on
+  // another device, or before a storage wipe) must still open. The coin page
+  // reads name, symbol and creator from the contract, so an entry carrying just
+  // the address is enough — and nothing here is invented.
+  return { address, name: '', symbol: '', image: '' };
 }

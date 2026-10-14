@@ -186,8 +186,9 @@ test('a coin page shows price, chart, tape and trade in one place', () => {
   }
   assert.match(tradeJs, /drawCandles\(chartHost, candles/,
     'the coin page must render the TradingView candles');
-  assert.match(tradeJs, /tradesHtml\(hist\.trades, token\.symbol\)/,
-    'the coin page must render the trade tape from the same read that fed the chart');
+  assert.match(tradeJs, /tradesHtml\(hist\.trades, state\.sym/,
+    'the coin page must render the trade tape from the same read that fed the chart — '
+    + 'and from the contract\'s ticker, which a chain-discovered coin does not have locally');
 });
 
 test('the launchpad\'s new UI is reachable by keyboard and by screen reader', () => {
@@ -241,7 +242,7 @@ test('a coin page with no wallet still shows price, chart and tape', async () =>
   const chart = tradeJs.slice(tradeJs.indexOf('if (!p || !dexChainOk())'));
   assert.match(chart, /paintChart\(\[\]\)/,
     'the chart must mount with no wallet — an empty candlestick frame, not an empty div');
-  assert.match(chart, /tradesHtml\(\[\], token\.symbol\)/,
+  assert.match(chart, /tradesHtml\(\[\], token\.symbol \|\| ''\)/,
     'the tape must say there are no trades rather than showing an empty box');
 
   // …and the price readout must be painted by the same refresh that reads the
@@ -386,4 +387,27 @@ test('every contract read the coin page makes must exist in the ABI', () => {
     'the sell must send the floor to the contract');
   assert.match(trade, /dex\.trade\.worstCase/,
     'and the floor must be shown, or "enforced" is invisible to the user');
+});
+
+// ── the button must not promise more than the contract does ────
+test('graduation says what actually happens, and what it does not', () => {
+  // The button calls withdraw(), which sends the backing to the creator's own
+  // wallet. It does NOT create a pool, seed liquidity, or migrate anything —
+  // the token and its curve simply stop existing as a market. Labelling it
+  // "Move liquidity out" read as a migration the contract never performs, which
+  // is the same class of lie as a quote the chain does not honour.
+  const i18n = read('../js/i18n.js');
+  const contract = read('../js/dex/pump-source.js');
+
+  assert.ok(/dex\.trade\.graduate': 'Withdraw backing to your wallet'/.test(i18n),
+    'the button must describe the withdrawal it performs');
+  assert.ok(!/dex\.trade\.graduate': '[^']*liquiditas (out|pindah)/i.test(i18n),
+    'the button must not imply a pool migration it does not do');
+  assert.ok(!/dex\.trade\.graduate': '[^']*migrate/i.test(i18n),
+    'and must not promise a migration');
+
+  // So the claim must be checkable: withdraw() pays the caller, and the
+  // graduation exit must stay gated on both graduation AND the creator.
+  assert.match(contract, /function withdraw\(\) external returns \(uint256\) \{\s*require\(msg\.sender == creator, "creator"\);\s*require\(graduated, "not graduated"\);/,
+    'withdraw must remain creator-only and post-graduation — the button is gated on the same facts');
 });

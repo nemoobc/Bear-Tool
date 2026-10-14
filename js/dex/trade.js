@@ -44,8 +44,8 @@ export function tokenTradeHtml(token) {
         ${token.image ? `<img src="${escapeHtml(token.image)}" alt="">` : ''}
       </span>
       <div style="min-width:0">
-        <strong style="font-size:1.15rem">${escapeHtml(token.name)}</strong>
-        <div class="small">${escapeHtml(token.symbol)} · <span class="mono">${escapeHtml(token.address)}</span></div>
+        <strong style="font-size:1.15rem" id="dexTradeName">${escapeHtml(token.name)}</strong>
+        <div class="small" id="dexTradeSymbol">${escapeHtml(token.symbol)} · <span class="mono">${escapeHtml(token.address)}</span></div>
         <div class="small" id="dexTradeCreator"></div>
       </div>
     </div>
@@ -94,7 +94,7 @@ export function tokenTradeHtml(token) {
       <div class="dex-swapbox-label">${escapeHtml(t('dex.trade.sell'))}</div>
       <div class="dex-swapbox-row">
         <input id="dexTradeSellTok" class="dex-trade-input" type="number" min="0" step="any" inputmode="decimal" placeholder="0" aria-label="${escapeHtml(t('dex.trade.tokIn'))}">
-        <span class="dex-swapbox-token">${escapeHtml(token.symbol)}</span>
+        <span class="dex-swapbox-token" id="dexTradeSellToken">${escapeHtml(token.symbol)}</span>
       </div>
       <div class="dex-swapbox-usd small" id="dexTradeSellQuote"></div>
     </div>
@@ -139,7 +139,7 @@ export function bindTokenTrade(host, token, onBack) {
 
   if (!p || !dexChainOk()) {
     status.textContent = t('dex.needWallet');
-    if (tapeHost) tapeHost.innerHTML = tradesHtml([], token.symbol);
+    if (tapeHost) tapeHost.innerHTML = tradesHtml([], token.symbol || '');
     paintChart([]);
     return;
   }
@@ -149,7 +149,7 @@ export function bindTokenTrade(host, token, onBack) {
     if (chartLoading) chartLoading.hidden = false;
     const hist = await loadHistory(c, p);
     if (chartLoading) chartLoading.hidden = true;
-    if (tapeHost) tapeHost.innerHTML = tradesHtml(hist.trades, token.symbol);
+    if (tapeHost) tapeHost.innerHTML = tradesHtml(hist.trades, state.sym || token.symbol || '');
     const candles = await historyCandles(hist.trades);
     await paintChart(candles);
   };
@@ -157,7 +157,7 @@ export function bindTokenTrade(host, token, onBack) {
 
   // Live state from the contract. state() holds the numbers the buy/sell use
   // so the quote and the tx cannot disagree.
-  const state = { vE: 0n, vT: 0n, reserve: 0n, graduated: false, mine: 0n, readable: false };
+  const state = { vE: 0n, vT: 0n, reserve: 0n, graduated: false, mine: 0n, readable: false, sym: token.symbol || '' };
   const refresh = async () => {
     // balanceOf needs a real 20-byte address. '0x0' is NOT one — it made ethers
     // reject, and because the reads shared one Promise.all, a wallet-less
@@ -165,9 +165,15 @@ export function bindTokenTrade(host, token, onBack) {
     // just their own balance. So a missing wallet means "no balance", never
     // "no page".
     const me = get('address');
-    const [vE, vT, reserve, graduated, mine] = await Promise.all([
+    const [vE, vT, reserve, graduated, mine, name, sym] = await Promise.all([
       c.virtualEth(), c.virtualTokens(), c.realEthReserve(), c.graduated(),
       me ? c.balanceOf(me) : Promise.resolve(0n),
+      // The contract, not the local index, is the authority on what this coin
+      // IS. A coin discovered from the chain (another device, or before a storage
+      // wipe) arrives with an empty name/symbol, and every label on the page has
+      // to show what the contract says rather than a blank header.
+      c.name().catch(() => ''),
+      c.symbol().catch(() => ''),
     ]).catch((e) => {
       // A failed read must SAY SO. Letting it throw left the last-known price,
       // market cap and graduation bar on screen with nothing saying they were
@@ -182,8 +188,24 @@ export function bindTokenTrade(host, token, onBack) {
     });
     if (!vE) return;
     state.readable = true;
-    const sym = token.symbol;
-    state.vE = vE; state.vT = vT; state.reserve = reserve; state.graduated = graduated; state.mine = mine;
+
+    // Prefer the on-chain identity; fall back to the local index only when the
+    // contract could not be asked.
+    // One ticker for the whole screen, taken from the contract. Every label and
+    // every dialog below reads it, so a coin discovered from the chain (empty
+    // local name/symbol) still says what it is instead of quoting an empty
+    // string into the confirm box.
+    state.sym = sym || token.symbol || '';
+    if (name || sym) {
+      const nameEl = $('#dexTradeName', host);
+      const symEl = $('#dexTradeSymbol', host);
+      if (nameEl && name) nameEl.textContent = name;
+      if (symEl) symEl.textContent = `${state.sym} · ${token.address}`;
+      const sellLabel = $('#dexTradeSellToken', host);
+      if (sellLabel) sellLabel.textContent = state.sym;
+    }
+    state.vE = vE; state.vT = vT; state.reserve = reserve;
+    state.graduated = graduated; state.mine = mine;
     // graduation bar
     const { bps } = graduationProgress(reserve, GRADUATION_ETH);
     const fill = $('#dexTradeGradFill', host);
@@ -193,11 +215,11 @@ export function bindTokenTrade(host, token, onBack) {
     // price & mcap & holding
     const priceEth = Number(vE) / Number(vT); // ETH per token
     const pEl = $('#dexTradePrice', host);
-    if (pEl) pEl.textContent = t('dex.trade.price', { price: priceEth.toExponential(4), sym });
+    if (pEl) pEl.textContent = t('dex.trade.price', { price: priceEth.toExponential(4), sym: state.sym });
     const mEl = $('#dexTradeMcap', host);
     if (mEl) mEl.textContent = t('dex.trade.mcap', { mcap: (priceEth * Number(vT) / 1e18).toFixed(4) });
     const hEl = $('#dexTradeHold', host);
-    if (hEl) hEl.textContent = t('dex.trade.hold', { amt: fmtTok(mine, 18, 4), sym });
+    if (hEl) hEl.textContent = t('dex.trade.hold', { amt: fmtTok(mine, 18, 4), sym: state.sym });
   };
 
   const quoteBuyLive = () => {
@@ -209,7 +231,7 @@ export function bindTokenTrade(host, token, onBack) {
     if (!state.readable) { buyQuote.textContent = t('dex.trade.quoteStale'); return; }
     if (eth <= 0n || state.graduated) { buyQuote.textContent = state.graduated ? t('dex.trade.graduated') : ''; return; }
     const q = quoteBuy(state.vE, state.vT, eth);
-    buyQuote.textContent = t('dex.trade.youGetTok', { amt: fmtTok(q.tokensOut, 18, 2), sym: token.symbol });
+    buyQuote.textContent = t('dex.trade.youGetTok', { amt: fmtTok(q.tokensOut, 18, 2), sym: state.sym });
   };
   const quoteSellLive = () => {
     const raw = (sellTokEl.value || '').trim();
@@ -247,11 +269,11 @@ export function bindTokenTrade(host, token, onBack) {
     // numbers in the confirm box (504,865 against a quote of 50,486,599).
     const minOut = (q.tokensOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
     const ok = await confirmTx({
-      title: t('dex.trade.buyTitle', { sym: token.symbol }),
+      title: t('dex.trade.buyTitle', { sym: state.sym }),
       rows: [
         { k: t('dex.trade.ethIn'), v: raw + ' ETH' },
-        { k: t('dex.trade.youGet'), v: fmtTok(q.tokensOut, 18, 2) + ' ' + token.symbol },
-        { k: t('dex.trade.worstCase'), v: fmtTok(minOut, 18, 2) + ' ' + token.symbol },
+        { k: t('dex.trade.youGet'), v: fmtTok(q.tokensOut, 18, 2) + ' ' + state.sym },
+        { k: t('dex.trade.worstCase'), v: fmtTok(minOut, 18, 2) + ' ' + state.sym },
       ],
       confirmText: t('dex.trade.buy'),
       danger: true,
@@ -261,7 +283,7 @@ export function bindTokenTrade(host, token, onBack) {
     const cs = new E.Contract(token.address, PUMP_ABI, signer);
     const rc = await sendDexTx(() => cs.buy(minOut, { value: eth }), t('dex.trade.buy'));
     if (!rc) return;
-    toast(t('dex.trade.bought', { sym: token.symbol }), 'success');
+    toast(t('dex.trade.bought', { sym: state.sym }), 'success');
     buyEthEl.value = ''; quoteBuyLive();
     await refresh();
   }));
@@ -324,9 +346,9 @@ export function bindTokenTrade(host, token, onBack) {
     // Same floor, mirrored: the contract reverts rather than pay less than this.
     const minOut = (q.ethOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
     const ok = await confirmTx({
-      title: t('dex.trade.sellTitle', { sym: token.symbol }),
+      title: t('dex.trade.sellTitle', { sym: state.sym }),
       rows: [
-        { k: t('dex.trade.tokIn'), v: raw + ' ' + token.symbol },
+        { k: t('dex.trade.tokIn'), v: raw + ' ' + state.sym },
         { k: t('dex.trade.youGet'), v: fmtEth(q.ethOut) + ' ETH' },
         { k: t('dex.trade.worstCase'), v: fmtEth(minOut) + ' ETH' },
       ],
@@ -337,7 +359,7 @@ export function bindTokenTrade(host, token, onBack) {
     const cs = new E.Contract(token.address, PUMP_ABI, signer);
     const rc = await sendDexTx(() => cs.sell(tok, minOut), t('dex.trade.sell'));
     if (!rc) return;
-    toast(t('dex.trade.sold', { sym: token.symbol }), 'success');
+    toast(t('dex.trade.sold', { sym: state.sym }), 'success');
     sellTokEl.value = ''; quoteSellLive();
     await refresh();
   }));

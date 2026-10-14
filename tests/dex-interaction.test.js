@@ -136,14 +136,13 @@ test('a coin page is never gated behind a pair or a pool', async () => {
     assert.ok(!new RegExp(ghost, 'i').test(text),
       `the coin page must never mention a "${ghost}" — a launchpad has none`);
   }
-  // "Liquidity" does appear, but only on the graduation button: once a coin
-  // graduates its backing moves to a pool. That is the coin's exit, not a
-  // pool-management feature — so it must be the ONLY thing that says it.
-  const saysLiquidity = [...window.document.querySelectorAll('#dexPanelHost *')]
-    .filter((el) => el.children.length === 0 && /liquidity/i.test(el.textContent))
-    .map((el) => el.id || el.className);
-  assert.deepEqual(saysLiquidity, ['dexTradeGraduate'],
-    'only the graduation button may talk about moving a coin\'s backing out');
+  // The graduation button must describe the withdrawal it actually performs. It
+  // used to say "Move liquidity out", which reads as a pool migration the
+  // contract never does — withdraw() just pays the creator's own wallet.
+  assert.ok(!/liquidity|migrat/i.test(text),
+    'the coin page must not promise a liquidity migration — withdraw() is not one');
+  assert.ok(/backing|withdraw/i.test(text),
+    'the coin page must say plainly that the backing is withdrawn to your wallet');
 });
 
 test('Back from a coin returns to the feed with the coin still listed', async () => {
@@ -152,14 +151,21 @@ test('Back from a coin returns to the feed with the coin still listed', async ()
   assert.ok($('[data-dex-token]'), 'the feed must be back, still listing the coin');
 });
 
-test('an address that is not a launched coin says so instead of rendering a page', async () => {
-  // Rendering an unknown address would mean drawing a contract this wallet knows
-  // nothing about. The honest answer is a plain "not in this list" with a way back.
+test('an address outside the feed opens, and nothing about it is invented', async () => {
+  // The feed is a view of the chain now, so any coin address is openable — that
+  // is how a coin launched on another device, or by another wallet, becomes
+  // reachable. Its identity comes from the CONTRACT, not from a local entry, so
+  // an address this browser never stored still shows its real name.
+  //
+  // What must never happen is a coin page that looks finished while showing
+  // nothing true. So the controls exist, no pair gate appears, and every figure
+  // waits for the chain rather than being filled in to look complete.
   dex.openCoin('0x2222222222222222222222222222222222222222');
-  await new Promise((r) => setTimeout(r, 40));
-  assert.match(panel().textContent, /not in this launchpad/i,
-    'an unknown coin must say it is not in the list');
-  assert.ok($('#dexCoinBack'), 'an unknown coin must still offer a way back');
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok($('#dexTradeBack'), 'an address outside the feed must still be openable');
+  assert.ok($('#dexTradeBuy'), 'and must offer the trade controls');
+  assert.ok(!/pick a base|choose a coin|pair/i.test(panel().textContent),
+    'no pair gate may appear — a launchpad has no pairs');
 });
 
 test('on the default network the gate dims everything AND offers the way out', async () => {

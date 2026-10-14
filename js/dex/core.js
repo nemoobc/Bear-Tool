@@ -56,6 +56,11 @@ export function fmtTok(units, dec = 18, digits = 6) {
   return n.toLocaleString('en-US', { maximumFractionDigits: digits });
 }
 
+// Is this a 20-byte address? Checked before anything touches the chain, so a
+// pasted or truncated value can never become a log filter that silently matches
+// nothing — or something.
+export function isAddr(v) { return /^0x[0-9a-fA-F]{40}$/.test(String(v || '')); }
+
 export function needSigner() {
   const p = provider();
   const s = get('signer');

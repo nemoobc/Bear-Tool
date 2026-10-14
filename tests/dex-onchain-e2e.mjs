@@ -131,6 +131,46 @@ try {
     check("a buy at the app's real floor succeeds", passed);
   }
 
+  // ── discovery: the coin must be findable from the chain alone ──
+  //
+  // The feed used to be a localStorage list, so a coin was only visible in the
+  // browser that launched it: clearing storage or opening another device erased
+  // real coins from the product's point of view. The constructor now emits one
+  // indexed Launched per coin, and this proves the log is actually there, is
+  // actually indexed by creator, and decodes back into the same coin.
+  {
+    const topic = ethers.id('Launched(address,address,string,string)');
+    const creatorTopic = ethers.zeroPadValue(creatorAddr.toLowerCase(), 32);
+    const logs = await provider.getLogs({
+      fromBlock: 0, toBlock: await provider.getBlockNumber(),
+      topics: [topic, creatorTopic],
+    });
+    check('the launch emitted exactly one Launched log', logs.length === 1, `${logs.length}`);
+    check('the Launched log is indexed by creator',
+      !!(logs[0] && logs[0].topics[1] === creatorTopic));
+    check('the Launched log is indexed by token',
+      !!(logs[0] && logs[0].topics[2] === ethers.zeroPadValue(addr.toLowerCase(), 32)),
+      'without an indexed token the feed cannot tell which coin a log is about');
+
+    // The log must carry enough to rebuild the coin's identity -- that is the
+    // whole point of indexing it. image is deliberately absent (too large to log;
+    // it is readable from the contract instead).
+    const decoded = ethers.AbiCoder.defaultAbiCoder().decode(['string', 'string'], logs[0].data);
+    check('the log carries the coin name', decoded[0] === 'Quote Test', `got "${decoded[0]}"`);
+    check('the log carries the ticker', decoded[1] === 'QTEST', `got "${decoded[1]}"`);
+    check('the decoded token matches the deployed address',
+      ethers.getAddress('0x' + logs[0].topics[2].slice(-40)).toLowerCase() === addr.toLowerCase());
+
+    // Another wallet's query must NOT see this coin: discovery is scoped to the
+    // creator, or every visitor's feed would list everyone else's coins.
+    const otherTopic = ethers.zeroPadValue(await other.getAddress(), 32);
+    const others = await provider.getLogs({
+      fromBlock: 0, toBlock: await provider.getBlockNumber(),
+      topics: [topic, otherTopic],
+    });
+    check('another wallet does not see this launch', others.length === 0, `${others.length}`);
+  }
+
   // ── the screen's promise vs the chain's answer ─────────────────
   const sizes = ['0.001', '0.01', '0.05', '0.2'];
   let feesBefore = await t.totalFeesCreator();

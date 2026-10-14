@@ -269,7 +269,8 @@ Bear-Tool/
 │   ├── dex/            # the launchpad, in its own folder (order: "buat folder dex")
 │   │   ├── index.js    # the launchpad view: welcome + Sepolia gate + feed/coin/create routing (no tabs, no pair)
 │   │   ├── core.js     # shared launchpad helpers: the Sepolia gate, provider access, the one tx path, formatting
-│   │   ├── tokens.js   # the feed — every curve coin this wallet launched, with live graduation progress
+│   │   ├── tokens.js   # the feed — a grid of curve coins from the chain, each with its curve progress bar
+│   │   ├── discover.js # finding those coins: one indexed Launched log per coin, chain-first, local only for the image
 │   │   ├── trade.js    # a coin's page: live curve state, chart + tape, buy()/sell(), creator claim/graduate
 │   │   ├── history.js  # the coin's trade tape: Bought/Sold logs → rows and OHLC candles
 │   │   ├── create.js   # the launch form (image upload → data URI, curve preview, compile+deploy)

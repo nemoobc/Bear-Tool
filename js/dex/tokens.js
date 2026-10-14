@@ -82,36 +82,115 @@ export function rememberLaunchedToken(entry) {
   writeStore(capped);
 }
 
+/**
+ * The coins the feed shows: what the chain says this wallet launched, unioned
+ * with whatever this browser remembers.
+ *
+ * Chain first in authority, local only for the image (too large to log, and
+ * readable from the contract anyway). That inversion is what makes the feed
+ * survive losing localStorage — the thing that erased real coins before.
+ */
+export async function feedCoins(scope = 'all') {
+  const { reconcile } = await import('./discover.js');
+  const local = launchedTokens();
+  const { coins, ok, reason, more } = await reconcile({ scope, local });
+  // Scope 'mine' is a filter over the same local list, so it must not be widened
+  // by the chain merge: without this, "My coins" would show everyone else's.
+  const mine = scope === 'mine'
+    ? coins.filter((c) => local.some((x) => x.address.toLowerCase() === c.address.toLowerCase()))
+    : coins;
+  return { coins: mine, ok, reason, more };
+}
+
 export function tokensHtml() {
   const launched = launchedTokens();
-  const rows = launched.map((tk) => `
-    <button type="button" class="dex-token-row" data-dex-token="${escapeHtml(tk.address)}">
-      <span class="dex-token-face">
-        ${tk.image ? `<img src="${escapeHtml(tk.image)}" alt="">` : ''}
-      </span>
-      <span class="dex-token-meta">
-        <strong>${escapeHtml(tk.name)}</strong>
-        <span class="small">${escapeHtml(tk.symbol)} · <span class="mono">${escapeHtml(tk.address.slice(0, 6))}…${escapeHtml(tk.address.slice(-4))}</span></span>
-        <span class="dex-token-bar" id="dexProg_${escapeHtml(tk.address.slice(2, 10))}"></span>
-      </span>
-      <span class="dex-token-tag small dex-token-tag--curve">${escapeHtml(t('dex.tokens.curve'))}</span>
-    </button>`).join('');
+  // The instant local paint. refreshFeed() re-renders from the chain right after,
+  // so this is only what the user sees for the moment it takes to query.
+  const rows = launched.map(rowHtml).join('');
 
   return `
-    <div class="field-label">${escapeHtml(t('dex.tokens.title'))}</div>
-    <div class="small mb-8">${escapeHtml(t('dex.tokens.hint'))}</div>
-    <div id="dexTokenList">${rows}</div>
+    <div class="dex-feedhead">
+      <div class="dex-tabstrip" role="group" aria-label="${escapeHtml(t('dex.tokens.filter'))}">
+        <button type="button" class="dex-tab" data-dex-scope="all" aria-pressed="true">${escapeHtml(t('dex.tokens.all'))}</button>
+        <button type="button" class="dex-tab" data-dex-scope="mine" aria-pressed="false">${escapeHtml(t('dex.tokens.mine'))}</button>
+      </div>
+    </div>
+    <div id="dexTokenList" class="dex-grid">${rows}</div>
+    <div id="dexFeedStatus" class="small mt-8"></div>
     ${launched.length ? '' : `<div class="dex-empty mt-8">${escapeHtml(t('dex.tokens.none'))}</div>`}`;
+}
+
+// One row renderer, shared by the instant local paint and the chain refresh, so
+// a coin cannot look different depending on which pass found it.
+// One card. Measured against pump.fun's own feed rather than invented: the
+// square face is the hero, the name and ticker sit under it, and the bonding
+// curve's progress bar is the last thing on the card — because on a launchpad
+// that bar is the single fact that matters: how close the coin is to graduating.
+function rowHtml(tk) {
+  const short = `${tk.address.slice(0, 4)}…${tk.address.slice(-4)}`;
+  return `
+    <button type="button" class="dex-card" data-dex-token="${escapeHtml(tk.address)}">
+      <span class="dex-card-face">
+        ${tk.image
+          ? `<img src="${escapeHtml(tk.image)}" alt="" loading="lazy">`
+          : `<span class="dex-card-face-fallback" aria-hidden="true">${escapeHtml((tk.symbol || '?').slice(0, 2).toUpperCase())}</span>`}
+      </span>
+      <span class="dex-card-name">${escapeHtml(tk.name)}</span>
+      <span class="dex-card-ticker">${escapeHtml(tk.symbol)}</span>
+      <span class="dex-card-curve" id="dexProg_${escapeHtml(tk.address.slice(2, 10))}"
+            role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+            aria-label="${escapeHtml(t('dex.tokens.progressAria', { name: tk.name || tk.symbol }))}">
+        <span class="dex-card-curve-fill"></span>
+        <span class="dex-card-curve-text">—</span>
+      </span>
+    </button>`;
+}
+
+// Paints whatever the chain knows, and says so honestly when it could not look.
+// The three outcomes are kept apart on purpose:
+//   • coins found        → show them
+//   • looked, found none → "you have not launched a coin"
+//   • could not look     → "could not read the chain", never a silent empty list
+export async function refreshFeed(host, scope = 'all') {
+  const list = $('#dexTokenList', host);
+  const status = $('#dexFeedStatus', host);
+  if (!list) return { coins: [], ok: false };
+
+  const { coins, ok, reason, more } = await feedCoins(scope);
+
+  // The grid and the empty box are ONE thing with two states, so both are set on
+  // every pass. The first version only replaced the grid when it had coins, so
+  // switching to a filter that matched nothing left the previous rows on screen
+  // next to an "empty" message — a feed that claimed to be empty while still
+  // listing three coins.
+  const box = host.querySelector('.dex-empty');
+
+  if (ok) {
+    list.innerHTML = coins.map(rowHtml).join('');
+    if (box) {
+      box.hidden = coins.length > 0;
+      if (!coins.length) box.textContent = t('dex.tokens.noneOnChain');
+    }
+  } else {
+    if (status) status.textContent = t('dex.tokens.scanFailed', { err: reason || '' });
+    // The local list stays on screen — it is not wrong, just not confirmed.
+    return { coins, ok: false };
+  }
+
+  if (status) {
+    status.textContent = more ? t('dex.tokens.moreOnChain') : '';
+  }
+
+  // Graduation progress for each card, live from the chain.
+  for (const tk of coins) paintProgress(tk, host);
+  return { coins, ok, more };
 }
 
 export function bindTokens(host, onOpen) {
   const list = $('#dexTokenList', host);
   // Live graduation progress for each curve token, read from chain.
   for (const tk of launchedTokens()) {
-    readProgress(tk).then((pct) => {
-      const bar = $(`#dexProg_${tk.address.slice(2, 10)}`, host);
-      if (bar) bar.textContent = pct;
-    });
+    paintProgress(tk, host);
   }
   if (list) {
     list.addEventListener('click', (e) => {
@@ -136,4 +215,28 @@ async function readProgress(tk) {
   } catch {
     return t('dex.tokens.unread');
   }
+}
+
+// Paints one card's curve bar from the chain: the fill width, the percentage,
+// and the ARIA value a screen reader announces. Three surfaces from one read, so
+// they cannot disagree.
+export function paintProgress(tk, host) {
+  const wrap = $(`#dexProg_${tk.address.slice(2, 10)}`, host);
+  if (!wrap) return Promise.resolve(null);
+  const fill = wrap.querySelector('.dex-card-curve-fill');
+  const text = wrap.querySelector('.dex-card-curve-text');
+  return readProgress(tk).then((label) => {
+    if (text) text.textContent = label;
+    // The label reads "42% to graduation", so the percentage is a LEADING number,
+    // not the whole string. Anchoring the regex at the end (the first version
+    // wanted exactly "42%") meant every real label failed to parse and every bar
+    // sat empty at 0% — which looks like a chain that never sold a coin.
+    const pct = /^(\d+)%/.exec(String(label));
+    const n = pct ? Math.max(0, Math.min(100, Number(pct[1]))) : null;
+    if (fill) fill.style.width = n === null ? '0%' : n + '%';
+    wrap.classList.toggle('is-done', label === t('dex.tokens.graduated'));
+    wrap.classList.toggle('is-unread', n === null);
+    if (n !== null) wrap.setAttribute('aria-valuenow', String(n));
+    return n;
+  });
 }
