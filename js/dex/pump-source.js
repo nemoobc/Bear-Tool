@@ -27,9 +27,14 @@ export const PUMP_ABI = [
   'function virtualEth() view returns (uint256)',
   'function virtualTokens() view returns (uint256)',
   'function realEthReserve() view returns (uint256)',
+  // balanceOf is the public mapping on the contract, and the coin page reads it
+  // for "You hold". It was missing from this list, so ethers had no such method:
+  // the read threw and the whole Promise.all in refresh() died — taking the
+  // price, market cap and graduation bar with it, because they shared one read.
+  'function balanceOf(address owner) view returns (uint256)',
   'function graduated() view returns (bool)',
-  'function buy() payable returns (uint256)',
-  'function sell(uint256 tokensIn) returns (uint256)',
+  'function buy(uint256 minTokensOut) payable returns (uint256)',
+  'function sell(uint256 tokensIn, uint256 minEthOut) returns (uint256)',
   'function claimFees() returns (uint256)',
   'function withdraw() returns (uint256)',
   'function totalFeesCreator() view returns (uint256)',
@@ -115,7 +120,16 @@ contract PumpToken {
 
     mapping(address => uint256) public balanceOf;
 
-    function buy() external payable returns (uint256 tokensOut) {
+    // minTokensOut is the buyer's floor, and it is ENFORCED HERE, on chain.
+    //
+    // The screen quotes a price, the user signs, and the transaction sits in the
+    // mempool where anyone can move the curve before it mines. A quote that is
+    // only advisory is a price the user cannot rely on: the old buy() took no
+    // argument, so the app computed a 1% slippage floor, displayed it, and then
+    // never passed it — a protection that existed only on screen. require() is
+    // the only thing that makes it real; if the curve moved too far the trade
+    // reverts and the user keeps their ETH instead of silently receiving less.
+    function buy(uint256 minTokensOut) external payable returns (uint256 tokensOut) {
         require(!graduated, "graduated");
         require(msg.value > 0, "zero");
         uint256 fee = (msg.value * FEE_BPS) / 10000;
@@ -124,6 +138,9 @@ contract PumpToken {
         // floor the OUTPUT so the rounding dust stays in the pool (k only grows)
         tokensOut = (virtualTokens * net) / (virtualEth + net);
         require(tokensOut > 0, "dust");
+        // The floor is checked BEFORE any state moves, so a failed slippage
+        // leaves the curve exactly as it was and costs the buyer only gas.
+        require(tokensOut >= minTokensOut, "slippage");
         virtualEth += net;
         virtualTokens -= tokensOut;
         // Split the fee into the two buckets that can actually leave the
@@ -147,7 +164,9 @@ contract PumpToken {
         emit Bought(msg.sender, msg.value, tokensOut, fee);
     }
 
-    function sell(uint256 tokensIn) external returns (uint256 ethOut) {
+    // minEthOut is the seller's floor, enforced for the same reason buy() has
+    // one: between the quote and the mining the curve can move against you.
+    function sell(uint256 tokensIn, uint256 minEthOut) external returns (uint256 ethOut) {
         require(!graduated, "graduated");
         require(tokensIn > 0, "zero");
         require(balanceOf[msg.sender] >= tokensIn, "balance");
@@ -156,12 +175,21 @@ contract PumpToken {
         uint256 fee = (ethOut * FEE_BPS) / 10000;
         ethOut -= fee;
         require(ethOut > 0, "dust");
+        require(ethOut >= minEthOut, "slippage");
         virtualTokens += netTokens;
         virtualEth -= ethOut;
         uint256 creatorFee = (fee * CREATOR_FEE_BPS) / FEE_BPS;
         totalFeesCreator += creatorFee;
         uint256 protocolFee = fee - creatorFee;
-        realEthReserve -= ethOut;
+        // The reserve must fall by exactly what LEFT the contract, which on a
+        // sell is the payout AND the protocol's share. It used to fall by the
+        // payout alone, so realEthReserve crept ABOVE the ETH actually held —
+        // one protocol-fee per sell. That is not a cosmetic number: claimFees
+        // subtracts the accrued fee from this same reserve, so once the drift
+        // passed the real balance that subtraction underflowed, claimFees
+        // reverted, and the creator could never withdraw their revenue again.
+        // buy() already subtracted its protocol share; this makes sell symmetric.
+        realEthReserve -= ethOut + protocolFee;
         if (protocolFee > 0) {
             (bool ok, ) = payable(protocolWallet).call{value: protocolFee}("");
             require(ok, "protocol");

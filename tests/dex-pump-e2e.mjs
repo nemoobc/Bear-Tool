@@ -90,7 +90,7 @@ try {
 
   // buy: buyer pays ETH, gets tokens, creator fee accrues
   const buyAmt = ethers.parseEther('0.01');
-  await (await t.connect(buyer).buy({ value: buyAmt, gasLimit: 500_000 })).wait();
+  await (await t.connect(buyer).buy(0n, { value: buyAmt, gasLimit: 500_000 })).wait();
   let s = await read();
   check('buy moves the curve (virtualEth up)', s.vE > V, `vE=${s.vE}`);
   check('buy credits the buyer', s.bal > 0n, `bal=${s.bal}`);
@@ -104,7 +104,7 @@ try {
   const sellAmt = balNow / 2n;
   const before = await provider.getBalance(await buyer.getAddress());
   const gasBefore = await provider.getBlock('latest');
-  await (await t.connect(buyer).sell(sellAmt, { gasLimit: 500_000 })).wait();
+  await (await t.connect(buyer).sell(sellAmt, 0n, { gasLimit: 500_000 })).wait();
   const after = await provider.getBalance(await buyer.getAddress());
   const balAfter = await t.balanceOf(await buyer.getAddress());
   check('sell burns the tokens handed back', balAfter === balNow - sellAmt, `${balNow} -> ${balAfter} sold ${sellAmt}`);
@@ -141,7 +141,7 @@ try {
   // (GRADUATION_ETH is 2 ETH; buy in chunks until graduated)
   for (let i = 0; i < 20; i++) {
     if ((await t.graduated())) break;
-    try { await (await t.connect(buyer).buy({ value: ethers.parseEther('0.2'), gasLimit: 900_000 })).wait(); } catch { break; }
+    try { await (await t.connect(buyer).buy(0n, { value: ethers.parseEther('0.2'), gasLimit: 900_000 })).wait(); } catch { break; }
   }
   s = await read();
   check('curve graduates at the threshold', s.graduated === true, `reserve=${s.reserve} graduated=${s.graduated}`);

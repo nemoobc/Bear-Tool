@@ -145,3 +145,74 @@ test('a buy then sell leaves the pool strictly richer than the trader', () => {
   assert.ok(sell.ethOut < ETH(3));
   assert.ok(sell.ethOut > 0n, 'but not zero — a functioning curve still pays out');
 });
+
+// ── the contract source itself ────────────────────────────────
+// PUMP_TOKEN_SOURCE is a JS template literal, so the Solidity inside it is not
+// free text: a stray backtick ends the string, and a `${` starts an
+// interpolation. Both fail as a JavaScript SyntaxError named after whatever
+// Solidity token happened to follow — "Unexpected identifier 'realEthReserve'" —
+// which points at the contract when the real mistake was a comment. Caught in
+// this repo while fixing the reserve drift, so it is pinned here.
+test('the Solidity source survives being a JS template literal', async () => {
+  const { PUMP_TOKEN_SOURCE, PUMP_ABI } = await import('../js/dex/pump-source.js');
+
+  assert.equal(typeof PUMP_TOKEN_SOURCE, 'string');
+  assert.ok(PUMP_TOKEN_SOURCE.length > 1000, 'the source must actually be there');
+
+  // An interpolation would have produced "[object Object]" or "undefined"
+  // somewhere in the middle of the contract instead of failing loudly.
+  assert.ok(!PUMP_TOKEN_SOURCE.includes('${'), 'no ${ may survive into the Solidity source');
+  assert.ok(!PUMP_TOKEN_SOURCE.includes('undefined'), 'the source must contain no unresolved interpolation');
+
+  // …and it must still be a contract: balance, constructor, and the two verbs
+  // the whole launchpad depends on.
+  for (const part of ['contract PumpToken', 'constructor(', 'function buy(uint256 minTokensOut)',
+                      'function sell(uint256 tokensIn, uint256 minEthOut)',
+                      'function claimFees()', 'function withdraw()', '_mintTo']) {
+    assert.ok(PUMP_TOKEN_SOURCE.includes(part), `the source must contain ${part}`);
+  }
+
+  // The ABI must describe exactly what the UI calls. A function the UI invokes
+  // but the ABI omits fails at runtime, in the browser, only when a user clicks.
+  const sigs = PUMP_ABI.map(String);
+  // The slippage floors are ABI, not decoration: a UI that computes a minimum
+  // and cannot pass it is protecting nobody.
+  for (const sig of ['function buy(uint256 minTokensOut) payable returns (uint256)',
+                     'function sell(uint256 tokensIn, uint256 minEthOut) returns (uint256)',
+                     'function balanceOf(address owner) view returns (uint256)',
+                     'function claimFees() returns (uint256)',
+                     'function withdraw() returns (uint256)',
+                     'function totalFeesCreator() view returns (uint256)']) {
+    assert.ok(sigs.includes(sig), `PUMP_ABI must carry: ${sig}`);
+  }
+  for (const ev of ['event Bought(', 'event Sold(', 'event Graduated(',
+                    'event FeesClaimed(', 'event Withdrawn(']) {
+    assert.ok(sigs.some((s) => s.startsWith(ev)), `PUMP_ABI must carry: ${ev}`);
+  }
+});
+
+test('the reserve and the ETH actually held cannot drift apart', async () => {
+  // The invariant, stated where the maths lives. sell() used to drop
+  // realEthReserve by the payout but not by the protocol's share, so the
+  // number grew above the ETH physically in the contract; claimFees() then
+  // underflowed and the creator's revenue was locked forever.
+  //
+  // Modelled here in integers: buy adds msg.value then removes the protocol
+  // share; sell removes the payout AND its protocol share. Drop the second
+  // removal and the sum stops matching.
+  const FEE = 125n, CREATOR = 30n, BPS = 10_000n;
+  const protocolOf = (fee) => fee - (fee * CREATOR) / FEE;
+
+  const msgValue = ETH(1);
+  const fee = (msgValue * FEE) / BPS;
+  let reserve = msgValue - protocolOf(fee);   // buy(): value in, protocol share out
+
+  const ethOut = ETH(1) / 2n;
+  const sellFee = (ethOut * FEE) / BPS;
+  // Correct: both what left the contract.
+  reserve -= ethOut + protocolOf(sellFee);
+  const held = msgValue - protocolOf(fee) - ethOut - protocolOf(sellFee);
+
+  assert.equal(reserve, held,
+    'reserve + unpaid creator fees must equal the ETH held — this is the identity claimFees() depends on');
+});

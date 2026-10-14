@@ -18,7 +18,8 @@
     "test:e2e-wc": "node tests/e2e-wc.mjs",
     "verify": "npm run test:all",
     "test:all": "npm run check && npm test && npm run test:fork && npm run test:e2e",
-    "test:live": "node --test --test-concurrency=1 --test-timeout=240000 tests/*.live.js"
+    "test:live": "node --test --test-concurrency=1 --test-timeout=240000 tests/*.live.js",
+    "test:dex-onchain": "node tests/dex-onchain-e2e.mjs"
   },
   "dependencies": {
     "@reown/walletkit": "^1.6.0",

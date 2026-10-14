@@ -181,6 +181,21 @@ feature combination compiled with the real solc (including the upgradeable
 ERC-1967 builds) plus the auto-verify routing. Plus browser E2E
 (`npm run test:e2e`).
 
+The launchpad has its own two on-chain gates, both on a throwaway anvil:
+
+- `npm run test:dex-pump` — the PumpToken contract end to end: deploy, buy,
+  sell, claim creator fees, graduate, withdraw; non-creators refused; nothing
+  left stranded.
+- `npm run test:dex-onchain` — the one that matters most: **the price the screen
+  shows must be the price the chain gives.** It imports the app's own
+  `curve.js` quote maths, drives real transactions with it, and asserts the
+  delivered amount against the quote, the fee against the app's own split, the
+  reserves against the quote's next reserves, the contract's ETH bookkeeping
+  against the balance it actually holds, and the slippage floor in both
+  directions — an impossible floor must revert and leave the curve untouched,
+  and the app's real floor must pass. A contract-level test cannot catch a
+  quote/chain disagreement, because both sides would be individually correct.
+
 ### Tests call the app, they do not rebuild it
 
 A swap test that declares its own ABI and calls the router itself proves the
@@ -251,16 +266,16 @@ Bear-Tool/
 │   ├── eip7702-tools.js# helper-contract batch/rescue/airdrop flows
 │   ├── eip7702-support.js # "does this node understand 7702?" probe, asked of every chain
 │   ├── deploy.js       # deploy wizard: solc compile → gas → deploy (+ 2-tx proxy) → auto-verify
-│   ├── dex/            # the Dex, in its own folder (order: "buat folder dex")
-│   │   ├── index.js    # Dex view: welcome + gate + tab strip + panel routing (chart inline in Swap)
-│   │   ├── core.js     # shared Dex helpers: the three coins, Sepolia gate, V2 registry, formatting
-│   │   ├── tokens.js   # the live token list (native coins + your launched tokens, graduation progress)
-│   │   ├── trade.js    # launched-token screen: live curve state, buy()/sell() on the bonding curve
-│   │   ├── create.js   # launchpad Create Token panel (image upload → data URI, curve preview, compile+deploy)
-│   │   ├── pump-source.js # the launchpad PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
-│   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over on-chain Swap logs
-│   │   ├── curve.js    # bonding-curve launchpad math (constant-product, virtual reserves, fees, graduation)
-│   │   └── contract.js # Uniswap V2 registry (factory/router/pair ABIs) + the ERC-20 ABI the Dex uses
+│   ├── dex/            # the launchpad, in its own folder (order: "buat folder dex")
+│   │   ├── index.js    # the launchpad view: welcome + Sepolia gate + feed/coin/create routing (no tabs, no pair)
+│   │   ├── core.js     # shared launchpad helpers: the Sepolia gate, provider access, the one tx path, formatting
+│   │   ├── tokens.js   # the feed — every curve coin this wallet launched, with live graduation progress
+│   │   ├── trade.js    # a coin's page: live curve state, chart + tape, buy()/sell(), creator claim/graduate
+│   │   ├── history.js  # the coin's trade tape: Bought/Sold logs → rows and OHLC candles
+│   │   ├── create.js   # the launch form (image upload → data URI, curve preview, compile+deploy)
+│   │   ├── pump-source.js # the PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
+│   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over those same logs
+│   │   └── curve.js    # bonding-curve math (constant-product, virtual reserves, fees, graduation)
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder
 │   ├── solc-worker.js  # the same compile, off the main thread

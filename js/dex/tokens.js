@@ -1,46 +1,93 @@
 // Bear Tool — js/dex/tokens.js
-// The Dex's LIVE token list — its home screen. Two kinds of row:
-//   • the three native coins (the Dex's own coins, always present);
-//   • launchpad tokens this wallet has deployed (PumpTokens on their own
-//     bonding curve), which carry an on-chain image and a graduation progress.
-// Nothing here is a hardcoded feed: it is the preset table plus whatever the
-// wallet actually deployed, so the list can never show a coin that does not
-// exist, and can never hide one that does. (User: "fitur daftar token live".)
+// The launchpad FEED — the Dex's home screen. In the pure-launchpad rebuild
+// (user: "opsi 1") the subject of the whole view is a TOKEN trading on its own
+// bonding curve. So this list holds ONLY curve tokens: coins launched here. The
+// three preset ERC-20s and the Uniswap V2 pools are gone from the Dex — they
+// were the source of its ambiguity (two trading engines, two "ETH", a global
+// pair) and a launchpad has neither.
+//
+// Nothing is a hardcoded feed: it is whatever this wallet actually deployed,
+// newest first, with each coin's live graduation progress read from chain.
 import { t } from '../i18n.js';
 import { get, set } from '../state.js';
 import { $, escapeHtml } from '../ui.js';
-import { DEX_PRESETS, dexChainOk, logoHtml, guardTokenLogos, provider, ethersLib } from './core.js';
+import { dexChainOk, provider, ethersLib, DEX_CHAIN_ID } from './core.js';
 import { PUMP_ABI } from './pump-source.js';
 import { graduationProgress, GRADUATION_ETH } from './curve.js';
 
-// Launchpad tokens this wallet deployed, kept in local state. This is a
-// convenience index of addresses YOU created — the chain is still the source
-// of truth for each token's live state (read fresh below).
+// Where the launched-coin index is KEPT, and why it is not in state.js.
+//
+// state.set() writes to an in-memory singleton: nothing survives a reload. The
+// first version of this feed read the list from there, so every coin the user
+// launched vanished on refresh — the contract stayed live, the gas was spent,
+// and the feed came back empty with no way back. Found by reloading the page
+// after a real launch, which no unit test does.
+//
+// So the index is persisted here, per chain: Sepolia coins must not appear on
+// mainnet just because the same browser ran both. Only what cannot be re-derived
+// is stored — address, name, symbol, image. Price, reserve and graduation are
+// always read live from the contract, so a stale entry can never show a stale
+// price.
+const LAUNCHED_KEY = 'bear.dex.launched';
+
+function storeKey() {
+  return `${LAUNCHED_KEY}.${DEX_CHAIN_ID}`;
+}
+
+function readStore() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(storeKey()) || '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x) => x && typeof x.address === 'string' && x.address);
+  } catch {
+    return [];
+  }
+}
+
+function writeStore(list) {
+  try {
+    localStorage.setItem(storeKey(), JSON.stringify(list));
+  } catch {
+    // Private mode / quota. The in-memory copy still serves this session, so the
+    // feed keeps working — it just will not survive a reload, and saying so is
+    // better than pretending otherwise.
+  }
+}
+
+// Curve tokens this wallet deployed. Newest first. The persisted index is the
+// record; the state mirror keeps every existing reader (and the router's
+// dex.tokenView lookup) on one path.
 export function launchedTokens() {
-  return Array.isArray(get('dex.launched')) ? get('dex.launched') : [];
+  const fromStore = readStore();
+  const fromState = Array.isArray(get('dex.launched')) ? get('dex.launched') : [];
+  // Union, newest first, no duplicates: a coin present in either place is a coin
+  // the user owns. Merging rather than preferring one means a write that only
+  // reached memory (private mode) is still visible this session.
+  const seen = new Set();
+  const out = [];
+  for (const x of [...fromState, ...fromStore]) {
+    const a = String(x.address).toLowerCase();
+    if (seen.has(a)) continue;
+    seen.add(a);
+    out.push(x);
+  }
+  return out;
 }
 
 export function rememberLaunchedToken(entry) {
   const list = launchedTokens().filter((x) => x.address.toLowerCase() !== entry.address.toLowerCase());
   list.unshift(entry);
-  set('dex.launched', list.slice(0, 50)); // a sane cap; newest first
+  const capped = list.slice(0, 100); // a sane cap; newest first
+  set('dex.launched', capped);
+  writeStore(capped);
 }
 
 export function tokensHtml() {
-  const natives = DEX_PRESETS.map((p) => `
-    <button type="button" class="dex-token-row" data-dex-token="${escapeHtml(p.address)}">
-      <span class="dex-token-face">${logoHtml(p, 34)}</span>
-      <span class="dex-token-meta">
-        <strong>${escapeHtml(p.name)}</strong>
-        <span class="small">${escapeHtml(p.symbol)} · <span class="mono">${escapeHtml(p.address.slice(0, 6))}…${escapeHtml(p.address.slice(-4))}</span></span>
-      </span>
-      <span class="dex-token-tag small">${escapeHtml(t('dex.tokens.native'))}</span>
-    </button>`).join('');
-
-  const launched = launchedTokens().map((tk) => `
+  const launched = launchedTokens();
+  const rows = launched.map((tk) => `
     <button type="button" class="dex-token-row" data-dex-token="${escapeHtml(tk.address)}">
       <span class="dex-token-face">
-        ${tk.image ? `<img src="${escapeHtml(tk.image)}" alt="">` : logoHtml({ address: tk.address, symbol: tk.symbol }, 34)}
+        ${tk.image ? `<img src="${escapeHtml(tk.image)}" alt="">` : ''}
       </span>
       <span class="dex-token-meta">
         <strong>${escapeHtml(tk.name)}</strong>
@@ -53,14 +100,13 @@ export function tokensHtml() {
   return `
     <div class="field-label">${escapeHtml(t('dex.tokens.title'))}</div>
     <div class="small mb-8">${escapeHtml(t('dex.tokens.hint'))}</div>
-    <div id="dexTokenList">${natives}${launched}</div>
-    ${launched ? '' : `<div class="dex-empty mt-8">${escapeHtml(t('dex.tokens.none'))}</div>`}`;
+    <div id="dexTokenList">${rows}</div>
+    ${launched.length ? '' : `<div class="dex-empty mt-8">${escapeHtml(t('dex.tokens.none'))}</div>`}`;
 }
 
-export function bindTokens(host, onTrade) {
+export function bindTokens(host, onOpen) {
   const list = $('#dexTokenList', host);
-  if (list) guardTokenLogos(list);
-  // Live graduation progress for each launched curve token, read from chain.
+  // Live graduation progress for each curve token, read from chain.
   for (const tk of launchedTokens()) {
     readProgress(tk).then((pct) => {
       const bar = $(`#dexProg_${tk.address.slice(2, 10)}`, host);
@@ -70,7 +116,7 @@ export function bindTokens(host, onTrade) {
   if (list) {
     list.addEventListener('click', (e) => {
       const row = e.target.closest('[data-dex-token]');
-      if (row && typeof onTrade === 'function') onTrade(row.dataset.dexToken);
+      if (row && typeof onOpen === 'function') onOpen(row.dataset.dexToken);
     });
   }
 }
@@ -86,7 +132,7 @@ async function readProgress(tk) {
     const [reserve, graduated] = await Promise.all([c.realEthReserve(), c.graduated()]);
     if (graduated) return t('dex.tokens.graduated');
     const { bps } = graduationProgress(reserve, GRADUATION_ETH);
-    return t('dex.tokens.progress', { pct: String(Number(bps) / 100) });
+    return t('dex.tokens.progress', { pct: String(Math.round(Number(bps) / 100)) });
   } catch {
     return t('dex.tokens.unread');
   }

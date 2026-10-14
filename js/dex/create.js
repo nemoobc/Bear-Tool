@@ -22,6 +22,7 @@ import {
 } from './curve.js';
 import { PUMP_TOKEN_SOURCE, PUMP_ABI } from './pump-source.js';
 import { rememberLaunchedToken } from './tokens.js';
+import { withTxButton } from './core.js';
 
 // Images: the user may upload a big file (10 MB), but a data URI can NEVER go
 // on-chain as-is — the constructor calldata explodes the deploy gas past what
@@ -72,7 +73,10 @@ export function createHtml() {
     </div>`;
 }
 
-export function bindCreate(host) {
+// `onLaunched(address)` fires after a coin is live, so the view can open its
+// page directly — a fresh launch should land on the coin, not back on a feed
+// the user then has to find it in.
+export function bindCreate(host, onLaunched) {
   const status = $('#dexCreateStatus', host);
   const fileEl = $('#dexCreateFile', host);
   const imgEl = $('#dexCreateImg', host);
@@ -146,7 +150,12 @@ export function bindCreate(host) {
     infoEl.textContent = t('dex.create.curveInfo', { open: openText, grad: gradText });
   }
 
-  $('#dexCreateGo', host).addEventListener('click', async () => {
+  $('#dexCreateGo', host).addEventListener('click', () => {
+    // Validation happens BEFORE the button enters its busy state: a spinner that
+    // flashes for a missing name reads as "something is deploying" when nothing
+    // is. Only the real work — compile, estimate, confirm, deploy — drives the
+    // spinner, and that work is the longest in the whole Dex (solc over the
+    // network, then a deploy), which is exactly why it needs one.
     if (!chainOk()) return toast(t('dex.gate.needSepolia'), 'error');
     if (!get('unlocked') || !get('signer')) return toast(t('dex.needWallet'), 'error');
     const name = $('#dexCreateName', host).value.trim();
@@ -156,12 +165,12 @@ export function bindCreate(host) {
     if (!symbol) return toast(t('dex.create.needSymbol'), 'error');
 
     const btn = $('#dexCreateGo', host);
-    btn.disabled = true;
-    status.textContent = t('dex.create.compiling');
-    try {
-      const compiled = await compileContract(PUMP_TOKEN_SOURCE, 'PumpToken', {
-        onStatus: (m) => { status.textContent = m; },
-      });
+    return withTxButton(btn, t('dex.create.sending'), async () => {
+      status.textContent = t('dex.create.compiling');
+      try {
+        const compiled = await compileContract(PUMP_TOKEN_SOURCE, 'PumpToken', {
+          onStatus: (m) => { status.textContent = m; },
+        });
       const E = globalThis.ethers;
       const net = getNetworkById(get('networkId'));
       const provider = await getProvider(net.chainId);
@@ -183,7 +192,14 @@ export function bindCreate(host) {
         rows: [
           { k: t('dex.create.name'), v: `${name} (${symbol})` },
           { k: t('cf.network'), v: net.name },
-          { k: t('dex.create.fee'), v: `${FEE_TOTAL_BPS / 100}% on every trade` },
+          // FEE_TOTAL_BPS is a BigInt (125n), so dividing it by the NUMBER 100
+          // threw "Cannot mix BigInt and other types" — and that line runs while
+          // building the confirm dialog, i.e. BEFORE the compile and the deploy.
+          // So Create Token had never once reached the chain: it died on its own
+          // fee label. Found by pressing the real button in a browser, which no
+          // unit test did. BigInt division would also have been wrong (125n/100n
+          // is 1, not 1.25), so this converts deliberately.
+          { k: t('dex.create.fee'), v: `${(Number(FEE_TOTAL_BPS) / 100).toFixed(2)}% on every trade` },
           { k: t('dex.create.gradAt'), v: fmtEth(GRADUATION_ETH) + ' ' + net.symbol },
           { k: t('cf.transactions'), v: '1' },
           { k: t('dex.create.cost'), v: gasPrice > 0n
@@ -194,14 +210,48 @@ export function bindCreate(host) {
         gasWei: cost,
         valueWei: 0,
       });
-      if (!ok) { status.textContent = ''; btn.disabled = false; return; }
+      // withTxButton restores the button on every exit, so a cancel must not
+      // also poke it — two owners of one button is how it sticks disabled.
+      if (!ok) { status.textContent = ''; return; }
 
       status.textContent = t('dex.create.deploying');
       const contract = await factory.deploy(...args);
-      const rc = receiptVerdict(await waitForReceipt(contract.deployTransaction, { label: t('dex.create.launch') }));
+      // ethers v6 exposes the deploy tx as a METHOD, deploymentTransaction().
+      // The old code read the PROPERTY `deployTransaction`, which is undefined —
+      // so waitForReceipt got a transaction with no .wait(), treated the
+      // TypeError as a transient poll failure, and spun for the full 2-minute
+      // confirm timeout before reporting failure. The coin was live on chain the
+      // whole time, but never reached the feed: the user paid gas, saw "Launching…"
+      // for two minutes, then "timed out", and had no way back to their coin.
+      //
+      // waitForDeployment() is the sanctioned wait: it resolves when the code is
+      // actually on chain, and it is the only path here that can return a
+      // transaction at all.
+      const sentTx = typeof contract.deploymentTransaction === 'function'
+        ? contract.deploymentTransaction()
+        : contract.deployTransaction;
+      const rc = receiptVerdict(await waitForReceipt(sentTx, { label: t('dex.create.launch') }));
       if (rc.kind !== 'success') {
-        status.textContent = rc.kind === 'failed' ? t('dex.tx.failed') : t('dex.tx.pending', { hash: String(rc.hash || '').slice(0, 10) });
-        btn.disabled = false;
+        // A confirm timeout is not proof the deploy failed — the coin may well
+        // be live while the node is slow to hand back its receipt. So ASK the
+        // chain whether the code is there before telling the user anything:
+        // reporting "failed" for a live coin loses them their coin, and reporting
+        // success for a dead one would be a lie. The chain decides.
+        const addr = await contract.getAddress().catch(() => null);
+        let live = false;
+        if (addr) {
+          try { live = (await provider.getCode(addr)) !== '0x'; } catch { live = false; }
+        }
+        if (!live) {
+          status.textContent = rc.kind === 'failed' ? t('dex.tx.failed') : t('dex.tx.pending', { hash: String(rc.hash || '').slice(0, 10) });
+          return;
+        }
+        // It IS deployed. Register it and say exactly that, rather than making
+        // the user pay for a coin and then lose it.
+        rememberLaunchedToken({ address: addr, name, symbol, image });
+        toast(t('dex.create.slowConfirm'), 'success');
+        status.textContent = t('dex.create.live', { addr });
+        if (typeof onLaunched === 'function') setTimeout(() => { try { onLaunched(addr); } catch { /* live either way */ } }, 400);
         return;
       }
       const addr = await contract.getAddress();
@@ -215,11 +265,17 @@ export function bindCreate(host) {
       a.textContent = t('dex.create.explore');
       status.appendChild(a);
       toast(t('dex.create.done', { symbol }), 'success');
-      btn.disabled = false;
+      // Give the caller first refusal on the new coin. Deferred one tick so the
+      // success toast is on screen before the form is torn down under it.
+      if (typeof onLaunched === 'function') {
+        setTimeout(() => { try { onLaunched(addr); } catch { /* the coin is live either way */ } }, 900);
+      }
     } catch (e) {
+      // The reason is shown, not swallowed: "create failed" with no cause is the
+      // one message that helps nobody. withTxButton re-enables the button.
       status.textContent = (e && (e.shortMessage || e.message)) || String(e);
-      btn.disabled = false;
     }
+    });
   });
 }
 

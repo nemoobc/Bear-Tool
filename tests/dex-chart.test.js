@@ -13,9 +13,13 @@ test('empty / non-array input yields no candles, never a crash', async () => {
 
 test('a single trade is a flat candle: open=high=low=close, real time', async () => {
   const seen = [];
-  const out = await tradesToCandles([trade(2.5, 3n, 42)], async (b) => { seen.push(b); return 1700000000; });
+  // The callback receives the trade ROW, not just its block: two trades can
+  // share a block, and a block alone cannot tell them apart.
+  const out = await tradesToCandles([trade(2.5, 3n, 42)], async (row) => { seen.push(row); return 1700000000; });
   assert.equal(out.length, 1);
-  assert.deepEqual(seen, [42], 'time comes from the trade block, not from now()');
+  assert.equal(seen.length, 1, 'time is resolved once, for the candle\'s last trade');
+  assert.equal(seen[0].block, 42, 'time comes from the trade block, not from now()');
+  assert.equal(seen[0].price, 2.5 * PRICE_SCALE, 'the whole row is handed over, not just the block');
   const c = out[0];
   assert.equal(c.open, 2.5); assert.equal(c.high, 2.5);
   assert.equal(c.low, 2.5); assert.equal(c.close, 2.5);
@@ -43,7 +47,7 @@ test('volume sums every trade in the bucket as bigint-safe arithmetic', async ()
 test('bucketing caps candle count and keeps ascending time order', async () => {
   const trades = [];
   for (let i = 0; i < 100; i++) trades.push(trade(1 + i / 100, 1n, 1000 - i)); // DESCENDING blocks
-  const out = await tradesToCandles(trades, async (b) => b, 10);
+  const out = await tradesToCandles(trades, async (row) => row.block, 10);
   assert.ok(out.length <= 10, `cap respected, got ${out.length}`);
   for (let i = 1; i < out.length; i++) {
     assert.ok(out[i].time > out[i - 1].time, 'candles must be ascending by time');

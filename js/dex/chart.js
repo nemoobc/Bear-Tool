@@ -23,8 +23,12 @@ const MAX_CANDLES = 60;
  *
  * @param {Array<{price:number, volQuote:bigint, block:number}>} trades in
  *   ascending block order; `price` is quote-per-base scaled by PRICE_SCALE
- * @param {(block:number)=>Promise<number>} timeForBlock real block timestamp
- *   (seconds). Injected so this stays pure — and so the caller can batch it.
+ * @param {(row:object, index:number)=>Promise<number>} timeFor real timestamp
+ *   (seconds) for a candle, given the LAST trade in the bucket and its index in
+ *   the bucket list. Injected so this stays pure — and so the caller can batch
+ *   it. It receives the whole ROW, not just the block: two trades can share a
+ *   block, so a block number is not enough to tell them apart and produced
+ *   duplicate timestamps the library rejects.
  * @param {number} [max]
  * @returns {Promise<Array<{time:number, open:number, high:number, low:number,
  *   close:number, volume:number, blocks:number[]}>>} ascending by time
@@ -33,7 +37,7 @@ const MAX_CANDLES = 60;
  * never the highest price. A bucket with a single trade is flat (O=H=L=C),
  * which is what actually happened.
  */
-export async function tradesToCandles(trades, timeForBlock, max = MAX_CANDLES) {
+export async function tradesToCandles(trades, timeFor, max = MAX_CANDLES) {
   if (!Array.isArray(trades) || !trades.length) return [];
   const n = Math.max(1, Math.min(max, trades.length));
   const per = Math.ceil(trades.length / n);
@@ -44,7 +48,8 @@ export async function tradesToCandles(trades, timeForBlock, max = MAX_CANDLES) {
     const prices = chunk.map((x) => x.price / PRICE_SCALE);
     let vol = 0n;
     for (const x of chunk) vol += x.volQuote || 0n;
-    const time = await timeForBlock(chunk[chunk.length - 1].block);
+    const last = chunk.length - 1;
+    const time = await timeFor(chunk[last], i + last);
     out.push({
       time,
       open: prices[0],

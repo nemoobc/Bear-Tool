@@ -17,12 +17,8 @@ import { waitForReceipt, receiptVerdict } from '../safetx.js';
 import { sendDexTx, provider, ethersLib, dexChainOk, needSigner, fmtTok, withTxButton } from './core.js';
 import { PUMP_ABI } from './pump-source.js';
 import { quoteBuy, quoteSell, graduationProgress, fmtEth, GRADUATION_ETH, VIRTUAL_ETH, VIRTUAL_TOKENS } from './curve.js';
-
-const ACTIVE_TOKEN_KEY = 'dex.tokenView';
-
-// Which launched token the trade panel is showing (or null).
-export function activeToken() { return get(ACTIVE_TOKEN_KEY) || null; }
-export function setActiveToken(address) { return address; }
+import { drawCandles } from './chart.js';
+import { loadHistory, historyCandles, tradesHtml } from './history.js';
 
 function readToken(token) {
   const p = provider();
@@ -32,6 +28,11 @@ function readToken(token) {
 }
 
 // The token detail + buy/sell screen.
+// How far the curve may move against the user before the trade is refused, in
+// basis points. 100 = 1%. The floor is enforced by the CONTRACT (see
+// pump-source.js), so this is the real protection, not a label on it.
+const SLIPPAGE_BPS = 100n;
+
 export function tokenTradeHtml(token) {
   return `
     <button type="button" class="btn btn-secondary btn-block mb-8" id="dexTradeBack">
@@ -61,10 +62,23 @@ export function tokenTradeHtml(token) {
     </div>
 
     <div class="dex-chart-block mt-8">
-      <div class="small"><strong>${escapeHtml(t('dex.trade.curve'))}</strong></div>
-      <canvas id="dexTradeCurve" height="150"></canvas>
-      <div class="small" id="dexTradeCurveInfo"></div>
+      <div class="small"><strong>${escapeHtml(t('dex.trade.price'))}</strong></div>
+      <div id="dexTradeChart" class="dex-chart-host" role="img"
+           aria-label="${escapeHtml(t('dex.trade.chartAria'))}"></div>
+      <div class="dex-loading" id="dexTradeChartLoading" hidden><span class="dex-spinner"></span><span>${escapeHtml(t('dex.chart.loading'))}</span></div>
+      <div class="small mt-8" id="dexTradeCurveInfo"></div>
     </div>
+
+    <div class="mt-8">
+      <div class="small"><strong>${escapeHtml(t('dex.trades.title'))}</strong></div>
+      <div id="dexTradeTape"></div>
+    </div>
+
+    <details class="dex-curve-details mt-8">
+      <summary class="small">${escapeHtml(t('dex.trade.curve'))}</summary>
+      <canvas id="dexTradeCurve" height="150"></canvas>
+      <div class="small" id="dexTradeCurveInfo2"></div>
+    </details>
 
     <div class="dex-swapbox mt-8">
       <div class="dex-swapbox-label">${escapeHtml(t('dex.trade.buy'))}</div>
@@ -105,17 +119,70 @@ export function bindTokenTrade(host, token, onBack) {
 
   $('#dexTradeBack', host).addEventListener('click', () => onBack());
 
-  if (!p || !dexChainOk()) { status.textContent = t('dex.needWallet'); return; }
+  // ── price chart + trade tape ──────────────────────────────────
+  // Both read the SAME thing: the curve's own Bought/Sold events. One fetch
+  // feeds both, so the tape can never disagree with the chart above it.
+  const chartHost = $('#dexTradeChart', host);
+  const chartLoading = $('#dexTradeChartLoading', host);
+  const tapeHost = $('#dexTradeTape', host);
+  let chartTearDown = null;
+
+  // The chart mounts whether or not there is anything to plot. That is
+  // deliberate on both counts: a coin with no trades gets an empty candlestick
+  // frame with its axes, and a visitor with NO WALLET gets the same frame
+  // instead of an empty div — a blank box read as "the chart is broken", which
+  // is exactly the "chart ga keliatan" report this was meant to end.
+  const paintChart = async (candles) => {
+    if (chartTearDown) { try { chartTearDown(); } catch { /* already gone */ } chartTearDown = null; }
+    if (chartHost) chartTearDown = await drawCandles(chartHost, candles, { height: 220 });
+  };
+
+  if (!p || !dexChainOk()) {
+    status.textContent = t('dex.needWallet');
+    if (tapeHost) tapeHost.innerHTML = tradesHtml([], token.symbol);
+    paintChart([]);
+    return;
+  }
   const c = readToken(token);
+
+  const paintHistory = async () => {
+    if (chartLoading) chartLoading.hidden = false;
+    const hist = await loadHistory(c, p);
+    if (chartLoading) chartLoading.hidden = true;
+    if (tapeHost) tapeHost.innerHTML = tradesHtml(hist.trades, token.symbol);
+    const candles = await historyCandles(hist.trades);
+    await paintChart(candles);
+  };
+  host.addEventListener('dex:teardown', () => { if (chartTearDown) { try { chartTearDown(); } catch { /* already gone */ } } }, { once: true });
 
   // Live state from the contract. state() holds the numbers the buy/sell use
   // so the quote and the tx cannot disagree.
-  const state = { vE: 0n, vT: 0n, reserve: 0n, graduated: false, mine: 0n };
+  const state = { vE: 0n, vT: 0n, reserve: 0n, graduated: false, mine: 0n, readable: false };
   const refresh = async () => {
-    const [vE, vT, reserve, graduated, mine, sym] = await Promise.all([
+    // balanceOf needs a real 20-byte address. '0x0' is NOT one — it made ethers
+    // reject, and because the reads shared one Promise.all, a wallet-less
+    // visitor lost the PRICE, the market cap and the graduation bar too, not
+    // just their own balance. So a missing wallet means "no balance", never
+    // "no page".
+    const me = get('address');
+    const [vE, vT, reserve, graduated, mine] = await Promise.all([
       c.virtualEth(), c.virtualTokens(), c.realEthReserve(), c.graduated(),
-      c.balanceOf(get('address') || '0x0'), token.symbol,
-    ]);
+      me ? c.balanceOf(me) : Promise.resolve(0n),
+    ]).catch((e) => {
+      // A failed read must SAY SO. Letting it throw left the last-known price,
+      // market cap and graduation bar on screen with nothing saying they were
+      // stale — numbers that looked live and were not. Mark the page instead.
+      state.readable = false;
+      if (status) {
+        status.textContent = t('dex.trade.readFailed', {
+          err: (e && (e.shortMessage || e.message)) || String(e),
+        });
+      }
+      return null;
+    });
+    if (!vE) return;
+    state.readable = true;
+    const sym = token.symbol;
     state.vE = vE; state.vT = vT; state.reserve = reserve; state.graduated = graduated; state.mine = mine;
     // graduation bar
     const { bps } = graduationProgress(reserve, GRADUATION_ETH);
@@ -137,6 +204,9 @@ export function bindTokenTrade(host, token, onBack) {
     const raw = (buyEthEl.value || '').trim();
     if (!raw) { buyQuote.textContent = ''; return; }
     let eth; try { eth = E.parseEther(raw); } catch { buyQuote.textContent = ''; return; }
+    // No live read means no quote: a price computed off the last-known reserves
+    // is a guess, and a guess rendered as a number is how someone gets hurt.
+    if (!state.readable) { buyQuote.textContent = t('dex.trade.quoteStale'); return; }
     if (eth <= 0n || state.graduated) { buyQuote.textContent = state.graduated ? t('dex.trade.graduated') : ''; return; }
     const q = quoteBuy(state.vE, state.vT, eth);
     buyQuote.textContent = t('dex.trade.youGetTok', { amt: fmtTok(q.tokensOut, 18, 2), sym: token.symbol });
@@ -145,6 +215,7 @@ export function bindTokenTrade(host, token, onBack) {
     const raw = (sellTokEl.value || '').trim();
     if (!raw) { sellQuote.textContent = ''; return; }
     let tok; try { tok = E.parseUnits(raw, 18); } catch { sellQuote.textContent = ''; return; }
+    if (!state.readable) { sellQuote.textContent = t('dex.trade.quoteStale'); return; }
     if (tok <= 0n || state.graduated) { sellQuote.textContent = state.graduated ? t('dex.trade.graduated') : ''; return; }
     const q = quoteSell(state.vE, state.vT, tok);
     sellQuote.textContent = t('dex.trade.youGetEth', { amt: fmtEth(q.ethOut) });
@@ -160,17 +231,27 @@ export function bindTokenTrade(host, token, onBack) {
     const signer = needSigner();
     if (!signer) return;
     const raw = (buyEthEl.value || '').trim();
+    if (!state.readable) return toast(t('dex.trade.quoteStale'), 'error');
     if (!raw) return toast(t('dex.trade.needEth'), 'error');
     let eth; try { eth = E.parseEther(raw); } catch { return toast(t('dex.trade.needEth'), 'error'); }
     if (eth <= 0n) return toast(t('dex.trade.needEth'), 'error');
     if (state.graduated) return toast(t('dex.trade.graduated'), 'error');
     const q = quoteBuy(state.vE, state.vT, eth);
-    const minOut = q.tokensOut * 99n / 100n; // 1% slippage
+    // The floor goes ON-CHAIN, not just on screen. The contract reverts if the
+    // curve moved past it, so a front-runner costs the buyer gas instead of
+    // tokens — which is the whole point of computing it.
+    // 1% tolerance means "at least 99% of the quote", NOT "1% of the quote".
+    // The first version of this line divided the amount by 100 directly, so the
+    // floor was 1% of the quote — a 99% slippage tolerance — while the dialog
+    // cheerfully labelled it "1% slippage guard". Caught by reading the actual
+    // numbers in the confirm box (504,865 against a quote of 50,486,599).
+    const minOut = (q.tokensOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
     const ok = await confirmTx({
       title: t('dex.trade.buyTitle', { sym: token.symbol }),
       rows: [
         { k: t('dex.trade.ethIn'), v: raw + ' ETH' },
         { k: t('dex.trade.youGet'), v: fmtTok(q.tokensOut, 18, 2) + ' ' + token.symbol },
+        { k: t('dex.trade.worstCase'), v: fmtTok(minOut, 18, 2) + ' ' + token.symbol },
       ],
       confirmText: t('dex.trade.buy'),
       danger: true,
@@ -178,7 +259,7 @@ export function bindTokenTrade(host, token, onBack) {
     });
     if (!ok) return;
     const cs = new E.Contract(token.address, PUMP_ABI, signer);
-    const rc = await sendDexTx(() => cs.buy({ value: eth }), t('dex.trade.buy'));
+    const rc = await sendDexTx(() => cs.buy(minOut, { value: eth }), t('dex.trade.buy'));
     if (!rc) return;
     toast(t('dex.trade.bought', { sym: token.symbol }), 'success');
     buyEthEl.value = ''; quoteBuyLive();
@@ -234,23 +315,27 @@ export function bindTokenTrade(host, token, onBack) {
     const signer = needSigner();
     if (!signer) return;
     const raw = (sellTokEl.value || '').trim();
+    if (!state.readable) return toast(t('dex.trade.quoteStale'), 'error');
     if (!raw) return toast(t('dex.trade.needTok'), 'error');
     let tok; try { tok = E.parseUnits(raw, 18); } catch { return toast(t('dex.trade.needTok'), 'error'); }
     if (tok <= 0n) return toast(t('dex.trade.needTok'), 'error');
     if (state.graduated) return toast(t('dex.trade.graduated'), 'error');
     const q = quoteSell(state.vE, state.vT, tok);
+    // Same floor, mirrored: the contract reverts rather than pay less than this.
+    const minOut = (q.ethOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
     const ok = await confirmTx({
       title: t('dex.trade.sellTitle', { sym: token.symbol }),
       rows: [
         { k: t('dex.trade.tokIn'), v: raw + ' ' + token.symbol },
         { k: t('dex.trade.youGet'), v: fmtEth(q.ethOut) + ' ETH' },
+        { k: t('dex.trade.worstCase'), v: fmtEth(minOut) + ' ETH' },
       ],
       confirmText: t('dex.trade.sell'),
       danger: true,
     });
     if (!ok) return;
     const cs = new E.Contract(token.address, PUMP_ABI, signer);
-    const rc = await sendDexTx(() => cs.sell(tok), t('dex.trade.sell'));
+    const rc = await sendDexTx(() => cs.sell(tok, minOut), t('dex.trade.sell'));
     if (!rc) return;
     toast(t('dex.trade.sold', { sym: token.symbol }), 'success');
     sellTokEl.value = ''; quoteSellLive();
@@ -306,8 +391,13 @@ export function bindTokenTrade(host, token, onBack) {
     ctx.strokeStyle = '#2D2A32'; ctx.lineWidth = 2; ctx.stroke();
   };
 
+  paintHistory();
+
   refresh().then(() => { drawCurve(); return quoteBuyLive(); }).then(quoteSellLive);
-  // keep the numbers + curve live while the panel is open
+  // Keep the numbers, the tape and the curve live while the panel is open. The
+  // history repaint runs on its own, slower clock: it is several RPCs, and a new
+  // trade only changes it once someone trades.
   const timer = setInterval(() => { refresh().then(() => { drawCurve(); quoteBuyLive(); quoteSellLive(); }); }, 5000);
-  host.addEventListener('dex:teardown', () => clearInterval(timer), { once: true });
+  const histTimer = setInterval(paintHistory, 15_000);
+  host.addEventListener('dex:teardown', () => { clearInterval(timer); clearInterval(histTimer); }, { once: true });
 }

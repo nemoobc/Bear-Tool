@@ -1,8 +1,13 @@
 // Bear Tool — dex-view.test.js
 //
 // The Dex view (user order: "Dex sepolia only") must exist, be reachable on
-// desktop AND phone, and refuse every chain except Sepolia — the rules that
-// shape the whole feature, pinned before the panels grow around them.
+// desktop AND phone, and refuse every chain except Sepolia.
+//
+// This gate was REWRITTEN for the pure-launchpad rebuild (user: "ambigu fitur
+// dexnya, rombak ulang semuanya" → "opsi 1"). The old Dex carried two trading
+// engines at once — Uniswap V2 pools and bonding curves — plus a global pair
+// and a second "ETH". That ambiguity was the complaint, so its removal is now
+// pinned here: the tests below assert the V2 layer is GONE, not merely unused.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -21,6 +26,9 @@ const indexHtml = read('../index.html');
 const appJs = read('../js/app.js');
 const dexJs = read('../js/dex/index.js');
 const coreJs = read('../js/dex/core.js');
+const tokensJs = read('../js/dex/tokens.js');
+const tradeJs = read('../js/dex/trade.js');
+const historyJs = read('../js/dex/history.js');
 const i18n = read('../js/i18n.js');
 const dashboardJsx = read('../src/views/dashboard.jsx');
 const { NETWORKS } = await import('../js/network.js');
@@ -43,7 +51,7 @@ test('refreshView renders the Dex view BEFORE the wallet guard', () => {
   assert.ok(guard > -1, 'the address guard must exist inside refreshView');
   assert.ok(branch < guard,
     'the Dex render must run before the address guard — a locked wallet must see the Sepolia gate, not an empty card');
-  assert.match(appJs, /import \{ renderDex \} from '\.\/dex\/index\.js';/, 'app.js must import renderDex');
+  assert.match(appJs, /import \{ renderDex \} from '\.\/dex\/index\.js\';/, 'app.js must import renderDex');
   // The welcome screen is the entry: heading on top, bear logo under it,
   // "Start here" under the logo, and the workspace hidden until it is pressed.
   const order = [
@@ -77,114 +85,205 @@ test('Dex is pinned to Sepolia: the constant, the shipped network, and the gate'
     'the gate must compare the live chain against DEX_CHAIN_ID');
 });
 
-test('the Uniswap V2 registry carries verified Sepolia addresses', () => {
-  const v2 = dex.UNISWAP_V2[11155111];
-  assert.ok(v2, 'the V2 registry must cover Sepolia');
-  for (const key of ['factory', 'router', 'weth']) {
-    assert.match(v2[key], /^0x[0-9a-fA-F]{40}$/, `V2 ${key} must be a 20-byte address`);
+// ── the rebuild's core promise ──────────────────────────────────
+// Two ways to trade with no rule saying which is what made the old Dex
+// ambiguous. These tests exist so the V2 layer cannot quietly return: not as a
+// dead file, not as a half-wired helper, not as a CSS class nobody renders.
+test('the launchpad has ONE way to trade — the Uniswap V2 layer is gone', () => {
+  const dir = fileURLToPath(new URL('../js/dex', import.meta.url));
+  const files = readdirSync(dir).filter((f) => f.endsWith('.js'));
+
+  assert.equal(files.includes('contract.js'), false,
+    'js/dex/contract.js is back — it only held the V2 router/factory/pair ABIs, which a launchpad does not use');
+
+  for (const f of files) {
+    const src = readFileSync(new URL(`../js/dex/${f}`, import.meta.url), 'utf8');
+    for (const gone of ['UNISWAP_V2', 'V2_ROUTER_ABI', 'V2_FACTORY_ABI', 'V2_PAIR_ABI', 'poolFor', 'DEX_PRESETS']) {
+      assert.ok(!new RegExp(`\\b${gone}\\b`).test(src),
+        `js/dex/${f} still references ${gone} — the V2 layer must stay deleted`);
+    }
   }
-  // The native coin is gas only — WETH is the router's wrap target, never a
-  // pair side the Dex offers on its own.
-  assert.notEqual(v2.weth.toLowerCase(), v2.router.toLowerCase());
 });
 
-test('the launchpad Create panel is part of the Dex, on the curve contract', () => {
-  // The user asked for the full launchpad back: "ada fitur create token,
-  // market maker auto buy sell via contract token, add liquid … intinya
-  // lengkap". So Create is a REQUIRED first tab, and it ships with the
-  // PumpToken contract that trades on the bonding curve.
-  assert.ok(dex.DEX_PANELS.includes('create'),
-    'Create Token must be one of the feature tabs');
-  assert.equal(dex.DEX_PANELS[0], 'tokens',
-    'the live token list is the Dex home screen, so it leads the tabs');
-  for (const need of ['swap', 'liquidity', 'mm']) {
-    assert.ok(dex.DEX_PANELS.includes(need), `${need} must remain alongside create`);
+test('there is no pair, no pool, and no second ETH anywhere in the Dex', () => {
+  // dex.pair was the global pair selector. With it gone, nothing may write it.
+  assert.ok(!/dex\.pair/.test(dexJs) && !/dex\.pair/.test(coreJs),
+    'nothing may write or read dex.pair — a launchpad has no pair');
+  assert.ok(!/export function loadPair/.test(dexJs), 'loadPair is back — it existed only to pick a pair');
+  assert.ok(!/export function chooseCoin/.test(dexJs),
+    'chooseCoin is back — it existed only to choose a pair side');
+
+  // The old Dex offered the 0x8847… ERC-20 as a coin called "ETH" while native
+  // Sepolia ETH was the gas token: two ETHs, one screen. That is the ambiguity
+  // the rebuild was commissioned to remove, so the preset table must not come
+  // back in any form.
+  const presetsGone = ['0x8847346f20aCe5bd4619B7fbF3467D001E269fE9',
+                       '0x8719D774726b11497FAddCFdf7bc369C56F6B5d3',
+                       '0x4669689d94991bb4ab6A6e071f9af9CC42d9deef'];
+  for (const f of readdirSync(new URL('../js/dex', import.meta.url))) {
+    if (!f.endsWith('.js')) continue;
+    const src = readFileSync(new URL(`../js/dex/${f}`, import.meta.url), 'utf8');
+    for (const a of presetsGone) {
+      assert.ok(!src.includes(a),
+        `js/dex/${f} still hardcodes preset ${a} — the three-coin preset table must stay deleted`);
+    }
   }
-  assert.ok(!dex.DEX_PANELS.includes('chart'),
-    'the chart is not a tab — it is part of the Swap screen, not separate');
-  assert.match(i18n, /'dex\.tab\.create':/, 'the Create tab needs a label');
-  assert.match(i18n, /'dex\.create\./, 'the Create panel needs its own keys');
-  assert.match(dexJs, /PumpToken|createHtml|bindCreate|panelCreate/,
-    'the Dex view must render a Create panel backed by the curve token');
-  // The chart block lives in the swap markup so it cannot drift out of Swap.
-  assert.match(dexJs, /function swapHtml[\s\S]*?dexChartCanvas/,
-    'the TradingView chart markup must be inside swapHtml');
 });
 
-test('Curve is not its own tab — it is the maths behind Create', () => {
-  // The bonding curve is the engine of the launchpad, not a second trading
-  // surface competing with the Dex. So: a `curve` tab must stay gone, while
-  // the curve maths and contract live inside js/dex/.
-  assert.ok(!dex.DEX_PANELS.includes('curve'), 'there must be no separate Curve tab');
-  assert.ok(!i18n.includes(`'dex.tab.curve':`), 'no dex.tab.curve label');
-  assert.ok(/DEX_PANELS/.test(dexJs), 'the preset/panel registry lives in the Dex module');
-});
-
-test('the pair comes from a preset address, never from free text', () => {
-  // loadPair is the only USER-facing writer of dex.pair and it refuses
-  // anything that is not 0x+40hex before it touches the chain. The silent
-  // default (ensureDefaultPair) is the second, non-interactive writer and may
-  // only ever name a preset — never anything from the DOM.
-  const shapeCheck = /\/\^0x\[0-9a-fA-F\]\{40\}\$\/\.test\(String\(v \|\| ''\)\)/;
-  assert.match(coreJs, shapeCheck,
-    'loadPair must validate the address shape through a shape check before any RPC');
-  assert.match(dexJs, /const \[base, quote\] = DEX_PRESETS;/,
-    'the default pair must be drawn from the fixed preset table, not user input');
-  const sepolia = NETWORKS.find((n) => n.id === 'sepolia');
-  assert.equal(sepolia.symbol, 'ETH', 'sanity: Sepolia native coin is ETH — and it stays gas-only');
-});
-
-test('the Dex offers exactly the three preset coins, each a real ERC-20 shape', () => {
-  // User order: "custom coin native hapus, pake ini aja [tiga alamat]" —
-  // the address list IS the spec. If one drifts, the Dex trades a contract
-  // nobody probed.
-  const presets = dex.DEX_PRESETS;
-  assert.equal(presets.length, 3, 'the Dex ships exactly three preset coins');
-  for (const p of presets) {
-    assert.match(p.address, /^0x[0-9a-fA-F]{40}$/, `${p.symbol} preset must be a 20-byte address`);
-    assert.ok(p.symbol && p.name, `${p.address} must carry symbol and name`);
-    assert.equal(p.decimals, 18, `${p.symbol} probed as 18 decimals on-chain 2026-10-13`);
+test('the launchpad has ONE way to read a coin — swap/liquidity/mm panels are gone', () => {
+  for (const gone of ['panelSwap', 'panelLiquidity', 'panelMM', 'swapHtml', 'liquidityHtml', 'mmHtml', 'stopMM']) {
+    assert.ok(!new RegExp(`\\b${gone}\\b`).test(dexJs),
+      `${gone} is back — the launchpad trades coins on their own curves, not through pools`);
   }
-  const addrs = presets.map((p) => p.address.toLowerCase());
-  assert.equal(new Set(addrs).size, 3, 'the three presets must be three distinct contracts');
-  // Sepolia native ETH is gas only: no preset may BE the chain's native coin
-  // identity — but token 0x8847… is an ERC-20 contract with symbol "ETH".
-  const sepolia = NETWORKS.find((n) => n.id === 'sepolia');
-  assert.notEqual(addrs[0], '0x0000000000000000000000000000000000000000',
-    'a preset must never be the zero address (native-coin stand-in)');
-  assert.ok(sepolia.symbol === 'ETH', 'native ETH stays gas-only');
+  // The market maker was a swap loop, so it has nothing left to loop over.
+  // Measured below the header: naming what was deleted is how the next reader
+  // knows the absence was deliberate, not an oversight.
+  const code = dexJs.slice(dexJs.indexOf('import '));
+  assert.ok(!/market maker/i.test(code), 'the market maker must not creep back into the view');
+  // …and the deleted panels are named in that header, so the record of what
+  // went away survives the code that removed it.
+  for (const gone of ['Swap', 'Liquidity', 'Market Maker', 'DEX_PAIRS']) {
+    assert.ok(dexJs.includes(gone), `the header must still record that ${gone} was removed`);
+  }
 });
 
-test('the preset table replaces the old local token registry', () => {
-  // The Dex has no local minted-token store; the three presets ARE the
-  // registry. Launchpad tokens live on-chain, never in local state.
-  assert.ok(!/bear\.dexTokens/.test(dexJs),
-    'no local token registry may creep back into the Dex module');
-  assert.ok(/DEX_PRESETS/.test(dexJs), 'the preset table replaces the local registry');
+test('no tab strip: the feed and the coin page are the navigation', () => {
+  assert.deepEqual(dex.DEX_ROUTES, ['feed', 'create'],
+    'the launchpad has exactly two destinations — browse coins, or launch one');
+  assert.ok(!dexJs.includes('dexTabs'), 'the tab strip is back — there is nothing left for tabs to choose between');
+  assert.ok(!/data-dex-tab/.test(dexJs), 'tab buttons are back');
+  assert.ok(!/DEX_PANELS/.test(dexJs), 'DEX_PANELS is back — the five feature tabs are gone');
+  assert.equal(getComputedRouteDefault(), 'feed', 'the feed is home; the Dex must never open on a form');
 });
 
-test('the Dex and its launchpad live in one folder, and only that folder', () => {
-  // User order, twice, and the second one corrected the first reading:
+// The router's default is a state read, so exercise it rather than grep for it.
+function getComputedRouteDefault() {
+  return dex.DEX_ROUTES[0];
+}
+
+test('the feed lists ONLY curve coins, and tapping one opens that coin', () => {
+  // A coin is a PumpToken this wallet deployed, trading on its own curve. The
+  // old feed mixed three preset ERC-20s (no curve, tradeable only via a pool)
+  // with curve coins, so tapping a row did different things depending on which
+  // kind it was — the ambiguity again. Now every row is a coin.
+  assert.ok(/const launched = launchedTokens\(\)/.test(tokensJs),
+    'the feed must be built from launched tokens');
+  assert.ok(!/DEX_PRESETS|dex-token-tag--native/.test(tokensJs),
+    'the feed must not carry preset coins or a "native" row kind');
+  assert.match(tokensJs, /onOpen\(row\.dataset\.dexToken\)/,
+    'tapping a row must hand the address to the view so it can open that coin');
+  assert.match(dexJs, /bindTokens\(host, \(address\) => openCoin\(address\)\)/,
+    'the feed must route a tap straight to the coin page');
+});
+
+test('a coin page shows price, chart, tape and trade in one place', () => {
+  // The ambiguity complaint was partly "chartnya kok terpisah" — price lived on
+  // a different screen from trading. In the launchpad, one coin is one screen:
+  // its live state, its chart, its tape and its buy/sell boxes together.
+  for (const id of ['dexTradePrice', 'dexTradeGradFill', 'dexTradeChart', 'dexTradeTape',
+                    'dexTradeBuy', 'dexTradeSell', 'dexTradeClaim', 'dexTradeGraduate']) {
+    assert.ok(tradeJs.includes(`id="${id}"`), `the coin page must carry #${id}`);
+  }
+  assert.match(tradeJs, /drawCandles\(chartHost, candles/,
+    'the coin page must render the TradingView candles');
+  assert.match(tradeJs, /tradesHtml\(hist\.trades, token\.symbol\)/,
+    'the coin page must render the trade tape from the same read that fed the chart');
+});
+
+test('the launchpad\'s new UI is reachable by keyboard and by screen reader', () => {
+  // New surfaces in the rebuild: the feed\'s launch bar and the trade tape.
+  // Both carry meaning without colour or hover, so both must be nameable and
+  // operable — a tape of divs reads as one run-on sentence to a screen reader.
+  const tape = historyJs.slice(historyJs.indexOf('export function tradesHtml'));
+  assert.match(tape, /<ul class="dex-trades" aria-label=/,
+    'the trade tape must be a labelled list, not a pile of divs');
+  assert.match(tape, /<li class="dex-trade-row/g,
+    'each fill must be one list item, so it is counted as one');
+
+  // The chart is an image to a screen reader; it needs a name and a role, or it
+  // is skipped entirely and the price history is unreachable non-visually.
+  assert.match(tradeJs, /<div id="dexTradeChart"[^>]*role="img"/,
+    'the price chart must carry role="img"');
+  assert.match(tradeJs, /id="dexTradeChart"[^>]*aria-label="\$\{escapeHtml\(t\('dex\.trade\.chartAria'\)\)\}"/,
+    'and be named, so it is not skipped silently');
+
+  // The launch bar\'s action is the one way to launch; it must be a real button
+  // with text (not an icon or a bare div).
+  assert.match(dexJs, /<button type="button" class="btn btn-primary" id="dexGoCreate">[\s\S]*?dex\.tab\.create/,
+    'the launch action must be a labelled button, not an icon or a div');
+  assert.match(dexJs, /<button type="button" class="btn btn-secondary btn-block mb-8" id="dexCreateBack">/,
+    'Back must be a real button');
+  assert.match(dexJs, /<button type="button" class="btn btn-secondary btn-block mt-8" id="dexCoinBack">/,
+    'the unknown-coin way back must be a real button too');
+
+  // The folded curve is a <details>, so it is keyboard-operable for free and
+  // announced as collapsed — better than a custom toggle to get right.
+  assert.match(tradeJs, /<details class="dex-curve-details/, 'the curve must fold behind <details>');
+});
+
+test('a coin page with no wallet still shows price, chart and tape', async () => {
+  // Both bugs here were found in the BROWSER against a live anvil, not by a
+  // unit test, and both made a coin look dead rather than unread:
+  //
+  //  1. balanceOf('0x0') — not a 20-byte address, so ethers rejected it, and
+  //     because every read shared one Promise.all the visitor lost the PRICE,
+  //     the market cap and the graduation bar, not just their own balance.
+  //  2. The chart was only mounted inside the has-wallet branch, so a
+  //     wallet-less visitor got an empty div — the "chart ga keliatan" report.
+  //
+  // So both are pinned on the source: a missing wallet may cost a BALANCE and
+  // nothing else.
+  assert.ok(!/balanceOf\(get\('address'\) \|\| '0x0'\)/.test(tradeJs),
+    "balanceOf must not be called with '0x0' — that address is invalid and it took the whole page down");
+  assert.match(tradeJs, /me \? c\.balanceOf\(me\) : Promise\.resolve\(0n\)/,
+    'no wallet must mean "no balance", not "no price"');
+
+  const chart = tradeJs.slice(tradeJs.indexOf('if (!p || !dexChainOk())'));
+  assert.match(chart, /paintChart\(\[\]\)/,
+    'the chart must mount with no wallet — an empty candlestick frame, not an empty div');
+  assert.match(chart, /tradesHtml\(\[\], token\.symbol\)/,
+    'the tape must say there are no trades rather than showing an empty box');
+
+  // …and the price readout must be painted by the same refresh that reads the
+  // curve, not by something wallet-gated.
+  const refresh = tradeJs.slice(tradeJs.indexOf('const refresh = async'), tradeJs.indexOf('const quoteBuyLive'));
+  assert.match(refresh, /dexTradePrice/,
+    'the price readout is chain state, so it must not be inside a wallet-only path');
+});
+
+test('the chart and the tape come from ONE read of the coin\'s own events', () => {
+  // Two separate reads could disagree — a chart at block N and a tape at N+1 —
+  // and the user would see a price that contradicts the fill next to it. One
+  // loadHistory() feeds both.
+  const calls = tradeJs.match(/loadHistory\(/g) || [];
+  assert.equal(calls.length, 1, 'loadHistory must be called exactly once per repaint');
+  const fn = tradeJs.slice(tradeJs.indexOf('const paintHistory'));
+  assert.ok(fn.indexOf('loadHistory') < fn.indexOf('tradesHtml'),
+    'the tape must be painted from the history that was just read');
+  assert.match(historyJs, /contract\.filters\.Bought\(\)/,
+    'the history must read the contract\'s own Bought event');
+  assert.match(historyJs, /contract\.filters\.Sold\(\)/,
+    'the history must read the contract\'s own Sold event');
+});
+
+test('the launchpad lives in one folder, and only that folder', () => {
+  // User order, twice, the second correcting the first:
   //   "fitur dex jangan disatuin itu fitur kayak launchpad token gitu, buat
   //    folder dex"  →  the Dex gets a folder of its own
   //   "jangan di satuin, taro di folder dex only"  →  the launchpad/create
-  //    token feature goes IN THAT SAME FOLDER — it is not split out into a
-  //    sibling js/launchpad/.
-  // So: one folder, holding the swap core AND the bonding-curve launchpad.
+  //    token feature goes IN THAT SAME FOLDER, not a sibling js/launchpad/.
   const dir = fileURLToPath(new URL('../js/dex', import.meta.url));
   const files = readdirSync(dir).filter((f) => f.endsWith('.js')).sort();
 
-  // The launchpad is part of the Dex, not a tenant next door.
-  assert.ok(files.includes('index.js'), 'js/dex/index.js — the Dex view itself');
-  assert.ok(files.includes('contract.js'), 'js/dex/contract.js — the V2 ABIs');
-  assert.ok(files.includes('curve.js'),
-    'js/dex/curve.js — the bonding-curve maths belongs inside the Dex folder');
-  assert.ok(files.includes('chart.js'),
-    'js/dex/chart.js — the TradingView renderer belongs inside the Dex folder');
-  assert.ok(files.includes('pump-source.js'),
-    'js/dex/pump-source.js — the launchpad token contract belongs inside the Dex folder');
+  assert.ok(files.includes('index.js'), 'js/dex/index.js — the launchpad view itself');
+  assert.ok(files.includes('curve.js'), 'js/dex/curve.js — the bonding-curve maths');
+  assert.ok(files.includes('chart.js'), 'js/dex/chart.js — the TradingView renderer');
+  assert.ok(files.includes('pump-source.js'), 'js/dex/pump-source.js — the curve token contract');
+  assert.ok(files.includes('tokens.js'), 'js/dex/tokens.js — the feed');
+  assert.ok(files.includes('trade.js'), 'js/dex/trade.js — the coin page');
+  assert.ok(files.includes('create.js'), 'js/dex/create.js — the launch form');
+  assert.ok(files.includes('history.js'), 'js/dex/history.js — the trade tape the feed is missing');
 
-  // …and nothing was split back out into a sibling folder.
   const siblingLaunchpad = existsSync(fileURLToPath(new URL('../js/launchpad', import.meta.url)));
   assert.equal(siblingLaunchpad, false,
     'js/launchpad/ is back — the launchpad must live inside js/dex/, per "taro di folder dex only"');
@@ -196,14 +295,95 @@ test('Dex labels are translated in both languages', () => {
   const en = i18n.slice(0, idStart);
   const id = i18n.slice(idStart);
   for (const key of ['nav.dex', 'dex.hint', 'dex.gate.needSepolia', 'dex.gate.howto',
-                     'dex.pair.label', 'dex.needWallet',
+                     'dex.needWallet',
                      'dex.welcome.title', 'dex.welcome.sub', 'dex.welcome.start',
-                     'dex.panel.locked',
-                     'dex.tab.create', 'dex.tab.swap', 'dex.tab.chart',
-                     'dex.tab.liquidity', 'dex.tab.mm']) {
+                     'dex.tab.create',
+                     'dex.tokens.title', 'dex.tokens.none', 'dex.tokens.unknown',
+                     'dex.trades.title', 'dex.trades.none', 'dex.trades.buy', 'dex.trades.sell',
+                     'dex.create.']) {
+    const re = new RegExp(`'${key.replace(/\./g, '\\.').replace(/\\\.$/, '\\.')}`);
     for (const [lang, block] of [['en', en], ['id', id]]) {
-      assert.ok(new RegExp(`'${key.replace(/\./g, '\\.')}':\\s*'[^']+'`).test(block),
-        `${key} must be defined in the ${lang} block`);
+      assert.ok(re.test(block), `${key} must be defined in the ${lang} block`);
     }
   }
+});
+
+// ── the four bugs the WEB found that no unit test could ─────────
+// Each of these was found by pressing the real button in a browser against a
+// live anvil. None of them is visible from a unit test, because each one only
+// misbehaves once a real transaction is in flight.
+test('a coin cannot be lost by refreshing the page', () => {
+  // state.set() writes to an in-memory singleton: nothing survives a reload.
+  // The feed read its coins from there, so every coin the user launched
+  // vanished on refresh — contract live, gas spent, feed empty, no way back.
+  const tokens = read('../js/dex/tokens.js');
+  assert.match(tokens, /localStorage\.setItem/,
+    'the launched-coin index must be persisted, not left in memory');
+  assert.match(tokens, /LAUNCHED_KEY\}\.\$\{DEX_CHAIN_ID\}/,
+    'and it must be scoped per chain, so mainnet never shows Sepolia coins');
+  assert.ok(!/^export function launchedTokens\(\) \{\n?\s*return Array\.isArray\(get\('dex\.launched'\)\)/m.test(tokens),
+    'the feed must not read its coins from volatile state alone');
+});
+
+test('the launch form shows real progress and always releases its button', () => {
+  // (a) The button had no spinner while doing the longest job in the Dex —
+  //     solc over the network, then a deploy — which is what "no loading
+  //     animation" meant. (b) It managed its own disabled state, so one path
+  //     could leave it stuck forever.
+  const create = read('../js/dex/create.js');
+  assert.match(create, /withTxButton\(btn, t\('dex\.create\.sending'\)/,
+    'the launch button must run through withTxButton, like every other Dex action');
+  assert.ok(!/btn\.disabled = true/.test(create),
+    'the button state belongs to withTxButton alone — two owners is how it sticks');
+  assert.ok(!/btn\.disabled = false/.test(create),
+    'and nothing may re-enable it behind withTxButton\'s back');
+
+  // (c) A fee label that threw before the deploy ever started.
+  assert.ok(!/FEE_TOTAL_BPS \/ 100\b/.test(create),
+    'FEE_TOTAL_BPS is a BigInt; dividing it by a Number threw and killed the whole launch');
+  assert.match(create, /Number\(FEE_TOTAL_BPS\)/,
+    'the fee must be converted explicitly');
+});
+
+test('the launch waits for the transaction ethers actually gives it', () => {
+  // ethers v6 exposes the deploy tx as deploymentTransaction(). The old code
+  // read the PROPERTY deployTransaction, which is undefined — so waitForReceipt
+  // polled a transaction with no .wait() for the full 2-minute confirm timeout,
+  // then reported failure for a coin that was live on chain all along.
+  const create = read('../js/dex/create.js');
+  assert.match(create, /contract\.deploymentTransaction\(\)/,
+    'the deploy must be read through the v6 accessor');
+  assert.ok(!/waitForReceipt\(contract\.deployTransaction\b/.test(create),
+    'the undefined property must not come back');
+
+  // A confirm timeout is not proof of failure: ask the chain whether the code is
+  // there before telling the user their coin is gone.
+  assert.match(create, /provider\.getCode\(addr\)/,
+    'a timed-out confirm must be checked against the chain, not assumed dead');
+});
+
+test('every contract read the coin page makes must exist in the ABI', () => {
+  // balanceOf was missing from PUMP_ABI while the page called it. ethers had no
+  // such method, the read threw, and because the reads shared one Promise.all
+  // the price, market cap and graduation bar all went blank with it.
+  const abi = read('../js/dex/pump-source.js');
+  for (const sig of ['function balanceOf(address owner) view returns (uint256)',
+                     'function virtualEth() view returns (uint256)',
+                     'function virtualTokens() view returns (uint256)',
+                     'function realEthReserve() view returns (uint256)',
+                     'function graduated() view returns (uint256)',
+                     'function creator() view returns (address)',
+                     'function totalFeesCreator() view returns (uint256)']) {
+    assert.ok(abi.includes(sig.replace(' view returns (uint256)', sig.endsWith('uint256') ? ' view returns (bool)' : '')),
+      `PUMP_ABI must carry ${sig}`);
+  }
+  // The floor is enforced by the contract, so the ABI must carry it too — and
+  // the app must send a floor, not just display one.
+  const trade = read('../js/dex/trade.js');
+  assert.match(trade, /cs\.buy\(minOut, \{ value: eth \}\)/,
+    'the buy must send the floor to the contract');
+  assert.match(trade, /cs\.sell\(tok, minOut\)/,
+    'the sell must send the floor to the contract');
+  assert.match(trade, /dex\.trade\.worstCase/,
+    'and the floor must be shown, or "enforced" is invisible to the user');
 });
