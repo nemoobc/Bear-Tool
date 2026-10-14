@@ -587,8 +587,6 @@ export function bindTokenTrade(host, token, onBack) {
 
   // The pool. Its contract functions shipped a commit before this call existed,
   // so for a while the app had no way to reach them at all.
-  const liq = bindLiquidity(host, token);
-  once().then(() => liq.refresh()).catch(() => { /* an unreadable pool says so when opened */ });
 
   // One refresh at a time. refresh() fans out ~10 RPCs before it writes, so on a
   // slow node two overlapping passes finish out of order and the older snapshot
@@ -600,6 +598,9 @@ export function bindTokenTrade(host, token, onBack) {
     inFlight = true;
     try { await refresh(); } finally { inFlight = false; }
   };
+
+  const liq = bindLiquidity(host, token);
+  once().then(() => liq.refresh()).catch(() => { /* an unreadable pool says so when opened */ });
 
   once().then(() => { drawCurve(); return quoteBuyLive(); }).then(quoteSellLive);
   // Keep the numbers, the tape and the curve live while the panel is open. The

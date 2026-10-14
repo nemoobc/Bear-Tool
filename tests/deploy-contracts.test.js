@@ -507,3 +507,36 @@ test('P1 peringatan delegasi permanen di ketiga flow sebelum execute', () => {
   assert.equal(t('cf.permanent.until.revoked.tools.revoke'),
     'Permanent until revoked (Tools → Revoke)', 'peringatan permanen tetap sama di en');
 });
+
+// ── live bug report (user, 2026-10-14): "fitur tools list sponsor wallet kosong"
+//
+// The three sponsor pickers are filled by renderHelperStatus() →
+// renderSponsorPickers() → sponsorOptionsHtml() → wallet.getAccounts(). That
+// chain ran exactly ONCE, from bindEip7702ToolsEvents(), which happens during
+// boot — i.e. BEFORE a fresh install has a wallet. So the <select> was built
+// from an empty account list, and entering the Tools view never rebuilt it:
+// the box stayed empty until the app was restarted. A picker that is only
+// filled at boot cannot recover from a wallet that did not exist yet, and
+// nothing in the suite noticed because every existing assertion checked that
+// the FILLING FUNCTION exists, never that the view ENTRY calls it.
+test('sponsor picker: entering Tools refills the picker (empty-list bug, 2026-10-14)', () => {
+  const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  // The import must exist, or the call below is a ReferenceError at boot.
+  assert.match(app, /import\s*\{[^}]*\brenderHelperStatus\b[^}]*\}\s*from\s*'\.\/eip7702-tools\.js'/,
+    'app.js must import renderHelperStatus to refresh the picker on view entry');
+
+  // The view-entry branch itself. Scoped to the `deploy` line so a call added
+  // anywhere else in refreshView cannot satisfy this.
+  const branch = app.split('\n').find((l) => /view === 'deploy'/.test(l)) || '';
+  assert.ok(branch, "refreshView must still have a `view === 'deploy'` branch");
+  assert.match(branch, /renderHelperStatus\(\)/,
+    'entering Tools must refill the sponsor pickers — boot-time only leaves a fresh install empty');
+});
+
+test('sponsor picker: an empty account list says so instead of rendering a blank box', () => {
+  const tools = fs.readFileSync(new URL('../js/eip7702-tools.js', import.meta.url), 'utf8');
+  const fn = tools.slice(tools.indexOf('function sponsorOptionsHtml'),
+    tools.indexOf('export function renderSponsorPickers'));
+  assert.match(fn, /No wallets saved yet/,
+    'a blank <select> with no options is indistinguishable from a broken one');
+});

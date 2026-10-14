@@ -23,7 +23,7 @@ import { bindSwapEvents, loadSwapTokens } from './swap.js';
 import { bindBridgeEvents, loadBridgeChains } from './bridge.js';
 import { loadEip7702 } from './eip7702.js';
 import { checkAllNetworks, summarize, STATUS as EIP7702_STATUS } from './eip7702-support.js';
-import { bindEip7702ToolsEvents } from './eip7702-tools.js';
+import { bindEip7702ToolsEvents, renderHelperStatus } from './eip7702-tools.js';
 import { bindDeployEvents } from './deploy.js';
 import { loadNfts } from './nft.js';
 import { cancelOrder, fulfillBasicOrder, getOrderStatusOnChain } from './opensea.js';
@@ -691,7 +691,14 @@ export function refreshView(view) {
   if (view === 'send') loadSendTokens();
   if (view === 'swap') loadSwapTokens();
   if (view === 'bridge') loadBridgeChains();
-  if (view === 'deploy') { loadEip7702(); bindOpenSeaPanel(); }
+  // `renderHelperStatus()` is what FILLS the three sponsor-wallet pickers, and
+  // it used to run exactly once — at boot, from bindEip7702ToolsEvents() — which
+  // is before any wallet exists on a fresh install. boots with zero accounts →
+  // every <select> is born with zero <option>s, and opening Tools never
+  // refilled it, so "Sponsor wallet" stayed an empty box until the app was
+  // restarted (user report 2026-10-14: "fitur tools list sponsor wallet
+  // kosong"). Re-filling on view entry also picks up wallets added since boot.
+  if (view === 'deploy') { loadEip7702(); bindOpenSeaPanel(); renderHelperStatus(); }
   if (view === 'nft') loadNfts();
   if (view === 'activity') renderActivity();
   // The Security Center is back in Settings (M3) — its documented original

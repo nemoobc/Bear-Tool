@@ -30,8 +30,17 @@ test('integration: refreshView handles the Tools view (EIP-7702 + OpenSea)', () 
   // The OpenSea panel lives in the Tools view: listing, cancelling and
   // accepting an offer are contract calls against the wallet, so they sit with
   // the tooling rather than the gallery.
-  assert.match(appSrc, /if \(view === 'deploy'\) \{ loadEip7702\(\); bindOpenSeaPanel\(\); \}/,
-    'Tools must run both the EIP-7702 loader and the OpenSea panel');
+  //
+  // The branch is matched by CONTENT, not by one frozen line. The old
+  // exact-string form (`…; bindOpenSeaPanel(); }`) went red the moment the
+  // branch legitimately gained a third call — the sponsor-picker refresh from
+  // the 2026-10-14 "list sponsor wallet kosong" fix — which says nothing about
+  // whether the two required calls are still there. Both must be present; order
+  // and any additional refresh work are not this test's business.
+  const branch = appSrc.split('\n').find((l) => /view === 'deploy'/.test(l)) || '';
+  assert.ok(branch, "refreshView must have a `view === 'deploy'` branch");
+  assert.match(branch, /loadEip7702\(\)/, 'Tools must run the EIP-7702 loader');
+  assert.match(branch, /bindOpenSeaPanel\(\)/, 'Tools must bind the OpenSea panel');
   assert.doesNotMatch(appSrc, /if \(view === 'nft'\)\s*\{[^}]*bindOpenSeaPanel/,
     'the OpenSea panel must not bind on the NFT view');
 });

@@ -199,3 +199,53 @@ test('no id is rendered twice on the coin page', () => {
   assert.deepEqual([...new Set(dupes)], [],
     'duplicate ids on one page: the second copy is unreachable and the first is ambiguous');
 });
+
+// ── temporal dead zone ──────────────────────────────────────────────
+// `once()` was called for the pool panel ABOVE the `const once = …` that
+// declares it. Node's parser accepts the file; nothing in the unit suite runs
+// bindTokenTrade end to end; and the coin page threw
+// "Cannot access 'once' before initialization" on every open — the Dex's
+// central screen, dead, behind a green suite. A browser is what found it.
+//
+// A static gate cannot run the module, so it does the next best thing: every
+// identifier used as a call must be declared before that use, in the same
+// function. That is the whole of a TDZ bug, checkable by reading.
+test('nothing on the coin page is called before it is declared', () => {
+  const trade = read('js/dex/trade.js');
+  // Comments are stripped FIRST. A prose sentence mentioning `once()` matched
+  // this gate before the code did — twice now a static check has been fooled by
+  // the explanation next to the code rather than the code itself. Source-scanning
+  // gates that read raw text must read only code.
+  const noComments = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .split('\n').map((l) => l.replace(/(\/\/.*)$/, '')).join('\n');
+  const body = noComments(trade.slice(trade.indexOf('export function bindTokenTrade')));
+  assert.ok(body.length > 1000, 'bindTokenTrade should be the function we check');
+
+  // const/let declarations, in source order.
+  const decls = new Map();
+  const declRe = /^\s*(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=/gm;
+  let m;
+  while ((m = declRe.exec(body)) !== null) {
+    if (!decls.has(m[1])) decls.set(m[1], m.index);
+  }
+
+  // Uses that are a bare call on the identifier.
+  const useRe = /(^|[^\w.$])([A-Za-z_$][\w$]*)\s*\(/g;
+  const problems = [];
+  while ((m = useRe.exec(body)) !== null) {
+    const name = m[2];
+    if (!decls.has(name)) continue;               // not a local const
+    const declaredAt = decls.get(name);
+    const usedAt = m.index + m[1].length;
+    // A declaration initialiser legitimately references its own name only after
+    // the '='; anything earlier is a TDZ access.
+    const declLine = body.slice(declaredAt, body.indexOf('\n', declaredAt));
+    if (usedAt > declaredAt && usedAt < declaredAt + declLine.length) continue;
+    if (usedAt < declaredAt) {
+      const line = body.slice(0, usedAt).split('\n').length + trade.slice(0, trade.indexOf(body)).split('\n').length;
+      problems.push(`${name}() is called on line ~${line} but declared on line ~${body.slice(0, declaredAt).split('\n').length + trade.slice(0, trade.indexOf(body)).split('\n').length}`);
+    }
+  }
+  assert.deepEqual(problems, [], `temporal dead zone — these throw the moment a coin is opened: ${problems.join('; ')}`);
+});

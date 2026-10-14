@@ -1042,6 +1042,11 @@ function sponsorSignerOf(sponsorKey, provider) {
 // only and an empty pick stops the flow instead of assuming the active one.
 function sponsorOptionsHtml() {
   const accounts = wallet.getAccounts() || [];
+  // An empty picker is the thing that WAS the bug (it stayed empty because it
+  // was only ever built at boot). With the refresh in place it should never be
+  // empty — but if it somehow is, say so instead of rendering a blank box the
+  // user can only read as "the app is broken".
+  if (!accounts.length) return `<option value="">No wallets saved yet</option>`;
   return accounts.map((a, i) =>
     `<option value="${i}">${escapeHtml(a.name || 'Wallet ' + (i + 1))} — ${escapeHtml(wallet.shortAddress(a.address))}</option>`
   ).join('');
