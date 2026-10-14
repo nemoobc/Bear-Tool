@@ -432,6 +432,29 @@ async function handleNativeRpc({ id, origin, payload }) {
   // all prompted and signed unconditionally, so any page in the WebView could
   // obtain a signature — or spend — without ever having been connected. The
   // injected path has always gated on the same check (dapp-bridge.js).
+  // Reads are not secrets. eth_chainId and net_version were already
+  // answered for unconnected pages (line above, before the gate) because
+  // exposure of chain state never threatens the wallet — and a page could
+  // discover each of these itself by pointing an HTTP client at any node.
+  // The same holds for every method in NATIVE_READ_METHODS, which only
+  // returns what the wallet's own node returns: the connection gate must
+  // protect SIGNING and SPENDING, never reads, or every disconnected dApp
+  // gets 4100 while pretending to verify the wallet's network.
+  if (NATIVE_READ_METHODS.has(method)) {
+    const provider = get('provider');
+    if (!provider) return respondError({ code: 4900, message: 'No connected network provider.' });
+    let result;
+    try {
+      result = await Promise.race([
+        provider.send(method, msg.params || []),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('RPC read timed out')), READ_DEADLINE_MS)),
+      ]);
+    } catch (e) {
+      return respondError({ code: (e && e.code) || -32003, message: (e && e.message) || String(e) });
+    }
+    return respond(result);
+  }
+
   if (!connectedOrigins.has(site)) {
     // 4100 is the standard "unauthorized" code, which is what a dApp checks to
     // decide it must call eth_requestAccounts first.
@@ -544,26 +567,6 @@ async function handleNativeRpc({ id, origin, payload }) {
     return respondError({ code: 4902, message: m });
   }
 
-  // Read-only methods: answered straight from the wallet's own provider —
-  // no prompt, no account exposure, caller-safe (a dApp can already read
-  // balances and state on any public RPC it chooses; this just makes the
-  // injected provider as useful as MetaMask's). Errors pass through with
-  // the node's own message so a dApp can distinguish e.g. insufficient
-  // funds from a dead RPC.
-  if (NATIVE_READ_METHODS.has(method)) {
-    const provider = get('provider');
-    if (!provider) return respondError({ code: 4900, message: 'No connected network provider.' });
-    let result;
-    try {
-      result = await Promise.race([
-        provider.send(method, msg.params || []),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('RPC read timed out')), READ_DEADLINE_MS)),
-      ]);
-    } catch (e) {
-      return respondError({ code: (e && e.code) || -32003, message: (e && e.message) || String(e) });
-    }
-    return respond(result);
-  }
 
   return respondError({ code: 4200, message: method + ' is not supported by the native dApp browser yet.' });
 }
