@@ -14,6 +14,7 @@
 //   not silently executed on the local chain;
 // - locked wallet raises the unlock prompt and answers honestly.
 import { confirmTx, toast, setModalVisibilityHook } from './ui.js';
+import { renderSignMessage } from './sign-render.js';
 import { t } from './i18n.js';
 import { get, requireUnlock, on } from './state.js';
 import { getNetworkById, getNetwork } from './network.js';
@@ -414,6 +415,17 @@ async function handleNativeRpc({ id, origin, payload }) {
     return respond([signer.address]);
   }
 
+  // The consent this file's header advertises was enforced in exactly one place:
+  // eth_accounts. personal_sign, eth_signTypedData_v4 and eth_sendTransaction
+  // all prompted and signed unconditionally, so any page in the WebView could
+  // obtain a signature — or spend — without ever having been connected. The
+  // injected path has always gated on the same check (dapp-bridge.js).
+  if (!connectedOrigins.has(site)) {
+    // 4100 is the standard "unauthorized" code, which is what a dApp checks to
+    // decide it must call eth_requestAccounts first.
+    return respondError({ code: 4100, message: `${site} is not connected. Call eth_requestAccounts first.` });
+  }
+
   if (method === 'personal_sign') {
     const [hex] = msg.params || [];
     const ok = await askConfirm({
@@ -422,7 +434,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: t('site.chain'), v: chainId },
         { k: t('site.site'), v: site },
         { k: t('site.account'), v: shortAddr(signer.address) },
-        { k: t('site.message'), v: String(hexToBytes(hex)).slice(0, 80) },
+        { k: t('site.message'), v: renderSignMessage(hex) },
       ],
       confirmText: t('sign.action'),
     });

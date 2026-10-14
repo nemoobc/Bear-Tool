@@ -1,0 +1,201 @@
+// ── the wiring gates ────────────────────────────────────────────────
+// A function on the contract is not a feature. Twice in this Dex, code shipped
+// green with an entire capability unreachable from the app:
+//
+//   • the market maker read its signer off the coin object, which has none, so
+//     start() refused on every device while 12/12 on-chain checks passed
+//   • addLiquidity / removeLiquidity shipped on the contract, in the ABI, and
+//     proven by an on-chain gate — with no UI anywhere calling them
+//
+// Both failed the same way: the engine was tested, the wiring was not. So the
+// check that matters is not "does the capability work" but "can the app reach
+// it" — and that is checkable by reading the two sides against each other.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const read = (p) => readFileSync(join(root, p), 'utf8');
+const dexFiles = readdirSync(join(root, 'js/dex')).filter((f) => f.endsWith('.js'));
+const allDex = dexFiles.map((f) => ({ f, src: read(`js/dex/${f}`) }));
+const dexSrc = allDex.map((x) => x.src).join('\n');
+
+test('every Dex module is actually imported by another module', () => {
+  // A module nothing imports is code the app never runs. list.js shipped for
+  // several commits with seven exported functions and zero callers — delisting
+  // was "done" on paper and absent from the product.
+  for (const { f, src } of allDex) {
+    const isEntry = ['index.js', 'pump-source.js'].includes(f);
+    if (isEntry) continue;
+    // BOTH import forms count. tokens.js pulls discover.js in with a dynamic
+    // `await import()`, and a gate that only understood the static form called
+    // a working module dead — which is how a "stranded module" check teaches
+    // people to ignore it.
+    const re = new RegExp(`(?:from|import)\\s*\\(?\\s*'\\./${f.replace('.', '\\.')}'`);
+    const importedBy = allDex.some((o) => o.f !== f && re.test(o.src));
+    assert.ok(importedBy, `js/dex/${f} is imported by nothing — the app never runs it`);
+  }
+});
+
+test('every liquidity function on the contract is reachable from the UI', () => {
+  // The gate that would have caught the orphaned pool. Named one by one so the
+  // failure says which capability is stranded.
+  for (const fn of ['addLiquidity', 'removeLiquidity']) {
+    assert.ok(new RegExp(`\\.${fn}\\s*\\(`).test(dexSrc),
+      `${fn}() exists on the contract but no UI calls it — it is not a feature yet`);
+  }
+  // …and the panel must read the pool rather than guess at it.
+  for (const read of ['lpValue', 'totalLpShares', 'positionOf']) {
+    assert.ok(new RegExp(`\\.${read}\\s*\\(`).test(dexSrc),
+      `the pool panel must READ ${read}() from the chain, not invent a number`);
+  }
+});
+
+test('the pool panel refuses before it spends, and says why', () => {
+  const liq = read('js/dex/liquidity.js');
+  // Guards that must exist BEFORE the first transaction is sent. A deposit that
+  // goes through with no confirmation is a deposit the user cannot see coming.
+  assert.match(liq, /confirmTx\(/, 'adding to a pool must be confirmed first');
+  assert.match(liq, /if \(amount <= 0n\)/, 'a zero deposit must be refused');
+  assert.match(liq, /amount > snap\.qbal/, 'a deposit larger than the balance must be refused');
+  assert.match(liq, /shares > snap\.shares/, 'withdrawing more than your own share must be refused');
+  assert.match(liq, /if \(snap\.total === 0n \|\| snap\.shares === 0n\)/,
+    'withdrawing with no position must be refused, not sent as a zero');
+});
+
+test('the pool panel states what a deposit does NOT do', () => {
+  // The difference between adding liquidity and buying is the whole point of
+  // the feature. A panel that omits it lets the two blur into one another.
+  const i18n = read('js/i18n.js');
+  assert.ok(/dex\.liq\.truth/.test(i18n), 'the panel must carry its own explanation');
+  assert.match(i18n, /dex\.liq\.truth': '[^']*(NOT|does not)[^']*'/,
+    'the explanation must say plainly that depositing does not buy tokens and does not move the price');
+  for (const lang of ['Add to the pool', 'Masukkan ke pool']) {
+    assert.ok(i18n.includes(lang), `both languages must offer the action: ${lang}`);
+  }
+});
+
+test('delisting is reversible from the UI, not only in code', () => {
+  const tokens = read('js/dex/tokens.js');
+  const trade = read('js/dex/trade.js');
+  // Hiding a coin with no way back is a bad delete wearing a delete button.
+  assert.match(tokens, /data-dex-scope="hidden"/, 'the feed needs a place to see what was hidden');
+  assert.match(tokens, /withoutHidden\(coins\)/, 'hidden coins must actually leave the main feed');
+  assert.match(tokens, /dexUnhideAll/, 'and there must be a way to restore all of them at once');
+  assert.match(trade, /hideCoin\(/, 'the coin page needs a hide action');
+  assert.match(trade, /unhideCoin\(/, 'and a restore action — the same button must undo it');
+  // The chain keeps the coin; the panel must not imply otherwise.
+  assert.ok(/dex\.list\.hidden': '[^']*chain[^']*'/i.test(read('js/i18n.js')),
+    'the note must say the coin still exists on the chain, or hiding reads as deleting');
+});
+
+test('delisting cannot hide a coin the chain no longer has', () => {
+  // withoutHidden() is applied to coins that came FROM the chain, so it can
+  // only ever remove things from a list that was already real. What it must not
+  // do is invent entries or drop the scope it was asked for.
+  const list = read('js/dex/list.js');
+  assert.match(list, /function withoutHidden/, 'the filter must exist');
+  assert.match(list, /localStorage/, 'hiding must survive a reload, or it is a filter that lies');
+  assert.match(list, /try\s*\{/, 'storage writes must be guarded — private mode is not an error to crash on');
+});
+
+test('the Dex contract ABI is fully wired: no capability stranded in pump-source.js', () => {
+  // A blunt sweep, deliberately. pump-source.js holds the ABI for a contract
+  // that grows features; every one of its public capabilities must be called
+  // somewhere in the UI. This is the check that turns "we added a function"
+  // into "we added a feature", and it fails loudly on the next addition.
+  const src = read('js/dex/pump-source.js');
+  const abiBlock = src.slice(src.indexOf('PUMP_ABI'), src.indexOf('];', src.indexOf('PUMP_ABI')));
+  const sigs = [...abiBlock.matchAll(/'function\s+([a-zA-Z_][\w]*)\s*\(/g)].map((m) => m[1]);
+  const unique = [...new Set(sigs)].filter((n) => !['constructor'].includes(n));
+  assert.ok(unique.length >= 15, `expected the full capability set, parsed ${unique.length}`);
+
+  const uiSrc = allDex.filter((x) => x.f !== 'pump-source.js').map((x) => x.src).join('\n');
+  // Aliases, named out loud with the reason. Each one is a SECOND way to read
+  // the same value that the UI gets from somewhere else — so the UI really is
+  // using the capability, just not through this particular entry point. A short,
+  // justified list is honest; a silent skip is a gate nobody trusts.
+  const ALIAS = {
+    lpShares: 'positionOf() returns the same shares in its first return value',
+    quoteDecimals: "the panel asks the ERC-20 itself for decimals(), which is the same number",
+  };
+  const stranded = unique.filter((name) => {
+    if (name in ALIAS) return false;
+    if (name.startsWith('get') || name.startsWith('total')) return false;
+    return !new RegExp(`\\.${name}\\s*\\(`).test(uiSrc);
+  });
+  assert.deepEqual(stranded, [],
+    `these contract capabilities are in the ABI but no UI calls them — a function is not a feature: ${stranded.join(', ')}`);
+});
+// ── the panel-level gates ───────────────────────────────────────────
+// The gates above check that a capability is reachable. These check that the
+// panel around it is honest, because a reachable button that misleads is worse
+// than a missing one: the user acts on it.
+test('every Dex panel is rendered by the coin page, not merely defined', () => {
+  const trade = read('js/dex/trade.js');
+  // liquidityHtml/botHtml exist and are called. A panel defined in a module and
+  // never inserted into the page is the same stranded code wearing a UI.
+  for (const fn of ['liquidityHtml', 'botHtml']) {
+    assert.ok(new RegExp(`\\b${fn}\\(`).test(trade), `the coin page must render ${fn}()`);
+  }
+  assert.ok(/bindLiquidity\(/.test(trade), 'and bind it, or the buttons do nothing');
+});
+
+test('a panel number is never rendered before the chain has been asked', () => {
+  // Every stat starts as a placeholder and is filled from a contract read. If a
+  // panel painted zeros at the top and then quietly failed to update, the user
+  // would read an empty pool as an empty pool.
+  const liq = read('js/dex/liquidity.js');
+  assert.match(liq, /id="dexLiqPool">—</, 'the pool figure must start as a placeholder, not a number');
+  assert.match(liq, /lpValue\(\)/, 'and be filled from lpValue()');
+  assert.match(liq, /unreadable/, 'a failed read must be said out loud, not left as a dash');
+});
+
+test('the liquidity panel cannot render a position for a signed-out reader', () => {
+  // positionOf() and lpShares() take the reader's address. With no address they
+  // must not be called with "undefined", and the panel must say the reader has
+  // nothing rather than showing someone else's position as their own.
+  const liq = read('js/dex/liquidity.js');
+  assert.match(liq, /const me = get\('address'\)/, 'the panel reads the wallet address');
+  assert.ok(/me\s*&&|if \(!me\)|me \? /.test(liq),
+    'and must handle there being no address yet — "undefined" is not an address');
+});
+
+test('delisting cannot be the only way a coin disappears', () => {
+  // Hiding is per-chain and reversible. If it were the ONLY removal path, a user
+  // could lose sight of a coin with no route back, which is the difference
+  // between a filter and a delete.
+  const list = read('js/dex/list.js');
+  assert.ok(!/localStorage\.removeItem/.test(list),
+    'delisting must never delete the coin record itself — only hide it');
+  assert.ok(/withoutHidden/, 'and there must be a filter the UI applies');
+  const tokens = read('js/dex/tokens.js');
+  assert.match(tokens, /scope === 'hidden'/, 'plus a view that shows what was hidden');
+});
+
+// ── duplicate ids ───────────────────────────────────────────────────
+// The coin page rendered the market maker TWICE — once from the panel it
+// already had, once when the pool panel was added beside it. bindBot resolves
+// every control through $(), which is always the FIRST match, so the second
+// copy rendered as a header the user could click and nothing would open: 19
+// duplicated ids, one visibly inert panel, sitting closest to the fold.
+// A gate that regex-matches `botHtml(` cannot tell one call from two.
+test('the coin page renders each panel exactly once', () => {
+  const trade = read('js/dex/trade.js');
+  for (const fn of ['botHtml', 'liquidityHtml']) {
+    const n = (trade.match(new RegExp(`\\$\\{${fn}\\(\\)\\}`, 'g')) || []).length;
+    assert.equal(n, 1, `${fn}() is rendered ${n} times — every copy past the first is inert, because $() always resolves to the first`);
+  }
+});
+
+test('no id is rendered twice on the coin page', () => {
+  // The general form of the bug above, so the next duplicate is caught whatever
+  // its name is.
+  const trade = read('js/dex/trade.js');
+  const ids = [...trade.matchAll(/id="(dex[A-Za-z0-9_]+)"/g)].map((m) => m[1]);
+  const dupes = ids.filter((v, i) => ids.indexOf(v) !== i);
+  assert.deepEqual([...new Set(dupes)], [],
+    'duplicate ids on one page: the second copy is unreachable and the first is ambiguous');
+});

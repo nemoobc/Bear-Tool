@@ -345,3 +345,11 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
 .dex-bot-meter { display: grid; gap: 4px; }
 .dex-bot-meter-head { display: flex; justify-content: space-between; }
 .dex-bot-log { max-height: 7em; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.8em; white-space: pre-wrap; }
+
+/* ── liquidity pool ──────────────────────────────────────────────── */
+.dex-liq { margin-top: 12px; border: 1px solid var(--border-thick); border-radius: var(--radius-lg); overflow: hidden; }
+.dex-liq-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.dex-liq-stat { display: grid; gap: 2px; padding: 6px 8px; background: var(--cream); border-radius: var(--radius-sm, 6px); }
+.dex-liq-stat strong { font-size: 0.95em; }
+
+.dex-btn-ghost { background: none; border: 0; color: var(--ink); text-decoration: underline; font: inherit; cursor: pointer; padding: 4px 8px; }

@@ -20,6 +20,7 @@
 // The heavy dependency is imported dynamically inside ensureKit(): importing
 // this module costs nothing at boot and opens no socket until the user
 // actually pastes a wc: URI.
+import { renderSignMessage, stripInvisible as stripInvisibleShared } from './sign-render.js';
 import { openModal, closeModal, confirmTx, escapeHtml, toast } from './ui.js';
 import { t } from './i18n.js';
 import { get, set, requireUnlock } from './state.js';
@@ -138,42 +139,23 @@ export function shortAddr(a) {
  *  decoded preview so a signed message cannot visually lie (U+202E would flip
  *  the displayed order of the text). Written as a code-point loop instead of
  *  a regex so this source file stays pure printable text. */
-export function stripInvisible(text) {
-  let out = '';
-  for (const ch of String(text)) {
-    const c = ch.codePointAt(0);
-    if (c <= 0x1f || (c >= 0x7f && c <= 0x9f)) continue;   // control chars
-    if (c >= 0x200b && c <= 0x200f) continue;               // zero-width + marks
-    if (c >= 0x202a && c <= 0x202e) continue;               // bidi embedding
-    if (c >= 0x2066 && c <= 0x2069) continue;               // bidi isolate
-    out += ch;
-  }
-  return out;
-}
 
 /** Hex payload -> readable preview. personal_sign sends UTF-8 as hex; some
  *  dApps send bytes that are not text at all, so failures degrade to the raw
  *  hex instead of throwing inside a confirm dialog. */
-export function hexToPreview(hex, max = 140) {
-  const s = String(hex || '');
-  if (!/^0x[0-9a-fA-F]*$/.test(s)) return s.slice(0, max);
-  try {
-    const body = s.slice(2);
-    const bytes = new Uint8Array(body.length >> 1);
-    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(body.slice(i * 2, i * 2 + 2), 16);
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-    const printable = stripInvisible(text).trim();
-    return (printable || s).slice(0, max);
-  } catch {
-    return s.slice(0, max);
-  }
-}
 
 // -- runtime (needs a real wallet + network) -------------------------------
 
 function address() {
   return get('signer')?.address || '';
 }
+
+// Both of these used to be implemented HERE as well as in the approval sheets,
+// which is how the native sheet ended up showing "104,101,108,108,111" while
+// this one showed "hello". They are now the shared implementation, re-exported
+// under the names this file has always used.
+export const stripInvisible = stripInvisibleShared;
+export const hexToPreview = renderSignMessage;
 
 function wcDebugEnabled() {
   try { return localStorage.getItem('bear.wcDebug') === '1'; } catch { return false; }
@@ -226,7 +208,29 @@ async function ensureKit() {
         },
       });
       w.on('session_proposal', (args) => { handleProposal(args).catch((e) => toast('WalletConnect: ' + e.message, 'error')); });
-      w.on('session_request', (args) => { handleRequest(args).catch((e) => toast('WalletConnect: ' + e.message, 'error')); });
+      // Every request MUST end in a respond() — success, refusal, or error.
+      //
+      // The engine marks its request queue "active" on emit and only clears it
+      // inside respond() (or when a request expires, which takes days). handleRequest
+      // had three awaits that throw in ordinary use — signMessage, signTypedData,
+      // and a sendTransaction that fails on insufficient funds, a stale nonce, a
+      // reverting estimate or a dead RPC — and none of them were caught here, so
+      // the catch only showed a toast. The queue stayed active and every LATER
+      // request from EVERY paired dApp was dropped in silence: the dApp spins on
+      // "signing…" forever, no error reaches anyone, and the only cure is an app
+      // restart. One insufficient-funds error was enough to do it.
+      w.on('session_request', (args) => {
+        const { id, topic } = args;
+        handleRequest(args).catch(async (e) => {
+          toast('WalletConnect: ' + (e && e.message ? e.message : String(e)), 'error');
+          try {
+            await respondError(topic, id, {
+              code: -32603,
+              message: (e && e.message) || 'The request could not be completed.',
+            });
+          } catch { /* the dApp is gone too; nothing left to tell */ }
+        });
+      });
       w.on('session_delete', (args) => {
         // Topics WE disconnected during re-approve cleanup are not the dApp
         // closing anything — no toast for those.
@@ -668,7 +672,8 @@ export function openPairWalletConnect(prefill = '') {
   // holds it must not re-pair on every focus. (Live-verified 2026-10-09.)
   const seenWc = new Set(prefill ? [prefill] : []);
   const onWcReturn = async () => {
-    if (!document.getElementById('wcPairUri')) { window.removeEventListener('focus', onWcReturn); return; }
+    // The sheet is gone: nothing to auto-pair into.
+    if (!document.getElementById('wcPairUri')) { window.__bearWcFocusHook = null; return; }
     try {
       const txt = (await navigator.clipboard.readText() || '').trim();
       if (!txt.startsWith('wc:') || seenWc.has(txt) || !isValidWcUri(txt)) return;
@@ -678,7 +683,22 @@ export function openPairWalletConnect(prefill = '') {
       go.click();
     } catch { /* clipboard denied — the Paste button stays the answer */ }
   };
-  window.addEventListener('focus', onWcReturn);
+
+  // ONE focus listener for the life of the app, pointing at whatever sheet is
+  // currently open. It used to be added on every openPairWalletConnect() and
+  // only removed inside its own handler on a LATER focus — so opening the sheet
+  // N times stacked N listeners, each with its own `seenWc`, and the next focus
+  // made all N run and all N call pair() for the same URI. The duplicates
+  // rejected into a "Pairing failed" toast, which is how a perfectly good paste
+  // came to look broken.
+  if (!window.__bearWcFocusHook) {
+    window.__bearWcFocusHook = null;
+    window.addEventListener('focus', () => {
+      const h = window.__bearWcFocusHook;
+      if (typeof h === 'function') h();
+    });
+  }
+  window.__bearWcFocusHook = onWcReturn;
   // Clipboard read is permission-gated on mobile Chrome: a refusal shows a
   // message instead of throwing — the manual paste path stays open.
   paste.onclick = async () => {

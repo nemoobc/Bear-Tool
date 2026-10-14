@@ -8,6 +8,7 @@
 //
 // Nothing is a hardcoded feed: it is whatever this wallet actually deployed,
 // newest first, with each coin's live graduation progress read from chain.
+import { withoutHidden, isHidden, hiddenCount, unhideAll } from './list.js';
 import { t } from '../i18n.js';
 import { get, set } from '../state.js';
 import { $, escapeHtml } from '../ui.js';
@@ -96,9 +97,12 @@ export async function feedCoins(scope = 'all') {
   const { coins, ok, reason, more } = await reconcile({ scope, local });
   // Scope 'mine' is a filter over the same local list, so it must not be widened
   // by the chain merge: without this, "My coins" would show everyone else's.
-  const mine = scope === 'mine'
-    ? coins.filter((c) => local.some((x) => x.address.toLowerCase() === c.address.toLowerCase()))
-    : coins;
+  // The chain query for this scope is ALREADY creator-scoped (discover.js
+  // filters the Launched topic by address), so it contains only this wallet's
+  // coins. Intersecting it with THIS browser's localStorage threw away every
+  // correct row: launch on the phone, open the Dex on the web, and "My coins" is
+  // empty while the coin sits happily under "All".
+  const mine = coins;
   return { coins: mine, ok, reason, more };
 }
 
@@ -113,6 +117,8 @@ export function tokensHtml() {
       <div class="dex-tabstrip" role="group" aria-label="${escapeHtml(t('dex.tokens.filter'))}">
         <button type="button" class="dex-tab" data-dex-scope="all" aria-pressed="true">${escapeHtml(t('dex.tokens.all'))}</button>
         <button type="button" class="dex-tab" data-dex-scope="mine" aria-pressed="false">${escapeHtml(t('dex.tokens.mine'))}</button>
+        <button type="button" class="dex-tab" data-dex-scope="hidden" aria-pressed="false">${escapeHtml(t('dex.tokens.hidden'))} (${hiddenCount()})</button>
+        <button type="button" class="dex-btn-ghost" id="dexUnhideAll" hidden>${escapeHtml(t('dex.tokens.restoreAll'))}</button>
       </div>
     </div>
     <div id="dexTokenList" class="dex-grid">${rows}</div>
@@ -158,6 +164,19 @@ export async function refreshFeed(host, scope = 'all') {
 
   const { coins, ok, reason, more } = await feedCoins(scope);
 
+  // Delisting is per-view, not a deletion: the chain keeps the coin either way.
+  // The "hidden" tab therefore shows the very coins every other tab filters
+  // out, which is what makes hiding reversible from the UI instead of a
+  // one-way trip the user can only undo by clearing storage.
+  const shown = scope === 'hidden' ? coins.filter((c) => isHidden(c.address)) : withoutHidden(coins);
+  const hideAll = $('#dexUnhideAll', host);
+  if (hideAll) hideAll.hidden = scope !== 'hidden' || hiddenCount() === 0;
+  // The count in the tab label was frozen at panel-build time, so after "Restore
+  // all" it still read "Hidden (3)" above an empty list. Rewritten from the
+  // same number the filter uses, on every pass.
+  const tab = host.querySelector('[data-dex-scope="hidden"]');
+  if (tab) tab.textContent = `${t('dex.tokens.hidden')} (${hiddenCount()})`;
+
   // The grid and the empty box are ONE thing with two states, so both are set on
   // every pass. The first version only replaced the grid when it had coins, so
   // switching to a filter that matched nothing left the previous rows on screen
@@ -166,12 +185,20 @@ export async function refreshFeed(host, scope = 'all') {
   const box = host.querySelector('.dex-empty');
 
   if (ok) {
-    list.innerHTML = coins.map(rowHtml).join('');
+    list.innerHTML = shown.map(rowHtml).join('');
     if (box) {
-      box.hidden = coins.length > 0;
-      if (!coins.length) box.textContent = t('dex.tokens.noneOnChain');
+      box.hidden = shown.length > 0;
+      if (!shown.length) {
+        box.textContent = scope === 'hidden' ? t('dex.tokens.noneHidden') : t('dex.tokens.noneOnChain');
+      }
     }
   } else {
+    // The empty box must be cleared HERE too, not only on the ok branch. It is
+    // pre-rendered by tokensHtml(), so a fresh browser with a dead RPC showed
+    // "No coins yet — launch one" AND "could not read the chain" at once: an
+    // empty state asserted next to a read that failed, which is the same lie as
+    // the old "empty message beside a populated grid", inverted.
+    if (box) { box.hidden = true; box.textContent = ''; }
     if (status) status.textContent = t('dex.tokens.scanFailed', { err: reason || '' });
     // The local list stays on screen — it is not wrong, just not confirmed.
     return { coins, ok: false };
@@ -182,8 +209,8 @@ export async function refreshFeed(host, scope = 'all') {
   }
 
   // Graduation progress for each card, live from the chain.
-  for (const tk of coins) paintProgress(tk, host);
-  return { coins, ok, more };
+  for (const tk of shown) paintProgress(tk, host);
+  return { coins: shown, ok, more };
 }
 
 export function bindTokens(host, onOpen) {

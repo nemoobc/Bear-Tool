@@ -23,13 +23,19 @@ const { historyCandles, tradesHtml, HISTORY_EVENTS } = await import('../js/dex/h
 const { PRICE_SCALE } = await import('../js/dex/chart.js');
 
 // One decoded log row, shaped exactly like what ethers hands back.
-const bought = (block, buyer, ethIn, tokensOut) => ({
+// These fixtures used the names the PRODUCTION CODE used (ethIn / ethOut) —
+// which are not in the ABI at all. history.js read the same wrong names, so the
+// test agreed with the bug and both went green while every coin's tape and
+// candle series rendered "NaN". A fixture that copies the code's mistake proves
+// nothing; these are named from the contract, and the test below reads the
+// names back out of the ABI so the two cannot drift apart again.
+const bought = (block, buyer, quoteIn, tokensOut) => ({
   blockNumber: block,
-  args: { buyer, ethIn, tokensOut },
+  args: { buyer, quoteIn, tokensOut },
 });
-const sold = (block, seller, tokensIn, ethOut) => ({
+const sold = (block, seller, tokensIn, quoteOut) => ({
   blockNumber: block,
-  args: { seller, tokensIn, ethOut },
+  args: { seller, tokensIn, quoteOut },
 });
 
 // loadHistory is driven through a stub provider/contract so the decode path is
@@ -339,4 +345,65 @@ test('the tape escapes what it prints', () => {
 test('an empty tape says so — it never shows an empty box', () => {
   const html = tradesHtml([], 'BMOON');
   assert.match(html, /No trades yet/i, 'an empty tape must say there are no trades');
+});
+
+// ── the gate that was missing ───────────────────────────────────────
+// history.js read `args.ethIn` while the event is `quoteIn`, so every trade
+// decoded to undefined, the price was NaN, and the tape and the whole candle
+// series rendered "NaN" on every coin that had ever traded. The unit tests
+// passed because their fake logs carried the SAME wrong names — a gate built
+// from the bug's own constant. This one reads the names out of the shipped ABI,
+// so the fixture and the contract cannot drift apart without it going red.
+test('every event field the tape reads is a field the contract actually emits', async () => {
+  const { PUMP_ABI } = await import('../js/dex/pump-source.js');
+
+  // PUMP_ABI is the human-readable array of strings that actually ships, so the
+  // names are read out of THAT rather than out of a re-typed copy of the ABI.
+  const namesOf = (eventName) => {
+    const frag = PUMP_ABI.find((f) => typeof f === 'string' && f.startsWith(`event ${eventName}(`));
+    assert.ok(frag, `the shipped ABI has no ${eventName} event`);
+    const args = frag.slice(frag.indexOf('(') + 1, frag.lastIndexOf(')'));
+    return new Set(args.split(',').map((a) => a.trim().split(/\s+/).pop()).filter(Boolean));
+  };
+  const bought = namesOf('Bought');
+  const sold = namesOf('Sold');
+
+  // What the production code asks for.
+  const src = readFileSync(new URL('../js/dex/history.js', import.meta.url), 'utf8');
+  const asked = [...src.matchAll(/l\.args\.([a-zA-Z_$][\w$]*)/g)].map((m) => m[1]);
+  assert.ok(asked.length >= 6, 'the tape should read several event fields');
+
+  for (const n of asked) {
+    assert.ok(bought.has(n) || sold.has(n),
+      `history.js reads args.${n}, which neither Bought nor Sold emits — `
+      + `that field is undefined on every trade, and the price becomes NaN`);
+  }
+
+  // And specifically the two that broke: quoted in an ERC-20 since the rename.
+  assert.ok(bought.has('quoteIn'), 'Bought must emit quoteIn — the curve is not quoted in native ETH');
+  assert.ok(sold.has('quoteOut'), 'Sold must emit quoteOut');
+});
+
+test('a trade the decoder cannot read is dropped, never rendered as NaN', async () => {
+  const { loadHistory } = await import('../js/dex/history.js');
+  // A log shaped like a real one but missing its amounts: the old code turned
+  // this into Number(undefined) → NaN and painted it.
+  const logs = [
+    { blockNumber: 10, args: { buyer: '0x' + '1'.repeat(40) } },
+    { blockNumber: 11, args: { buyer: '0x' + '1'.repeat(40), quoteIn: 10n ** 18n, tokensOut: 5n * 10n ** 18n } },
+  ];
+  const provider = {
+    getBlockNumber: async () => 100,
+    getBlock: async () => ({ timestamp: 1700000000 }),
+  };
+  const contract = {
+    queryFilter: async (f) => (f.name === 'Bought' ? logs : []),
+    filters: { Bought: () => ({ name: 'Bought' }), Sold: () => ({ name: 'Sold' }), Graduated: () => ({ name: 'Graduated' }) },
+  };
+  const out = await loadHistory(contract, provider);
+  assert.equal(out.trades.length, 1, 'the unreadable trade is dropped');
+  for (const tr of out.trades) {
+    assert.ok(Number.isFinite(tr.price), `price must be finite, got ${tr.price}`);
+  }
+  assert.ok(Number.isFinite(out.candles?.[0]?.close ?? 1), 'and no candle may be NaN');
 });

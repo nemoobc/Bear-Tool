@@ -58,7 +58,10 @@ export const WHY = {
  * @param {bigint} p.price        current spot price, quote per token (18dp)
  * @param {bigint} p.floor        buy below this
  * @param {bigint} p.ceil         sell above this
- * @param {bigint} p.size         quote amount for a buy, token amount for a sell
+ * @param {bigint} p.size         default amount for both sides, when no
+ *                                per-side size is given
+ * @param {bigint} p.sizeIn       QUOTE amount for a buy (overrides size)
+ * @param {bigint} p.sizeOut      TOKEN amount for a sell (overrides size)
  * @param {bigint} p.quoteBal     quote coin the chosen wallet holds
  * @param {bigint} p.tokenBal     the token that chosen wallet holds
  * @param {bigint} p.spent        quote already spent since the bot started
@@ -69,6 +72,7 @@ export const WHY = {
 export function decide(p) {
   const {
     price, floor, ceil, size,
+    sizeIn, sizeOut,
     quoteBal = 0n, tokenBal = 0n, spent = 0n, cap = 0n,
     graduated = false,
   } = p;
@@ -85,16 +89,29 @@ export function decide(p) {
 
   // The cap is the user's promise to themselves ("once I fund it, that is all
   // it may ever spend"). It is checked before any trade, never after.
-  if (cap > 0n && spent + size > cap) return stop(WHY.NO_BUDGET);
+  // The cap is denominated in quote, so it is checked against the QUOTE size —
+  // a sell costs nothing from the budget. Checking it against the sell size
+  // would have let a bot stop trading because of tokens it was not spending.
+  const quoteSpend = (price <= floor && floor < ceil) ? (sizeIn ?? size) : 0n;
+  if (cap > 0n && spent + quoteSpend > cap) return stop(WHY.NO_BUDGET);
+
+  // The two sizes are SEPARATE and must not be the same number. A buy spends
+  // quote; a sell gives up tokens. Using one figure for both made each sell
+  // ~10^12 times smaller than each buy: a bot configured with "0.01" bought with
+  // 0.01 quote and sold 0.01 TOKEN — about 1e-11 quote — so it could never
+  // meaningfully unwind what it bought, and drained its budget on one-way buys.
+  // A two-sided band that can only go one way is not market making.
+  const buySize = sizeIn ?? size;
+  const sellSize = sizeOut ?? size;
 
   if (price <= floor) {
-    if (quoteBal < size) return stop(WHY.NO_WALLET);
-    return { action: BUY, why: WHY.BELOW_FLOOR, amount: size };
+    if (quoteBal < buySize) return stop(WHY.NO_WALLET);
+    return { action: BUY, why: WHY.BELOW_FLOOR, amount: buySize };
   }
 
   if (price >= ceil) {
-    if (tokenBal < size) return stop(WHY.NOTHING_TO_SELL);
-    return { action: SELL, why: WHY.ABOVE_CEILING, amount: size };
+    if (tokenBal < sellSize) return stop(WHY.NOTHING_TO_SELL);
+    return { action: SELL, why: WHY.ABOVE_CEILING, amount: sellSize };
   }
 
   return { action: HOLD, why: WHY.IN_BAND, amount: 0n };

@@ -137,6 +137,19 @@ let currentDismissible = true;
 // backdrop, Escape — resolves the awaiting caller instead of stranding it.
 let onClose = null;
 
+// A queue, not a mutex. confirmTx awaits totalPriceRow() (up to an 8s gas
+// estimate) BEFORE it paints anything, so two requests arriving together always
+// interleave: A suspends, B suspends, A paints, B then rewrites the sheet —
+// detaching A's buttons and overwriting the single onClose slot. A's promise then
+// has no way to settle — a dApp doing Promise.all([sign(x), sign(y)]) hangs on
+// x for ever, and one security prompt vanishes with no trace and no user ever
+// asked. That is ordinary dApp code, not an edge case.
+//
+// Queueing instead: the second request waits for the first to be answered. Both
+// get shown, in order, and neither can silently destroy the other.
+let modalQueue = [];
+let modalBusy = false;
+
 function getFocusable(box) {
   if (!box) return [];
   return [...box.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
@@ -215,6 +228,18 @@ export function openModal(html, { fullscreen = false, wide = false, dismissible 
 export function closeModal() {
   const overlay = $('#modalOverlay');
   if (!overlay) return;
+  // Every exit path funnels through here — buttons, ✕, backdrop, Escape — so
+  // this is the ONE place that hands the sheet back to the queue. Releasing
+  // inside settle() instead would leave the queue held for ever whenever a
+  // sheet was closed by anything but its own buttons, and every later confirm
+  // would wait on a busy flag that never cleared.
+  const wasBusy = modalBusy;
+  modalBusy = false;
+  if (wasBusy) {
+    // Deferred so the sheet's own DOM teardown finishes before the next one is
+    // painted — two sheets in one frame read as a flicker, not as two prompts.
+    setTimeout(drainModalQueue, 0);
+  }
   overlay.classList.remove('open', 'welcome-screen');
   // Nothing wallet-side is on screen any more: let the native browser come back
   // (a no-op when none was ever opened — see setModalVisibilityHook).
@@ -480,6 +505,26 @@ export async function confirmTx({ title, rows, confirmText = 'Confirm', cancelTe
     if (total) list = [...list, total];
   } catch { /* total is informational — never block the confirm */ }
   return new Promise((resolve) => {
+    // Enqueued, not opened. resolveOnce below is what guarantees the first
+    // caller's answer survives even if the UI is torn down underneath it.
+    let done = false;
+    const resolveOnce = (v) => { if (!done) { done = true; resolve(v); } };
+    modalQueue.push(() => openConfirmNow({ title, list, confirmText, cancelText, danger, resolve: resolveOnce }));
+    drainModalQueue();
+  });
+}
+
+function drainModalQueue() {
+  if (modalBusy) return;
+  const next = modalQueue.shift();
+  if (!next) return;
+  modalBusy = true;
+  // The sheet releases the queue when it closes, whichever way it closed.
+  next();
+}
+
+function openConfirmNow({ title, list, confirmText, cancelText, danger, resolve }) {
+  {
     const rowsHtml = list.map(r =>
       `<div class="row"><span class="k">${escapeHtml(r.k)}</span><span class="v">${escapeHtml(r.v)}</span></div>`
     ).join('');
@@ -503,7 +548,7 @@ export async function confirmTx({ title, rows, confirmText = 'Confirm', cancelTe
     onClose = () => settle(false);
     yes.onclick = () => settle(true);
     no.onclick = () => settle(false);
-  });
+  }
 }
 
 // ── password prompt ──

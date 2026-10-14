@@ -237,3 +237,71 @@ test('every module the bot imports is actually exported by it', () => {
     }
   }
 });
+
+// ── the two sides are not the same unit ────────────────────────────
+// The engine used one `size` for both, read as a QUOTE amount for a buy and a
+// TOKEN amount for a sell. With the default 0.01 that made each sell about
+// 1e-11 quote, so a two-sided band could only go one way: the bot bought and
+// never unwound, while draining its budget. The docstring even said so.
+test('a buy spends quote and a sell gives up tokens, so the sizes must differ', () => {
+  const d = decide(base({
+    price: Q(0.5), size: Q(1),
+    sizeIn: Q(1),                 // 1 quote per buy
+    sizeOut: Q(1000000),          // 1M tokens per sell — the same VALUE, not the same number
+    quoteBal: Q(10), tokenBal: Q(1000000),
+  }));
+  assert.equal(d.action, BUY);
+  assert.equal(d.amount, Q(1), 'a buy must be denominated in quote');
+});
+
+test('the budget is a quote budget, so a sell must not spend it', () => {
+  const room = Q(1);
+  // Almost no budget left, but plenty of tokens. Selling costs no quote, so the
+  // bot must still be allowed to sell — checking the cap against the sell size
+  // stopped it from ever unwinding.
+  const d = decide(base({
+    price: Q(5), size: Q(1), sizeIn: Q(1), sizeOut: Q(1000),
+    quoteBal: Q(10), tokenBal: Q(1000),
+    spent: room, cap: room,
+  }));
+  assert.equal(d.action, SELL, 'a sell must not be blocked by an exhausted quote budget');
+  assert.equal(d.why, WHY.ABOVE_CEILING);
+});
+
+test('an exhausted quote budget still stops a buy', () => {
+  const d = decide(base({
+    price: Q(0.5), size: Q(1), sizeIn: Q(1), sizeOut: Q(1000),
+    quoteBal: Q(10), tokenBal: Q(1000),
+    spent: Q(1), cap: Q(1),
+  }));
+  assert.equal(d.action, STOP);
+  assert.equal(d.why, WHY.NO_BUDGET);
+});
+
+// ── a start in progress ─────────────────────────────────────────────
+// start() guards on `if (R)`, but R is not assigned until after the curve
+// read, the confirm sheet, derivation and the funding transfers. Two clicks in
+// that window both passed the guard: two confirm sheets, the budget paid out
+// twice, and the second run overwriting the first — which was already holding a
+// live timer and kept trading against an object the UI could no longer see.
+test('a start in progress blocks a second one', () => {
+  const src = readFileSync(new URL('../js/dex/bot.js', import.meta.url), 'utf8');
+  assert.match(src, /let starting = false/, 'there must be an in-flight flag');
+  assert.match(src, /if \(starting\)/, 'and start() must check it');
+  // It has to be cleared on EVERY exit, including the early returns for an
+  // invalid band, a locked wallet and a failed funding.
+  assert.match(src, /finally \{[\s\S]{0,80}starting = false/,
+    'the flag must be released in a finally — a plain assignment is skipped by the early returns');
+  assert.ok(!/if \(!sent\) \{ stop\(t\('dex\.bot\.fundFailed'\)\) \)/.test(src),
+    'stop() is a no-op before the runner exists, so a funding failure must report itself');
+});
+
+test('the market maker and the pool say what the size is denominated in', () => {
+  // The UI offered one "Each trade" field whose unit differed per side. That is
+  // a number the user cannot reason about.
+  const src = readFileSync(new URL('../js/dex/bot.js', import.meta.url), 'utf8');
+  assert.match(src, /sizeOut|sizeIn/, 'the runner must pass the two sizes the engine now distinguishes');
+  const i18n = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  assert.match(i18n, /dex\.bot\.size': '[^']*quote/i,
+    'the label must say the figure is a quote amount, or it is a unit the user has to guess');
+});

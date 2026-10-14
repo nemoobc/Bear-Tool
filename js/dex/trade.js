@@ -19,6 +19,8 @@ import { PUMP_ABI } from './pump-source.js';
 import { quoteBuy, quoteSell, graduationProgress, fmtEth, GRADUATION_QUOTE, VIRTUAL_QUOTE, VIRTUAL_TOKENS } from './curve.js';
 import { drawCandles } from './chart.js';
 import { botHtml, bindBot } from './bot.js';
+import { liquidityHtml, bindLiquidity } from './liquidity.js';
+import { isHidden, hideCoin, unhideCoin } from './list.js';
 import { loadHistory, historyCandles, tradesHtml } from './history.js';
 
 function readToken(token) {
@@ -41,7 +43,7 @@ export function tokenTradeHtml(token) {
     </button>
 
     <div class="dex-trade-head">
-      <span class="dex-token-face" style="width:64px;height:64px;flex:0 0 64px">
+      <span class="dex-token-face" id="dexTradeFace" style="width:64px;height:64px;flex:0 0 64px">
         ${token.image ? `<img src="${escapeHtml(token.image)}" alt="">` : ''}
       </span>
       <div style="min-width:0">
@@ -50,6 +52,8 @@ export function tokenTradeHtml(token) {
         <div class="small" id="dexTradeCreator"></div>
       </div>
     </div>
+
+    <p class="small" id="dexTradeDesc"${token.description ? '' : ' hidden'}>${escapeHtml(token.description || '')}</p>
 
     <div class="dex-grad">
       <div class="small" id="dexTradeGradText"></div>
@@ -118,6 +122,11 @@ export function tokenTradeHtml(token) {
 
     ${botHtml()}
 
+    <button id="dexTradeHide" type="button" class="btn btn-ghost btn-block mt-8"></button>
+    <div class="small" id="dexTradeHideNote" hidden></div>
+
+    ${liquidityHtml()}
+
     <div class="dex-loading" id="dexTradeLoading" hidden><span class="dex-spinner"></span><span>${escapeHtml(t('dex.chart.loading'))}</span></div>
     <div id="dexTradeStatus" class="small mt-8"></div>
     <div id="dexTradeLog" class="small"></div>`;
@@ -185,7 +194,7 @@ export function bindTokenTrade(host, token, onBack) {
     const me = get('address');
     // NOTE: this order MUST match the Promise.all below it. It did not, once:
     // ethBal was bound to the ticker's string and the balance rendered as NaN.
-    const [vE, vT, reserve, graduated, mine, quoteAddr, name, sym] = await Promise.all([
+    const [vE, vT, reserve, graduated, mine, quoteAddr, name, sym, img, desc] = await Promise.all([
       c.virtualQuote(), c.virtualTokens(), c.realQuoteReserve(), c.graduated(),
       me ? c.balanceOf(me) : Promise.resolve(0n),
       // Which coin this curve is quoted in. Everything else — the balance, the
@@ -198,6 +207,10 @@ export function bindTokenTrade(host, token, onBack) {
       // to show what the contract says rather than a blank header.
       c.name().catch(() => ''),
       c.symbol().catch(() => ''),
+      // The picture and the blurb live on the contract too. Left out, a coin
+      // found from the chain opened to an empty square and no description.
+      c.image().catch(() => ''),
+      c.description().catch(() => ''),
     ]).catch((e) => {
       // A failed read must SAY SO. Letting it throw left the last-known price,
       // market cap and graduation bar on screen with nothing saying they were
@@ -238,6 +251,18 @@ export function bindTokenTrade(host, token, onBack) {
     // local name/symbol) still says what it is instead of quoting an empty
     // string into the confirm box.
     state.sym = sym || token.symbol || '';
+    // The face and the blurb are read from the contract for the same reason the
+    // name and symbol are: a coin launched on another device, or found again
+    // after a storage wipe, has an empty local record — and the contract had
+    // both the whole time.
+    const faceEl = $('#dexTradeFace', host);
+    if (faceEl && img) faceEl.innerHTML = `<img src="${escapeHtml(img)}" alt="">`;
+    const descEl = $('#dexTradeDesc', host);
+    if (descEl) {
+      const d = desc || token.description || '';
+      descEl.textContent = d;
+      descEl.hidden = !d;
+    }
     if (name || sym) {
       const nameEl = $('#dexTradeName', host);
       const symEl = $('#dexTradeSymbol', host);
@@ -246,6 +271,13 @@ export function bindTokenTrade(host, token, onBack) {
       const sellLabel = $('#dexTradeSellToken', host);
       if (sellLabel) sellLabel.textContent = state.sym;
     }
+    // A successful read clears the failure line. Nothing else wrote to that node
+    // when things went well, so one dropped RPC left a permanent red "could not
+    // read" sitting under live, updating numbers — both true, neither
+    // believable.
+    if (status) status.textContent = '';
+    state.readable = true;
+
     state.vE = vE; state.vT = vT; state.reserve = reserve;
     state.graduated = graduated; state.mine = mine;
     // graduation bar
@@ -363,7 +395,12 @@ export function bindTokenTrade(host, token, onBack) {
     // Approve only what this trade needs, and only when the current allowance
     // is short. An existing allowance is reused rather than re-granted.
     const quote = new E.Contract(state.quoteAddr, ERC20_ABI, signer);
-    const allowed = await quote.allowance(signer.getAddress?.() || get('address'), token.address).catch(() => 0n);
+    // `await` on getAddress(), not around it. On an ethers.Wallet getAddress()
+    // returns a Promise, so the Promise OBJECT was being passed as the address
+    // argument; ethers rejects the encoding, the .catch below turned that into
+    // 0n, and the result was an approve transaction before EVERY buy.
+    const me = get('address') || (signer.getAddress ? await signer.getAddress() : '');
+    const allowed = me ? await quote.allowance(me, token.address).catch(() => 0n) : 0n;
     if (allowed < amount) {
       const approved = await sendDexTx(
         () => quote.approve(token.address, amount),
@@ -525,11 +562,50 @@ export function bindTokenTrade(host, token, onBack) {
   // leaving this page leaves the bot trading.
   bindBot(host, token);
 
-  refresh().then(() => { drawCurve(); return quoteBuyLive(); }).then(quoteSellLive);
+  // Hide / restore. The chain keeps the coin either way — this only takes it out
+  // of THIS feed, per chain, and the button says so, because a hide that reads
+  // as a delete is a lie the user acts on.
+  const hideBtn = $('#dexTradeHide', host);
+  const hideNote = $('#dexTradeHideNote', host);
+  const paintHide = () => {
+    if (!hideBtn) return;
+    const hidden = isHidden(token.address);
+    hideBtn.textContent = t(hidden ? 'dex.list.restore' : 'dex.list.hide');
+    hideBtn.setAttribute('aria-pressed', String(hidden));
+    if (hideNote) {
+      hideNote.hidden = !hidden;
+      if (hidden) hideNote.textContent = t('dex.list.hidden');
+    }
+  };
+  paintHide();
+  hideBtn?.addEventListener('click', () => {
+    const wasHidden = isHidden(token.address);
+    if (wasHidden) unhideCoin(token.address); else hideCoin(token.address);
+    paintHide();
+    toast(t(wasHidden ? 'dex.list.restoredToast' : 'dex.list.hiddenToast'), 'success');
+  });
+
+  // The pool. Its contract functions shipped a commit before this call existed,
+  // so for a while the app had no way to reach them at all.
+  const liq = bindLiquidity(host, token);
+  once().then(() => liq.refresh()).catch(() => { /* an unreadable pool says so when opened */ });
+
+  // One refresh at a time. refresh() fans out ~10 RPCs before it writes, so on a
+  // slow node two overlapping passes finish out of order and the older snapshot
+  // paints last. The mount path below called refresh() a SECOND time as well,
+  // doubling the fan-out on every coin open.
+  let inFlight = false;
+  const once = async () => {
+    if (inFlight) return;
+    inFlight = true;
+    try { await refresh(); } finally { inFlight = false; }
+  };
+
+  once().then(() => { drawCurve(); return quoteBuyLive(); }).then(quoteSellLive);
   // Keep the numbers, the tape and the curve live while the panel is open. The
   // history repaint runs on its own, slower clock: it is several RPCs, and a new
   // trade only changes it once someone trades.
-  const timer = setInterval(() => { refresh().then(() => { drawCurve(); quoteBuyLive(); quoteSellLive(); }); }, 5000);
+  const timer = setInterval(() => { once().then(() => { drawCurve(); quoteBuyLive(); quoteSellLive(); }); }, 5000);
   const histTimer = setInterval(paintHistory, 15_000);
   host.addEventListener('dex:teardown', () => { clearInterval(timer); clearInterval(histTimer); }, { once: true });
 }

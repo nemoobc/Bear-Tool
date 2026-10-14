@@ -132,13 +132,24 @@ export async function loadHistory(contract, provider, { limit = 60 } = {}) {
     const rows = raw.slice(0, limit);
     const stamps = await blockStamps(provider, rows.map((r) => Number(r.l.blockNumber)));
 
-    const trades = rows.map(({ kind, l }) => {
+    const trades = rows.map(({ kind, l }) => {   // eslint-disable-line
+      // The ABI is the only source of these names: quoteIn / quoteOut. They were
+      // read as ethIn / ethOut — the names from before the curve was quoted in
+      // an ERC-20 — so both were undefined on every trade, the price was NaN, and
+      // the tape and the entire candle series rendered "NaN".
+      //
+      // There is deliberately no fallback to the old names. Nothing was ever
+      // deployed with them, so a fallback is not compatibility — it is the same
+      // mistake with an extra step, and it is exactly what a reader (or a gate)
+      // can no longer distinguish from correct code.
       const args = kind === 'buy'
-        ? { who: l.args.buyer, eth: l.args.ethIn, tokens: l.args.tokensOut }
-        : { who: l.args.seller, eth: l.args.ethOut, tokens: l.args.tokensIn };
+        ? { who: l.args.buyer, eth: l.args.quoteIn, tokens: l.args.tokensOut }
+        : { who: l.args.seller, eth: l.args.quoteOut, tokens: l.args.tokensIn };
       // The event's ETH/token IS the execution price — the average the trade
       // got after fees. No need to reconstruct reserves: cheaper and exact.
+      if (args.eth === undefined || args.tokens === undefined) return null;   // filtered below
       const price = args.tokens > 0n ? Number(args.eth) / Number(args.tokens) : 0;
+      if (!Number.isFinite(price)) return null;
       return {
         kind,
         who: String(args.who || '0x0000000000000000000000000000000000000000'),
@@ -151,7 +162,10 @@ export async function loadHistory(contract, provider, { limit = 60 } = {}) {
     });
 
     return {
-      trades,
+      // Rows this file could not read are dropped, not rendered. A tape entry
+      // saying "NaN" is worse than a tape with one fewer row: it looks like a
+      // real price the curve never had.
+      trades: trades.filter(Boolean),
       graduated: gradLogs.length > 0,
       ok: true,
     };

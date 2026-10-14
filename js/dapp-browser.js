@@ -101,7 +101,22 @@ const LOAD_PHASE_MS = { slow: 3000, verySlow: 10000, timeout: 20000 };
 const sessionVerdicts = new Map();
 
 // ── storage helpers ──────────────────────────────────────────────────────
-const read = (k, fb) => { try { return JSON.parse(localStorage.getItem(k)) ?? fb; } catch { return fb; } };
+// A shape check, not just a parse check. localStorage is shared with every
+// script on this origin and survives upgrades, so a single wrong write — or a
+// value from an older build whose shape differed — used to reach callers that
+// assumed an array. `bear.dapp.tabs = {}` then threw inside openDappBrowser:
+// the overlay came up unpainted, every tap did nothing, and there was no message
+// and no way back. A browser you cannot open is not a browser.
+const read = (k, fb) => {
+  let v;
+  try { v = JSON.parse(localStorage.getItem(k)); } catch { return fb; }
+  // Anything that is not the shape the caller asked for is discarded, not
+  // passed through: a wrong type is a corrupt value, and corrupt values get
+  // the default, never the caller.
+  if (Array.isArray(fb)) return Array.isArray(v) ? v : fb;
+  if (fb && typeof fb === 'object') return (v && typeof v === 'object' && !Array.isArray(v)) ? v : fb;
+  return v == null ? fb : v;
+};
 const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
 
 // ═══════════════════════════════════════════════════════════════
@@ -514,7 +529,7 @@ function paintHome() {
     <div class="dbr-hero">
       <div class="dbr-hero-t">Bear dApp browser</div>
       <p class="small dim">Every address is checked before it loads. Nothing here can reach your keys:
-      the page runs in its own origin with no cookies, no referrer and no clipboard.</p>
+      the page runs in its own origin with no cookies, no referrer, and no camera or mic. It IS granted clipboard-write, so a page you open here can put text on your clipboard.</p>
     </div>
     ${bms.length ? `<div class="dbr-sec-h">🔖 Bookmarks</div>
       <div class="dbr-mini">${bms.map((b) => `<button class="dbr-chip" data-open="${escapeHtml(b.url)}" data-name="${escapeHtml(b.name || baseHost(b.url))}">${escapeHtml(b.name || baseHost(b.url))}</button>`).join('')}</div>` : ''}

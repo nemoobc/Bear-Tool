@@ -234,10 +234,17 @@ test('a filter that matches nothing must not leave the old rows on screen', asyn
   const tokens = await (await import('node:fs')).promises.readFile(
     new URL('../js/dex/tokens.js', import.meta.url), 'utf8');
   const fn = tokens.slice(tokens.indexOf('export async function refreshFeed'));
-  assert.match(fn, /list\.innerHTML = coins\.map\(rowHtml\)\.join\(''\)/,
+  // Asserted on BEHAVIOUR, not on the name of the variable. This test used to
+  // demand the literal text `coins.map(rowHtml)`, so renaming the list — which
+  // is what delisting did, since hidden coins are filtered out of it — broke a
+  // passing test without changing anything about the bug it guards.
+  assert.match(fn, /list\.innerHTML = \w+\.map\(rowHtml\)\.join\(''\)/,
     'the grid must be rewritten on EVERY pass, including an empty result');
-  assert.match(fn, /box\.hidden = coins\.length > 0/,
+  assert.match(fn, /box\.hidden = \w+\.length > 0/,
     'and the empty box must be hidden exactly when the grid has cards');
+  // …and the list it renders must be the one the view filters, not the raw set.
+  assert.match(fn, /withoutHidden\(/,
+    'a coin the user hid must not be back on the grid just because it is on chain');
   assert.ok(!/if \(ok && coins\.length\) \{\s*list\.innerHTML/.test(fn),
     'the "only replace when non-empty" guard must not come back');
 });

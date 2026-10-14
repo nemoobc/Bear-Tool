@@ -38,7 +38,8 @@ import { renderDex } from './dex/index.js';
 // that panel had to be rewritten to say the checks are not applied.
 import { scanTransaction } from './security.js';
 import { createProvider, announceLock, announceAccounts, disconnectOrigin, PROVIDER_FLAG } from './dapp-bridge.js';
-import { executeLocal, currentChainId } from './dapp-exec.js';
+import { executeLocal, currentChainId, splitSignParams } from './dapp-exec.js';
+import { renderSignMessage, safeJson } from './sign-render.js';
 import { siteAllowed } from './dapp-sessions.js';
 import { startUpdateGuard } from './update-guard.js';
 import { checkWL, getMintEstimate, getHighestOffer, getListings, getOffers, cancelListing, listNft, parseOpenSeaInput } from './opensea-api.js';
@@ -755,23 +756,47 @@ function scanSignCall(method, params) {
 }
 
 // Describe what is being asked for, in words, before anyone signs it.
+//
+// The description must come from the SAME split the signer uses. Reading
+// params[0] directly was correct for the spec order and wrong for the legacy
+// one that dApps still send: the dialog showed the user's own ADDRESS as the
+// message while the signature was taken over a different string entirely. Every
+// approval the wallet has ever shown for such a page described content the user
+// never saw — the one failure the per-call confirmation exists to prevent.
+//
+// A throw here is also a security failure, not a crash: this runs on page-supplied
+// data, and an exception before confirmTx means the request dies with no prompt
+// at all. Every read below is guarded, and anything unrenderable is SHOWN rather
+// than swallowed.
 function describeSignCall(method, params) {
-  const p = Array.isArray(params) ? (params[0] || {}) : {};
-  const rows = [{ k: t('cf.method'), v: method }];
-  if (method === 'personal_sign') {
-    let text = '';
-    try { text = String(typeof p === 'string' ? p : (p && p.message) || ''); } catch { /* not a string */ }
-    rows.push({ k: t('cf.message'), v: text ? text.slice(0, 160) : '(binary)' });
-  } else if (String(method).startsWith('eth_signTypedData')) {
-    rows.push({ k: t('cf.typed.data'), v: typeof p === 'string' ? p.slice(0, 160) + '…' : JSON.stringify(p).slice(0, 160) + '…' });
-  } else {
-    if (p.to) rows.push({ k: t('site.to'), v: String(p.to) });
-    if (p.value && BigInt(p.value) > 0n) rows.push({ k: t('cf.value'), v: formatNativeValue(p.value) });
-    if (p.data && p.data !== '0x') rows.push({ k: t('cf.calldata'), v: String(p.data).slice(0, 74) + '…' });
-    else rows.push({ k: t('cf.calldata'), v: t('cf.none.a.plain.transfer') });
+  const rows = [{ k: t('cf.method'), v: String(method) }];
+  try {
+    if (method === 'personal_sign') {
+      const { message } = splitSignParams(params);
+      rows.push({ k: t('cf.message'), v: renderSignMessage(message) });
+    } else if (String(method).startsWith('eth_signTypedData')) {
+      const p = Array.isArray(params) ? (params[1] ?? params[0]) : {};
+      rows.push({ k: t('cf.typed.data'), v: safeJson(p) });
+    } else {
+      const p = Array.isArray(params) ? (params[0] || {}) : {};
+      if (p.to) rows.push({ k: t('site.to'), v: String(p.to) });
+      if (p.value) {
+        let v = 0n;
+        try { v = BigInt(p.value); } catch { v = -1n; }
+        if (v < 0n) rows.push({ k: t('cf.value'), v: `unreadable: ${String(p.value).slice(0, 40)}` });
+        else if (v > 0n) rows.push({ k: t('cf.value'), v: formatNativeValue(p.value) });
+      }
+      if (p.data && p.data !== '0x') rows.push({ k: t('cf.calldata'), v: String(p.data).slice(0, 74) + '…' });
+      else rows.push({ k: t('cf.calldata'), v: t('cf.none.a.plain.transfer') });
+    }
+  } catch (e) {
+    // Showing the raw request beats showing nothing: a prompt the user can
+    // cancel is safer than a silent sign and safer than a blank dialog.
+    rows.push({ k: t('cf.message'), v: `could not be displayed (${String(e && e.message || e).slice(0, 60)})` });
   }
   return rows;
 }
+
 
 function formatNativeValue(wei) {
   try { return ethers.formatEther(BigInt(wei)) + ' native'; } catch { return String(wei); }

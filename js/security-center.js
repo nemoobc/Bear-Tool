@@ -77,11 +77,11 @@ export function renderSecurityCenter(container) {
       <h4 class="sec-h">What a dApp can and cannot reach</h4>
       <p class="small dim">Stated plainly, because guessing wrong here is what makes people
       over-trust a page or under-use the wallet.</p>
-      ${row('dApp page', 'Runs in its own origin: no cookies, no storage, no referrer, no clipboard, no camera or mic.')}
+      ${row('dApp page', 'Runs in its own origin: no cookies, no storage, no referrer, no camera or mic. It IS granted clipboard-write, so a page can put text on your clipboard if you let it.')}
       ${row('Reads your balance', '<strong>Needs permission</strong> — per site, revocable below.')}
       ${row('Signs a message', '<strong>Needs a second, separate grant</strong>, per method.')}
-      ${row('Moves funds', 'Your own actions — Send, Swap, Bridge, Rescue, Batch — always show a confirmation with the details first, and never run automatically. <strong>A dApp page is different</strong>: it asks once for the methods it needs, and after that grant it can call them without asking you again. Revoke it below to force the question to come back.')}
-      ${row('A cross-origin dApp detecting this wallet', '<strong>Not possible.</strong> No page on another site can see this wallet. Injection needs a native wrapper, a proxy or an extension — a web page cannot do it.')}
+      ${row('Moves funds (this wallet\'s own screens)', 'Your own actions — Send, Swap, Bridge, Rescue, Batch — always show a confirmation with the details first, and never run automatically. <strong>A dApp page is different</strong>: being connected is NOT permission to sign or to spend. Every single sign and every single transaction asks you again, whatever the site was granted. Revoking a site below returns it to unconnected.')}
+      ${row('A cross-origin dApp detecting this wallet', '<strong>Depends on the build.</strong> In this native app, opening a dApp runs its page in a WebView with the provider injected, so a dApp you open here DOES see <code>window.ethereum</code>. It still cannot sign without asking you. In a plain browser tab, no page can see the wallet.')}
     </div>
 
     <div class="sec-block">

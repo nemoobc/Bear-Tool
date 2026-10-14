@@ -35,6 +35,13 @@ const CFG = (addr) => `bear.dex.bot.${addr}`;
 // stays private so nothing can poke the loop from a panel that has been torn
 // down.
 let R = null;
+// A start in progress. `if (R)` guards the RUNNING bot, but R is not assigned
+// until after the curve read, the confirm sheet, the address derivation and the
+// funding transfers — a window of several seconds in which a second click passed
+// the guard, queued a second confirm, and paid for a second round of funding.
+// The second run then overwrote R, orphaning the first runner, which was already
+// holding a live timer and kept trading against an object the UI could not see.
+let starting = false;
 const subs = new Set();
 
 const idle = {
@@ -208,6 +215,9 @@ export function bindBot(host, token) {
 export async function start(token) {
   if (!dexChainOk()) { toast(t('dex.bot.wrongChain'), 'error'); return; }
   if (R) { toast(t('dex.bot.alreadyRunning'), 'error'); return; }
+  if (starting) { toast(t('dex.bot.alreadyRunning'), 'error'); return; }
+  starting = true;
+  try {
 
   const E = ethersLib();
   const cfg = loadCfg(token.address);
@@ -296,7 +306,14 @@ export async function start(token) {
       () => quote.transfer(wallets[i].address, shares[i]),
       t('dex.bot.funding', { n: String(i + 1), of: String(wallets.length) }),
     );
-    if (!sent) { stop(t('dex.bot.fundFailed')); return; }
+    // stop() does nothing when R is still null, which it is here — the failure
+    // happens BEFORE the runner exists. So the explanation has to be given here,
+    // where the user can act on it: k of n addresses are funded, the rest are
+    // not, and the panel looking untouched would hide that.
+    if (!sent) {
+      toast(t('dex.bot.fundFailed'), 'error');
+      return;
+    }
   }
 
   R = {
@@ -308,6 +325,9 @@ export async function start(token) {
   };
   publish();
   schedule(0);
+  } finally {
+    starting = false;
+  }
 }
 
 // ── the loop ─────────────────────────────────────────────────────────
@@ -338,6 +358,11 @@ async function oneTick() {
 
   const [vq, vt, graduated] = await Promise.all([cs.virtualQuote(), cs.virtualTokens(), cs.graduated()]);
   const price = vt > 0n ? (vq * 10n ** 18n) / vt : 0n;
+  // The configured size is a QUOTE figure; the sell leg is denominated in
+  // TOKENS and is sized to be worth the same, so the band is symmetric in VALUE.
+  // Handing the engine the same number for both sides made each sell ~10^12 too
+  // small to unwind a buy, which turned a two-sided bot into a one-way drain.
+  const sizeOut = price > 0n ? (cur.size * 10n ** 18n) / price : 0n;
 
   // Balances are read fresh every tick. A bot that remembers balances asks a
   // wallet for money it spent an hour ago, and then fails forever.
@@ -355,7 +380,7 @@ async function oneTick() {
   // way keeps every rule in decide() and leaves the two files free to disagree
   // about nothing.
   const want = decide({
-    price, floor: cur.floor, ceil: cur.ceil, size: cur.size,
+    price, floor: cur.floor, ceil: cur.ceil, size: cur.size, sizeOut,
     spent: cur.spent, cap: cur.cap, graduated: Boolean(graduated),
     quoteBal: accs.reduce((a, b) => a + b.quoteBal, 0n),
     tokenBal: accs.reduce((a, b) => a + b.tokenBal, 0n),
@@ -363,11 +388,11 @@ async function oneTick() {
   if (want.action === STOP && stopReason(want.why)) { halt(want.why); return; }
 
   const side = want.action === BUY ? 'buy' : 'sell';
-  const { account } = nextAccount(accs, side, cur.size, cur.cursor);
+  const { account } = nextAccount(accs, side, want.action === BUY ? cur.size : sizeOut, cur.cursor);
   if (!account) { note(t('dex.bot.why.noWallet')); return; }
 
   const d = decide({
-    price, floor: cur.floor, ceil: cur.ceil, size: cur.size,
+    price, floor: cur.floor, ceil: cur.ceil, size: cur.size, sizeOut,
     quoteBal: account.quoteBal, tokenBal: account.tokenBal,
     spent: cur.spent, cap: cur.cap, graduated: Boolean(graduated),
   });

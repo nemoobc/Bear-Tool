@@ -37,6 +37,7 @@ import {
   provider,
   t, get, set, on, $, escapeHtml,
 } from './core.js';
+import { unhideAll } from './list.js';
 
 // Re-exported so the app (and the gates) read one entry point for the Dex's
 // chain facts while the values live in core.js — a chain id is never written
@@ -191,7 +192,14 @@ function renderFeed(host) {
   let scope = 'all';
   const paint = async () => { await refreshFeed(host, scope); };
 
-  host.addEventListener('click', (e) => {
+  host.addEventListener('click', async (e) => {
+    // "Restore all" lives on the hidden tab only, and it is the single button
+    // that makes a whole session of hiding recoverable in one press.
+    if (e.target.closest('#dexUnhideAll')) {
+      unhideAll();
+      await paint();
+      return;
+    }
     const btn = e.target.closest('[data-dex-scope]');
     if (!btn) return;
     scope = btn.dataset.dexScope;
