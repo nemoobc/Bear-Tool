@@ -87,6 +87,14 @@ export function tokenTradeHtml(token) {
         <span class="dex-swapbox-token">ETH</span>
       </div>
       <div class="dex-swapbox-usd small" id="dexTradeBuyQuote"></div>
+      <!-- Percentages of what you actually hold. Without them the buy box makes
+           you type an amount out of thin air, which is the single biggest
+           difference from every real launchpad: you know your balance, so the
+           useful answer to "how much?" is "a quarter of it". -->
+      <div class="dex-pctrow" role="group" aria-label="${escapeHtml(t('dex.trade.buyPct'))}">
+        <span class="small dex-pctbal" id="dexTradeQuoteBal"></span>
+        ${[25, 50, 75, 100].map((pc) => `<button type="button" class="dex-pct" data-dex-pct="${pc}">${pc === 100 ? escapeHtml(t('dex.trade.max')) : pc + '%'}</button>`).join('')}
+      </div>
     </div>
     <button id="dexTradeBuy" type="button" class="btn btn-primary btn-block mt-8">${escapeHtml(t('dex.trade.buy'))}</button>
 
@@ -97,6 +105,10 @@ export function tokenTradeHtml(token) {
         <span class="dex-swapbox-token" id="dexTradeSellToken">${escapeHtml(token.symbol)}</span>
       </div>
       <div class="dex-swapbox-usd small" id="dexTradeSellQuote"></div>
+      <div class="dex-pctrow" role="group" aria-label="${escapeHtml(t('dex.trade.sellPct'))}">
+        <span class="small dex-pctbal" id="dexTradeTokenBal"></span>
+        ${[25, 50, 75, 100].map((pc) => `<button type="button" class="dex-pct" data-dex-sell-pct="${pc}">${pc === 100 ? escapeHtml(t('dex.trade.max')) : pc + '%'}</button>`).join('')}
+      </div>
     </div>
     <button id="dexTradeSell" type="button" class="btn btn-secondary btn-block mt-8">${escapeHtml(t('dex.trade.sell'))}</button>
 
@@ -157,7 +169,10 @@ export function bindTokenTrade(host, token, onBack) {
 
   // Live state from the contract. state() holds the numbers the buy/sell use
   // so the quote and the tx cannot disagree.
-  const state = { vE: 0n, vT: 0n, reserve: 0n, graduated: false, mine: 0n, readable: false, sym: token.symbol || '' };
+  const state = {
+    vE: 0n, vT: 0n, reserve: 0n, graduated: false, mine: 0n, readable: false,
+    sym: token.symbol || '', ethBal: 0n,
+  };
   const refresh = async () => {
     // balanceOf needs a real 20-byte address. '0x0' is NOT one — it made ethers
     // reject, and because the reads shared one Promise.all, a wallet-less
@@ -165,9 +180,15 @@ export function bindTokenTrade(host, token, onBack) {
     // just their own balance. So a missing wallet means "no balance", never
     // "no page".
     const me = get('address');
-    const [vE, vT, reserve, graduated, mine, name, sym] = await Promise.all([
+    // NOTE: this order MUST match the Promise.all below it. It did not, once:
+    // ethBal was bound to the ticker's string and the balance rendered as NaN.
+    const [vE, vT, reserve, graduated, mine, ethBal, name, sym] = await Promise.all([
       c.virtualEth(), c.virtualTokens(), c.realEthReserve(), c.graduated(),
       me ? c.balanceOf(me) : Promise.resolve(0n),
+      // The quote balance is what the buy percentages divide, so it is read with
+      // the same pass. A failure here must not blank the price, so it falls back
+      // to zero and the buttons simply do nothing rather than filling a guess.
+      me && p ? p.getBalance(me).catch(() => 0n) : Promise.resolve(0n),
       // The contract, not the local index, is the authority on what this coin
       // IS. A coin discovered from the chain (another device, or before a storage
       // wipe) arrives with an empty name/symbol, and every label on the page has
@@ -220,6 +241,15 @@ export function bindTokenTrade(host, token, onBack) {
     if (mEl) mEl.textContent = t('dex.trade.mcap', { mcap: (priceEth * Number(vT) / 1e18).toFixed(4) });
     const hEl = $('#dexTradeHold', host);
     if (hEl) hEl.textContent = t('dex.trade.hold', { amt: fmtTok(mine, 18, 4), sym: state.sym });
+
+    // Balances, on the boxes they belong to. Without these the percentage row
+    // has nothing to divide and the user is asked to type a number they cannot
+    // know.
+    state.ethBal = ethBal || 0n;
+    const qb = $('#dexTradeQuoteBal', host);
+    if (qb) qb.textContent = t('dex.trade.balance', { amt: fmtEth(state.ethBal) });
+    const tb = $('#dexTradeTokenBal', host);
+    if (tb) tb.textContent = t('dex.trade.balance', { amt: fmtTok(mine, 18, 2) });
   };
 
   const quoteBuyLive = () => {
@@ -244,6 +274,38 @@ export function bindTokenTrade(host, token, onBack) {
   };
   if (buyEthEl) buyEthEl.addEventListener('input', quoteBuyLive);
   if (sellTokEl) sellTokEl.addEventListener('input', quoteSellLive);
+
+  // ── percentage quick-fill ──────────────────────────────────────
+  // Each button writes the matching slice of the balance you actually hold, then
+  // re-quotes. No button acts on a balance it has not read: with nothing in the
+  // wallet they leave the box alone rather than filling a number that would be
+  // wrong.
+  //
+  // 100% is "Max", and Max subtracts nothing: the quote is a payable amount, not
+  // a spendable-after-fee one, so trimming it would only make the user buy less
+  // than they asked for. If gas ever comes out of the same balance, this is the
+  // one line that has to change — noted rather than silently guessed.
+  host.addEventListener('click', (e) => {
+    const buy = e.target.closest('[data-dex-pct]');
+    if (buy) {
+      const pct = BigInt(buy.dataset.dexPct);
+      if (state.ethBal <= 0n) return;
+      const amt = (state.ethBal * pct) / 100n;
+      buyEthEl.value = pct >= 100n
+        ? E.formatEther(state.ethBal)
+        : E.formatEther(amt);
+      quoteBuyLive();
+      return;
+    }
+    const sell = e.target.closest('[data-dex-sell-pct]');
+    if (sell) {
+      const pct = BigInt(sell.dataset.dexSellPct);
+      if (state.mine <= 0n) return;
+      const amt = (state.mine * pct) / 100n;
+      sellTokEl.value = E.formatUnits(amt, 18);
+      quoteSellLive();
+    }
+  });
 
   const buyBtn = $('#dexTradeBuy', host);
   const sellBtn = $('#dexTradeSell', host);

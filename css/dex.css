@@ -303,3 +303,25 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
   background: var(--honey, #F5C24A);
 }
 .dex-token-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ── the percentage row: balances and quick-fill ────────────────
+   A launchpad's buy box is useless without this. You know your balance, so the
+   useful answer to "how much?" is a fraction of it — typing an amount out of
+   thin air is the friction that made the old box feel amateur. */
+.dex-pctrow {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px dashed rgba(45, 42, 50, 0.2);
+}
+.dex-pctbal { margin-right: auto; opacity: 0.7; }
+.dex-pct {
+  padding: 5px 11px; border: 2px solid var(--ink); border-radius: 999px;
+  background: var(--white); color: var(--ink); cursor: pointer;
+  font-family: 'Fredoka', sans-serif; font-weight: 700; font-size: 0.76rem;
+  transition: background 0.15s ease, transform 0.08s ease;
+}
+.dex-pct:hover { background: var(--cream); transform: translateY(-1px); }
+.dex-pct:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* A percentage of a zero balance would be a zero, so the row says so rather
+   than offering a button that cannot do anything useful. */
+.dex-pct:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }

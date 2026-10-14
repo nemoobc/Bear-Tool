@@ -411,3 +411,57 @@ test('graduation says what actually happens, and what it does not', () => {
   assert.match(contract, /function withdraw\(\) external returns \(uint256\) \{\s*require\(msg\.sender == creator, "creator"\);\s*require\(graduated, "not graduated"\);/,
     'withdraw must remain creator-only and post-graduation — the button is gated on the same facts');
 });
+
+// ── the two things that make a buy box usable ──────────────────
+test('the buy box shows a balance and can fill itself by percentage', () => {
+  // Typing an amount out of thin air is the friction that made the old box feel
+  // amateur. You know your balance, so the useful answer to "how much?" is a
+  // fraction of it — the same affordance every real launchpad has, and the one
+  // thing the first pass left out entirely.
+  for (const pct of [25, 50, 75, 100]) {
+    assert.ok(tradeJs.includes(`data-dex-pct="${pct}"`) || tradeJs.includes(`[25, 50, 75, 100]`),
+      `the buy box must offer a ${pct}% quick-fill`);
+    assert.ok(tradeJs.includes(`data-dex-sell-pct="${pct}"`) || tradeJs.includes(`[25, 50, 75, 100]`),
+      `the sell box must offer a ${pct}% quick-fill`);
+  }
+  assert.ok(tradeJs.includes('id="dexTradeQuoteBal"'), 'the buy box must show the quote balance');
+  assert.ok(tradeJs.includes('id="dexTradeTokenBal"'), 'the sell box must show the holding');
+
+  // The buttons divide a balance that was READ. A percentage of a stale or
+  // invented number is how someone ends up sending an amount they did not mean.
+  assert.match(tradeJs, /p\.getBalance\(me\)/,
+    'the quote balance must be read from the chain, not remembered');
+  assert.match(tradeJs, /if \(state\.ethBal <= 0n\) return;/,
+    'a zero balance must leave the box alone rather than fill zero');
+  assert.match(tradeJs, /if \(state\.mine <= 0n\) return;/,
+    'and the same for the sell side');
+
+  // …and the percentage must come off the balance, not out of thin air.
+  assert.match(tradeJs, /state\.ethBal \* pct\) \/ 100n/,
+    'a quick-fill must be that fraction of the balance held');
+});
+
+test('the read order cannot silently swap two values', () => {
+  // Found in the browser: ethBal was bound to the ticker STRING, so the balance
+  // rendered as "Balance: NaN" while everything else looked fine. Destructuring
+  // order and Promise.all order are two lists a reader has to match by eye, so
+  // the order is pinned here.
+  // Compare the two lists by where each read sits in the source, rather than by
+  // parsing them — comments and line breaks make a regex fragile, and a fragile
+  // gate is a gate that fails for the wrong reason.
+  const fn = tradeJs.slice(tradeJs.indexOf('const refresh = async'));
+  const destructured = fn.slice(fn.indexOf('const ['), fn.indexOf('] = await Promise.all'));
+  const list = fn.slice(fn.indexOf('await Promise.all(['), fn.indexOf('])', fn.indexOf('await Promise.all([')));
+
+  // Each name the destructuring claims must appear in that position in the list.
+  const slots = ['virtualEth', 'virtualTokens', 'realEthReserve', 'graduated',
+                 'balanceOf', 'getBalance', 'name', 'symbol'];
+  let cursor = 0;
+  for (const slot of slots) {
+    const at = list.indexOf(slot + '(', cursor);
+    assert.ok(at > -1, `the read list must contain ${slot}`);
+    cursor = at + 1;
+  }
+  assert.ok(destructured.includes('ethBal') && destructured.includes('name') && destructured.includes('sym'),
+    'the destructuring must claim the balance, the name and the ticker');
+});
