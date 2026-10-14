@@ -124,18 +124,6 @@ export async function discoverCoins({ scope = 'all', creator, limit = 100 } = {}
 }
 
 /**
- * Look further back for older launches. Only widens the window when the last
- * pass came back full, so a feed with 3 coins does not fire a genesis query.
- */
-export async function discoverMore({ scope = 'all', creator, limit = 100 } = {}) {
-  const first = await discoverCoins({ scope, creator, limit });
-  if (!first.ok || !first.more) return first;
-  cursor.at = Math.min(cursor.at * 4, 2_000_000);
-  const deeper = await discoverCoins({ scope, creator, limit });
-  return deeper.ok ? { ...deeper, more: deeper.more || first.more } : first;
-}
-
-/**
  * The feed's full picture: what the chain says, plus whatever the browser
  * remembers that the chain has not shown us yet.
  *

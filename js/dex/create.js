@@ -22,7 +22,15 @@ import {
 } from './curve.js';
 import { PUMP_TOKEN_SOURCE, PUMP_ABI } from './pump-source.js';
 import { rememberLaunchedToken } from './tokens.js';
-import { withTxButton, QUOTE_PRESETS } from './core.js';
+import { withTxButton, QUOTE_PRESETS, quoteBy } from './core.js';
+
+// Symbol for whichever quote ERC-20 is selected, falling back to the first
+// preset. The curve is quoted in this token, not the chain's native coin, so
+// every unit shown on the create screen must name it.
+function quoteSymFor(addr) {
+  const q = quoteBy(addr);
+  return (q && q.symbol) || QUOTE_PRESETS[0].symbol;
+}
 
 // Images: the user may upload a big file (10 MB), but a data URI can NEVER go
 // on-chain as-is — the constructor calldata explodes the deploy gas past what
@@ -152,10 +160,20 @@ export function bindCreate(host, onLaunched) {
     // purpose: the i18n placeholder-checker parses object literals inside a
     // t(key, {...}) argument as {{params}}, so an inline
     // { maximumFractionDigits: 0 } would look like a missing placeholder.
-    const open = Number(spotPrice(VIRTUAL_QUOTE, VIRTUAL_TOKENS)) / 1e18; // tokens per ETH
+    const open = Number(spotPrice(VIRTUAL_QUOTE, VIRTUAL_TOKENS)) / 1e18; // tokens per quote
     const openText = open.toLocaleString('en-US', { maximumFractionDigits: 0 });
     const gradText = fmtEth(GRADUATION_QUOTE);
-    infoEl.textContent = t('dex.create.curveInfo', { open: openText, grad: gradText });
+    // The curve is quoted in whichever ERC-20 is selected below, NOT the
+    // chain's native token — the copy must name that quote, or a USDC-quoted
+    // coin reads "graduates at 2 ETH" and the unit is simply wrong.
+    const paintInfo = () => {
+      const qSym = quoteSymFor($('#dexCreateQuote', host)?.value);
+      infoEl.textContent = t('dex.create.curveInfo', { open: openText, grad: gradText, q: qSym });
+    };
+    paintInfo();
+    // Re-paint when the quote changes so the shown unit always matches the
+    // token the user actually picked.
+    $('#dexCreateQuote', host)?.addEventListener('change', paintInfo);
   }
 
   $('#dexCreateGo', host).addEventListener('click', () => {
@@ -209,7 +227,10 @@ export function bindCreate(host, onLaunched) {
           // unit test did. BigInt division would also have been wrong (125n/100n
           // is 1, not 1.25), so this converts deliberately.
           { k: t('dex.create.fee'), v: `${(Number(FEE_TOTAL_BPS) / 100).toFixed(2)}% on every trade` },
-          { k: t('dex.create.gradAt'), v: fmtEth(GRADUATION_QUOTE) + ' ' + net.symbol },
+          // The graduation threshold is denominated in the chosen QUOTE token,
+          // not the chain's native coin — net.symbol (e.g. SepoliaETH) was
+          // wrong for every non-native quote (USDT/USDC).
+          { k: t('dex.create.gradAt'), v: fmtEth(GRADUATION_QUOTE) + ' ' + quoteSymFor(quoteAddr) },
           { k: t('cf.transactions'), v: '1' },
           { k: t('dex.create.cost'), v: gasPrice > 0n
             ? `${E.formatEther(cost)} ${net.symbol} (${gasEstimate} gas)`
