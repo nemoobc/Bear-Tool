@@ -386,6 +386,12 @@ function makePage(cdp) {
 }
 
 // ── journey ────────────────────────────────────────────────────────────────
+// requestId → URL, populated from Network.requestWillBeSent, consumed by
+// Network.loadingFailed so a failure line can name the request that died.
+// Module-scoped (not per-call) because requestWillBeSent and loadingFailed
+// arrive in different collectConsole() drains.
+let reqUrl = null;
+
 // Drain accumulated CDP events into the report. Splice = idempotent, so BOTH
 // paths may call it: the verdict (success) and the fatal catch — the failure
 // report of run 38034404898 carried a consoleTrail of ZERO because the fatal
@@ -410,9 +416,21 @@ function collectConsole(cdp) {
       const t = (ev.params.args || []).map((a) => a.value ?? a.description ?? '').join(' ');
       if (ev.params.type === 'error' && report.stepCtx.length < 12) report.stepCtx.push('console: ' + t.slice(0, 200));
     }
+    // Network failures are only actionable WITH the URL that failed: an
+    // ERR_FAILED with no target is a lead you cannot follow. requestWillBeSent
+    // carries requestId → request.url; loadingFailed carries requestId →
+    // errorText — join them so every failure names its own request.
+    if (ev.method === 'Network.requestWillBeSent') {
+      const id = ev.params.requestId;
+      if (id && ev.params.request?.url) {
+        if (!reqUrl) reqUrl = new Map();
+        if (reqUrl.size < 400) reqUrl.set(id, ev.params.request.url);
+      }
+    }
     if (ev.method === 'Network.loadingFailed') {
-      const err = ev.params.errorText || ('failed ' + ev.params.type + ' ' + (ev.params.requestId || ''));
-      const line = 'request-failed: ' + err;
+      const err = ev.params.errorText || ('failed ' + ev.params.type);
+      const url = (reqUrl && reqUrl.get(ev.params.requestId)) || '';
+      const line = 'request-failed: ' + err + (url ? ' url=' + url : ' (url unknown — requestId ' + ev.params.requestId + ')');
       if (report.netFailures.length < 60) report.netFailures.push(line);
       if (report.stepCtx.length < 12) report.stepCtx.push(line);
     }
