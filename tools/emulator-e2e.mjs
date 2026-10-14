@@ -280,7 +280,21 @@ function cdpClient(ws) {
 
 async function connectCDP(urlMatch = null) {
   let lastErr;
-  for (let i = 0; i < 30; i++) { // the WebView socket appears after app boot
+  // Wait for the APP to be alive before probing for its WebView socket. A run
+  // that raced the boot (device registered, app not yet spawned) burned the
+  // whole retry window on "no webview_devtools_remote socket yet" and died at
+  // steps=0 — which reads like "the app broke" when it had not launched. Bounded
+  // and skip-safe: a device that never spawns the app just times out.
+  for (let i = 0; i < 60; i++) {
+    try { if (adb('shell', 'pidof com.nemoobc.beartool').trim()) break; } catch { /* not yet */ }
+    await sleep(2000);
+  }
+  // The WebView debug socket appears AFTER the app process, and adb itself can
+  // hiccup mid-boot (a run died with "Command failed: adb shell cat
+  // /proc/net/unix" for a straight 60s). 90 tries × 3s = 270s of patience: a
+  // slow fleet box gets its run, a dead one costs a few minutes, and neither
+  // outcome is mistaken for an app failure.
+  for (let i = 0; i < 90; i++) {
     try {
       const unix = adb('shell', 'cat /proc/net/unix');
       const socks = [...new Set(unix.match(/webview_devtools_remote_\d+/g) || [])];
@@ -300,7 +314,7 @@ async function connectCDP(urlMatch = null) {
         ws.once('error', (e) => { clearTimeout(to); reject(e); });
       });
       return cdpClient(ws);
-    } catch (e) { lastErr = e; await sleep(2000); }
+    } catch (e) { lastErr = e; await sleep(3000); }
   }
   throw new Error('CDP connect failed: ' + lastErr.message);
 }
