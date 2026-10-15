@@ -224,15 +224,35 @@ export function restoreSession() {
 // Every id below is pre-existing except #dbrClose / #dbrNet / #dbrNetIc / #dbrBar.
 // The five navigation buttons MOVED rather than changed identity, so the back /
 // forward / home / reload / menu tests keep passing against the same selectors.
+//
+// ICONS — inline SVG for every fixed control, replacing the old unicode glyphs
+// (✕ ↗ ‹ › ⟳ ⌂ ⋯ 🔗 ⚠). The glyphs rendered differently per device font and
+// read as "text characters in buttons" next to a real web browser; these are
+// stroke icons on currentColor, so they inherit each button's colour and its
+// :disabled opacity exactly like the text did. Data-driven pills (the verdict
+// status and the network badge) keep their own painting — they are not fixed
+// chrome. viewBox 24, 2px round stroke: one vocabulary, one weight.
+const S = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+const ICONS = {
+  close:  `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`,
+  ext:    `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>`,
+  back:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>`,
+  fwd:    `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>`,
+  reload: `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>`,
+  home:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg>`,
+  menu:   `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`,
+  link:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>`,
+  warn:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M12 3 2 20h20L12 3zM12 9v5M12 17.5v.5"/></svg>`,
+};
 const SHELL = `
   <div class="dbr-top">
-    <button class="dbr-btn dbr-ic" id="dbrClose" title="Close browser" aria-label="Close browser">✕</button>
+    <button class="dbr-btn dbr-ic" id="dbrClose" title="Close browser" aria-label="Close browser">${ICONS.close}</button>
     <div class="dbr-urlwrap">
       <span class="dbr-secure" id="dbrSecure" role="status" aria-live="polite"></span>
       <input type="text" id="dbrUrl" class="dbr-url" spellcheck="false" autocomplete="off"
              placeholder="Search DApps or type an address" aria-label="Address and search">
     </div>
-    <button class="dbr-btn dbr-ic dbr-ext" id="dbrExt" title="Open this page in a new tab" aria-label="Open this page in a new tab" hidden>↗</button>
+    <button class="dbr-btn dbr-ic dbr-ext" id="dbrExt" title="Open this page in a new tab" aria-label="Open this page in a new tab" hidden>${ICONS.ext}</button>
     <button class="dbr-btn dbr-ic dbr-conn" id="dbrConnect" title="Connect this site to the wallet" aria-label="Connect this site to the wallet" hidden><img class="dbr-conn-logo" src="assets/bear.svg" alt="" width="20" height="20"></button>
     <button class="dbr-btn dbr-ic dbr-net" id="dbrNet" title="Switch network" aria-label="Current network — switch network">
       <span class="dbr-net-ic" id="dbrNetIc" aria-hidden="true"></span>
@@ -245,8 +265,8 @@ const SHELL = `
   <div class="dbr-wc-hint" id="dbrWcHint" hidden>
     <span class="dbr-wc-hint-txt">This site can't see the wallet directly — in the site choose
       <strong>Connect -&gt; WalletConnect</strong>, copy the <code>wc:</code> link, then pair here.</span>
-    <button class="dbr-wc-btn" id="dbrWcPair" type="button" title="Pair via WalletConnect" aria-label="Pair via WalletConnect">🔗</button>
-    <button class="dbr-wc-btn" id="dbrWcHintX" type="button" title="Dismiss this hint" aria-label="Dismiss WalletConnect hint">✕</button>
+    <button class="dbr-wc-btn" id="dbrWcPair" type="button" title="Pair via WalletConnect" aria-label="Pair via WalletConnect">${ICONS.link}</button>
+    <button class="dbr-wc-btn" id="dbrWcHintX" type="button" title="Dismiss this hint" aria-label="Dismiss WalletConnect hint">${ICONS.close}</button>
   </div>
   <div class="dbr-stage" id="dbrStage">
     <div class="dbr-home" id="dbrHomePage"></div>
@@ -260,15 +280,15 @@ const SHELL = `
       allow="clipboard-write" hidden></iframe>
     <div class="dbr-blocked" id="dbrBlocked" hidden></div>
     <button class="dbr-peak" id="dbrPeak" hidden title="The page may still be loading — open the report again"
-            aria-label="Open the page report">⚠</button>
+            aria-label="Open the page report">${ICONS.warn}</button>
     <div class="dbr-tabgrid" id="dbrTabGrid" hidden role="dialog" aria-label="Open tabs"></div>
   </div>
   <div class="dbr-bar" id="dbrBar" role="toolbar" aria-label="Browser controls">
-    <button class="dbr-bbtn" id="dbrBack" title="Back" aria-label="Back">‹</button>
-    <button class="dbr-bbtn" id="dbrFwd" title="Forward" aria-label="Forward">›</button>
-    <button class="dbr-bbtn" id="dbrReload" title="Reload" aria-label="Reload">⟳</button>
-    <button class="dbr-bbtn" id="dbrHome" title="Home" aria-label="Home">⌂</button>
-    <button class="dbr-bbtn" id="dbrMenu" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">⋯</button>
+    <button class="dbr-bbtn" id="dbrBack" title="Back" aria-label="Back">${ICONS.back}</button>
+    <button class="dbr-bbtn" id="dbrFwd" title="Forward" aria-label="Forward">${ICONS.fwd}</button>
+    <button class="dbr-bbtn" id="dbrReload" title="Reload" aria-label="Reload">${ICONS.reload}</button>
+    <button class="dbr-bbtn" id="dbrHome" title="Home" aria-label="Home">${ICONS.home}</button>
+    <button class="dbr-bbtn" id="dbrMenu" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">${ICONS.menu}</button>
   </div>`;
 
 function build() {

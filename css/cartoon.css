@@ -3577,6 +3577,14 @@ select.input option, select.select option, .input option {
 .dbr-btn { border: 1px solid var(--border); background: transparent; border-radius: 9px; min-width: 34px; height: 34px; cursor: pointer; font-size: 1rem; flex: 0 0 auto; }
 .dbr-btn:disabled { opacity: .35; cursor: default; }
 .dbr-ic { width: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+/* SVG controls: a glyph inherited font-size, an <svg> does not — size it here.
+   currentColor keeps the stroke matched to the button's own colour and its
+   :disabled opacity, exactly like the old text did. */
+.dbr-btn > svg, .dbr-bbtn > svg, .dbr-wc-btn > svg, .dbr-peak > svg {
+  width: 20px; height: 20px; display: block; pointer-events: none;
+}
+.dbr-bbtn > svg { width: 24px; height: 24px; }
+.dbr-peak > svg { width: 18px; height: 18px; }
 /* Verdict and address share one pill, status first — where you are, and whether
    it is safe: the OKX shape, kept honest by the safety gate underneath it. */
 .dbr-urlwrap { position: absolute; left: 50%; transform: translateX(-50%); width: min(calc(100% - 170px), 520px); min-width: 0; display: flex; align-items: center; gap: 6px; padding: 3px 12px; border: 1px solid var(--border); border-radius: 999px; background: rgba(127,127,127,.08); }
