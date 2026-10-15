@@ -16,6 +16,8 @@ import assert from 'node:assert/strict';
 import {
   fetchAllPrices,
   fetchPriceHistory,
+  fetchOHLC,
+  dexChainSlug,
   getPriceFromCache,
   clearPriceCache,
   resetCgCooldown
@@ -261,4 +263,77 @@ test('price: a cached price is returned without ANY network call', async () => {
 
   assert.equal(result.get('native'), 2000);
   assert.equal(hits, 0, 'a hot cache must not touch the network');
+});
+
+// ── Sepolia (testnet): the Total fills, token sources decline to guess ────
+// User, 2026-10-15: "total price $ ga ada … always fills on testnet" → the
+// chain gets a price row. What these pin is the whole contract of that row:
+// the NATIVE figure has a source (the chain's binance symbol), and every
+// TOKEN source that does not index a testnet is skipped rather than asked —
+// because the ones that would answer (global search, llama's mainnet keys)
+// answer with a MAINNET contract that shares the address, which is the
+// wrong-chain substitution price.js refuses everywhere else.
+// Sources verified live 2026-10-15: DexScreener → [] for 11155111,
+// GeckoTerminal → no sepolia network, DefiLlama → {} for sepolia keys,
+// Binance → ETHUSDT 200.
+const SEPOLIA = 11155111;
+const SEPOLIA_USDC = '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238';   // the bundled sepolia USDC, lowercased
+
+// Every route a wrong answer would take, ready to poison the result IF any
+// request slips past a guard — a guard that lets the request out must fail on
+// the absence assertion, not on an unexpected-fetch throw.
+const sepoliaRoutes = () => [
+  ['api.binance.com/api/v3/ticker/price?symbol=ETHUSDT', jsonResponse({ symbol: 'ETHUSDT', price: '2365.49' })],
+  ['coins.llama.fi/prices/current/', jsonResponse({ coins: { [`ethereum:${SEPOLIA_USDC}`]: { price: 999 } } })],
+  ['api.dexscreener.com', jsonResponse([pair(SEPOLIA_USDC, '123', { chainId: 'ethereum' })])],
+  ['geckoterminal', jsonResponse({ data: [] })],
+  ['api.binance.com/api/v3/klines', jsonResponse([])],
+];
+
+test('price: sepolia native fills from the ETH ticker — testnet Total price $ renders', async () => {
+  const calls = installFetch(sepoliaRoutes());
+  const result = await fetchAllPrices([
+    { symbol: 'ETH' },
+    { address: SEPOLIA_USDC, symbol: 'USDC', decimals: 6 },
+  ], SEPOLIA);
+
+  assert.equal(result.get('native'), 2365.49, 'the number that used to be "(USD ?)"');
+  assert.ok(calls.some((u) => u.includes('symbol=ETHUSDT')), 'the native slot rides the chain binance symbol');
+  assert.ok(!calls.some((u) => u.includes('dexscreener')),
+    'no token source indexes a testnet — the batch and the global search must both be skipped');
+  assert.ok(!calls.some((u) => u.includes('llama')), 'nor the llama retry, which can only miss a sepolia key');
+  assert.ok(!calls.some((u) => u.includes('geckoterminal')), 'nor the chart host that has no sepolia network');
+});
+
+test('price: a sepolia token is never priced from a mainnet contract wearing its address', async () => {
+  const calls = installFetch(sepoliaRoutes());
+  const result = await fetchAllPrices([
+    { symbol: 'ETH' },
+    { address: SEPOLIA_USDC, symbol: 'USDC', decimals: 6 },
+  ], SEPOLIA);
+
+  assert.equal(result.has(SEPOLIA_USDC), false,
+    'no price beats a wrong price: a faucet token must not inherit a mainnet $');
+  assert.ok(!calls.some((u) => u.includes('llama') || u.includes('dexscreener')),
+    'the poison routes are only reachable if a guard is missing');
+});
+
+test('price: sepolia is documented as NOT indexed — dexChainSlug → null', () => {
+  assert.equal(dexChainSlug(SEPOLIA), null,
+    'token logos and charts read this before asking; null is the documented skip');
+  assert.equal(dexChainSlug(1), 'ethereum', 'indexed chains keep their slug');
+});
+
+test('price history: sepolia token chart skips GeckoTerminal; the native chart still works', async () => {
+  const calls = installFetch(sepoliaRoutes());
+
+  const tok = await fetchOHLC({ address: SEPOLIA_USDC, chainId: SEPOLIA, days: 1 });
+  assert.deepEqual(tok, [], 'honest empty — no chart host carries this chain');
+  assert.ok(!calls.some((u) => u.includes('geckoterminal')),
+    'skip, rather than building `networks/null/tokens/…` and burning the capped host on a 404');
+
+  const nat = await fetchOHLC({ chainId: SEPOLIA, days: 1 });
+  assert.ok(calls.some((u) => u.includes('klines') && u.includes('ETHUSDT')),
+    'the NATIVE chart keeps its source — the same ticker that fills the Total');
+  assert.ok(Array.isArray(nat));
 });

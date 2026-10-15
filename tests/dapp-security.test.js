@@ -37,25 +37,43 @@ test('the approval sheet describes the payload the signer will sign', () => {
     'personal_sign must take its message from the split, not from a raw index');
 });
 
-// ── 1b. the typed-data row described the wrong half ──────────────────────
-// v4 arrives in BOTH orders, and splitSignParams is the one function that
-// knows it — dapp-exec.js uses it to pick what to SIGN (line ~189). The
-// approval sheet did not: `params[1] ?? params[0]` returned the ADDRESS for
-// the legacy order, so the dialog displayed a 0x…40 hex string as "typed data"
-// while executeLocal signed the real payload. A user could approve a Permit
-// they had never seen — the one failure the per-call confirmation exists to
-// prevent, and the file's own comment (767-772) already stated the invariant.
-test('the typed-data row comes from the same split the signer uses', () => {
-  const at = app.indexOf("startsWith('eth_signTypedData')");
-  assert.ok(at > 0, 'the typed-data branch must exist');
-  const body = app.slice(at, at + 700);
-  // Comments quote the old expression to explain what was wrong with it, so
-  // assert on CODE: strip line comments before hunting for the raw index.
-  const code = body.replace(/\/\/[^\n]*/g, '');
-  assert.match(code, /splitSignParams\(params\)/,
-    'describe the payload with the function that chooses what is signed');
-  assert.ok(!/params\[1\] \?\? params\[0\]/.test(code),
-    'params[1] ?? params[0] is the ADDRESS under the legacy order — that is the bug');
+// ── 1b. the typed-data payload is chosen by SHAPE, in every path ──────────
+// v4 arrives in BOTH orders — [address, typedData] (the convention, sent by
+// the emulator's own fixture with the stand-in address "0x0") and the legacy
+// [typedData, address]. Two wrong pickers have shipped:
+//   * `params[1] ?? params[0]` (this file's old subject) returned the ADDRESS
+//     under the legacy order — the dialog showed a hex string as "typed data"
+//     while the real payload was signed;
+//   * a 40-hex address rule (splitSignParams) fails short addresses like
+//     "0x0", reads them AS the payload, JSON.parse throws — and the request
+//     dies without a sheet ("typed-data sheet never appeared", emulator run
+//     38726524114).
+// splitTypedParams (dapp-exec.js) picks by structure — object, or a string
+// holding a JSON object — and every one of the three paths must use it, for
+// parsing AND for what the approval sheet describes.
+test('every typed-data path picks the payload with splitTypedParams', () => {
+  const typedBranches = [
+    ['app.js (approval sheet)', app, "startsWith('eth_signTypedData')", 700],
+    ['native-dapp.js', native, "if (method === 'eth_signTypedData_v4')", 1300],
+    ['walletconnect.js', wc, "if (method === 'eth_signTypedData_v4')", 1300],
+  ];
+  for (const [name, src, anchor, span] of typedBranches) {
+    const at = src.indexOf(anchor);
+    assert.ok(at > 0, `${name}: the typed-data branch must exist`);
+    // Comments quote the wrong pickers to explain what was wrong with them,
+    // so the negatives judge CODE only.
+    const code = src.slice(at, at + span).replace(/\/\/[^\n]*/g, '');
+    assert.match(code, /splitTypedParams\(/,
+      `${name}: the payload must be chosen by SHAPE — a40-hex rule rejects "0x0"`);
+    assert.ok(!/splitSignParams\(/.test(code),
+      `${name}: splitSignParams is the LENGTH rule — it must not pick typed data`);
+    assert.ok(!/params\[1\] \?\? params\[0\]/.test(code),
+      `${name}: params[1] ?? params[0] is the ADDRESS under the legacy order`);
+  }
+  // The picker itself must be exported from the one module that owns it —
+  // three private copies would drift the way the three signers already had.
+  assert.match(exec, /export function splitTypedParams\(/,
+    'splitTypedParams lives in dapp-exec.js, next to splitSignParams');
 });
 
 test('a sign payload is shown as text, not as a byte array', () => {

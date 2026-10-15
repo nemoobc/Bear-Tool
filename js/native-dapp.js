@@ -23,7 +23,7 @@ import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
 // (dapp-exec.js) already splits both param orders, validates typed data, and
 // guards the chain a broadcast goes out on. This path re-implemented each by
 // hand and got them wrong — see the personal_sign / typed-data branches below.
-import { splitSignParams, parseTyped, typedParts, providerOnCurrentChain } from './dapp-exec.js';
+import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain } from './dapp-exec.js';
 
 const USER_REJECTED = { code: 4001, message: 'User rejected the request.' };
 const LOCKED = { code: 5100, message: 'Wallet is locked.' };
@@ -536,11 +536,16 @@ async function handleNativeRpc({ id, origin, payload }) {
   }
 
   if (method === 'eth_signTypedData_v4') {
-    // BOTH param orders, exactly as personal_sign above: the legacy
-    // [typedData, address] puts the ADDRESS in params[1] — which is precisely
-    // where this branch used to look.
-    const { message: raw } = splitSignParams(msg.params || []);
-    if (raw == null) return respondError({ code: 32602, message: 'Expected [typedData, address].' });
+    // BOTH orders — [address, typedData] (the convention real dApps send; the
+    // E2E fixture sends it with the stand-in address "0x0") and the legacy
+    // [typedData, address]. splitTypedParams finds the payload by SHAPE
+    // (object / JSON string): a length rule rejects short addresses like
+    // "0x0", reads them as the payload, JSON.parse throws — and this branch
+    // then answered 32602 without ever showing a sheet, which is how the
+    // emulator gate failed ("typed-data sheet never appeared") after the
+    // previous fix.
+    const { typed } = splitTypedParams(msg.params || []);
+    if (typed == null) return respondError({ code: 32602, message: 'Expected [typedData, address].' });
     // parseTyped/typedParts THROW 32602 on a payload that cannot be signed —
     // that is their entire job. The local try/catch they replace turned every
     // failure into {}: the chain guard then saw no chainId (so refused
@@ -551,7 +556,7 @@ async function handleNativeRpc({ id, origin, payload }) {
     // identical payloads.
     let parsed, domain, types, message;
     try {
-      parsed = parseTyped(raw);
+      parsed = parseTyped(typed);
       ({ domain, types, message } = typedParts(parsed));
     } catch (e) {
       return respondError({ code: (e && e.code) || 32602, message: (e && e.message) || String(e) });

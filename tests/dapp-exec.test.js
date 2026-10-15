@@ -25,7 +25,7 @@ globalThis.localStorage = {
 };
 globalThis.window = globalThis;
 
-const { executeLocal, currentChainId, splitSignParams, isLocalMethod } = await import('../js/dapp-exec.js');
+const { executeLocal, currentChainId, splitSignParams, splitTypedParams, isLocalMethod } = await import('../js/dapp-exec.js');
 const { set } = await import('../js/state.js');
 
 const ADDR = '0x' + 'ab'.repeat(20);
@@ -196,6 +196,59 @@ test('eth_signTypedData_v4: undeclared primaryType → 32602', async () => {
   await assert.rejects(
     () => executeLocal({ method: 'eth_signTypedData_v4', params: [bad, ADDR] }),
     (e) => e.code === 32602,
+  );
+});
+
+// ── the side is found by SHAPE, not by address length ───────────────────
+// public/dapp-sign-fixture.html — the emulator's OWN dApp — sends
+// params: ['0x0', JSON.stringify(typed)]: EIP-712's [address, typedData]
+// convention with a STAND-IN address, because the wallet signs with its own
+// account. splitSignParams' 40-hex rule does not recognize '0x0' as an
+// address, so nothing was swapped: the address was taken AS the payload,
+// JSON.parse('0x0') threw, and the native path answered 32602 without ever
+// showing a sheet. The emulator gate died exactly there — "typed-data sheet
+// never appeared" (run 38726524114) — while these unit tests stayed green,
+// because none of them used the shape the fixture sends.
+test('splitTypedParams: the fixture order — short stand-in address, JSON payload', () => {
+  const json = JSON.stringify(TYPED);
+
+  const spec = splitTypedParams(['0x0', json]);
+  assert.equal(spec.typed, json, 'the payload is found by shape, never by a 40-hex rule');
+  assert.equal(spec.address, '0x0', 'the address is the OTHER param, however short');
+
+  const legacy = splitTypedParams([json, '0x0']);
+  assert.equal(legacy.typed, json, 'the legacy order resolves to the same payload');
+  assert.equal(legacy.address, '0x0');
+
+  assert.deepEqual(splitTypedParams([TYPED, '0x0']).typed, TYPED, 'an object payload is recognized directly');
+  assert.deepEqual(splitTypedParams(['0x0', TYPED]).typed, TYPED, 'object payload in spec order too');
+  assert.equal(splitTypedParams([]).typed, undefined, 'nothing to find → the caller answers 32602');
+});
+
+test('eth_signTypedData_v4: both param orders hand the signer the SAME payload', async () => {
+  const calls = installSigner();
+  const r1 = await executeLocal({ method: 'eth_signTypedData_v4', params: [ADDR, JSON.stringify(TYPED)] });
+  const r2 = await executeLocal({ method: 'eth_signTypedData_v4', params: [JSON.stringify(TYPED), ADDR] });
+  assert.equal(r1.value, '0xsig-typed');
+  assert.equal(r2.value, '0xsig-typed');
+
+  const [, d1, t1, m1] = calls[0];
+  const [, d2, t2, m2] = calls[1];
+  assert.deepEqual(d1, d2, 'the ORDER of params must not change what is signed');
+  assert.deepEqual(t1, t2, 'nor the types');
+  assert.deepEqual(m1, m2, 'nor the message — a swapped order is still the same signature');
+});
+
+test('eth_signTypedData_v4: the stand-in address is identified as the ADDRESS', async () => {
+  installSigner();
+  // Spec order with the fixture's dummy account: requireAddressMatch must
+  // refuse '0x0' (it is not the active account) — and the refusal must NAME
+  // 0x0, proving the address side was found. When the address slot was read as
+  // the payload, this same refusal instead named the whole JSON document.
+  await assert.rejects(
+    () => executeLocal({ method: 'eth_signTypedData_v4', params: ['0x0', JSON.stringify(TYPED)] }),
+    (e) => e.code === 4100 && /\b0x0\b/.test(e.message) && !/domain/i.test(e.message),
+    'the mismatch must name the ADDRESS it refused, not the payload',
   );
 });
 

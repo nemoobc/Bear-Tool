@@ -48,7 +48,24 @@ const CHAINS = {
   324:    { dex: 'zksync',   llama: 'era',      gt: 'zksync',       binance: 'ETHUSDT',  wrapped: '0x5aea5775959fbc2557cc8789bc1bf90a239d9a91' },
   42220:  { dex: 'celo',     llama: 'celo',     gt: 'celo',         binance: 'CELOUSDT', wrapped: '0x471ece3750da237f93b8e339c536989b8978a438' },
   146:    { dex: 'sonic',    llama: 'sonic',    gt: 'sonic',        binance: null,       wrapped: '0x039e2fb66102314ce7b64ce5ce3e5183bc94ad38' },
-  5000:   { dex: 'mantle',   llama: 'mantle',   gt: 'mantle',       binance: 'MNTUSDT',  wrapped: '0x78c1b0c915c4faa5fffa6cabf0219da63d7f4cb8' }
+  5000:   { dex: 'mantle',   llama: 'mantle',   gt: 'mantle',       binance: 'MNTUSDT',  wrapped: '0x78c1b0c915c4faa5fffa6cabf0219da63d7f4cb8' },
+  // Sepolia — Ethereum's TESTNET, and the chain the Dex/launchpad, the
+  // emulator and the default dev flows run on. Without a row this chain had
+  // NO price source at all, so every Total price $ on testnet rendered
+  // "(USD ?)" (user: "total price $ ga ada … always fills on testnet",
+  // approved 2026-10-15).
+  //
+  // dex and gt are null ON PURPOSE — verified against the live APIs
+  // 2026-10-15: DexScreener answers [] for 11155111, GeckoTerminal has no
+  // sepolia network, and null is dexChainSlug's documented "not indexed"
+  // value. llama stays 'sepolia' for the same honesty: DefiLlama returns {}
+  // for sepolia keys, and pointing it at 'ethereum' would price a sepolia
+  // TOKEN from a mainnet contract that merely shares its address — the
+  // wrong-chain substitution this file refuses everywhere else. The native
+  // figure therefore rides binance: a testnet unit is a stand-in for ETH, so
+  // ETH's own ticker is the truthful number to show, and the blank
+  // "(USD ?)" is exactly what the user rejected.
+  11155111: { dex: null, llama: 'sepolia', gt: null, binance: 'ETHUSDT', wrapped: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' },
 };
 
 const chainMeta = (chainId) => CHAINS[Number(chainId)] || null;
@@ -405,6 +422,13 @@ async function fetchDexScreenerBatch(chainId, addresses) {
 // Fallback for tokens whose /tokens/v1 pair list is empty (new / not yet
 // indexed): search returns { pairs: [...] } — take the deepest pair on chain.
 async function fetchDexScreenerSearch(chainId, address) {
+  // The search endpoint is GLOBAL, so for a chain with no index (testnet)
+  // it would surface MAINNET pairs whose address merely matches — which the
+  // same-chain filter below then discards anyway. Skipping the trip gives the
+  // identical answer (null) with no chance of a same-address impostor ever
+  // reaching the sort, and no request every refresh for a token that can
+  // never be priced on this chain.
+  if (!chainMeta(chainId)?.dex) return null;
   const url = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(address)}`;
   const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error('DexScreener search ' + res.status);
@@ -420,7 +444,17 @@ async function fetchDexScreenerSearch(chainId, address) {
 
 async function fetchTokenPrices(chainId, addresses) {
   const meta = chainMeta(chainId);
-  if (!meta || !addresses.length) return {};
+  // A chain no token source indexes — a testnet (DexScreener answers [] for
+  // 11155111 and DefiLlama {} for sepolia keys, both verified live
+  // 2026-10-15) — skips BOTH hops. The batch would always come back empty and
+  // the llama retry would key `sepolia:<addr>` and always miss: one pointless
+  // request per refresh, forever. And the only fallbacks that DO answer for a
+  // testnet answer for the wrong chain — a mainnet contract sharing the
+  // address — which is the substitution this module refuses. The native coin
+  // keeps its price from a different column of the same row (binance), so the
+  // Total still fills; only token pricing, which has no honest source here,
+  // declines to guess.
+  if (!meta?.dex || !addresses.length) return {};
   const out = {};
   for (const chunk of tokenPriceChunks(addresses)) {
     try {
@@ -570,7 +604,11 @@ async function binanceKlines(symbol, days) {
 // keyless; only the capped one (ohlcv) rides the cooldown.
 async function geckoTerminalKlines(chainId, address, days) {
   const meta = chainMeta(chainId);
-  if (!meta || !address) return [];
+  // `!meta.gt`: a chain GeckoTerminal does not host (sepolia — checked live
+  // 2026-10-15) carries null on purpose. Without this the URL below would be
+  // built as `networks/null/tokens/…` — a guaranteed 404 charged against the
+  // capped host on every chart open, where [] is the honest answer anyway.
+  if (!meta || !meta.gt || !address) return [];
   // BOTH GeckoTerminal calls ride the capped path: the whole host is limited
   // (30/min), and a network failure here must open the cooldown or every
   // page load re-runs the failing walk (the storm this module was built for).

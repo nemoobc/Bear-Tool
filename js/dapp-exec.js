@@ -74,6 +74,32 @@ export function splitSignParams(params) {
   return { message: a, address: b };
 }
 
+// EIP-712 arrives in BOTH orders — [address, typedData] (the convention real
+// dApps send; the emulator's own fixture does, with the stand-in address
+// "0x0") and [typedData, address] (legacy). splitSignParams CANNOT pick the
+// side here: its 40-hex address rule rejects short addresses, so "0x0" was
+// read AS the payload, JSON.parse('0x0') threw, and the wallet answered 32602
+// without ever showing the sheet — the emulator gate failed on exactly this
+// ("typed-data sheet never appeared", run 38726524114) after a fix that had
+// only swapped which function did the picking.
+//
+// The discriminator is STRUCTURAL, not a length: the payload is an object, or
+// a string holding a JSON object; an address is a bare hex token. Nothing else
+// in this request can look like either. (MetaMask picks the side the same way.)
+export function splitTypedParams(params) {
+  const list = Array.isArray(params) ? params : [];
+  const isPayload = (v) => (v && typeof v === 'object')
+    || (typeof v === 'string' && /^\s*\{/.test(v));
+  const at = list.findIndex(isPayload);
+  if (at >= 0) {
+    const rest = list.filter((_, i) => i !== at);
+    return { typed: list[at], address: rest.length ? rest[0] : undefined };
+  }
+  // Nothing recognizable: assume the spec order and let the parse decide —
+  // its 32602 names the real problem, where a guess here would only hide it.
+  return { typed: list[1] !== undefined ? list[1] : list[0], address: list[0] };
+}
+
 function requireSigner() {
   const signer = get('signer');
   if (!signer || typeof signer.signMessage !== 'function') {
@@ -219,10 +245,13 @@ export async function executeLocal({ method, params = [], origin = '', activateN
     case 'eth_signTypedData_v3':
     case 'eth_signTypedData_v4': {
       const signer = requireSigner();
-      const { message: raw, address } = splitSignParams(params);
+      // splitTypedParams, NOT splitSignParams: the payload must be found by
+      // shape (object / JSON string), or a short stand-in address like "0x0"
+      // is read as the payload and the request dies unparseable.
+      const { typed, address } = splitTypedParams(params);
       requireAddressMatch(address);
-      if (raw == null) throw err(32602, 'Expected [typedData, address].');
-      const { domain, types, message } = typedParts(parseTyped(raw));
+      if (typed == null) throw err(32602, 'Expected [typedData, address].');
+      const { domain, types, message } = typedParts(parseTyped(typed));
       return { done: true, value: await signer.signTypedData(domain, types, message) };
     }
 

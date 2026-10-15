@@ -38,7 +38,7 @@ import { renderDex } from './dex/index.js';
 // that panel had to be rewritten to say the checks are not applied.
 import { scanTransaction } from './security.js';
 import { createProvider, announceLock, announceAccounts, disconnectOrigin, PROVIDER_FLAG } from './dapp-bridge.js';
-import { executeLocal, currentChainId, splitSignParams } from './dapp-exec.js';
+import { executeLocal, currentChainId, splitSignParams, splitTypedParams } from './dapp-exec.js';
 import { renderSignMessage, safeJson } from './sign-render.js';
 import { siteAllowed } from './dapp-sessions.js';
 import { startUpdateGuard } from './update-guard.js';
@@ -782,14 +782,15 @@ function describeSignCall(method, params) {
       const { message } = splitSignParams(params);
       rows.push({ k: t('cf.message'), v: renderSignMessage(message) });
     } else if (String(method).startsWith('eth_signTypedData')) {
-      // The SAME split the signer uses, exactly as the personal_sign branch
-      // above: params arrive as [typedData, address] OR [address, typedData],
-      // and `params[1] ?? params[0]` handed back the ADDRESS for the legacy
-      // order — the dialog showed a 0x…40 hex string as "typed data" while
-      // executeLocal signed the real payload, so a user could approve a Permit
-      // they had never seen. splitSignParams is the one function that knows
-      // both orders (dapp-exec.js, also used by the signer at line ~189).
-      const p = splitSignParams(params).message;
+      // The SAME split the signer uses — splitTypedParams, which finds the
+      // payload by SHAPE (object / JSON string), not by address length. The
+      // old `params[1] ?? params[0]` handed back the ADDRESS under the legacy
+      // order (the dialog showed a hex string as "typed data" while the real
+      // payload was signed), and a40-hex address rule fails stand-in addresses
+      // like "0x0" — the fixture's own order — taking the ADDRESS as the
+      // payload and describing nothing. Display must cover exactly what
+      // executeLocal signs (dapp-exec.js, same function).
+      const p = splitTypedParams(params).typed;
       rows.push({ k: t('cf.typed.data'), v: safeJson(p ?? {}) });
     } else {
       const p = Array.isArray(params) ? (params[0] || {}) : {};

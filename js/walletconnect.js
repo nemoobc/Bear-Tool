@@ -30,7 +30,7 @@ import { getNetworkById, getNetwork } from './network.js';
 // broadcast actually goes out on. This path re-implemented each by hand and
 // disagreed with the others about what was even signable — see the branches
 // below.
-import { splitSignParams, parseTyped, typedParts, providerOnCurrentChain } from './dapp-exec.js';
+import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain } from './dapp-exec.js';
 
 export const WC_PROJECT_ID =
   (import.meta.env && import.meta.env.VITE_WC_PROJECT_ID) || '99909bde486039e2102663b92be74974';
@@ -366,11 +366,13 @@ async function handleRequest({ id, topic, params }) {
   }
 
   if (method === 'eth_signTypedData_v4') {
-    // BOTH param orders again: the legacy [typedData, address] puts the
-    // ADDRESS in params[1], which is exactly where this used to look — so the
-    // parse below silently failed and produced {}.
-    const { message: raw } = splitSignParams(params.request.params || []);
-    if (raw == null) {
+    // BOTH orders — [address, typedData] (the convention real dApps send) and
+    // the legacy [typedData, address]. splitTypedParams finds the payload by
+    // SHAPE (object / JSON string), never by address length: a40-hex rule
+    // rejects stand-in addresses like "0x0", reads them as the payload, and
+    // the parse below dies — the wallet answers 32602 with no sheet at all.
+    const { typed } = splitTypedParams(params.request.params || []);
+    if (typed == null) {
       return respondError(topic, id, { code: 32602, message: 'Expected [typedData, address].' });
     }
     // parseTyped/typedParts THROW 32602 on anything that cannot be signed —
@@ -382,7 +384,7 @@ async function handleRequest({ id, topic, params }) {
     // native paths, so all three accept and refuse identical payloads.
     let parsed, domain, types, message;
     try {
-      parsed = parseTyped(raw);
+      parsed = parseTyped(typed);
       ({ domain, types, message } = typedParts(parsed));
     } catch (e) {
       return respondError(topic, id, { code: (e && e.code) || 32602, message: (e && e.message) || String(e) });
