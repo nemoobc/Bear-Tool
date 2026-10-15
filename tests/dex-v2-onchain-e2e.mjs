@@ -380,6 +380,56 @@ try {
     && BigInt(rEnd[0]) === BigInt(rAfter[0]) - qSell.amountOut
     && BigInt(rEnd[1]) === BigInt(rAfter[1]) + sellAmt,
     `reserves ${rAfter} -> ${rEnd}`);
+
+  // --- the app's liquidity path (js/dex/lp.js) on the live pool ---
+  // Same discipline as the swap path: the previews are pure, and they must
+  // equal what the pair actually mints and burns, to the wei. The trader here
+  // is a plain wallet with a small token bag, so the deposit is small enough
+  // to pass on both sides — the math is scale-free.
+  const lpJs = await import('../js/dex/lp.js');
+  const lpSup0 = BigInt(await pool.totalSupply());
+  const lpAddQ = 2n * 10n ** 16n; // 0.02 quote
+  const lpAddT = (lpAddQ * BigInt(rEnd[1])) / BigInt(rEnd[0]); // the exact live ratio
+  const lpAddPrev = lpJs.addPreview({ quoteIn: lpAddQ, tokenIn: lpAddT, quoteReserve: BigInt(rEnd[0]), tokenReserve: BigInt(rEnd[1]), supply: lpSup0 });
+  check('addPreview predicts mintable shares on live reserves', lpAddPrev.ok === true, `reason=${lpAddPrev.reason || ''}`);
+  const lpShares0 = BigInt(await pool.balanceOf(traderAddr));
+  const lpRcAdd = await lpJs.addLiquidityTx({ pair: poolAddr, quoteToken: quoteAddr, token: tokenAddr, quoteAmount: lpAddQ, tokenAmount: lpAddT, minShares: lpAddPrev.minShares, signer: traderWallet });
+  const lpShares1 = BigInt(await pool.balanceOf(traderAddr));
+  const lpR = await pool.reserves();
+  check('addLiquidityTx mints exactly the preview (shares, both reserves, supply)',
+    Boolean(lpRcAdd)
+    && lpShares1 - lpShares0 === lpAddPrev.shares
+    && BigInt(lpR[0]) === BigInt(rEnd[0]) + lpAddQ
+    && BigInt(lpR[1]) === BigInt(rEnd[1]) + lpAddT
+    && BigInt(await pool.totalSupply()) === lpSup0 + lpAddPrev.shares,
+    `shares +${lpShares1 - lpShares0} vs preview ${lpAddPrev.shares}`);
+
+  const lpRemSh = (lpShares1 - lpShares0) / 2n;
+  const lpSup1 = BigInt(await pool.totalSupply());
+  const lpRemPrev = lpJs.removePreview({ shares: lpRemSh, quoteReserve: BigInt(lpR[0]), tokenReserve: BigInt(lpR[1]), supply: lpSup1 });
+  const lpQb = await quote.balanceOf(traderAddr);
+  const lpTb = await token.balanceOf(traderAddr);
+  const lpRcRem = await lpJs.removeLiquidityTx({ pair: poolAddr, shares: lpRemSh, minQuote: lpRemPrev.minQuote, minToken: lpRemPrev.minToken, signer: traderWallet });
+  const lpR2 = await pool.reserves();
+  check('removeLiquidityTx burns exactly the preview (shares, both payouts, supply)',
+    Boolean(lpRcRem)
+    && (await quote.balanceOf(traderAddr)) - lpQb === lpRemPrev.quoteOut
+    && (await token.balanceOf(traderAddr)) - lpTb === lpRemPrev.tokenOut
+    && BigInt(lpR2[0]) === BigInt(lpR[0]) - lpRemPrev.quoteOut
+    && BigInt(lpR2[1]) === BigInt(lpR[1]) - lpRemPrev.tokenOut
+    && BigInt(await pool.totalSupply()) === lpSup1 - lpRemSh,
+    `out ${lpRemPrev.quoteOut}/${lpRemPrev.tokenOut}`);
+
+  // Lock: the remaining shares go under a real lock, and the CONTRACT — not
+  // the UI — is what refuses the exit while it runs.
+  const lpLockRc = await lpJs.lockSharesTx({ pair: poolAddr, durationSecs: 60, signer: traderWallet });
+  const lpLockNow = BigInt(await pool.lockedUntil(traderAddr));
+  const lpWallNow = BigInt(Math.floor(Date.now() / 1000));
+  check('lockSharesTx sets lockedUntil into the future', Boolean(lpLockRc) && lpLockNow >= lpWallNow + 55n, `lock=${lpLockNow} now=${lpWallNow}`);
+  const lockedMove = await refusal(() => pool.connect(trader).transfer(outsiderAddr, 1n));
+  check('a locked LP cannot move shares until the lock expires', lockedMove.rejected && /locked/.test(lockedMove.text), lockedMove.text.slice(0, 120));
+  const lockedExit = await refusal(() => pool.connect(trader).removeLiquidity(1n, 0n, 0n));
+  check('and cannot pull liquidity out either', lockedExit.rejected && /locked/.test(lockedExit.text), lockedExit.text.slice(0, 120));
 } catch (e) {
   failures++;
   console.error('  ERROR', e && (e.shortMessage || e.message) || String(e));

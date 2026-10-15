@@ -288,7 +288,9 @@ Bear-Tool/
 │   │   ├── pools.js    # v2 discovery: the factory's Launched/PoolCreated logs → pool rows + metadata cache
 │   │   ├── pool-data.js # v2 shared reads: reserves (quote first), token info/decimals, LP position + lock, allowance
 │   │   ├── swap.js     # v2 Swap: engine (exact parse, contract-floor quotes, approve→swap tx) + the panel
-│   │   └── pool-list.js # v2 Pools panel: live reserves + price per pool, opens the Swap tab
+│   │   ├── pool-list.js # v2 Pools panel: live reserves + price per pool, opens the Swap tab
+│   │   ├── lp.js       # v2 Liquidity panel: add / remove / lock the pair's LP shares
+│   │   └── portfolio.js # v2 Portfolio panel: LP positions + token balances, read live
 │   ├── sign-render.js  # how a signing payload is SHOWN: hex→text, binary labelled, bidi chars stripped (one copy, three sheets)
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder

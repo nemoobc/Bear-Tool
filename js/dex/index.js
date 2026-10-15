@@ -31,6 +31,8 @@ import { tokensHtml, bindTokens, refreshFeed } from './tokens.js';
 import { tokenTradeHtml, bindTokenTrade } from './trade.js';
 import { swapHtml, bindSwap } from './swap.js';
 import { poolsHtml, bindPools } from './pool-list.js';
+import { lpHtml, bindLp } from './lp.js';
+import { portfolioHtml, bindPortfolio } from './portfolio.js';
 import {
   DEX_NETWORK_ID, DEX_CHAIN_ID, dexChainOk,
   provider,
@@ -42,11 +44,11 @@ import {
 // twice.
 export { DEX_CHAIN_ID, DEX_NETWORK_ID, dexChainOk };
 
-// The Dex's navigation. The nav carries feed / swap / pools — the v2 surfaces
-// with a panel of their own; 'create' is a route you reach from the feed's
-// launch button. A coin's own page hangs off the feed: you reach it by tapping
-// a coin.
-export const DEX_ROUTES = ['feed', 'swap', 'pools', 'create'];
+// The Dex's navigation. The nav carries feed / swap / pools / liquidity /
+// portfolio — the v2 surfaces with a panel of their own; 'create' is a route
+// you reach from the feed's launch button. A coin's own page hangs off the
+// feed: you reach it by tapping a coin.
+export const DEX_ROUTES = ['feed', 'swap', 'pools', 'liquidity', 'portfolio', 'create'];
 
 // ── the view ───────────────────────────────────────────────────
 let bound = false;
@@ -75,6 +77,8 @@ export function renderDex(root, opts = {}) {
           <button type="button" class="dex-tab" data-dex-tab="feed" aria-pressed="true"></button>
           <button type="button" class="dex-tab" data-dex-tab="swap" aria-pressed="false"></button>
           <button type="button" class="dex-tab" data-dex-tab="pools" aria-pressed="false"></button>
+          <button type="button" class="dex-tab" data-dex-tab="liquidity" aria-pressed="false"></button>
+          <button type="button" class="dex-tab" data-dex-tab="portfolio" aria-pressed="false"></button>
         </nav>
         <div id="dexPanelHost" class="dex-panel"></div>
       </div>
@@ -182,6 +186,8 @@ export function renderPanel() {
   const route = get('dex.route');
   if (route === 'swap') { paintNav('swap'); renderSwap(host); return; }
   if (route === 'pools') { paintNav('pools'); renderPools(host); return; }
+  if (route === 'liquidity') { paintNav('liquidity'); renderLiquidity(host); return; }
+  if (route === 'portfolio') { paintNav('portfolio'); renderPortfolio(host); return; }
   if (route === 'create') { paintNav(null); renderCreate(host); return; }
   paintNav('feed');
   renderFeed(host);
@@ -289,6 +295,21 @@ function renderPools(host) {
   // A pool row's one action is "swap this token": remember the pick and hop
   // to the Swap tab — the same tab the user could have chosen directly.
   bindPools(host, (address) => { set('dex.swapToken', address); go('swap'); });
+}
+
+function renderLiquidity(host) {
+  host.innerHTML = lpHtml();
+  bindLp(host);
+}
+
+function renderPortfolio(host) {
+  host.innerHTML = portfolioHtml();
+  // The portfolio is a mirror — its two actions hand off to the panels that
+  // own the real work (LP management, swapping), with the pool preselected.
+  bindPortfolio(host, {
+    onManageLp: (address) => { set('dex.lpToken', address); go('liquidity'); },
+    onSwap: (address) => { set('dex.swapToken', address); go('swap'); },
+  });
 }
 
 // A coin's own page. The address is resolved against what this wallet actually

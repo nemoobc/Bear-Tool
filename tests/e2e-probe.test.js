@@ -492,6 +492,13 @@ const dynamicSkip = new Set([
   // them depends on live chain reads.
   'dexNav','dexSwapPool','dexSwapAmount','dexSwapMax','dexSwapBal','dexSwapQuote','dexSwapGo','dexSwapNote',
   'dexPoolsList','dexPoolsNote',
+  // Dex v2 Liquidity + Portfolio panels (M3d): every control is painted by
+  // js/dex/lp.js / js/dex/portfolio.js — their contents depend on which pool
+  // is picked and what the chain says it holds.
+  'dexLpPool','dexLpPosition','dexLpQuoteLabel','dexLpQuoteIn','dexLpTokenLabel','dexLpTokenIn',
+  'dexLpAddPreview','dexLpAddGo','dexLpShares','dexLpMax','dexLpRemovePreview','dexLpRemoveGo',
+  'dexLpLockDur','dexLpLockGo','dexLpNote',
+  'dexPfLpHdr','dexPfLp','dexPfTokenHdr','dexPfTokens','dexPfNote',
 
 ]);
 

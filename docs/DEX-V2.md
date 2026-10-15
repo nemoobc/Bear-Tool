@@ -114,7 +114,7 @@ SISA    : testnet-only → dana nyata minim; audit pihak ketiga = non-goal v1 (d
 | M3a ✅ | `pool-data.js` (lapisan baca bersama v2: poolState/tokenInfo/lpPosition/allowanceOf — found/found-none/gagal) + 5 unit + e2e +6 check (49/49) | `node --test tests/dex-pool-data.test.js` |
 | M3b ✅ | `swap.js` engine (parseAmount eksak, swapQuote floor-kontrak urutan-reserve terpin dua arah, swapTx, ensureAllowanceTx menanya chain) + 4 unit angka-tangan + e2e +6 jalur app (55/55) | `node --test tests/dex-swap.test.js` |
 | M3c ✅ | Nav v2 di index.js (feed/swap/pools, DEX_ROUTES 4) + panel Swap (`swapHtml`/`bindSwap`) + panel Pools (`pool-list.js`) + i18n 31 key ×2 bahasa + CSS nav/pool-card; view 22/22, interaction 11/11 jsdom, npm test 1652 pass/0 fail, check 290 (2026-10-15) | `node --test tests/dex-view.test.js tests/dex-interaction.test.js` |
-| M3d | Liquidity + Portfolio UI | unit/view hijau |
+| M3d ✅ | Panel Liquidity (`lp.js`: add/remove/lock — preview = aturan mint/burn kontrak, tx approve-pintar dua sisi) + panel Portfolio (`portfolio.js`: posisi LP + saldo token live) + 4 unit angka-tangan (`tests/dex-lp.test.js`) + e2e jalur app +6 check (61/61); view 22/22 (6 rute), interaction 13/13, npm test 1661 (1658 pass / 0 fail), check 293 (2026-10-15) | `node --test tests/dex-lp.test.js` |
 | M4 | Launch wizard + token page (chart/tape) + i18n | unit/view hijau |
 | M5 | Bot adaptasi + feed/delete/tombstone | unit hijau |
 | M6 | E2E latih: anvil + emulator + playwright | CI [gate] pass=true |

@@ -157,16 +157,20 @@ test('ONE engine: the old V2 layer stays dead — the v2 surfaces ride the pool 
   // stranded: the router imports both panels and renders their shells.
   assert.match(dexJs, /from '\.\/swap\.js';/, 'the Swap panel must be imported by the router');
   assert.match(dexJs, /from '\.\/pool-list\.js';/, 'the Pools panel must be imported by the router');
+  assert.match(dexJs, /from '\.\/lp\.js';/, 'the Liquidity panel must be imported by the router');
+  assert.match(dexJs, /from '\.\/portfolio\.js';/, 'the Portfolio panel must be imported by the router');
   assert.match(dexJs, /swapHtml\(\)/, 'the router must render the Swap shell');
   assert.match(dexJs, /poolsHtml\(\)/, 'the router must render the Pools shell');
+  assert.match(dexJs, /lpHtml\(\)/, 'the router must render the Liquidity shell');
+  assert.match(dexJs, /portfolioHtml\(\)/, 'the router must render the Portfolio shell');
 });
 
 test('the nav carries ONLY the v2 destinations — feed, swap, pools', () => {
-  assert.deepEqual(dex.DEX_ROUTES, ['feed', 'swap', 'pools', 'create'],
-    'browse pools, swap against one, read them, or launch a coin — nothing else');
+  assert.deepEqual(dex.DEX_ROUTES, ['feed', 'swap', 'pools', 'liquidity', 'portfolio', 'create'],
+    'the v2 surfaces plus launch — browse, swap, read pools, give liquidity, check the wallet, launch');
   assert.ok(!dexJs.includes('dexTabs'), 'the OLD tab strip id must stay dead — the v2 nav has its own');
   const tabs = [...dexJs.matchAll(/data-dex-tab="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(tabs, ['feed', 'swap', 'pools'],
+  assert.deepEqual(tabs, ['feed', 'swap', 'pools', 'liquidity', 'portfolio'],
     'the nav buttons are exactly the panels that exist; Launch stays a feed action');
   for (const tab of tabs) {
     assert.ok(dex.DEX_ROUTES.includes(tab), `${tab} must resolve to a real route`);

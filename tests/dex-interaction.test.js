@@ -6,9 +6,9 @@
 // renders its own live controls.
 //
 // UPDATED for the Dex v2 rebuild (2026-10-15, docs/DEX-V2.md): the nav carries
-// the v2 surfaces (feed / swap / pools — one pool engine), and this gate walks
-// them in jsdom. Every panel must be a real control, and every panel must
-// speak honestly when it cannot read the chain.
+// the v2 surfaces (feed / swap / pools / liquidity / portfolio — one pool
+// engine), and this gate walks them in jsdom. Every panel must be a real
+// control, and every panel must speak honestly when it cannot read the chain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -70,7 +70,8 @@ test('Start here reveals the workspace with the v2 nav — feed, swap, pools', a
 
   // The nav is the navigation now, and it carries only real destinations.
   const tabs = [...window.document.querySelectorAll('[data-dex-tab]')].map((b) => b.dataset.dexTab);
-  assert.deepEqual(tabs, ['feed', 'swap', 'pools'], 'the nav is the feed plus the two pool surfaces');
+  assert.deepEqual(tabs, ['feed', 'swap', 'pools', 'liquidity', 'portfolio'],
+    'the nav is the feed plus the four v2 surfaces');
   assert.equal($('[data-dex-tab="feed"]').getAttribute('aria-pressed'), 'true',
     'the feed is the active tab at home');
 
@@ -114,6 +115,30 @@ test('the Pools tab renders the pool list shell, and the nav returns to the feed
   assert.ok($('#dexPoolsList'), 'the pools tab must carry the list container');
   assert.ok($('#dexPoolsNote').textContent.trim().length > 0,
     'with no chain, the list must say why it is empty');
+
+  await click($('[data-dex-tab="feed"]'));
+  assert.equal(state.get('dex.route'), 'feed', 'the nav must be able to return to the feed');
+});
+
+test('the Liquidity tab renders the add/remove/lock controls, honestly gated', async () => {
+  await click($('[data-dex-tab="liquidity"]'));
+  assert.equal(state.get('dex.route'), 'liquidity');
+  for (const id of ['dexLpPool', 'dexLpQuoteIn', 'dexLpTokenIn', 'dexLpAddGo', 'dexLpShares',
+    'dexLpMax', 'dexLpRemoveGo', 'dexLpLockDur', 'dexLpLockGo', 'dexLpNote']) {
+    assert.ok($(`#${id}`), `the liquidity tab must carry #${id}`);
+  }
+  // No provider in this gate: the panel must SAY it cannot read — never zeros.
+  assert.ok($('#dexLpNote').textContent.trim().length > 0,
+    'the liquidity tab must explain its empty state');
+});
+
+test('the Portfolio tab renders its containers, then the nav returns to the feed', async () => {
+  await click($('[data-dex-tab="portfolio"]'));
+  assert.equal(state.get('dex.route'), 'portfolio');
+  assert.ok($('#dexPfLp'), 'portfolio must carry the LP container');
+  assert.ok($('#dexPfTokens'), 'portfolio must carry the tokens container');
+  assert.ok($('#dexPfNote').textContent.trim().length > 0,
+    'with no chain, the portfolio must say why it is empty');
 
   await click($('[data-dex-tab="feed"]'));
   assert.equal(state.get('dex.route'), 'feed', 'the nav must be able to return to the feed');
