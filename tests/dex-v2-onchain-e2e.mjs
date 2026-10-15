@@ -337,6 +337,49 @@ try {
   const psBad = await poolData.poolState('0x0000000000000000000000000000000000000000');
   check('a pool that is not there refuses instead of showing zeros',
     psBad.ok === false && Boolean(psBad.reason), `ok=${psBad.ok}`);
+
+  // --- the app's swap path (js/dex/swap.js) on the live pool ---
+  // Deterministic: zero the trader's allowance first, so "approve exactly the
+  // trade" is tested from a known chain state, not from leftovers of the M1
+  // checks above. The state signer is a Wallet — the shape the app fills.
+  const swapJs = await import('../js/dex/swap.js');
+  const traderWallet = new ethers.Wallet('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d', provider);
+  await (await quote.connect(trader).approve(poolAddr, 0)).wait();
+
+  const buyAmt = 5n * V;
+  const appr = await swapJs.ensureAllowanceTx({ token: quoteAddr, spender: poolAddr, amount: buyAmt, owner: traderAddr, signer: traderWallet });
+  check('ensureAllowanceTx approves exactly the amount when the chain says there is none',
+    appr.ok && appr.approved === true, JSON.stringify(appr));
+  const again = await swapJs.ensureAllowanceTx({ token: quoteAddr, spender: poolAddr, amount: buyAmt, owner: traderAddr, signer: traderWallet });
+  const allowNow = await quote.allowance(traderAddr, poolAddr);
+  check('and does NOT approve again when the allowance is already there (asked, not assumed)',
+    again.ok && again.approved === false && BigInt(allowNow) === buyAmt, `approved=${again.approved} allow=${allowNow}`);
+
+  const rBefore = await pool.reserves();
+  const qBuy = swapJs.swapQuote({ quoteReserve: BigInt(rBefore[0]), tokenReserve: BigInt(rBefore[1]), direction: 'buy', amountIn: buyAmt });
+  check('the engine quotes the live pool', qBuy.ok === true, `reason=${qBuy.reason || ''}`);
+  const tokBefore = await token.balanceOf(traderAddr);
+  const rcBuy = await swapJs.swapTx({ pair: poolAddr, direction: 'buy', amountIn: buyAmt, minOut: qBuy.minOut, signer: traderWallet });
+  const rAfter = await pool.reserves();
+  const tokAfter = await token.balanceOf(traderAddr);
+  check('swapTx(buy) moves the reserves by exactly the input, and out by exactly the quote',
+    Boolean(rcBuy) && BigInt(rAfter[0]) === BigInt(rBefore[0]) + buyAmt
+    && BigInt(rAfter[1]) === BigInt(rBefore[1]) - qBuy.amountOut,
+    `reserves ${rBefore} -> ${rAfter}`);
+  check('…and the trader holds exactly the quoted output', tokAfter - tokBefore === qBuy.amountOut);
+
+  // Sell half of it straight back — the other direction, same path.
+  const sellAmt = qBuy.amountOut / 2n;
+  const qSell = swapJs.swapQuote({ quoteReserve: BigInt(rAfter[0]), tokenReserve: BigInt(rAfter[1]), direction: 'sell', amountIn: sellAmt });
+  await (await token.connect(trader).approve(poolAddr, 0)).wait();
+  const sellAppr = await swapJs.ensureAllowanceTx({ token: tokenAddr, spender: poolAddr, amount: sellAmt, owner: traderAddr, signer: traderWallet });
+  const rcSell = await swapJs.swapTx({ pair: poolAddr, direction: 'sell', amountIn: sellAmt, minOut: qSell.minOut, signer: traderWallet });
+  const rEnd = await pool.reserves();
+  check('swapTx(sell) mirrors it: quote out by the quote, token back by the input',
+    sellAppr.ok && Boolean(rcSell)
+    && BigInt(rEnd[0]) === BigInt(rAfter[0]) - qSell.amountOut
+    && BigInt(rEnd[1]) === BigInt(rAfter[1]) + sellAmt,
+    `reserves ${rAfter} -> ${rEnd}`);
 } catch (e) {
   failures++;
   console.error('  ERROR', e && (e.shortMessage || e.message) || String(e));

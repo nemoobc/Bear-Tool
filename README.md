@@ -286,7 +286,8 @@ Bear-Tool/
 │   │   ├── pool-math.js # v2 pool math offchain: constant-product outputs, price, LP shares, slippage (BearPair's mirror)
 │   │   ├── factory.js  # v2 factory per chain: deploy (compile → tx), remembered; ONE source for its address
 │   │   ├── pools.js    # v2 discovery: the factory's Launched/PoolCreated logs → pool rows + metadata cache
-│   │   └── pool-data.js # v2 shared reads: reserves (quote first), token info/decimals, LP position + lock, allowance
+│   │   ├── pool-data.js # v2 shared reads: reserves (quote first), token info/decimals, LP position + lock, allowance
+│   │   └── swap.js     # v2 swap engine: exact amount parsing, contract-floor quotes, approve-if-needed → swap tx
 │   ├── sign-render.js  # how a signing payload is SHOWN: hex→text, binary labelled, bidi chars stripped (one copy, three sheets)
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder

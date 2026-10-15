@@ -34,7 +34,7 @@ test('every Dex module is actually imported by another module', () => {
   // losing that proof turns the gate red in the same commit. When a v2 panel
   // starts importing one, delete its line.
   const v2Harness = 'tests/dex-v2-onchain-e2e.mjs';
-  const v2PreUi = ['pool-math.js', 'pools.js', 'pool-data.js'];
+  const v2PreUi = ['pool-math.js', 'pools.js', 'pool-data.js', 'swap.js'];
   for (const { f, src } of allDex) {
     const isEntry = ['index.js', 'pump-source.js'].includes(f);
     if (isEntry) continue;
