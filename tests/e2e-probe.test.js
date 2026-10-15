@@ -499,6 +499,12 @@ const dynamicSkip = new Set([
   'dexLpAddPreview','dexLpAddGo','dexLpShares','dexLpMax','dexLpRemovePreview','dexLpRemoveGo',
   'dexLpLockDur','dexLpLockGo','dexLpNote',
   'dexPfLpHdr','dexPfLp','dexPfTokenHdr','dexPfTokens','dexPfNote',
+  // Dex v2 launch wizard + token page (M4): painted by js/dex/launch.js and
+  // js/dex/token-page.js.
+  'dexLaunchDeployFactory','dexLaunchSupply','dexLaunchTokens','dexLaunchQuoteLabel','dexLaunchQuoteIn',
+  'dexLaunchLock','dexLaunchPreview',
+  'dexTpBack','dexTpImg','dexTpImgEmpty','dexTpName','dexTpDesc','dexTpPrice','dexTpReserves','dexTpMy',
+  'dexTpSwap','dexTpLp','dexTpNote',
 
 ]);
 

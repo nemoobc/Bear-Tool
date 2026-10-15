@@ -430,6 +430,43 @@ try {
   check('a locked LP cannot move shares until the lock expires', lockedMove.rejected && /locked/.test(lockedMove.text), lockedMove.text.slice(0, 120));
   const lockedExit = await refusal(() => pool.connect(trader).removeLiquidity(1n, 0n, 0n));
   check('and cannot pull liquidity out either', lockedExit.rejected && /locked/.test(lockedExit.text), lockedExit.text.slice(0, 120));
+
+  // --- the app's launch path (js/dex/launch.js): ONE call, one tx ---
+  // The wizard's whole tx flow lives in launchTx(): approve the quote if the
+  // chain says so, then factory.launch, then read the token back out of the
+  // Launched event — never assumed. This proves the exact path the button
+  // runs, with the wizard's own signer shape (a plain wallet).
+  const launchJs = await import('../js/dex/launch.js');
+  const creatorWallet = new ethers.Wallet('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', provider);
+  const creatorWalletAddr = await creatorWallet.getAddress();
+  const appLock = 90n * 86400n;
+  const appRes = await launchJs.launchTx({
+    name: 'App Bear', symbol: 'APB', image: '', description: 'via the app path',
+    supply: SUPPLY, quote: quoteAddr, tokensForPool: 600_000n * V, quoteForPool: 3n * V,
+    lockDuration: appLock, signer: creatorWallet,
+  });
+  check('launchTx succeeds and returns the token read from the receipt',
+    appRes.ok && /^0x[0-9a-fA-F]{40}$/.test(String(appRes.token)), `ok=${appRes.ok} token=${appRes.token}`);
+
+  const appToken = new ethers.Contract(appRes.token, bear.token.abi, provider);
+  const appPoolAddr = await factory.pairFor(appRes.token);
+  const appPool = new ethers.Contract(appPoolAddr, bear.pair.abi, provider);
+  check('the one call seated the pool exactly as asked',
+    BigInt(await quote.balanceOf(appPoolAddr)) === 3n * V
+    && BigInt(await appToken.balanceOf(appPoolAddr)) === 600_000n * V,
+    `quote=${await quote.balanceOf(appPoolAddr)} token=${await appToken.balanceOf(appPoolAddr)}`);
+  check('leftover supply went to the launch signer',
+    BigInt(await appToken.balanceOf(creatorWalletAddr)) === SUPPLY - 600_000n * V,
+    `kept=${await appToken.balanceOf(creatorWalletAddr)}`);
+  check('the creator LP arrived locked for the chosen duration',
+    BigInt(await appPool.lockedUntil(creatorWalletAddr)) >= BigInt(Math.floor(Date.now() / 1000)) + appLock - 60n,
+    `lock=${await appPool.lockedUntil(creatorWalletAddr)}`);
+  check('token metadata round-trips through the app path',
+    await appToken.name() === 'App Bear' && await appToken.symbol() === 'APB');
+  const discoApp = await (await import('../js/dex/pools.js')).discoverPools({ scope: 'all', limit: 10 });
+  check('discovery finds the app-launched pool too',
+    discoApp.ok && discoApp.pools.some((x) => x.address.toLowerCase() === appRes.token.toLowerCase()),
+    `ok=${discoApp.ok} found=${discoApp.pools.length}`);
 } catch (e) {
   failures++;
   console.error('  ERROR', e && (e.shortMessage || e.message) || String(e));

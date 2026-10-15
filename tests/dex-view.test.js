@@ -163,6 +163,10 @@ test('ONE engine: the old V2 layer stays dead — the v2 surfaces ride the pool 
   assert.match(dexJs, /poolsHtml\(\)/, 'the router must render the Pools shell');
   assert.match(dexJs, /lpHtml\(\)/, 'the router must render the Liquidity shell');
   assert.match(dexJs, /portfolioHtml\(\)/, 'the router must render the Portfolio shell');
+  assert.match(dexJs, /from '\.\/launch\.js';/, 'the launch wizard must be imported by the router');
+  assert.match(dexJs, /from '\.\/token-page\.js';/, 'the token page must be imported by the router');
+  assert.match(dexJs, /launchHtml\(\)/, 'the router must render the launch wizard shell');
+  assert.match(dexJs, /tokenPageHtml\(\)/, 'the router must render the token page shell');
 });
 
 test('the nav carries ONLY the v2 destinations — feed, swap, pools', () => {
@@ -305,7 +309,8 @@ test('the launchpad lives in one folder, and only that folder', () => {
   assert.ok(files.includes('pump-source.js'), 'js/dex/pump-source.js — the curve token contract');
   assert.ok(files.includes('tokens.js'), 'js/dex/tokens.js — the feed');
   assert.ok(files.includes('trade.js'), 'js/dex/trade.js — the coin page');
-  assert.ok(files.includes('create.js'), 'js/dex/create.js — the launch form');
+  assert.ok(files.includes('launch.js'), 'js/dex/launch.js — the launch wizard (one-tx factory.launch)');
+  assert.ok(files.includes('token-page.js'), 'js/dex/token-page.js — the v2 token page');
   assert.ok(files.includes('history.js'), 'js/dex/history.js — the trade tape the feed is missing');
 
   const siblingLaunchpad = existsSync(fileURLToPath(new URL('../js/launchpad', import.meta.url)));
@@ -350,40 +355,35 @@ test('a coin cannot be lost by refreshing the page', () => {
 });
 
 test('the launch form shows real progress and always releases its button', () => {
-  // (a) The button had no spinner while doing the longest job in the Dex —
-  //     solc over the network, then a deploy — which is what "no loading
-  //     animation" meant. (b) It managed its own disabled state, so one path
-  //     could leave it stuck forever.
-  const create = read('../js/dex/create.js');
-  assert.match(create, /withTxButton\(btn, t\('dex\.create\.sending'\)/,
+  // The launch is the longest job in the Dex (approve + one tx that deploys
+  // the token, the pool and the seed). The button must run through
+  // withTxButton like every other action, and nothing else may own its
+  // disabled state — two owners is how a button sticks.
+  const launch = read('../js/dex/launch.js');
+  assert.match(launch, /withTxButton\(btn, t\('dex\.create\.sending'\)/,
     'the launch button must run through withTxButton, like every other Dex action');
-  assert.ok(!/btn\.disabled = true/.test(create),
+  assert.ok(!/btn\.disabled = true/.test(launch),
     'the button state belongs to withTxButton alone — two owners is how it sticks');
-  assert.ok(!/btn\.disabled = false/.test(create),
+  assert.ok(!/btn\.disabled = false/.test(launch),
     'and nothing may re-enable it behind withTxButton\'s back');
-
-  // (c) A fee label that threw before the deploy ever started.
-  assert.ok(!/FEE_TOTAL_BPS \/ 100\b/.test(create),
-    'FEE_TOTAL_BPS is a BigInt; dividing it by a Number threw and killed the whole launch');
-  assert.match(create, /Number\(FEE_TOTAL_BPS\)/,
-    'the fee must be converted explicitly');
+  // The v2 path compiles NOTHING in the browser: the factory IS the deployer,
+  // so the old solc-in-the-browser failure mode cannot come back here.
+  assert.ok(!/compileContract/.test(launch),
+    'no browser-side compile belongs in the v2 launch path');
 });
 
 test('the launch waits for the transaction ethers actually gives it', () => {
-  // ethers v6 exposes the deploy tx as deploymentTransaction(). The old code
-  // read the PROPERTY deployTransaction, which is undefined — so waitForReceipt
-  // polled a transaction with no .wait() for the full 2-minute confirm timeout,
-  // then reported failure for a coin that was live on chain all along.
-  const create = read('../js/dex/create.js');
-  assert.match(create, /contract\.deploymentTransaction\(\)/,
-    'the deploy must be read through the v6 accessor');
-  assert.ok(!/waitForReceipt\(contract\.deployTransaction\b/.test(create),
-    'the undefined property must not come back');
-
-  // A confirm timeout is not proof of failure: ask the chain whether the code is
-  // there before telling the user their coin is gone.
-  assert.match(create, /provider\.getCode\(addr\)/,
-    'a timed-out confirm must be checked against the chain, not assumed dead');
+  // factory.launch deploys token + pool + seed + lock in a single tx; the
+  // token address comes back out of the Launched event on that receipt —
+  // parsed, never assumed. The pre-v6 deploy property must never return.
+  const launch = read('../js/dex/launch.js');
+  assert.match(launch, /c\.launch\(\[name, symbol, image, description\]/,
+    'the one launch call must carry the whole LaunchMeta tuple');
+  assert.match(launch, /sendDexTx\(/, 'the launch tx must ride the shared spine');
+  assert.match(launch, /parseLog\(log\)/, 'the token address must be parsed from the receipt logs');
+  assert.match(launch, /'Launched'/, 'and specifically from the Launched event');
+  assert.ok(!/deployTransaction\b/.test(launch),
+    'the undefined pre-v6 deploy property must not come back');
 });
 
 test('every contract read the coin page makes must exist in the ABI', () => {

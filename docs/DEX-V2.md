@@ -115,8 +115,8 @@ SISA    : testnet-only → dana nyata minim; audit pihak ketiga = non-goal v1 (d
 | M3b ✅ | `swap.js` engine (parseAmount eksak, swapQuote floor-kontrak urutan-reserve terpin dua arah, swapTx, ensureAllowanceTx menanya chain) + 4 unit angka-tangan + e2e +6 jalur app (55/55) | `node --test tests/dex-swap.test.js` |
 | M3c ✅ | Nav v2 di index.js (feed/swap/pools, DEX_ROUTES 4) + panel Swap (`swapHtml`/`bindSwap`) + panel Pools (`pool-list.js`) + i18n 31 key ×2 bahasa + CSS nav/pool-card; view 22/22, interaction 11/11 jsdom, npm test 1652 pass/0 fail, check 290 (2026-10-15) | `node --test tests/dex-view.test.js tests/dex-interaction.test.js` |
 | M3d ✅ | Panel Liquidity (`lp.js`: add/remove/lock — preview = aturan mint/burn kontrak, tx approve-pintar dua sisi) + panel Portfolio (`portfolio.js`: posisi LP + saldo token live) + 4 unit angka-tangan (`tests/dex-lp.test.js`) + e2e jalur app +6 check (61/61); view 22/22 (6 rute), interaction 13/13, npm test 1661 (1658 pass / 0 fail), check 293 (2026-10-15) | `node --test tests/dex-lp.test.js` |
-| M4 | Launch wizard + token page (chart/tape) + i18n | unit/view hijau |
-| M5 | Bot adaptasi + feed/delete/tombstone | unit hijau |
+| M4 ✅ | Wizard launch (`launch.js` pengganti `create.js` yang DIHAPUS: gambar→data-URI, `launchTx` = approve-hemat → **factory.launch SATU tx** → token dari event `Launched` receipt; tombol deploy-factory bila belum ada) + halaman token v2 (`token-page.js`: `poolOf` via `factory.pairFor`, face/harga/reserves/posisi live; route legacy tetap untuk token non-factory) + 14 key i18n ×2; e2e jalur `launchTx` +6 (**67/67**); view 22/22, interaction 13/13, wiring+i18n 22/22, npm test 1661 (1658 pass / 0 fail), check 294 (2026-10-15) | `node --test tests/dex-view.test.js` + `node tests/dex-v2-onchain-e2e.mjs` |
+| M5 | Bot adaptasi + feed/delete/tombstone + tape/chart pool (pindahan dari M4) | unit hijau |
 | M6 | E2E latih: anvil + emulator + playwright | CI [gate] pass=true |
 | M7 | Audit + red-team + verify penuh + APK | audit-full CLEAN, APK terkirim |
 

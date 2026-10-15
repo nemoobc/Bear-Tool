@@ -147,7 +147,8 @@ test('the Portfolio tab renders its containers, then the nav returns to the feed
 test('the launch button opens the create form, and Back returns to the feed', async () => {
   await click($('#dexGoCreate'));
   assert.equal(state.get('dex.route'), 'create', 'the launch button must route to create');
-  for (const id of ['dexCreateName', 'dexCreateSymbol', 'dexCreateGo']) {
+  for (const id of ['dexCreateName', 'dexCreateSymbol', 'dexCreateGo',
+    'dexLaunchSupply', 'dexLaunchTokens', 'dexLaunchQuoteIn', 'dexLaunchLock']) {
     assert.ok($(`#${id}`), `the launch form must carry #${id}`);
   }
   // The coin list must not still be underneath the form.

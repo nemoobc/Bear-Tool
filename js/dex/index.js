@@ -26,7 +26,8 @@
 //    price.
 //  - Everything is a real transaction. No simulation, no invented fills.
 // ═══════════════════════════════════════════════════════════════
-import { createHtml, bindCreate } from './create.js';
+import { launchHtml, bindLaunch } from './launch.js';
+import { poolOf, tokenPageHtml, bindTokenPage } from './token-page.js';
 import { tokensHtml, bindTokens, refreshFeed } from './tokens.js';
 import { tokenTradeHtml, bindTokenTrade } from './trade.js';
 import { swapHtml, bindSwap } from './swap.js';
@@ -182,7 +183,7 @@ export function renderPanel() {
   host.innerHTML = '';
 
   const coin = get('dex.tokenView');
-  if (coin) { paintNav('feed'); renderCoin(host, coin); return; }
+  if (coin) { paintNav('feed'); renderTokenView(host, coin); return; }
   const route = get('dex.route');
   if (route === 'swap') { paintNav('swap'); renderSwap(host); return; }
   if (route === 'pools') { paintNav('pools'); renderPools(host); return; }
@@ -248,11 +249,11 @@ function renderCreate(host) {
     <button type="button" class="btn btn-secondary btn-block mb-8" id="dexCreateBack">
       ← ${escapeHtml(t('dex.tokens.title'))}
     </button>
-    ${createHtml()}`;
+    ${launchHtml()}`;
   $('#dexCreateBack', host).addEventListener('click', () => go('feed'));
-  // A freshly launched coin IS a coin page — send the user straight to it
-  // instead of dropping them back on a feed they have to find it in.
-  bindCreate(host, (address) => { if (address) openCoin(address); });
+  // A freshly launched token IS a token page — send the user straight to it
+  // instead of dropping them back on a list they have to find it in.
+  bindLaunch(host, (address) => { if (address) openCoin(address); });
 }
 
 // ── the v2 surfaces ────────────────────────────────────────────
@@ -328,6 +329,25 @@ function renderCoin(host, address) {
   }
   host.innerHTML = tokenTradeHtml(token);
   bindTokenTrade(host, token, () => go('feed'));
+}
+
+// A tap on a token has two possible faces: a token the factory knows gets the
+// v2 page — its real pool, read live — and anything else keeps the legacy coin
+// view. The factory, not a local list, decides which; and the await is
+// guarded, so a slow read never paints over a page the user already left.
+async function renderTokenView(host, address) {
+  const pair = await poolOf(address);
+  if (get('dex.tokenView') !== address) return;
+  if (pair) {
+    host.innerHTML = tokenPageHtml();
+    bindTokenPage(host, address, pair, {
+      onBack: () => go('feed'),
+      onSwap: (a) => { set('dex.swapToken', a); go('swap'); },
+      onLp: (a) => { set('dex.lpToken', a); go('liquidity'); },
+    });
+  } else {
+    renderCoin(host, address);
+  }
 }
 
 // Resolves a coin address against the wallet's own launched list. Kept here so

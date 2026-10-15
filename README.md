@@ -273,7 +273,8 @@ Bear-Tool/
 │   │   ├── discover.js # finding those coins: one indexed Launched log per coin, chain-first, local only for the image
 │   │   ├── trade.js    # a coin's page: live curve state, chart + tape, buy()/sell(), creator claim/graduate
 │   │   ├── history.js  # the coin's trade tape: Bought/Sold logs → rows and OHLC candles
-│   │   ├── create.js   # the launch form (image upload → data URI, curve preview, compile+deploy)
+│   │   ├── launch.js   # the launch wizard: image → data URI, ONE factory.launch tx, token from receipt
+│   │   ├── token-page.js # v2 token page: face, price, reserves, positions — all read live
 │   │   ├── pump-source.js # the PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
 │   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over those same logs
 │   │   ├── list.js     # per-coin delisting: hide/restore a coin from your own feed, per chain, reversible
