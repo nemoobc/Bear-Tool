@@ -138,10 +138,10 @@ test('there is no pair, no pool, and no second ETH anywhere in the Dex', async (
     'the addresses live in core.js only');
 });
 
-test('the launchpad has ONE way to read a coin — swap/liquidity/mm panels are gone', () => {
-  for (const gone of ['panelSwap', 'panelLiquidity', 'panelMM', 'swapHtml', 'liquidityHtml', 'mmHtml', 'stopMM']) {
+test('ONE engine: the old V2 layer stays dead — the v2 surfaces ride the pool engine', () => {
+  for (const gone of ['panelSwap', 'panelLiquidity', 'panelMM', 'mmHtml', 'stopMM']) {
     assert.ok(!new RegExp(`\\b${gone}\\b`).test(dexJs),
-      `${gone} is back — the launchpad trades coins on their own curves, not through pools`);
+      `${gone} is back — the old V2-layer Dex is what the rebuild deleted`);
   }
   // The market maker was a swap loop, so it has nothing left to loop over.
   // Measured below the header: naming what was deleted is how the next reader
@@ -153,14 +153,25 @@ test('the launchpad has ONE way to read a coin — swap/liquidity/mm panels are 
   for (const gone of ['Swap', 'Liquidity', 'Market Maker', 'DEX_PAIRS']) {
     assert.ok(dexJs.includes(gone), `the header must still record that ${gone} was removed`);
   }
+  // The v2 surfaces ARE the product now — and they must be wired, not
+  // stranded: the router imports both panels and renders their shells.
+  assert.match(dexJs, /from '\.\/swap\.js';/, 'the Swap panel must be imported by the router');
+  assert.match(dexJs, /from '\.\/pool-list\.js';/, 'the Pools panel must be imported by the router');
+  assert.match(dexJs, /swapHtml\(\)/, 'the router must render the Swap shell');
+  assert.match(dexJs, /poolsHtml\(\)/, 'the router must render the Pools shell');
 });
 
-test('no tab strip: the feed and the coin page are the navigation', () => {
-  assert.deepEqual(dex.DEX_ROUTES, ['feed', 'create'],
-    'the launchpad has exactly two destinations — browse coins, or launch one');
-  assert.ok(!dexJs.includes('dexTabs'), 'the tab strip is back — there is nothing left for tabs to choose between');
-  assert.ok(!/data-dex-tab/.test(dexJs), 'tab buttons are back');
-  assert.ok(!/DEX_PANELS/.test(dexJs), 'DEX_PANELS is back — the five feature tabs are gone');
+test('the nav carries ONLY the v2 destinations — feed, swap, pools', () => {
+  assert.deepEqual(dex.DEX_ROUTES, ['feed', 'swap', 'pools', 'create'],
+    'browse pools, swap against one, read them, or launch a coin — nothing else');
+  assert.ok(!dexJs.includes('dexTabs'), 'the OLD tab strip id must stay dead — the v2 nav has its own');
+  const tabs = [...dexJs.matchAll(/data-dex-tab="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(tabs, ['feed', 'swap', 'pools'],
+    'the nav buttons are exactly the panels that exist; Launch stays a feed action');
+  for (const tab of tabs) {
+    assert.ok(dex.DEX_ROUTES.includes(tab), `${tab} must resolve to a real route`);
+  }
+  assert.ok(!/DEX_PANELS/.test(dexJs), 'DEX_PANELS is back — the five legacy tabs are gone');
   assert.equal(getComputedRouteDefault(), 'feed', 'the feed is home; the Dex must never open on a form');
 });
 

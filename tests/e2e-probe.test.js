@@ -486,6 +486,12 @@ const dynamicSkip = new Set([
   'dexWelcome','dexWelcomeTitle','dexWelcomeSub','dexStartHere','dexWorkspace',
   'dexGate','dexGateTitle','dexGateHow','dexGateGo','dexPairInfo',
   'dexTabs','dexPanelHost','dexMmStatus','dexSwapFrom',
+  // Dex v2 nav + panels (M3): the nav buttons are painted by renderDex's
+  // innerHTML and re-labelled per route; the Swap and Pools panels paint their
+  // own bodies (js/dex/swap.js, js/dex/pool-list.js) because every number in
+  // them depends on live chain reads.
+  'dexNav','dexSwapPool','dexSwapAmount','dexSwapMax','dexSwapBal','dexSwapQuote','dexSwapGo','dexSwapNote',
+  'dexPoolsList','dexPoolsNote',
 
 ]);
 

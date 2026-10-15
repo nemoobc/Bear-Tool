@@ -1,26 +1,23 @@
 // ═══════════════════════════════════════════════════════════════
 // Bear Tool — js/dex/index.js
-// The LAUNCHPAD.
+// The Dex, v2 — ONE engine: real-reserve pools.
 //
-// This is the pure-launchpad rebuild (user: "ambigu fitur dexnya, rombak ulang
-// semuanya" → "opsi 1"). The old Dex carried two trading engines at once —
-// Uniswap V2 pools (swap / liquidity / market maker) AND bonding-curve coins —
-// plus a global pair and a second "ETH" (the 0x8847 preset vs native Sepolia
-// ETH). Two ways to trade, no rule saying which, is what made it ambiguous.
+// The pure-launchpad rebuild deleted the old two-engine Dex (Uniswap V2 pools
+// plus bonding-curve coins, a global pair and a second "ETH"). Order
+// 2026-10-15 rebuilt it further, ORIGINAL from scratch: the curve is on its
+// way out and the pool came back as the ONE engine (BearToken / BearPair /
+// BearFactory, see docs/DEX-V2.md):
 //
-// The rebuild's whole job is to delete that ambiguity:
+//   Feed    → pools born from the factory (curve coins still show while the
+//             feed swaps over — M5 of the spec)
+//   Swap    → buy/sell against a pool; every number a live reserve read
+//   Pools   → reserves + price per pool, read from each pair
+//   Create  → launch: ONE transaction deploys the token + its pair, seeds it
+//             and locks the creator's LP
 //
-//   THE SUBJECT IS A TOKEN.  Not a pair, not a pool, not an engine.
-//   1 way to create it  → Create a coin
-//   1 way to trade it   → its own curve, ETH in / ETH out
-//   1 way to read it    → its own candle chart + trade tape, both from the
-//                         curve's events
-//
-// So there are no tabs, no pair picker, no V2 router, no pools, no market
-// maker. Three screens — the feed (home), a coin, and the launch form — and
-// nothing else. The Swap / Liquidity / Market Maker panels, the DEX_PAIRS
-// table, loadPair and chooseCoin are gone, not hidden: a feature that stays in
-// the file with nothing wired to it is just a second, broken way to trade.
+// The old V2-layer panels (Swap / Liquidity / Market Maker) and the DEX_PAIRS
+// table stay deleted — a second way to trade is exactly what made the old Dex
+// ambiguous. What lives here now is v2 code on the v2 engine.
 //
 // Rules that shape every line here:
 //  - Sepolia ONLY. Any other chain → the view says so and every action refuses.
@@ -32,6 +29,8 @@
 import { createHtml, bindCreate } from './create.js';
 import { tokensHtml, bindTokens, refreshFeed } from './tokens.js';
 import { tokenTradeHtml, bindTokenTrade } from './trade.js';
+import { swapHtml, bindSwap } from './swap.js';
+import { poolsHtml, bindPools } from './pool-list.js';
 import {
   DEX_NETWORK_ID, DEX_CHAIN_ID, dexChainOk,
   provider,
@@ -43,11 +42,11 @@ import {
 // twice.
 export { DEX_CHAIN_ID, DEX_NETWORK_ID, dexChainOk };
 
-// The launchpad's navigation. Two top-level destinations, because that is all
-// there is: browse the feed, or launch a coin. A coin's own page is a third
-// state, but it hangs off the feed — you reach it by tapping a coin, never by
-// hunting for a tab.
-export const DEX_ROUTES = ['feed', 'create'];
+// The Dex's navigation. The nav carries feed / swap / pools — the v2 surfaces
+// with a panel of their own; 'create' is a route you reach from the feed's
+// launch button. A coin's own page hangs off the feed: you reach it by tapping
+// a coin.
+export const DEX_ROUTES = ['feed', 'swap', 'pools', 'create'];
 
 // ── the view ───────────────────────────────────────────────────
 let bound = false;
@@ -72,11 +71,17 @@ export function renderDex(root, opts = {}) {
           <div class="small"><strong id="dexGateTitle"></strong> <span id="dexGateHow"></span></div>
           <button type="button" class="btn btn-primary mt-8" id="dexGateGo"></button>
         </div>
+        <nav id="dexNav" class="dex-nav mb-8" aria-label="">
+          <button type="button" class="dex-tab" data-dex-tab="feed" aria-pressed="true"></button>
+          <button type="button" class="dex-tab" data-dex-tab="swap" aria-pressed="false"></button>
+          <button type="button" class="dex-tab" data-dex-tab="pools" aria-pressed="false"></button>
+        </nav>
         <div id="dexPanelHost" class="dex-panel"></div>
       </div>
     `;
     paintStatic();
     bindWelcome();
+    bindNav();
     // The chain can move under the open view (Settings, dApp request): the
     // gate must follow it, not freeze at whatever it was on first paint.
     on('networkId', () => renderDex(root));
@@ -136,10 +141,16 @@ function paintGate() {
   // Every control behind the gate is dimmed AND inert: a button that still
   // clicks on the wrong chain just fails later, with a worse message.
   const host = $('#dexPanelHost');
-  if (!host) return;
-  host.style.opacity = ok ? '' : '0.5';
-  host.style.pointerEvents = ok ? '' : 'none';
-  host.setAttribute('aria-disabled', String(!ok));
+  if (host) {
+    host.style.opacity = ok ? '' : '0.5';
+    host.style.pointerEvents = ok ? '' : 'none';
+    host.setAttribute('aria-disabled', String(!ok));
+  }
+  const nav = $('#dexNav');
+  if (nav) {
+    nav.style.opacity = ok ? '' : '0.5';
+    nav.style.pointerEvents = ok ? '' : 'none';
+  }
 }
 
 // ── routing ────────────────────────────────────────────────────
@@ -167,8 +178,12 @@ export function renderPanel() {
   host.innerHTML = '';
 
   const coin = get('dex.tokenView');
-  if (coin) { renderCoin(host, coin); return; }
-  if (get('dex.route') === 'create') { renderCreate(host); return; }
+  if (coin) { paintNav('feed'); renderCoin(host, coin); return; }
+  const route = get('dex.route');
+  if (route === 'swap') { paintNav('swap'); renderSwap(host); return; }
+  if (route === 'pools') { paintNav('pools'); renderPools(host); return; }
+  if (route === 'create') { paintNav(null); renderCreate(host); return; }
+  paintNav('feed');
   renderFeed(host);
 }
 
@@ -232,6 +247,48 @@ function renderCreate(host) {
   // A freshly launched coin IS a coin page — send the user straight to it
   // instead of dropping them back on a feed they have to find it in.
   bindCreate(host, (address) => { if (address) openCoin(address); });
+}
+
+// ── the v2 surfaces ────────────────────────────────────────────
+// Their panels live in their own modules; the router paints the shell and
+// hands over. Both panels read the chain through pool-data.js, so no two
+// screens can disagree about a pool.
+
+// Attached once, next to the welcome's own binding: the nav nodes are painted
+// once by renderDex and persist across renders, so binding per-render would
+// stack duplicate listeners on every visit.
+function bindNav() {
+  const nav = $('#dexNav');
+  if (!nav) return;
+  for (const btn of nav.querySelectorAll('[data-dex-tab]')) {
+    btn.addEventListener('click', () => go(btn.dataset.dexTab));
+  }
+}
+
+// Labels and pressed-state are re-painted every render — switching language
+// or route must never leave a tab reading the previous language, or two tabs
+// marked as current.
+function paintNav(active) {
+  const nav = $('#dexNav');
+  if (!nav) return;
+  nav.setAttribute('aria-label', t('dex.nav.label'));
+  for (const btn of nav.querySelectorAll('[data-dex-tab]')) {
+    const tab = btn.dataset.dexTab;
+    btn.textContent = t(`dex.tab.${tab}`);
+    btn.setAttribute('aria-pressed', String(tab === active));
+  }
+}
+
+function renderSwap(host) {
+  host.innerHTML = swapHtml();
+  bindSwap(host);
+}
+
+function renderPools(host) {
+  host.innerHTML = poolsHtml();
+  // A pool row's one action is "swap this token": remember the pick and hop
+  // to the Swap tab — the same tab the user could have chosen directly.
+  bindPools(host, (address) => { set('dex.swapToken', address); go('swap'); });
 }
 
 // A coin's own page. The address is resolved against what this wallet actually

@@ -5,11 +5,10 @@
 // and walks the two destinations — the feed and the coin page — asserting each
 // renders its own live controls.
 //
-// REWRITTEN for the pure-launchpad rebuild. The old gate pressed a pair picker
-// and walked five feature tabs; none of that exists any more, and a gate that
-// still described it would have kept passing while the product changed under
-// it. What replaces it is the ambiguity guarantee: two destinations, one way to
-// trade, and every button a real control.
+// UPDATED for the Dex v2 rebuild (2026-10-15, docs/DEX-V2.md): the nav carries
+// the v2 surfaces (feed / swap / pools — one pool engine), and this gate walks
+// them in jsdom. Every panel must be a real control, and every panel must
+// speak honestly when it cannot read the chain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -65,18 +64,21 @@ test('the Dex opens on the welcome screen: heading, bear logo, Start here', () =
   assert.equal($('#dexStartHere').textContent.trim(), 'Start here');
 });
 
-test('Start here reveals the workspace on the feed — no tabs, no pair', async () => {
+test('Start here reveals the workspace with the v2 nav — feed, swap, pools', async () => {
   await click($('#dexStartHere'));
   assert.equal($('#dexWorkspace').hidden, false, 'Start here must open the workspace');
 
-  // The ambiguity guarantee, measured on the live DOM: nothing here offers a
-  // second way to trade. No tab strip, no pair chips, no pool controls.
-  assert.equal($('[data-dex-tab]'), null, 'a tab button is on screen — there are no tabs to choose between');
-  assert.equal($('#dexTabs'), null, 'the tab strip is back');
+  // The nav is the navigation now, and it carries only real destinations.
+  const tabs = [...window.document.querySelectorAll('[data-dex-tab]')].map((b) => b.dataset.dexTab);
+  assert.deepEqual(tabs, ['feed', 'swap', 'pools'], 'the nav is the feed plus the two pool surfaces');
+  assert.equal($('[data-dex-tab="feed"]').getAttribute('aria-pressed'), 'true',
+    'the feed is the active tab at home');
+
+  // The old ambiguity markers stay dead: no pair chips, no coin strip, and the
+  // old codebase's swap-box id is not reused by v2.
   assert.equal($('.dex-coinstrip'), null, 'the coin picker strip is back');
   assert.equal($('.dex-pairbar'), null, 'the pair bar is back');
-  assert.equal($('#dexSwapFrom'), null, 'a swap box is on screen — a launchpad has no swap');
-  assert.equal($('#dexLiq'), null, 'a liquidity control is on screen — a launchpad has no pools');
+  assert.equal($('#dexSwapFrom'), null, 'the OLD swap-box id must not come back — v2 has its own ids');
 });
 
 test('the feed is home, and it lists the launched coin', () => {
@@ -89,6 +91,32 @@ test('the feed is home, and it lists the launched coin', () => {
   assert.equal(row.dataset.dexToken, COIN.address, 'the row must carry the coin address');
   assert.match(row.textContent, /Bear Moon/, 'the row must name the coin');
   assert.match(row.textContent, /BMOON/, 'the row must show the ticker');
+});
+
+test('the Swap tab renders the v2 form, and says honestly when it cannot read', async () => {
+  await click($('[data-dex-tab="swap"]'));
+  assert.equal(state.get('dex.route'), 'swap', 'the nav tab must route to swap');
+  assert.equal($('[data-dex-tab="swap"]').getAttribute('aria-pressed'), 'true',
+    'the active tab must follow the route');
+  for (const id of ['dexSwapPool', 'dexSwapAmount', 'dexSwapMax', 'dexSwapBal', 'dexSwapQuote', 'dexSwapGo', 'dexSwapNote']) {
+    assert.ok($(`#${id}`), `the swap tab must carry #${id}`);
+  }
+  // Direction is a real toggle with an accessible state.
+  assert.equal($('[data-dex-swap-dir="buy"]').getAttribute('aria-pressed'), 'true');
+  // No provider in this gate: the panel must SAY it cannot read — never zeros.
+  assert.ok($('#dexSwapNote').textContent.trim().length > 0,
+    'the swap tab must explain its empty state');
+});
+
+test('the Pools tab renders the pool list shell, and the nav returns to the feed', async () => {
+  await click($('[data-dex-tab="pools"]'));
+  assert.equal(state.get('dex.route'), 'pools');
+  assert.ok($('#dexPoolsList'), 'the pools tab must carry the list container');
+  assert.ok($('#dexPoolsNote').textContent.trim().length > 0,
+    'with no chain, the list must say why it is empty');
+
+  await click($('[data-dex-tab="feed"]'));
+  assert.equal(state.get('dex.route'), 'feed', 'the nav must be able to return to the feed');
 });
 
 test('the launch button opens the create form, and Back returns to the feed', async () => {

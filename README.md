@@ -267,7 +267,7 @@ Bear-Tool/
 │   ├── eip7702-support.js # "does this node understand 7702?" probe, asked of every chain
 │   ├── deploy.js       # deploy wizard: solc compile → gas → deploy (+ 2-tx proxy) → auto-verify
 │   ├── dex/            # the launchpad, in its own folder (order: "buat folder dex")
-│   │   ├── index.js    # the launchpad view: welcome + Sepolia gate + feed/coin/create routing (no tabs, no pair)
+│   │   ├── index.js    # the Dex v2 view: welcome + Sepolia gate + the nav (feed/swap/pools) + create routing
 │   │   ├── core.js     # shared launchpad helpers: the Sepolia gate, provider access, the one tx path, formatting
 │   │   ├── tokens.js   # the feed — a grid of curve coins from the chain, each with its curve progress bar
 │   │   ├── discover.js # finding those coins: one indexed Launched log per coin, chain-first, local only for the image
@@ -287,7 +287,8 @@ Bear-Tool/
 │   │   ├── factory.js  # v2 factory per chain: deploy (compile → tx), remembered; ONE source for its address
 │   │   ├── pools.js    # v2 discovery: the factory's Launched/PoolCreated logs → pool rows + metadata cache
 │   │   ├── pool-data.js # v2 shared reads: reserves (quote first), token info/decimals, LP position + lock, allowance
-│   │   └── swap.js     # v2 swap engine: exact amount parsing, contract-floor quotes, approve-if-needed → swap tx
+│   │   ├── swap.js     # v2 Swap: engine (exact parse, contract-floor quotes, approve→swap tx) + the panel
+│   │   └── pool-list.js # v2 Pools panel: live reserves + price per pool, opens the Swap tab
 │   ├── sign-render.js  # how a signing payload is SHOWN: hex→text, binary labelled, bidi chars stripped (one copy, three sheets)
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder

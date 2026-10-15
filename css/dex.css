@@ -315,6 +315,21 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
 .dex-tab[aria-pressed="true"] { background: var(--white); border-color: var(--ink); }
 .dex-tab:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
+/* ── the v2 nav (Feed / Swap / Pools) ─────────────────────────────
+   Same segmented language as the scope switch: these are views of one Dex,
+   so they read as one control, not a toolbar. */
+.dex-nav {
+  display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px;
+  border: var(--border-thick); border-radius: 999px; background: var(--cream);
+}
+
+/* One pool in the Pools grid: a card that stacks its facts and keeps the
+   action pinned to the bottom, so the Swap buttons line up across a row. */
+.dex-pool-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+}
+.dex-pool-card .btn { margin-top: auto; }
+
 /* The coin page's face. Same idea as the card's, sized for the header: the
    coin you are looking at is the coin's picture, not a thumbnail beside text. */
 .dex-token-face {
