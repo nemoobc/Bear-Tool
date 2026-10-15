@@ -9,6 +9,7 @@
 // calls. A regex over list.js would pass on a function that returns nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { DEX_CHAIN_ID } from '../js/dex/core.js';
 import { deleteCoin, deletedCoins, isDeleted, withoutDeleted } from '../js/dex/list.js';
 import { set } from '../js/state.js';
@@ -60,4 +61,14 @@ test('garbage can never enter the log, and case can never split it', () => {
     'the log only ever holds addresses, whatever storage was told to say');
   assert.ok(log.includes(A), 'stored uppercase still matches lowercase reads');
   assert.equal(log.some((x) => x.startsWith('0xnope')), false, 'garbage stays out');
+});
+
+// The legacy coin page and the v2 token page must delete through the SAME two
+// stores, or a coin deleted on one surface reappears from the other.
+test('the v2 token page deletes through the same two stores as the legacy page', () => {
+  const page = readFileSync(new URL('../js/dex/token-page.js', import.meta.url), 'utf8');
+  assert.match(page, /confirmTx\(/, 'a delete that cannot be cancelled is a trap');
+  assert.match(page, /forgetLaunchedToken\(token\)/, 'the launched index must forget the token');
+  assert.match(page, /deleteCoin\(token\)/, 'and the tombstone must land for the feed scan');
+  assert.match(page, /t\('dex\.list\.deletedToast'\)/, 'the user must be told what happened');
 });

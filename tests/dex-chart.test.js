@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tradesToCandles, PRICE_SCALE, LWC_SRI, LWC_VERSION, LWC_URL, chartEngine } from '../js/dex/chart.js';
+import { readFileSync } from 'node:fs';
+import { tradesToCandles, PRICE_SCALE, LWC_SRI, LWC_VERSION, LWC_URL, chartEngine, barsSvg, paintBars } from '../js/dex/chart.js';
 
 const S = (n) => n * PRICE_SCALE; // helper: human price -> scaled
 const trade = (price, vol = 1n, block = 1) => ({ price: S(price), volQuote: vol, block });
@@ -73,4 +74,65 @@ test('chartEngine reads the global and tolerates a missing window', () => {
   assert.equal(chartEngine({ LightweightCharts: 'X' }), 'X');
   assert.equal(chartEngine({}), null);
   assert.equal(chartEngine(null), null);
+});
+
+// ── the hand-rolled fallback ─────────────────────────────────────
+// The library loads from a pinned CDN; a blocked CDN used to leave an empty
+// box (user: "chart ga keliatan"). barsSvg is the fallback the comment always
+// promised — same palette, same candles, no dependency — finally kept.
+
+test('bars fallback: no candles still draw a frame with the empty label', () => {
+  const svg = barsSvg([], { empty: 'No trades yet', width: 300, height: 200 });
+  assert.match(svg, /^<svg /);
+  assert.match(svg, /No trades yet/, 'an empty chart must SAY so, not show a blank box');
+  assert.match(svg, /viewBox="0 0 300 200"/);
+  assert.equal((svg.match(/data-bar/g) || []).length, 0, 'no trades, no bars');
+});
+
+test('bars fallback: one bar per candle, coloured by direction', () => {
+  const candles = [
+    { open: 1, high: 2, low: 0.5, close: 1.5 },   // up
+    { open: 2, high: 2.2, low: 1.3, close: 1.4 }, // down
+  ];
+  const svg = barsSvg(candles, { width: 320, height: 220 });
+  assert.equal((svg.match(/data-bar/g) || []).length, 2, 'one bar per candle');
+  assert.equal((svg.match(/data-dir="up"/g) || []).length, 1);
+  assert.equal((svg.match(/data-dir="down"/g) || []).length, 1);
+  // The SAME palette the library path draws from — one map, two renderers.
+  assert.ok(svg.includes('#1B8F4E'), 'up colour comes from the light palette');
+  assert.ok(svg.includes('#D64545'), 'down colour comes from the light palette');
+  const dark = barsSvg(candles, { width: 320, height: 220, theme: 'dark' });
+  assert.ok(dark.includes('#0ecb81') && dark.includes('#f6465d'), 'dark theme keeps the exchange palette');
+});
+
+test('bars fallback: a flat series still draws — no divide by zero', () => {
+  const svg = barsSvg([{ open: 5, high: 5, low: 5, close: 5 }], { width: 300, height: 200 });
+  assert.equal((svg.match(/data-bar/g) || []).length, 1);
+  assert.ok(!svg.includes('NaN'), 'a flat price must never produce NaN coordinates');
+});
+
+test('bars fallback: labels are the caller\'s formatter, escaped', () => {
+  const svg = barsSvg([{ open: 1, high: 2, low: 1, close: 2 }], { fmt: (v) => `P${v}`, width: 300, height: 200 });
+  assert.match(svg, /P2<\/text>/, 'the top label uses the caller formatter');
+  assert.match(svg, /P1<\/text>/, 'and so does the bottom label');
+  const empty = barsSvg([], { empty: 'a <b> & "c"' });
+  assert.ok(!empty.includes('<b>'), 'a label must never become markup');
+  assert.ok(empty.includes('&lt;b&gt;'), 'and must ride in escaped');
+});
+
+test('paintBars fills the host, respects its width, and returns a teardown', () => {
+  const host = { innerHTML: '', clientWidth: 280 };
+  const td = paintBars(host, [{ open: 1, high: 1, low: 1, close: 1 }], { height: 100 });
+  assert.match(host.innerHTML, /^<svg /);
+  assert.match(host.innerHTML, /viewBox="0 0 280 100"/, 'the live host width must win over the default');
+  assert.equal(typeof td, 'function');
+  td();
+  assert.equal(host.innerHTML, '', 'teardown must leave nothing behind');
+});
+
+test('drawCandles falls back to the bars — the old null path is gone', () => {
+  const src = readFileSync(new URL('../js/dex/chart.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(!LWC\) return paintBars\(host, candles, opts\)/,
+    'a missing library must paint bars, not return null — null left an empty box');
+  assert.ok(!/if \(!LWC\) return null/.test(src), 'the dead null fallback must stay dead');
 });

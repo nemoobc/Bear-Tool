@@ -225,35 +225,9 @@ export function fmtEth(ethWei, digits = 6) {
   return eth.toLocaleString('en-US', { maximumFractionDigits: digits });
 }
 
-/**
- * A price, for display only, at a fixed number of SIGNIFICANT digits.
- *
- * A bonding curve starts near 1e-13 quote per token, and `toFixed(4)` renders
- * every price a fresh coin will ever have as "0.0000" — on a page that also
- * shows the real signed trades, that reads as a broken feed rather than a tiny
- * number. `toExponential(4)` replaced the zeros but not the confusion:
- * "1.2345e-13" is developer notation, not a ticker.
- *
- * Significant digits instead of fixed ones keeps the price readable at ANY
- * scale the curve can reach (1e-13 … 1e3) without ever falling back to
- * exponent notation. Nothing here feeds a trade — the contract's own integer
- * maths does — so this is a display helper and says so.
- *
- * @param {number} n
- * @param {number} [sig] significant digits, 1–18
- * @returns {string}
- */
-export function fmtPrice(n, sig = 4) {
-  const v = Number(n);
-  if (!Number.isFinite(v) || v === 0) return '0';
-  const s = Math.min(18, Math.max(1, Math.round(Number(sig) || 4)));
-  const exp = Math.floor(Math.log10(Math.abs(v)));
-  // Strip what we already spent on the integer part (none below 1) and cap at
-  // the 18 decimals a wei-denominated price can meaningfully carry.
-  const decimals = Math.min(18, Math.max(0, s - 1 - exp));
-  const out = v.toLocaleString('en-US', { maximumFractionDigits: decimals });
-  // A sub-1 price that still rounds to zero would be worse than the zeros we
-  // set out to remove: say so with a bound instead of printing "0".
-  if (Number(out.replace(/,/g, '')) === 0) return `<${(10 ** -decimals).toLocaleString('en-US', { maximumFractionDigits: 18 })}`;
-  return out;
-}
+// fmtPrice moved to core.js (M5b): the v2 token page draws its chart axis with
+// the same formatter the tape uses, and one formatter for the whole Dex beats
+// two that can silently round the same price differently. Re-exported here so
+// every existing import — the coin page, the tape — keeps working without a
+// second implementation to keep in sync.
+export { fmtPrice } from './core.js';

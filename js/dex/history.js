@@ -1,14 +1,15 @@
 // Bear Tool — js/dex/history.js
 // A coin's real trading history, read from the chain.
 //
-// The PumpToken contract emits `Bought`, `Sold` and `Graduated` for every trade.
+// The v2 machine emits `Swap` from the pair; the legacy curve emits `Bought`,
+// `Sold` and `Graduated`. Both decode into ONE row shape here — kind, who,
+// quote amount, token amount, block, time, the price that fill got — so the
+// chart and the tape are a single renderer over either machine's own logs.
 // Nothing here is stored, sampled or invented: every row is a log the chain
-// produced, with its block number and timestamp, so the price on the chart is
-// the price that actually traded.
+// produced, with its block number and timestamp.
 //
-// This is also what feeds the chart. A pure launchpad has no Uniswap V2 Swap
-// logs to read (there is no pool), so the curve's own events ARE the tape.
-// Turning them into OHLC candles is what makes the price history real.
+// This is also what feeds the chart. Turning logs into OHLC candles is what
+// makes the price history real.
 
 import { t } from '../i18n.js';
 import { escapeHtml } from '../ui.js';
@@ -212,6 +213,68 @@ export function historyCandles(trades) {
   // The callback gets the row itself, so the per-row time survives grouping:
   // keying by block would collapse same-block fills onto one timestamp again.
   return tradesToCandles(rows, async (row) => row.fixed);
+}
+
+// The pool twin of historyCandles: a pair's Swap rows decode into the exact
+// same trade shape, so the candle maths is not copied — it is the SAME
+// function under the name the pool page calls it by. One implementation, so
+// the curve page and the pool page can never draw a different candle.
+export const poolCandles = historyCandles;
+
+// Reads a POOL's Swap logs and returns them newest-first, in the same row
+// shape loadHistory returns.
+//
+// The pair emits the direction together with both amounts — `quoteIn` says
+// which side went in — so the quote total and the token total fall straight
+// out, and the row's price is the rate that fill got. No reserves are
+// reconstructed: the event is exact and cheaper.
+//
+// Returns { trades, ok } — `ok:false` (with `reason`) when the node cannot
+// serve the logs, so the page can say WHY instead of pretending "no trades".
+export async function loadPoolHistory(contract, provider, { limit = 60 } = {}) {
+  const empty = { trades: [], ok: false };
+  if (!contract || !provider) return empty;
+
+  try {
+    const latest = await provider.getBlockNumber();
+    const fromBlock = latest > LOOKBACK_BLOCKS ? latest - LOOKBACK_BLOCKS : 0;
+
+    const logs = await contract.queryFilter(contract.filters.Swap(), fromBlock, latest);
+    const raw = [...logs].sort((a, b) => Number(b.blockNumber) - Number(a.blockNumber));
+
+    const rows = raw.slice(0, limit);
+
+    // Decode FIRST, timestamps second: a row the ABI cannot explain is dropped
+    // before it costs a getBlock, and never reaches the chart as NaN.
+    const decoded = rows.map((l) => {
+      const a = l.args || {};
+      const buy = a.quoteIn === true;
+      // buy: quote went in, tokens came out. sell: tokens went in, quote came
+      // out. The quote side is the row's money either way — paid or received.
+      const eth = buy ? a.amountIn : a.amountOut;
+      const tokens = buy ? a.amountOut : a.amountIn;
+      if (eth === undefined || tokens === undefined) return null;
+      const price = tokens > 0n ? Number(eth) / Number(tokens) : 0;
+      if (!Number.isFinite(price)) return null;
+      return {
+        kind: buy ? 'buy' : 'sell',
+        who: String(a.trader || '0x0000000000000000000000000000000000000000'),
+        eth,
+        tokens,
+        block: Number(l.blockNumber),
+        price,
+      };
+    }).filter(Boolean);
+
+    const stamps = await blockStamps(provider, decoded.map((t) => t.block));
+    const trades = decoded.map((t) => ({ ...t, time: stamps.get(t.block) || 0 }));
+
+    return { trades, ok: true };
+  } catch (e) {
+    // Same discipline as loadHistory: a node that cannot serve logs reports
+    // why, and the page keeps its header instead of going down with the tape.
+    return { ...empty, reason: (e && (e.shortMessage || e.message)) || String(e) };
+  }
 }
 
 // The "recent trades" tape under the chart. Newest first, like every exchange:

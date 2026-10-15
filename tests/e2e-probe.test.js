@@ -505,6 +505,9 @@ const dynamicSkip = new Set([
   'dexLaunchLock','dexLaunchPreview',
   'dexTpBack','dexTpImg','dexTpImgEmpty','dexTpName','dexTpDesc','dexTpPrice','dexTpReserves','dexTpMy',
   'dexTpSwap','dexTpLp','dexTpNote',
+  // + the chart, the tape and the delete the v2 page grew (M5b): the chart
+  // host, its status line, the tape, the delete button and its note.
+  'dexTpChart','dexTpChartNote','dexTpTape','dexTpDelete','dexTpDeleteNote',
 
 ]);
 

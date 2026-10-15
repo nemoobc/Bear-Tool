@@ -96,6 +96,35 @@ export function fmtTok(units, dec = 18, digits = 6) {
   return n.toLocaleString('en-US', { maximumFractionDigits: digits });
 }
 
+// A price, for display only, at a fixed number of SIGNIFICANT digits.
+//
+// A fresh coin trades near 1e-13 quote per token, and `toFixed(4)` renders
+// every price it will ever have as "0.0000" — on a page that also shows the
+// real signed trades, that reads as a broken feed rather than a tiny number.
+// `toExponential(4)` replaced the zeros but not the confusion: "1.2345e-13" is
+// developer notation, not a ticker.
+//
+// Significant digits keep the price readable at ANY scale a launchpad can
+// reach (1e-13 … 1e3) without ever falling back to exponent notation. The
+// chart axis, the tape and the token page all format through here — one
+// formatter, so no two surfaces can round the same price differently. Nothing
+// here feeds a trade — the contract's own integer maths does — so this is a
+// display helper and says so.
+export function fmtPrice(n, sig = 4) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v === 0) return '0';
+  const s = Math.min(18, Math.max(1, Math.round(Number(sig) || 4)));
+  const exp = Math.floor(Math.log10(Math.abs(v)));
+  // Strip what we already spent on the integer part (none below 1) and cap at
+  // the 18 decimals a wei-denominated price can meaningfully carry.
+  const decimals = Math.min(18, Math.max(0, s - 1 - exp));
+  const out = v.toLocaleString('en-US', { maximumFractionDigits: decimals });
+  // A sub-1 price that still rounds to zero would be worse than the zeros we
+  // set out to remove: say so with a bound instead of printing "0".
+  if (Number(out.replace(/,/g, '')) === 0) return `<${(10 ** -decimals).toLocaleString('en-US', { maximumFractionDigits: 18 })}`;
+  return out;
+}
+
 // Is this a 20-byte address? Checked before anything touches the chain, so a
 // pasted or truncated value can never become a log filter that silently matches
 // nothing — or something.

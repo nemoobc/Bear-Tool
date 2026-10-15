@@ -318,6 +318,22 @@ test('the launchpad lives in one folder, and only that folder', () => {
     'js/launchpad/ is back — the launchpad must live inside js/dex/, per "taro di folder dex only"');
 });
 
+test('the v2 token page carries its own chart, tape and delete (M5b)', () => {
+  const page = read('../js/dex/token-page.js');
+  // The series is a view over the pool's OWN Swap logs, decoded by the shared
+  // history seam: one row shape, one chart, one tape — the curve page and the
+  // pool page cannot disagree about what a trade is.
+  assert.match(page, /from '\.\/history\.js';/, 'the pool tape must come from history.js');
+  assert.match(page, /from '\.\/chart\.js';/, 'the chart renderer must be the shared one');
+  assert.match(page, /loadPoolHistory\(/, 'reading the pool\'s own Swap logs');
+  assert.match(page, /poolCandles\(/, 'candles via the shared pool candle maths');
+  assert.match(page, /drawCandles\(/, 'drawn by the shared renderer');
+  assert.match(page, /tradesHtml\(/, 'taped by the shared renderer');
+  for (const id of ['dexTpChart', 'dexTpTape', 'dexTpDelete']) {
+    assert.ok(page.includes(`id="${id}"`), `the token page must carry #${id}`);
+  }
+});
+
 test('Dex labels are translated in both languages', () => {
   const idStart = i18n.indexOf('\n  id: {');
   assert.ok(idStart > -1, 'i18n.js must keep an id block');
@@ -329,6 +345,7 @@ test('Dex labels are translated in both languages', () => {
                      'dex.tab.create',
                      'dex.tokens.title', 'dex.tokens.none', 'dex.tokens.unknown',
                      'dex.trades.title', 'dex.trades.none', 'dex.trades.buy', 'dex.trades.sell',
+                     'dex.tp.chart', 'dex.tp.noTrades',
                      'dex.create.']) {
     const re = new RegExp(`'${key.replace(/\./g, '\\.').replace(/\\\.$/, '\\.')}`);
     for (const [lang, block] of [['en', en], ['id', id]]) {

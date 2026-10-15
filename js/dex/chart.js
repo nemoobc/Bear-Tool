@@ -85,7 +85,8 @@ export async function verifyEngineIntegrity(win = globalThis) {
 
 /**
  * Load the pinned build once. Returns the global, or null when the CDN is
- * unreachable — the caller falls back to bars, it does not lie about data.
+ * unreachable — drawCandles falls back to the hand-rolled bars, and still
+ * refuses to lie about data.
  *
  * The attempt is CACHED (module-scoped per-window): when the CDN is blocked,
  * chartEngine(win) never becomes truthy, so without this cache the 15s history
@@ -116,36 +117,125 @@ export function loadChartEngine(doc = globalThis.document, win = globalThis) {
   });
 }
 
+// One palette per theme, in ONE place now that two renderers draw from it: the
+// library path below and the SVG bars fallback. A colour fixed here is a colour
+// fixed in both, which is the whole point of a palette map.
+const PALETTES = {
+  dark: { text: '#848e9c', grid: 'rgba(132,142,156,0.10)', border: 'rgba(30,35,41,1)',
+          up: '#0ecb81', down: '#f6465d', volUp: 'rgba(14,203,129,0.32)', volDown: 'rgba(246,70,93,0.32)' },
+  light: { text: '#2D2A32', grid: 'rgba(45,42,50,0.08)', border: 'rgba(45,42,50,0.2)',
+           up: '#1B8F4E', down: '#D64545', volUp: 'rgba(27,143,78,0.5)', volDown: 'rgba(214,69,69,0.5)' },
+};
+const palette = (theme) => (theme === 'dark' ? PALETTES.dark : PALETTES.light);
+
+const XML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => XML_ESC[c]);
+
+/**
+ * The hand-rolled fallback the comment above always promised: candlesticks as
+ * plain SVG, same palette, no dependency. It exists for exactly the states
+ * loadChartEngine can end in — offline, blocked CDN, strict CSP — where the
+ * panel must still answer "what did this trade at" instead of going blank.
+ *
+ * Pure string builder: no DOM, no globals, so a test can read the markup.
+ * `opts`: width/height, theme ('dark'|'light'), `fmt` (number → label), and
+ * `empty` (the label a zero-trade chart shows — "no trades yet", never the
+ * blank box that once read as "the chart is broken").
+ */
+export function barsSvg(candles, opts = {}) {
+  const w = Math.max(80, Math.round(Number(opts.width) || 320));
+  const h = Math.max(60, Math.round(Number(opts.height) || 220));
+  const theme = palette(opts.theme);
+  const fmt = typeof opts.fmt === 'function' ? opts.fmt : (v) => String(v);
+  const pad = { t: 16, r: 6, b: 16, l: 6 };
+  const iw = w - pad.l - pad.r;
+  const ih = h - pad.t - pad.b;
+
+  const parts = [];
+  // The frame first — even an empty chart is a chart, not a blank box.
+  for (const f of [0, 0.5, 1]) {
+    const y = pad.t + ih * f;
+    parts.push(`<line x1="${pad.l}" y1="${y}" x2="${w - pad.r}" y2="${y}" stroke="${theme.grid}" stroke-width="1"/>`);
+  }
+  parts.push(`<rect x="${pad.l}" y="${pad.t}" width="${iw}" height="${ih}" fill="none" stroke="${theme.border}" stroke-width="1"/>`);
+
+  // Candles whose OHLC is not all finite would map to NaN coordinates and take
+  // the whole chart down with them — they are skipped, the same "drop the row,
+  // never paint NaN" rule the tape follows.
+  const rows = (Array.isArray(candles) ? candles : []).filter((c) => c
+    && Number.isFinite(c.open) && Number.isFinite(c.close));
+  const highOf = (c) => (Number.isFinite(c.high) ? c.high : Math.max(c.open, c.close));
+  const lowOf = (c) => (Number.isFinite(c.low) ? c.low : Math.min(c.open, c.close));
+
+  if (!rows.length) {
+    if (opts.empty) {
+      parts.push(`<text x="${w / 2}" y="${h / 2 + 4}" text-anchor="middle" fill="${theme.text}" font-size="12" font-family="sans-serif">${xmlEsc(opts.empty)}</text>`);
+    }
+  } else {
+    let hi = -Infinity;
+    let lo = Infinity;
+    for (const c of rows) { hi = Math.max(hi, highOf(c)); lo = Math.min(lo, lowOf(c)); }
+    // A flat series has no range to scale against: give it a hairline one, so
+    // the candle draws as a line at mid-height instead of dividing by zero.
+    if (hi === lo) { const bump = Math.abs(hi) * 0.01 || 1; hi += bump; lo -= bump; }
+    const yOf = (p) => pad.t + ih * (1 - (p - lo) / (hi - lo));
+    const slot = iw / rows.length;
+    const bw = Math.max(1, Math.min(14, slot * 0.66));
+    rows.forEach((c, i) => {
+      const x = pad.l + slot * i + slot / 2;
+      const up = c.close >= c.open;
+      const col = up ? theme.up : theme.down;
+      parts.push(`<line x1="${x}" y1="${yOf(highOf(c))}" x2="${x}" y2="${yOf(lowOf(c))}" stroke="${col}" stroke-width="1"/>`);
+      const yO = yOf(c.open);
+      const yC = yOf(c.close);
+      parts.push(`<rect data-bar data-dir="${up ? 'up' : 'down'}" x="${(x - bw / 2).toFixed(1)}" y="${Math.min(yO, yC).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, Math.abs(yC - yO)).toFixed(1)}" fill="${col}"/>`);
+    });
+    // The price range, formatted by the caller's own formatter — the same
+    // digits the stat line above uses, never a second rounding.
+    parts.push(`<text x="${w - pad.r}" y="${h - pad.b + 12}" text-anchor="end" fill="${theme.text}" font-size="10" font-family="sans-serif">${xmlEsc(fmt(lo))}</text>`);
+    parts.push(`<text x="${w - pad.r}" y="${pad.t - 5}" text-anchor="end" fill="${theme.text}" font-size="10" font-family="sans-serif">${xmlEsc(fmt(hi))}</text>`);
+  }
+
+  const aria = opts.label ? ` role="img" aria-label="${xmlEsc(opts.label)}"` : ' aria-hidden="true"';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none"${aria}>${parts.join('')}</svg>`;
+}
+
+/**
+ * barsSvg into a live host, plus the same teardown contract drawCandles
+ * returns — so a caller swaps renderers without knowing which one it got.
+ */
+export function paintBars(host, candles, opts = {}) {
+  if (!host) return () => {};
+  host.innerHTML = barsSvg(candles, { ...opts, width: host.clientWidth || opts.width });
+  return () => { try { host.innerHTML = ''; } catch { /* already gone */ } };
+}
+
 /**
  * Draw candles into `host`. Returns a teardown function.
  *
- * Falls back to the hand-rolled bars when the library is absent, so the
- * panel keeps working offline / behind a strict CSP — an honest "here are the
- * trades" beats a blank box.
+ * Falls back to the hand-rolled SVG bars (barsSvg) when the library is
+ * absent, so the panel keeps working offline / behind a strict CSP — an
+ * honest "here are the trades" beats a blank box.
  */
 export async function drawCandles(host, candles, opts = {}) {
   const win = opts.win || globalThis;
   const LWC = await loadChartEngine(opts.document || globalThis.document, win);
-  // Only a missing library falls back to bars. An EMPTY data set still gets a
-  // real chart — an empty grid with price/time axes — because a blank box read
-  // as "the chart is broken" (user: "chart ga keliatan"), whereas an empty chart
-  // clearly says "no trades yet" while still being a chart.
-  if (!LWC) return null;
+  // Only a missing library falls back to bars, and the fallback keeps the same
+  // promise: an EMPTY data set still gets a real chart — a framed grid that
+  // says "no trades yet" — because a blank box read as "the chart is broken"
+  // (user: "chart ga keliatan"), whereas an empty chart clearly says "no
+  // trades yet" while still being a chart.
+  if (!LWC) return paintBars(host, candles, opts);
 
-  if (!LWC) return null;
-
-  // Two themes, one palette per theme in ONE place. The coin page moved onto a
-  // near-black exchange surface (css/exchange.css) and the old hardcoded
-  // #2D2A32 axes were drawn in the cartoon ink colour: near-black on
-  // near-black, i.e. an empty-looking chart on the Dex's central screen.
-  // `theme: 'dark'` is the same chart with the exchange palette; nothing about
-  // the data or the series changes.
-  const dark = opts.theme === 'dark';
-  const theme = dark
-    ? { text: '#848e9c', grid: 'rgba(132,142,156,0.10)', border: 'rgba(30,35,41,1)',
-        up: '#0ecb81', down: '#f6465d', volUp: 'rgba(14,203,129,0.32)', volDown: 'rgba(246,70,93,0.32)' }
-    : { text: '#2D2A32', grid: 'rgba(45,42,50,0.08)', border: 'rgba(45,42,50,0.2)',
-        up: '#1B8F4E', down: '#D64545', volUp: 'rgba(27,143,78,0.5)', volDown: 'rgba(214,69,69,0.5)' };
+  // Two themes, one palette per theme in ONE place — the PALETTES map above,
+  // shared with the bars fallback so a colour can never be fixed in one
+  // renderer and missed in the other. The coin page moved onto a near-black
+  // exchange surface (css/exchange.css) and the old hardcoded #2D2A32 axes
+  // were drawn in the cartoon ink colour: near-black on near-black, i.e. an
+  // empty-looking chart on the Dex's central screen. `theme: 'dark'` is the
+  // same chart with the exchange palette; nothing about the data or the
+  // series changes.
+  const theme = palette(opts.theme);
 
   const chart = LWC.createChart(host, {
     width: host.clientWidth || 320,

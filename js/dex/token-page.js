@@ -9,11 +9,15 @@
 // The router keeps last say: only tokens the factory actually knows get this
 // page. Anything else falls back to the legacy coin view — never a half-made
 // v2 page over a token that has no pool.
-import { t, escapeHtml, fmtTok, $, get, provider, ethersLib, isAddr, dexChainOk, quoteBy } from './core.js';
+import { t, escapeHtml, fmtTok, fmtPrice, $, get, provider, ethersLib, isAddr, dexChainOk, quoteBy, confirmTx, toast } from './core.js';
 import { poolState, tokenInfo, lpPosition } from './pool-data.js';
 import { quotePerToken } from './pool-list.js';
-import { BEAR_TOKEN_ABI, BEAR_FACTORY_ABI } from './bear-source.js';
+import { BEAR_TOKEN_ABI, BEAR_FACTORY_ABI, BEAR_PAIR_ABI } from './bear-source.js';
 import { factoryAddress } from './factory.js';
+import { loadPoolHistory, poolCandles, tradesHtml } from './history.js';
+import { drawCandles } from './chart.js';
+import { deleteCoin } from './list.js';
+import { forgetLaunchedToken } from './tokens.js';
 
 const shortOf = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 
@@ -61,7 +65,18 @@ export function tokenPageHtml() {
         <button type="button" class="btn btn-secondary" id="dexTpLp"></button>
       </div>
       <div class="small mt-8" id="dexTpNote" role="status"></div>
-    </div>`;
+    </div>
+    <div class="card mb-8">
+      <div class="field-label">${escapeHtml(t('dex.tp.chart'))}</div>
+      <div id="dexTpChart" class="dex-chart-host" role="img" aria-label="${escapeHtml(t('dex.tp.chart'))}"></div>
+      <div class="small" id="dexTpChartNote" role="status"></div>
+    </div>
+    <div class="card mb-8">
+      <div class="field-label">${escapeHtml(t('dex.trades.title'))}</div>
+      <div id="dexTpTape"></div>
+    </div>
+    <button type="button" class="btn btn-danger btn-block mt-8" id="dexTpDelete">${escapeHtml(t('dex.list.delete'))}</button>
+    <div class="small" id="dexTpDeleteNote">${escapeHtml(t('dex.list.deleteNote'))}</div>`;
 }
 
 export async function bindTokenPage(host, token, pair, { onBack, onSwap, onLp } = {}) {
@@ -77,6 +92,29 @@ export async function bindTokenPage(host, token, pair, { onBack, onSwap, onLp } 
   lpBtn.textContent = t('dex.pf.manage');
   if (onSwap) swapBtn.addEventListener('click', () => onSwap(token));
   if (onLp) lpBtn.addEventListener('click', () => onLp(token));
+
+  // Delete first, so it works even when every read below fails: the tombstone
+  // forgets the token for THIS wallet's feed (list.js) and the launched index
+  // drops it (tokens.js) — the same two stores the legacy coin page uses. The
+  // contract stays on chain, which is why the copy says "from my feed".
+  const delBtn = el('dexTpDelete');
+  if (delBtn) {
+    delBtn.addEventListener('click', async () => {
+      const nameEl = el('dexTpName');
+      const ok = await confirmTx({
+        title: t('dex.list.deleteConfirmTitle'),
+        rows: [{ k: t('dex.list.deleteRowCoin'), v: (nameEl && nameEl.textContent) || shortOf(token) }],
+        confirmText: t('dex.list.deleteConfirmCta'),
+        danger: true,
+      });
+      if (!ok) return;
+      forgetLaunchedToken(token);
+      deleteCoin(token);
+      toast(t('dex.list.deletedToast'), 'success');
+      // The feed is the token's only home now that it is out of it — go back.
+      if (typeof onBack === 'function') onBack();
+    });
+  }
 
   noteEl.textContent = t('dex.pools.loading');
   const E = ethersLib();
@@ -134,5 +172,52 @@ export async function bindTokenPage(host, token, pair, { onBack, onSwap, onLp } 
         : t('dex.lp.unlocked'));
     }
     myEl.textContent = bits.join(' · ');
+  }
+
+  // ── the pool's own tape ─────────────────────────────────────────
+  // The chart and the tape read the pair's Swap logs through the same history
+  // seam the curve page uses — one row shape, one chart, one tape, so the two
+  // pages can never disagree about what a trade is. Loaded AFTER the header
+  // paints: identity and price first, the series fills in under them.
+  const chartHost = el('dexTpChart');
+  const chartNote = el('dexTpChartNote');
+  const tapeEl = el('dexTpTape');
+  if (chartNote) chartNote.textContent = t('dex.pools.loading');
+  let chartTearDown = null;
+  try {
+    const pc = new E.Contract(pair, BEAR_PAIR_ABI, provider());
+    const hist = await loadPoolHistory(pc, provider());
+    // Left while reading? Do not paint into a page that is already gone — the
+    // same guard the router uses before it binds.
+    if (get('dex.tokenView') !== token) return;
+    if (tapeEl) {
+      tapeEl.innerHTML = hist.ok
+        ? tradesHtml(hist.trades, sym, qSym)
+        : `<div class="small">${escapeHtml(hist.reason || t('dex.swap.unreadable'))}</div>`;
+    }
+    let candles = [];
+    if (hist.ok) {
+      if (chartNote) chartNote.textContent = '';
+      candles = await poolCandles(hist.trades);
+    } else if (chartNote) {
+      // A node that cannot serve logs must not blank the page: the header is
+      // already painted, and the reason rides under the empty frame.
+      chartNote.textContent = hist.reason || t('dex.swap.unreadable');
+    }
+    if (chartHost) {
+      chartTearDown = await drawCandles(chartHost, candles, {
+        height: 220,
+        theme: 'light',
+        fmt: (v) => fmtPrice(v, 4),
+        empty: t('dex.tp.noTrades'),
+      });
+      host.addEventListener('dex:teardown', () => {
+        if (chartTearDown) { try { chartTearDown(); } catch { /* already gone */ } }
+      }, { once: true });
+    }
+  } catch (e) {
+    // The header is already read and painted; a chart that cannot draw must
+    // not take the page down with it — say so under the frame.
+    if (chartNote) chartNote.textContent = (e && (e.shortMessage || e.message)) || String(e);
   }
 }

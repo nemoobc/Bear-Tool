@@ -407,3 +407,138 @@ test('a trade the decoder cannot read is dropped, never rendered as NaN', async 
   }
   assert.ok(Number.isFinite(out.candles?.[0]?.close ?? 1), 'and no candle may be NaN');
 });
+
+// ── the v2 pool tape ────────────────────────────────────────────────
+// A pool's Swap log is the same tape in another dialect. The pair emits the
+// direction (quoteIn) and both amounts, so both machines decode into ONE row
+// shape — and everything above (candles, the tape renderer) never learns
+// which machine it read.
+const swapLog = (block, trader, quoteIn, amountIn, amountOut) => ({
+  blockNumber: block,
+  args: { trader, quoteIn, amountIn, amountOut },
+});
+
+function stubPool({ swaps = [], latest = 10_000_000, stamps = {} }) {
+  const asked = { filter: null, fromBlock: null, toBlock: null };
+  const contract = {
+    filters: { Swap: () => 'Swap' },
+    queryFilter: async (f, from, to) => {
+      asked.filter = f; asked.fromBlock = from; asked.toBlock = to;
+      return f === 'Swap' ? swaps : [];
+    },
+  };
+  const provider = {
+    getBlockNumber: async () => latest,
+    getBlock: async (n) => (stamps[n] ? { number: n, timestamp: stamps[n] } : null),
+  };
+  return { contract, provider, asked };
+}
+
+test('a pool buy and a pool sell decode into the SAME trade shape the curve uses', async () => {
+  const { loadPoolHistory, _clearStampCache } = await import('../js/dex/history.js');
+  _clearStampCache(); // never inherit another test's stamps — the seam says so
+  const buyBlock = 9_990_002;
+  const sellBlock = 9_990_001;
+  const { contract, provider } = stubPool({
+    swaps: [
+      swapLog(buyBlock, '0xBuyer', true, 3n * 10n ** 16n, 7n * 10n ** 18n),
+      swapLog(sellBlock, '0xSeller', false, 4n * 10n ** 18n, 1n * 10n ** 16n),
+    ],
+    stamps: { [buyBlock]: 1_700_000_011, [sellBlock]: 1_700_000_010 },
+  });
+  const out = await loadPoolHistory(contract, provider);
+  assert.equal(out.ok, true, 'a readable pool reports ok');
+  assert.equal(out.trades.length, 2);
+  assert.equal(out.trades[0].block, buyBlock, 'newest first, like the curve tape');
+
+  const [buy, sell] = out.trades;
+  assert.equal(buy.kind, 'buy');
+  assert.equal(buy.who, '0xBuyer');
+  assert.equal(buy.eth, 3n * 10n ** 16n, 'a buy\'s quote is what was PAID (amountIn)');
+  assert.equal(buy.tokens, 7n * 10n ** 18n, 'and its tokens are what CAME OUT (amountOut)');
+  assert.equal(buy.time, 1_700_000_011, 'the stamp comes from the block, exact');
+  assert.ok(Math.abs(buy.price - (3e16 / 7e18)) < 1e-15, 'price is THAT fill\'s own rate');
+
+  assert.equal(sell.kind, 'sell');
+  assert.equal(sell.eth, 1n * 10n ** 16n, 'a sell\'s quote is what was RECEIVED (amountOut)');
+  assert.equal(sell.tokens, 4n * 10n ** 18n, 'and its tokens are what WENT IN (amountIn)');
+  assert.equal(sell.time, 1_700_000_010);
+});
+
+test('an empty pool says "no trades", not "unreadable"', async () => {
+  const { loadPoolHistory, _clearStampCache } = await import('../js/dex/history.js');
+  _clearStampCache();
+  const { contract, provider } = stubPool({ swaps: [] });
+  const out = await loadPoolHistory(contract, provider);
+  assert.equal(out.ok, true, 'no swaps is a readable answer');
+  assert.deepEqual(out.trades, []);
+  assert.equal(out.reason, undefined, 'no reason belongs on a successful read');
+});
+
+test('the pool tape window is bounded, and it reads Swap and nothing else', async () => {
+  const { loadPoolHistory, _clearStampCache } = await import('../js/dex/history.js');
+  _clearStampCache();
+  const { contract, provider, asked } = stubPool({});
+  await loadPoolHistory(contract, provider);
+  assert.equal(asked.filter, 'Swap', 'the pool tape reads Swap, nothing else');
+  assert.equal(asked.toBlock, 10_000_000);
+  assert.ok(asked.fromBlock >= 0 && asked.toBlock - asked.fromBlock <= 40_000, 'bounded window, like the curve');
+});
+
+test('a pool node that cannot serve logs reports why, and never throws', async () => {
+  const { loadPoolHistory } = await import('../js/dex/history.js');
+  const contract = {
+    filters: { Swap: () => 'Swap' },
+    queryFilter: async () => { throw new Error('range too wide'); },
+  };
+  const out = await loadPoolHistory(contract, { getBlockNumber: async () => 5_000_000 });
+  assert.equal(out.ok, false);
+  assert.deepEqual(out.trades, []);
+  assert.match(out.reason, /range too wide/, 'the reason is carried, not swallowed');
+});
+
+test('a swap log without its amounts is dropped, never rendered as NaN', async () => {
+  const { loadPoolHistory, _clearStampCache } = await import('../js/dex/history.js');
+  _clearStampCache();
+  const good = 9_990_004;
+  const bad = 9_990_003;
+  const { contract, provider } = stubPool({
+    swaps: [
+      { blockNumber: bad, args: { trader: '0x' + '1'.repeat(40), quoteIn: true } },
+      swapLog(good, '0x' + '2'.repeat(40), true, 10n ** 16n, 10n ** 18n),
+    ],
+    stamps: { [bad]: 1_700_000_003, [good]: 1_700_000_004 },
+  });
+  const out = await loadPoolHistory(contract, provider);
+  assert.equal(out.trades.length, 1, 'the unreadable swap is dropped');
+  assert.equal(out.trades[0].block, good);
+  for (const t of out.trades) assert.ok(Number.isFinite(t.price), 'price must be finite');
+});
+
+test('the pool tape reads fields the pair actually emits', async () => {
+  const { BEAR_PAIR_ABI } = await import('../js/dex/bear-source.js');
+  const frag = BEAR_PAIR_ABI.find((f) => typeof f === 'string' && f.startsWith('event Swap('));
+  assert.ok(frag, 'BEAR_PAIR_ABI must ship the Swap event');
+  const args = frag.slice(frag.indexOf('(') + 1, frag.lastIndexOf(')'));
+  const names = new Set(args.split(',').map((s) => s.trim().split(/\s+/).pop()).filter(Boolean));
+  for (const n of ['trader', 'quoteIn', 'amountIn', 'amountOut']) {
+    assert.ok(names.has(n), `Swap must emit ${n} — the pool tape reads it`);
+  }
+  const src = readFileSync(new URL('../js/dex/history.js', import.meta.url), 'utf8');
+  for (const n of ['quoteIn', 'amountIn', 'amountOut', 'trader']) {
+    assert.ok(src.includes(`a.${n}`), `loadPoolHistory must read the emitted name a.${n}`);
+  }
+});
+
+test('poolCandles is the same candle maths — one shape, one chart', async () => {
+  const { poolCandles, historyCandles } = await import('../js/dex/history.js');
+  assert.equal(poolCandles, historyCandles, 'the pool name must BE the shared function, not a fork');
+  const trades = [
+    { kind: 'sell', who: '0xS', eth: 1n, tokens: 1n, block: 30, time: 300, price: 2e-13 },
+    { kind: 'buy', who: '0xB', eth: 1n, tokens: 1n, block: 10, time: 100, price: 1e-13 },
+  ];
+  const candles = await poolCandles(trades);
+  assert.ok(candles.length >= 1, 'the shared maths must produce candles');
+  const times = candles.map((c) => c.time);
+  assert.deepEqual([...times].sort((a, b) => a - b), times, 'pool candles ascend like curve candles');
+});
