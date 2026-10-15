@@ -81,7 +81,9 @@ test('browser shell carries a visible Pair (WalletConnect) hint strip', () => {
 });
 
 test('menu keeps the WalletConnect row (regression pin)', () => {
-  assert.match(browserSrc, /\['wc', '🔗 Pair via WalletConnect'/, 'menu row still present');
+  // The row's leading glyph is now an inline SVG (ICONS.link), not 🔗 — pin the
+  // key + label so the row can't silently disappear.
+  assert.match(browserSrc, /\['wc', `\$\{ICONS\.link\} Pair via WalletConnect`/, 'menu row still present');
   assert.match(browserSrc, /data-act="wc"/, 'blocked/home fallback buttons still present');
 });
 

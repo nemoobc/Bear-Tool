@@ -118,7 +118,7 @@ test('every control the e2e suite clicks by id is still in the shell', () => {
   }
   assert.ok(!shell.includes('dbrBm'), 'the star button is gone — bookmarking lives in the ⋯ menu');
   assert.ok(!/id="dbrBm"/.test(src), 'no leftover #dbrBm wiring in the module');
-  assert.match(src, /\['bm', isBookmarked\(t\?\.url\)/, 'the ⋯ menu still offers bookmark toggle');
+  assert.match(src, /\['bm', .*isBookmarked\(t\?\.url\)/, 'the ⋯ menu still offers bookmark toggle');
 });
 
 // Hidden means hidden — for the whole sheet, not per component. The tab grid
@@ -126,6 +126,42 @@ test('every control the e2e suite clicks by id is still in the shell', () => {
 // attribute, because .dbr-tabgrid's display:flex outranked the UA sheet. The
 // lock is global on purpose: the next display:flex written beside a hidden
 // element must not be able to repeat it.
+// ── every control icon is an <svg>, never a unicode glyph ─────────────────
+// The five nav buttons already moved off glyphs (they rendered differently per
+// device font). This pins the REST of the chrome that still painted emoji or
+// symbol characters as controls: tab strip, tab grid, secure pill, connect
+// button and the ⋯ menu. Each must draw its icon from the ICONS map and must
+// no longer carry the glyph it replaced — a bare glyph creeping back into any
+// of these is a device-dependent rendering regression waiting to happen.
+test('browser chrome paints SVG control icons, not unicode glyphs', () => {
+  const body = (startMarker, endMarker) => {
+    const a = src.indexOf(startMarker);
+    assert.ok(a > -1, `marker not found: ${startMarker}`);
+    const b = src.indexOf(endMarker, a + startMarker.length);
+    assert.ok(b > -1, `end marker not found: ${endMarker}`);
+    // Strip comments: a comment may still NAME a glyph to explain an old design
+    // ("✕ Close browser"), but only PAINTED code counts. The lookbehind on the
+    // preceding whitespace/start keeps `https://` intact.
+    return src.slice(a, b).replace(/(\s|^)\/\/[^\n]*/g, '$1');
+  };
+
+  const tabs = body('function paintTabs()', 'function shortUrl');
+  assert.match(tabs, /ICONS\.(tab|incog)/, 'tab icon draws from the map');
+  assert.ok(!/[◍🕶＋×]/.test(tabs), 'tab strip must not paint unicode glyphs');
+
+  const grid = body('function toggleTabGrid(', 'function paintSecure(');
+  assert.match(grid, /ICONS\.(plus|xsmall)/, 'tab-grid controls draw from the map');
+  assert.ok(!/[✕＋]/.test(grid), 'tab-grid buttons must not paint unicode glyphs');
+
+  const secure = body('function paintSecure(', 'function paint()');
+  assert.match(secure, /ICONS\.(lock|warn|block|globe)/, 'verdict mark draws from the map');
+  assert.ok(!/[🔒⚠⛔🌐]/.test(secure), 'secure pill must not paint emoji');
+
+  const menu = body('function toggleMenu(', 'function showDidNotLoad');
+  assert.match(menu, /ICONS\./, 'menu rows draw icons from the map');
+  assert.ok(!/[＋🕶↗🔗🔖🕘🧹✕]/.test(menu), 'menu rows must not paint emoji or glyph controls');
+});
+
 test('css: the hidden attribute outranks every author display rule', () => {
   assert.match(css, /\[hidden\]\s*\{\s*display:\s*none\s*!important\s*;?\s*\}/,
     'one global lock — a component-specific exception is the bug coming back');
@@ -302,7 +338,8 @@ test('the secure pill knows every verdict and shows what it saw', () => {
     assert.ok(fn.includes(`[VERDICT.${v}]`), `the pill must map VERDICT.${v} — an unmapped verdict paints an empty pill`);
   }
   assert.match(fn, /verdict\.signals\.map/, 'the tooltip lists every signal, not just the worst one');
-  assert.match(fn, /el\.secure\.textContent/, 'the verdict is painted where the user looks');
+  assert.match(fn, /el\.secure\.(?:textContent|innerHTML)/,
+    'the verdict is painted where the user looks');
 });
 
 test('back and forward stay inside the stack and persist the move', () => {
@@ -348,8 +385,8 @@ test('↗ #dbrExt: the permanent escape hatch from a frame that renders nothing'
   const at = src.indexOf('function reportSheet(');
   assert.ok(at > -1, 'reportSheet exists');
   const fn = src.slice(at, src.indexOf('function openExternal', at));
-  assert.match(fn, /data-act="ext">↗ Open in a new tab</,
-    'the pre-load sheet offers ↗ next to "Open anyway"');
+  assert.match(fn, /data-act="ext">\$\{ICONS\.ext\}<span>Open in a new tab<\/span>/,
+    'the pre-load sheet offers the external-tab door next to "Open anyway"');
   assert.match(fn, /querySelector\('\[data-act="ext"\]'\)\?\.addEventListener\('click'/,
     'the sheet ↗ button is wired');
   assert.match(fn, /querySelector\('\[data-act="ext"\]'\)\?\.remove\(\)|data-act="ext"/,

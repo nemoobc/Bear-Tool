@@ -243,6 +243,26 @@ const ICONS = {
   menu:   `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`,
   link:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>`,
   warn:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M12 3 2 20h20L12 3zM12 9v5M12 17.5v.5"/></svg>`,
+  // Chrome glyphs that were still unicode: tab, incognito, plus, small-close.
+  // ◍ → a tab/page outline; 🕶 → the hat-and-glasses mark every browser uses;
+  // ＋ / × → a real plus and a real close. Same 2px stroke vocabulary as above.
+  tab:    `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="2.5"/></svg>`,
+  incog:  `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M3 11l9-4 9 4M4 11h16"/><circle cx="7.5" cy="15" r="3"/><circle cx="16.5" cy="15" r="3"/><path d="M10.5 15h3"/></svg>`,
+  plus:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
+  xsmall: `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`,
+  lock:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
+  // Secure-pill verdict marks (were 🔒 ⛔ 🌐 — emoji render differently per device).
+  block:  `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>`,
+  globe:  `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/></svg>`,
+  chain:  `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>`,
+  eye:    `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  copy:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+  bookmark: `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>`,
+  clock:  `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>`,
+  trash:  `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M4 7h16M10 7V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/></svg>`,
+  folder: `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`,
+  grid:   `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>`,
+  diamond: `<svg viewBox="0 0 24 24" ${S} aria-hidden="true"><path d="M12 3.5 20.5 12 12 20.5 3.5 12 12 3.5z"/></svg>`,
 };
 const SHELL = `
   <div class="dbr-top">
@@ -349,11 +369,11 @@ function paintTabs() {
     <div class="dbr-tab${t.id === activeId ? ' on' : ''}${t.incognito ? ' incog' : ''}" role="tab"
          aria-selected="${t.id === activeId}" tabindex="0" data-tab="${t.id}"
          title="${escapeHtml(t.name)}">
-      <span class="dbr-tab-ic" aria-hidden="true">${t.incognito ? '🕶' : '◍'}</span>
+      <span class="dbr-tab-ic" aria-hidden="true">${t.incognito ? ICONS.incog : ICONS.tab}</span>
       <span class="dbr-tab-nm">${escapeHtml(t.name || 'New tab')}</span>
-      <button class="dbr-tab-x" data-close="${t.id}" aria-label="Close ${escapeHtml(t.name || 'tab')}">×</button>
+      <button class="dbr-tab-x" data-close="${t.id}" aria-label="Close ${escapeHtml(t.name || 'tab')}">${ICONS.xsmall}</button>
     </div>`).join('')
-    + `<button class="dbr-tab-new" id="dbrNew" title="New tab" aria-label="New tab">＋</button>`;
+    + `<button class="dbr-tab-new" id="dbrNew" title="New tab" aria-label="New tab">${ICONS.plus}</button>`;
 
   bar.querySelectorAll('[data-tab]').forEach((n) => {
     n.addEventListener('click', (e) => {
@@ -401,8 +421,8 @@ function toggleTabGrid(force) {
   const card = (t) => `
     <div class="dbr-tg-card${t.id === activeId ? ' on' : ''}" role="button" tabindex="0"
          data-tg="${t.id}" aria-label="Switch to ${escapeHtml(t.name || 'New tab')}">
-      <button class="dbr-tg-x" data-tg-close="${t.id}" aria-label="Close ${escapeHtml(t.name || 'tab')}">×</button>
-      <span class="dbr-tg-ic" aria-hidden="true">${t.incognito ? '🕶' : '◍'}</span>
+      <button class="dbr-tg-x" data-tg-close="${t.id}" aria-label="Close ${escapeHtml(t.name || 'tab')}">${ICONS.xsmall}</button>
+      <span class="dbr-tg-ic" aria-hidden="true">${t.incognito ? ICONS.incog : ICONS.tab}</span>
       <span class="dbr-tg-nm">${escapeHtml(t.name || 'New tab')}</span>
       <span class="dbr-tg-url">${escapeHtml(shortUrl(t.url))}</span>
     </div>`;
@@ -410,11 +430,11 @@ function toggleTabGrid(force) {
   grid.innerHTML = `
     <div class="dbr-tg-head">
       <span class="dbr-tg-title">Open tabs (${tabs.length})</span>
-      <button class="btn btn-sm btn-secondary" data-tg-all>✕ Close all</button>
+      <button class="btn btn-sm btn-secondary" data-tg-all>${ICONS.xsmall}<span>Close all</span></button>
     </div>
     <div class="dbr-tg-cards">${tabs.map(card).join('')}</div>
     <div class="dbr-tg-foot">
-      <button class="btn btn-sm btn-primary" data-tg-new>＋ New tab</button>
+      <button class="btn btn-sm btn-primary" data-tg-new>${ICONS.plus}<span>New tab</span></button>
       <button class="btn btn-sm btn-secondary" data-tg-done>Done</button>
     </div>`;
 
@@ -447,14 +467,14 @@ function toggleTabGrid(force) {
 
 function paintSecure(verdict) {
   const map = {
-    [VERDICT.KNOWN]: { ic: '🔒', cls: 'ok', txt: 'Checked' },
-    [VERDICT.CAUTION]: { ic: '⚠', cls: 'warn', txt: 'Unchecked site' },
-    [VERDICT.DANGER]: { ic: '⛔', cls: 'bad', txt: 'Blocked' },
-    [VERDICT.BLOCKED]: { ic: '⛔', cls: 'bad', txt: 'Blocked' },
+    [VERDICT.KNOWN]: { ic: ICONS.lock, cls: 'ok', txt: 'Checked' },
+    [VERDICT.CAUTION]: { ic: ICONS.warn, cls: 'warn', txt: 'Unchecked site' },
+    [VERDICT.DANGER]: { ic: ICONS.block, cls: 'bad', txt: 'Blocked' },
+    [VERDICT.BLOCKED]: { ic: ICONS.block, cls: 'bad', txt: 'Blocked' },
   };
-  const m = map[verdict?.verdict] || { ic: '🌐', cls: '', txt: '' };
+  const m = map[verdict?.verdict] || { ic: ICONS.globe, cls: '', txt: '' };
   el.secure.className = 'dbr-secure ' + m.cls;
-  el.secure.textContent = verdict ? `${m.ic} ${m.txt}` : '';
+  el.secure.innerHTML = verdict ? `${m.ic}<span>${escapeHtml(m.txt)}</span>` : '';
   el.secure.title = verdict ? verdict.signals.map((s) => `${s.level.toUpperCase()}: ${s.label}`).join('\n') : '';
 }
 
@@ -475,7 +495,7 @@ function paint() {
     paintHome();
     el.url.value = '';
     el.secure.className = 'dbr-secure';
-    el.secure.textContent = '';
+    el.secure.innerHTML = '';
     el.back.disabled = t.i <= 0;
     el.fwd.disabled = t.i >= t.hist.length - 1;
     el.connect.hidden = true;
@@ -515,7 +535,12 @@ function paint() {
   const wc = wcOrigins.has(origin);
   const connected = injected || wc;
   el.connect.hidden = !connected;
-  el.connect.textContent = connected ? (injected ? '🔗 Connected' : '🔗 WalletConnect') : '';
+  // Icon-only affordance: the button is `.dbr-ic` (34px), so the old
+  // '🔗 Connected' label overflowed the box. The chain mark + title/aria
+  // carry the state; the label is kept for screen readers only.
+  el.connect.innerHTML = connected
+    ? `${ICONS.chain}<span class="sr-only">${injected ? 'Connected' : 'WalletConnect'}</span>`
+    : '';
   el.connect.title = connected ? 'This site is connected — disconnect' : '';
   // The honest instruction, at the moment it applies: a loaded cross-origin
   // page whose own Connect button cannot see the wallet. Hidden when already
@@ -551,14 +576,14 @@ function paintHome() {
       <p class="small dim">Every address is checked before it loads. Nothing here can reach your keys:
       the page runs in its own origin with no cookies, no referrer, and no camera or mic. It IS granted clipboard-write, so a page you open here can put text on your clipboard.</p>
     </div>
-    ${bms.length ? `<div class="dbr-sec-h">🔖 Bookmarks</div>
+    ${bms.length ? `<div class="dbr-sec-h">${ICONS.bookmark} Bookmarks</div>
       <div class="dbr-mini">${bms.map((b) => `<button class="dbr-chip" data-open="${escapeHtml(b.url)}" data-name="${escapeHtml(b.name || baseHost(b.url))}">${escapeHtml(b.name || baseHost(b.url))}</button>`).join('')}</div>` : ''}
-    ${recent.length ? `<div class="dbr-sec-h">🕘 Recent</div>
+    ${recent.length ? `<div class="dbr-sec-h">${ICONS.clock} Recent</div>
       <div class="dbr-mini">${recent.map((h) => `<button class="dbr-chip" data-open="${escapeHtml(h.url)}" data-name="${escapeHtml(h.name || baseHost(h.url))}">${escapeHtml(h.name || baseHost(h.url))}</button>`).join('')}</div>` : ''}
-    ${native ? '<div class="dbr-sec-h">◆ All DApps — every address opens in-app</div>'
-             : `<div class="dbr-sec-h">◆ Loadable in-app <span class="small dim">(${known.length} verified frameable)</span></div>`}
+    ${native ? `<div class="dbr-sec-h">${ICONS.diamond} All DApps — every address opens in-app</div>`
+             : `<div class="dbr-sec-h">${ICONS.diamond} Loadable in-app <span class="small dim">(${known.length} verified frameable)</span></div>`}
     <div class="dbr-grid">${known.map(cardHTML).join('')}</div>
-    <div class="dbr-sec-h">▦ All ${catalog.length} DApps</div>
+    <div class="dbr-sec-h">${ICONS.grid} All ${catalog.length} DApps</div>
     <div class="dbr-chips dbr-cats" role="group" aria-label="Filter by category">
       ${['', ...cats].map((c, i) => {
         const face = catFace(c || 'All');
@@ -599,7 +624,7 @@ const cardHTML = (d) => `
           data-category="${escapeHtml(d.category || '')}" style="--cat:${catFace(d.category || '').color}">
     <span class="dbr-card-ic" aria-hidden="true">${dappMark(d.name, catFace(d.category || '').color, 36)}${dappLogo(d.url)}</span>
     <span class="dbr-card-nm">${escapeHtml(d.name)}</span>
-    <span class="dbr-card-ct">${escapeHtml(d.category || '')}${!isNativeDappBrowser() && d.frameable === false ? ' ↗' : ''}</span>
+    <span class="dbr-card-ct">${escapeHtml(d.category || '')}${!isNativeDappBrowser() && d.frameable === false ? ` ${ICONS.ext}` : ''}</span>
   </button>`;
 
 // ═══════════════════════════════════════════════════════════════
@@ -747,8 +772,8 @@ function load(url, name) {
 function schemeSheet(reason) {
   el.blocked.innerHTML = `
     <div class="dbr-report" role="alertdialog" aria-label="Address refused">
-      <div class="dbr-rep-h"><span aria-hidden="true">⛔</span> That address was not opened</div>
-      <ul class="dsig-list"><li class="dsig dsig-fail"><span class="dsig-mark" aria-hidden="true">✖</span>
+      <div class="dbr-rep-h">${ICONS.block} That address was not opened</div>
+      <ul class="dsig-list"><li class="dsig dsig-fail"><span class="dsig-mark" aria-hidden="true">${ICONS.close}</span>
         <span><strong>Refused</strong> — ${escapeHtml(reason)}</span></li></ul>
       <div class="dbr-rep-btns">
         <button class="btn btn-sm btn-secondary" data-act="back">Back</button>
@@ -770,7 +795,7 @@ function reportSheet(v, { canProceed }) {
   el.blocked.innerHTML = `
     <div class="dbr-report" role="alertdialog" aria-labelledby="dbrRepTitle">
       <div class="dbr-rep-h" id="dbrRepTitle">
-        <span aria-hidden="true">${canProceed ? '⚠' : '⛔'}</span>
+        <span aria-hidden="true">${canProceed ? ICONS.warn : ICONS.block}</span>
         ${canProceed ? 'Before you open this site' : 'This site was not opened'}
       </div>
       <div class="dbr-rep-host">${escapeHtml(v.host || v.url)}</div>
@@ -779,7 +804,7 @@ function reportSheet(v, { canProceed }) {
       shapes phishing actually uses; they cannot certify a site as honest.</p>
       <div class="dbr-rep-btns">
         ${canProceed ? '<button class="btn btn-sm btn-primary" data-act="proceed">Open anyway</button>' : ''}
-        ${canProceed ? '<button class="btn btn-sm btn-secondary" data-act="ext">↗ Open in a new tab</button>' : ''}
+        ${canProceed ? `<button class="btn btn-sm btn-secondary" data-act="ext">${ICONS.ext}<span>Open in a new tab</span></button>` : ''}
         <button class="btn btn-sm btn-secondary" data-act="back">${previous ? 'Back' : 'Close'}</button>
         ${canProceed ? '<button class="btn btn-sm btn-secondary" data-act="trust">Trust this site</button>' : ''}
         <button class="btn btn-sm btn-danger" data-act="block">Block this site</button>
@@ -990,18 +1015,18 @@ function toggleMenu(force) {
   if (!open) return;
   const t = active();
   const rows = [
-    ['tab', '＋ New tab', () => addTab()],
-    ['incog', '🕶 Incognito tab', () => addTab({ incognito: true })],
+    ['tab', `${ICONS.plus} New tab`, () => addTab()],
+    ['incog', `${ICONS.incog} Incognito tab`, () => addTab({ incognito: true })],
     ['sep'],
-    ['open', '↗ Open in a new browser tab', () => { openExternal(t?.url); }],
-    ['share', '🔗 Copy address', async () => { try { await navigator.clipboard.writeText(t?.url || ''); toast('Address copied', 'info'); } catch { toast('Clipboard refused by the browser', 'error'); } }],
-    ['wc', '🔗 Pair via WalletConnect', () => openPairWalletConnect()],
+    ['open', `${ICONS.ext} Open in a new browser tab`, () => { openExternal(t?.url); }],
+    ['share', `${ICONS.copy} Copy address`, async () => { try { await navigator.clipboard.writeText(t?.url || ''); toast('Address copied', 'info'); } catch { toast('Clipboard refused by the browser', 'error'); } }],
+    ['wc', `${ICONS.link} Pair via WalletConnect`, () => openPairWalletConnect()],
     ['sep'],
-    ['bm', isBookmarked(t?.url) ? '🔖 Remove bookmark' : '🔖 Bookmark this page', () => toggleBookmark()],
-    ['hist', '🕘 Clear history', () => { write(LS.history, []); toast('History cleared', 'info'); paint(); }],
-    ['data', '🧹 Clear all browsing data', () => { clearBrowsingData(); tabs = []; const nt = newTab(); tabs.push(nt); activeId = nt.id; toast('Tabs, history and bookmarks cleared', 'info'); paint(); }],
+    ['bm', `${ICONS.bookmark} ${isBookmarked(t?.url) ? 'Remove bookmark' : 'Bookmark this page'}`, () => toggleBookmark()],
+    ['hist', `${ICONS.clock} Clear history`, () => { write(LS.history, []); toast('History cleared', 'info'); paint(); }],
+    ['data', `${ICONS.trash} Clear all browsing data`, () => { clearBrowsingData(); tabs = []; const nt = newTab(); tabs.push(nt); activeId = nt.id; toast('Tabs, history and bookmarks cleared', 'info'); paint(); }],
     ['sep'],
-    ['close', '✕ Close browser', () => close()],
+    ['close', `${ICONS.close} Close browser`, () => close()],
   ];
   el.menuPop.innerHTML = rows.map((r) => r[0] === 'sep'
     ? '<div class="dbr-menu-sep" role="separator"></div>'
@@ -1026,16 +1051,16 @@ function showDidNotLoad() {
   el.loading.hidden = true;
   loadbarFail();
   el.blocked.innerHTML = `<div class="dbr-report" data-kind="didnotload" role="alertdialog" aria-label="Page did not load">
-    <div class="dbr-rep-h">⚠ This page did not load</div>
+    <div class="dbr-rep-h">${ICONS.warn} This page did not load</div>
     <p class="small dim">${escapeHtml(el.frame.src || '')} did not finish loading in time. Either the site
     refuses to be embedded (X-Frame-Options / frame-ancestors — no web page can bypass that, only a
     native app can) or it is simply slow: heavy dApps can take 30s+ to fire "load", and if you can see
     the page behind this sheet, that is what is happening — wait or press Show the page. Roughly half
     of all dApps block embedding; the honest way out is a real browser tab:</p>
-    <div class="dbr-rep-btns"><button class="btn btn-sm btn-primary" data-act="popup">↗ Open in a new tab</button>
-    <button class="btn btn-sm btn-secondary" data-act="peek">👁 Show the page</button>
-    <button class="btn btn-sm btn-secondary" data-act="copy"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy URL</button>
-    <button class="btn btn-sm btn-secondary" data-act="wc">🔗 Pair via WalletConnect</button>
+    <div class="dbr-rep-btns"><button class="btn btn-sm btn-primary" data-act="popup">${ICONS.ext}<span>Open in a new tab</span></button>
+    <button class="btn btn-sm btn-secondary" data-act="peek">${ICONS.eye}<span>Show the page</span></button>
+    <button class="btn btn-sm btn-secondary" data-act="copy"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy URL</span></button>
+    <button class="btn btn-sm btn-secondary" data-act="wc">${ICONS.link}<span>Pair via WalletConnect</span></button>
     <button class="btn btn-sm btn-secondary" data-act="back">Back</button></div></div>`;
   el.blocked.hidden = false;
   // "Show the page": the sheet may be wrong. A slow frame (Aave fires load at
@@ -1374,13 +1399,13 @@ export function openExternalNotice(url, name, reason) {
   t.url = null; t.name = name || baseHost(url) || url; t.hist = []; t.i = -1;
   el.homePage.innerHTML = `
     <div class="dbr-report">
-      <div class="dbr-rep-h"><span aria-hidden="true">↗</span> ${escapeHtml(t.name)} will not open inside Bear Tool</div>
+      <div class="dbr-rep-h"><span aria-hidden="true">${ICONS.ext}</span> ${escapeHtml(t.name)} will not open inside Bear Tool</div>
       <p class="small dim">${escapeHtml(reason || 'This site sends a clickjacking protection header. No web page can override it — only a native app can embed the site.')}</p>
       <div class="dbr-rep-host">${escapeHtml(url)}</div>
       <ul class="dsig-list">${renderSignalList(v.signals)}</ul>
       <div class="dbr-rep-btns">
-        <button class="btn btn-sm btn-primary" data-act="popup">↗ Open in a browser tab</button>
-        <button class="btn btn-sm btn-secondary" data-act="wc">🔗 Pair via WalletConnect</button>
+        <button class="btn btn-sm btn-primary" data-act="popup">${ICONS.ext}<span>Open in a browser tab</span></button>
+        <button class="btn btn-sm btn-secondary" data-act="wc">${ICONS.link}<span>Pair via WalletConnect</span></button>
         <button class="btn btn-sm btn-secondary" data-act="block">Block this site</button>
         <button class="btn btn-sm btn-secondary" data-act="home">Back to DApps</button>
       </div>

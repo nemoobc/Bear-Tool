@@ -342,12 +342,21 @@ export function verdictRank(v) {
   return { [VERDICT.BLOCKED]: 0, [VERDICT.DANGER]: 1, [VERDICT.CAUTION]: 2, [VERDICT.KNOWN]: 3 }[v] ?? 2;
 }
 
-const MARK = { pass: '✔', warn: '⚠', fail: '✖' };
+// Unicode marks → inline SVG. ✔ ⚠ ✖ rendered differently per device font (the
+// same reason the browser chrome moved off glyphs); stroke:currentColor keeps
+// each mark in its dsig-pass/warn/fail colour. Sized by `.dsig-mark > svg`.
+const svg = (path) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+const MARK = {
+  pass: svg('<path d="M4 12.5 9.5 18 20 6.5"/>'),
+  warn: svg('<path d="M12 3 2.5 20.5h19L12 3zM12 9.5v4.5M12 17v.5"/>'),
+  fail: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
+};
+const DOT = svg('<circle cx="12" cy="12" r="3"/>');
 
 /** Renders signals as list items. Kept here so every caller words it the same. */
 export function renderSignalList(signals) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   return (signals || []).map((s) =>
-    `<li class="dsig dsig-${esc(s.level)}"><span class="dsig-mark" aria-hidden="true">${MARK[s.level] || '·'}</span>`
+    `<li class="dsig dsig-${esc(s.level)}"><span class="dsig-mark" aria-hidden="true">${MARK[s.level] || DOT}</span>`
     + `<span><strong>${esc(s.label)}</strong> — ${esc(s.detail)}</span></li>`).join('');
 }

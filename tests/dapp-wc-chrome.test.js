@@ -50,7 +50,8 @@ test('the pairing hint is actually SHOWN for loaded cross-origin pages', () => {
 
 test('the bar covers WalletConnect sessions, not only injected sites', () => {
   assert.match(browser, /wcOrigins\.has\(origin\)/, 'D2: bar reads WC session cache');
-  assert.match(browser, /🔗 WalletConnect/, 'the label tells the user WHICH path is live');
+  assert.match(browser, /injected \? 'Connected' : 'WalletConnect'/,
+    'the label tells the user WHICH path is live (leading 🔗 is now an inline SVG)');
   assert.match(browser, /disconnectWcOrigin/, 'the same button disconnects a WC session');
 });
 

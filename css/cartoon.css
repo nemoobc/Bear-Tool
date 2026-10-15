@@ -3585,6 +3585,24 @@ select.input option, select.select option, .input option {
 }
 .dbr-bbtn > svg { width: 24px; height: 24px; }
 .dbr-peak > svg { width: 18px; height: 18px; }
+/* Screen-reader-only text (icons carry the visual, the label carries meaning). */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* The remaining chrome that was unicode is now <svg>: size each context so a
+   bare SVG does not collapse to 0×0 or fill the whole control. */
+.dbr-tab-ic > svg, .dbr-tg-ic > svg { width: 16px; height: 16px; display: block; pointer-events: none; }
+.dbr-tab-x > svg, .dbr-tg-x > svg { width: 12px; height: 12px; display: block; pointer-events: none; }
+.dbr-tab-new > svg { width: 15px; height: 15px; display: block; pointer-events: none; }
+.dbr-secure > svg { width: 12px; height: 12px; display: inline-block; vertical-align: -1px; flex: 0 0 auto; margin-right: 3px; pointer-events: none; }
+.dbr-secure > span { vertical-align: -1px; }
+.dbr-conn > svg { width: 18px; height: 18px; display: block; pointer-events: none; }
+.dbr-rep-h > svg, .dbr-rep-h span > svg { width: 18px; height: 18px; display: inline-block; vertical-align: -3px; margin-right: 5px; pointer-events: none; }
+.dsig-mark > svg { width: 14px; height: 14px; display: block; pointer-events: none; }
+/* Text buttons that gained a leading icon keep label + icon on one baseline. */
+.dbr-rep-btns .btn > svg, .dbr-tg-head .btn > svg, .dbr-tg-foot .btn > svg { width: 15px; height: 15px; display: inline-block; vertical-align: -2px; margin-right: 5px; pointer-events: none; }
+.dbr-menu-in .btn > svg { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; margin-right: 6px; pointer-events: none; }
+.dbr-menu-item > svg { width: 16px; height: 16px; flex: 0 0 auto; pointer-events: none; }
+.dbr-sec-h > svg { width: 15px; height: 15px; display: inline-block; vertical-align: -2px; margin-right: 6px; pointer-events: none; }
+.dbr-card-ct > svg { width: 12px; height: 12px; display: inline-block; vertical-align: -1px; margin-left: 3px; pointer-events: none; }
 /* Verdict and address share one pill, status first — where you are, and whether
    it is safe: the OKX shape, kept honest by the safety gate underneath it. */
 .dbr-urlwrap { position: absolute; left: 50%; transform: translateX(-50%); width: min(calc(100% - 170px), 520px); min-width: 0; display: flex; align-items: center; gap: 6px; padding: 3px 12px; border: 1px solid var(--border); border-radius: 999px; background: rgba(127,127,127,.08); }
