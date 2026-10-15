@@ -233,6 +233,15 @@ jobs:
       - name: Install foundry (anvil)
         uses: foundry-rs/foundry-toolchain@v1
 
+      # The WalletConnect PROTOCOL round-trip (tests/e2e-wc.mjs) — two OS
+      # processes over the PUBLIC relay, with anvil under the broadcast:
+      # pair → approve → accounts → personal_sign → typed data → tx/receipt →
+      # disconnect. Transport failure at init exits 0 with a SKIP line (never a
+      # fake red); anything after the session is established is a real failure.
+      # Until 2026-10-16 it ran by hand only — this step keeps it honest.
+      - name: Run WalletConnect protocol E2E (tests/e2e-wc.mjs)
+        run: npm run test:e2e-wc
+
       - name: Run E2E suite (tests/e2e/*.spec.js)
         run: npm run test:e2e -- --reporter=list
 
