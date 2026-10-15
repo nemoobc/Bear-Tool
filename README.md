@@ -137,7 +137,7 @@ is reachable (`CI=1`, or `FORK_RPC_URL` / `FORK_PORT`), so on a machine with no
 foundry the gate reports skips rather than pretending to have passed.
 
 **The browser suite needs Playwright browsers installed** (`npx playwright install
-chromium`). The 23 specs are driven by `tools/e2e.mjs`, which serves the app itself
+chromium`). The 24 specs are driven by `tools/e2e.mjs`, which serves the app itself
 and works on any platform. It is in `verify`, and it exits **5** — neither pass nor
 failure — on a machine with no browser, rather than passing without running.
 
