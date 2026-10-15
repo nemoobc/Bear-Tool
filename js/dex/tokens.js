@@ -9,11 +9,18 @@
 // the tokens this browser launched, painted the moment the feed opens so it is
 // never blank while the first scan runs. Price is ALWAYS read live, so a stale
 // local entry can never show a stale price.
+//
+// Discovery sits ON TOP of that list, not beside it (riset launchpad-ux R3,
+// user: "fitur launchpad kurang lengkap"): one search box that takes a name, a
+// ticker OR a contract address — a name can be copied, an address cannot — one
+// sort that only claims what this feed actually knows, and two badges that are
+// FACTS with a source: "New" dies with its freshness window, "LP locked" exists
+// because the pair's own lockedUntil says so. Nothing here is decoration.
 import { withoutDeleted } from './list.js';
 import { t } from '../i18n.js';
 import { get, set } from '../state.js';
 import { $, escapeHtml } from '../ui.js';
-import { quoteBy, fmtTok, DEX_CHAIN_ID } from './core.js';
+import { quoteBy, fmtTok, provider, ethersLib, isAddr, DEX_CHAIN_ID } from './core.js';
 import { discoverPools, fillMeta } from './pools.js';
 import { poolState } from './pool-data.js';
 import { quotePerToken } from './pool-list.js';
@@ -99,6 +106,55 @@ export function forgetLaunchedToken(address) {
   return kept.length;
 }
 
+// ── the freshness window & the view maths ────────────────────────────
+//
+// "New" is a CLAIM, and a claim needs a window: 7 200 blocks ≈ 24h at
+// Sepolia's ~12s. Outside the window the badge would be a lie, so it dies.
+export const FRESH_BLOCKS = 7_200;
+
+/** Is a pool's birth block within the window of the tip the scan saw?
+ *  No tip or no block means NO claim — a badge on a guess is a small lie. */
+export function isFresh(block, latest) {
+  const b = Number(block);
+  const l = Number(latest);
+  return Number.isFinite(b) && Number.isFinite(l) && b > 0 && l >= b && l - b <= FRESH_BLOCKS;
+}
+
+/** Has the pair's lockedUntil(creator) not expired yet? The expiry second
+ *  itself is already over — a lock you can exit this block is not a lock. */
+export function isLocked(until, now) {
+  const u = Number(until);
+  return Number.isFinite(u) && u > Number(now);
+}
+
+/** The feed's VIEW: filter by q (name / ticker / contract address) and order
+ *  by sort. Pure — returns a new array and never touches the caller's rows, so
+ *  a repaint can never corrupt what the chain said. The sorts are honest about
+ *  what the feed knows: 'liq' is the pair's quote reserve (BigInt — wei does
+ *  not fit a Number), 'name' needs no chain at all. */
+export function feedView(rows, { q = '', sort = 'new' } = {}) {
+  if (!Array.isArray(rows)) return [];
+  const needle = String(q).trim().toLowerCase();
+  const out = needle
+    ? rows.filter((r) => `${r.name || ''} ${r.symbol || ''} ${r.address || ''}`.toLowerCase().includes(needle))
+    : [...rows];
+  const byNew = (a, b) => (Number(b.block) || 0) - (Number(a.block) || 0)
+    || String(a.address || '').localeCompare(String(b.address || ''));
+  if (sort === 'liq') {
+    const liqOf = (r) => { try { return BigInt(r.liq ?? 0); } catch { return 0n; } };
+    out.sort((a, b) => {
+      const x = liqOf(a); const y = liqOf(b);
+      return x === y ? byNew(a, b) : (x > y ? -1 : 1);
+    });
+  } else if (sort === 'name') {
+    const nameOf = (r) => String(r.name || r.symbol || r.address || '').toLowerCase();
+    out.sort((a, b) => nameOf(a).localeCompare(nameOf(b)) || byNew(a, b));
+  } else {
+    out.sort(byNew);
+  }
+  return out;
+}
+
 export function tokensHtml() {
   const launched = launchedTokens();
   // The instant local paint. refreshFeed() re-renders from the chain right
@@ -114,7 +170,17 @@ export function tokensHtml() {
         <button type="button" class="dex-tab" data-dex-scope="all" aria-pressed="true">${escapeHtml(t('dex.tokens.all'))}</button>
         <button type="button" class="dex-tab" data-dex-scope="mine" aria-pressed="false">${escapeHtml(t('dex.tokens.mine'))}</button>
       </div>
+      <div class="dex-feedtools">
+        <input id="dexFeedSearch" class="dex-search" type="search" autocomplete="off"
+          placeholder="${escapeHtml(t('dex.feed.search'))}" aria-label="${escapeHtml(t('dex.feed.search'))}">
+        <select id="dexFeedSort" class="dex-sort" aria-label="${escapeHtml(t('dex.feed.sortAria'))}">
+          <option value="new">${escapeHtml(t('dex.feed.sortNew'))}</option>
+          <option value="liq">${escapeHtml(t('dex.feed.sortLiq'))}</option>
+          <option value="name">${escapeHtml(t('dex.feed.sortName'))}</option>
+        </select>
+      </div>
     </div>
+    <div id="dexFeedMatch" hidden></div>
     <div id="dexTokenList" class="dex-grid">${rows}</div>
     <div id="dexFeedStatus" class="small mt-8"></div>
     <div class="dex-empty mt-8" ${rows ? 'hidden' : ''}>
@@ -130,10 +196,19 @@ export function tokensHtml() {
 //
 // The row is a MARKET row: a square face, name over ticker over address, and
 // the pool price under it — live from the pair on every chain pass, a dash in
-// the moment before the chain has answered.
+// the moment before the chain has answered. Badges are facts with a source:
+// "New" rides the pinned freshness window against the scan's tip, "LP locked"
+// rides the pair's own lockedUntil(creator). A fact that is not there = no
+// badge, never a guess.
 function rowHtml(tk) {
   const short = `${tk.address.slice(0, 4)}…${tk.address.slice(-4)}`;
   const price = tk.price ? `${String(tk.price)} ${String(tk.qSym || '')}`.trim() : '—';
+  const badges = [
+    tk.fresh ? `<span class="dex-badge dex-badge-new">${escapeHtml(t('dex.feed.badgeNew'))}</span>` : '',
+    isLocked(tk.lockedUntil, Math.floor(Date.now() / 1000))
+      ? `<span class="dex-badge dex-badge-lock" title="${escapeHtml(t('dex.feed.lockUntil', { date: dateOf(tk.lockedUntil) }))}">${escapeHtml(t('dex.feed.badgeLock'))}</span>`
+      : '',
+  ].join('');
   return `
     <button type="button" class="dex-card" data-dex-token="${escapeHtml(tk.address)}">
       <span class="dex-card-face">
@@ -144,11 +219,35 @@ function rowHtml(tk) {
       <span class="dex-card-id">
         <span class="dex-card-name">${escapeHtml(tk.name || '')}</span>
         <span class="dex-card-ticker">${escapeHtml(tk.symbol || '')}</span>
+        ${badges}
         <span class="dex-card-addr">${escapeHtml(short)}</span>
       </span>
       <span class="dex-card-price">${escapeHtml(price)}</span>
       <span class="dex-card-go" aria-hidden="true">›</span>
     </button>`;
+}
+
+/** A lock's expiry as a plain ISO day — a title string must not depend on the
+ *  viewer's locale to avoid being wrong. */
+function dateOf(until) {
+  const d = new Date(Number(until) * 1000);
+  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : '';
+}
+
+// The pair's own lockedUntil(creator) — the ONE honest source for the locked
+// badge. One read per row, beside the price read, and a pair that will not
+// answer simply gets no badge instead of a guessed one.
+const LOCK_ABI = ['function lockedUntil(address) view returns (uint256)'];
+async function readLock(pair, creator) {
+  const p = provider();
+  const E = ethersLib();
+  if (!p || !E || !isAddr(pair) || !isAddr(creator)) return 0;
+  try {
+    const c = new E.Contract(pair, LOCK_ABI, p);
+    return Number(await c.lockedUntil(creator));
+  } catch {
+    return 0;
+  }
 }
 
 // Paints whatever the chain knows, and says so honestly when it could not look.
@@ -188,9 +287,11 @@ export async function refreshFeed(host, scope = 'all') {
 
   // Price per row, read from each pair: the number this token actually trades
   // at right now. A row whose read fails shows a dash — never a guessed price.
+  // The same pass reads the pair's lockedUntil for its creator; freshness rides
+  // the tip the scan just reported. Both feed badges, neither is invented.
   const priced = await Promise.all(rows.map(async (r) => {
-    const ps = await poolState(r.pair);
-    if (!ps.ok) return { ...r, price: '' };
+    const [ps, lockedUntil] = await Promise.all([poolState(r.pair), readLock(r.pair, r.creator)]);
+    if (!ps.ok) return { ...r, price: '', lockedUntil };
     const q = quoteBy(r.quote);
     // Factory tokens are BearTokens: always 18 decimals. The quote side uses
     // its preset's decimals, or the displayed unit would be wrong.
@@ -198,16 +299,71 @@ export async function refreshFeed(host, scope = 'all') {
       ...r,
       price: fmtTok(quotePerToken(ps.quoteReserve, ps.tokenReserve, 18), q ? q.decimals : 18, 6),
       qSym: q ? q.symbol : '',
+      liq: ps.quoteReserve,
+      lockedUntil,
+      fresh: isFresh(r.block, out.latest),
     };
   }));
 
-  list.innerHTML = priced.map(rowHtml).join('');
+  // The view state lives on the module: search and sort must repaint from the
+  // LAST chain-verified rows without re-scanning (typing must never cost an
+  // RPC pass), and the chain paint and the filter paint share one renderer so
+  // the screen can never show two different feeds.
+  feedState.rows = priced;
+  feedState.status = out.more ? t('dex.tokens.moreOnChain') : '';
   if (box) {
     box.hidden = priced.length > 0;
     if (!priced.length) say(t('dex.tokens.noneOnChain'));
   }
-  if (status) status.textContent = out.more ? t('dex.tokens.moreOnChain') : '';
+  applyView(host);
   return { coins: priced, ok: true, more: out.more };
+}
+
+// The feed view state: the last rows the chain verified, plus the status line
+// the chain path set. Search and sort read the LIVE controls and re-render from
+// here — nothing to reset on the 20s refresh, because the controls are state.
+const feedState = { rows: [], status: '' };
+
+function viewControls(host) {
+  const search = $('#dexFeedSearch', host);
+  const sort = $('#dexFeedSort', host);
+  return {
+    q: search && typeof search.value === 'string' ? search.value : '',
+    sort: sort && sort.value ? sort.value : 'new',
+  };
+}
+
+/** Paint the list + status + the open-a-contract affordance from the last
+ *  verified rows. THE one paint path: the chain refresh and every keystroke
+ *  both land here. */
+function applyView(host) {
+  const list = $('#dexTokenList', host);
+  if (!list || !feedState.rows.length) return;
+  const status = $('#dexFeedStatus', host);
+  const match = $('#dexFeedMatch', host);
+  const { q, sort } = viewControls(host);
+  const shown = feedView(feedState.rows, { q, sort });
+  list.innerHTML = shown.map(rowHtml).join('');
+
+  // A full contract address that is NOT in the window is not a dead end: the
+  // factory can resolve it (pairFor), so offer the way in. Below a full
+  // address the honest answer is "nothing matches", not a wild guess.
+  const raw = String(q || '').trim();
+  const canOpen = shown.length === 0 && isAddr(raw);
+  if (match) {
+    match.hidden = !canOpen;
+    match.innerHTML = canOpen
+      ? `<button type="button" class="dex-open" data-dex-open="${escapeHtml(raw.toLowerCase())}">${escapeHtml(t('dex.feed.openAddr'))} — ${escapeHtml(`${raw.slice(0, 6)}…${raw.slice(-4)}`)}</button>`
+      : '';
+  }
+
+  // Status speaks for the VIEW: a search that matched nothing is not an empty
+  // feed, and it is not a failed scan either. The three claims stay separate.
+  if (status) {
+    status.textContent = raw && shown.length === 0
+      ? t('dex.feed.noMatch', { q: raw })
+      : feedState.status;
+  }
 }
 
 export function bindTokens(host, onOpen) {
@@ -216,6 +372,24 @@ export function bindTokens(host, onOpen) {
     list.addEventListener('click', (e) => {
       const row = e.target.closest('[data-dex-token]');
       if (row && typeof onOpen === 'function') onOpen(row.dataset.dexToken);
+    });
+  }
+
+  // Search and sort repaint from the last verified rows — typing must never
+  // fire a chain scan (on a public RPC it never could afford one).
+  const search = $('#dexFeedSearch', host);
+  const sort = $('#dexFeedSort', host);
+  if (search) search.addEventListener('input', () => applyView(host));
+  if (sort) sort.addEventListener('change', () => applyView(host));
+
+  // The not-in-window address goes to the same door as a card tap: the token
+  // page resolves the pool itself (pairFor) and refuses politely when there is
+  // none.
+  const match = $('#dexFeedMatch', host);
+  if (match) {
+    match.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-dex-open]');
+      if (b && typeof onOpen === 'function') onOpen(b.dataset.dexOpen);
     });
   }
 }

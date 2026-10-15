@@ -175,6 +175,7 @@ test('logs decode to rows and the feed leads with the newest', async () => {
   assert.equal(low(r.pools[1].address), low(TOKEN_A));
   assert.equal(low(r.pools[1].creator), low(CREATOR));
   assert.equal(low(r.pools[1].pair), low(PAIR_A));
+  assert.equal(r.latest, 10_000, 'the tip the scan looked at rides along — the "New" badge needs an anchor');
 });
 
 test('one pool per token — a duplicate log cannot double the feed', async () => {

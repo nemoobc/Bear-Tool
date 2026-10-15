@@ -509,3 +509,46 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
 .dex-trade-stats > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .dex-stat-lb { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.6; flex: 0 0 auto; }
 .dex-stat-v { font-size: 0.98rem; font-weight: 700; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── the feed tools (search + sort) ───────────────────────────────
+   A compact row under the scope switch: search takes the width, sort keeps
+   its natural one. Same bordered/rounded language as the tab strip so the
+   whole head reads as one control panel, not three widgets. */
+.dex-feedtools { display: flex; gap: 8px; margin-top: 8px; }
+.dex-search {
+  flex: 1 1 auto; min-width: 0;
+  padding: 8px 12px; border: 2px solid var(--ink); border-radius: 999px;
+  background: var(--white); color: var(--ink);
+  font-family: 'Fredoka', sans-serif; font-size: 0.84rem;
+}
+.dex-search:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dex-sort {
+  flex: 0 0 auto;
+  padding: 8px 10px; border: 2px solid var(--ink); border-radius: 999px;
+  background: var(--white); color: var(--ink);
+  font-family: 'Fredoka', sans-serif; font-weight: 700; font-size: 0.8rem;
+}
+.dex-sort:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* A badge is a FACT with a source: "New" dies with the freshness window,
+   "LP locked" lives on the pair's own lockedUntil. Never decoration. */
+.dex-badge {
+  display: inline-block; margin: 1px 4px 1px 0; padding: 1px 7px;
+  border: 2px solid var(--ink); border-radius: 999px;
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-family: 'Fredoka', sans-serif;
+}
+.dex-badge-new { background: var(--honey, #F5C24A); }
+.dex-badge-lock { background: #CDEBD9; }
+
+/* The not-in-the-window contract: an explicit door, not a dead end. */
+.dex-open {
+  width: 100%; margin-top: 8px; padding: 9px 12px;
+  border: 2px solid var(--ink); border-radius: 10px;
+  background: var(--white); color: var(--ink); cursor: pointer;
+  font-family: 'Fredoka', sans-serif; font-weight: 700; font-size: 0.84rem;
+  text-align: left;
+}
+.dex-open:hover { background: var(--cream); }
+.dex-open:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }

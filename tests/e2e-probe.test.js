@@ -508,6 +508,9 @@ const dynamicSkip = new Set([
   // + the chart, the tape and the delete the v2 page grew (M5b): the chart
   // host, its status line, the tape, the delete button and its note.
   'dexTpChart','dexTpChartNote','dexTpTape','dexTpDelete','dexTpDeleteNote',
+  // + the feed tools (M5c): the search box, the sort select, and the slot the
+  // not-in-window contract's "open" button renders into.
+  'dexFeedSearch','dexFeedSort','dexFeedMatch',
 
 ]);
 

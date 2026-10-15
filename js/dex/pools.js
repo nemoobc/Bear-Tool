@@ -163,10 +163,12 @@ export async function fillMeta(rows, { concurrency = 6 } = {}) {
  * @param {number} [opts.limit]    cap on rows (a feed does not need 10k pools)
  * @param {string} [opts.factory]  override the stored factory (tests, and the
  *   token page checking "is this pool ours")
- * @returns {Promise<{pools: Array, ok: boolean, reason?: string, more: boolean}>}
+ * @returns {Promise<{pools: Array, ok: boolean, reason?: string, more: boolean, latest?: number}>}
  *
  * A row is { address (token), pair, quote, creator, block }. Rows are a VIEW:
- * nothing here is invented locally, only filtered and ordered.
+ * nothing here is invented locally, only filtered and ordered. `latest` is the
+ * tip the scan looked at — the anchor the feed measures pool freshness against;
+ * a failed scan carries no tip, and no tip means no freshness claim.
  */
 export async function discoverPools({ scope = 'all', creator, limit = 100, factory } = {}) {
   const empty = { pools: [], ok: false, more: false };
@@ -215,7 +217,7 @@ export async function discoverPools({ scope = 'all', creator, limit = 100, facto
     pools.sort((a, b) => b.block - a.block);
 
     const full = logs.length >= PAGE_SIZE;
-    return { pools: pools.slice(0, limit), ok: true, more: full };
+    return { pools: pools.slice(0, limit), ok: true, more: full, latest };
   } catch (e) {
     // Reason rides along. A node that cannot serve the range must not look like
     // an empty feed.
