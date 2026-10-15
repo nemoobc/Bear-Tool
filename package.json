@@ -20,6 +20,7 @@
     "test:all": "npm run check && npm test && npm run test:fork && npm run test:e2e",
     "test:live": "node --test --test-concurrency=1 --test-timeout=240000 tests/*.live.js",
     "test:dex-onchain": "node tests/dex-onchain-e2e.mjs",
+    "test:dex-v2": "node tests/dex-v2-onchain-e2e.mjs",
     "test:dex-liquidity": "node tests/dex-liquidity-e2e.mjs",
     "test:dex-bot": "node tests/dex-bot-e2e.mjs"
   },

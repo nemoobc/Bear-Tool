@@ -1,0 +1,261 @@
+// Bear Tool — tests/dex-v2-onchain-e2e.mjs
+// REAL end-to-end of the DEX V2 contracts (js/dex/bear-source.js) on a
+// throwaway anvil chain: factory.launch (token+pool+seed+lock in ONE tx) →
+// buy → sell → addLiquidity → lock enforcement → time travel → removeLiquidity
+// → full drain (nothing stranded) → re-seed after drain → createPool for an
+// existing token → duplicate pool refused → native ETH refused everywhere.
+//
+// This is the maturity gate for docs/DEX-V2.md's contract layer. The math the
+// UI will show (js/dex/pool-math.js) must agree with these contracts to the
+// last wei, so every expected number here is computed in JS with the same
+// floor rules and compared against the chain's answer.
+import { spawn } from 'node:child_process';
+import { ethers } from 'ethers';
+
+const PORT = 8609;
+const ANVIL = ['--port', String(PORT), '--silent', '--chain-id', '11155111'];
+
+function startAnvil() {
+  const p = spawn('anvil', ANVIL);
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('anvil did not start')), 15000);
+    p.on('exit', (c) => { clearTimeout(t); reject(new Error('anvil exited ' + c)); });
+    (async () => {
+      const url = `http://127.0.0.1:${PORT}`;
+      for (let i = 0; i < 60; i++) {
+        try {
+          // cacheTimeout -1: before/after reads either side of a tx must never
+          // come back from a stale cache — that made every delta check lie.
+          const pr = new ethers.JsonRpcProvider(url, undefined, { cacheTimeout: -1, staticNetwork: true });
+          await pr.getBlockNumber();
+          clearTimeout(t); resolve({ p, provider: pr }); return;
+        } catch { await new Promise((r) => setTimeout(r, 300)); }
+      }
+      clearTimeout(t); reject(new Error('anvil never answered'));
+    })();
+  });
+}
+
+const solcJs = await import('../js/solc.js');
+const { BEAR_SOURCE, BEAR_FACTORY_ABI, BEAR_PAIR_ABI, BEAR_TOKEN_ABI } = await import('../js/dex/bear-source.js');
+const solc = (await import('solc')).default;
+
+// Same standard-JSON input the app sends (js/solc.js builds it); the npm solc
+// compiles it here so the test proves the shipped source, not a copy.
+function compileBear() {
+  const input = solcJs.buildStandardJsonInput(BEAR_SOURCE, 'BearFactory');
+  const o = JSON.parse(solc.compile(JSON.stringify(input)));
+  const errs = (o.errors || []).filter((e) => e.severity === 'error');
+  if (errs.length) throw new Error('solc: ' + errs.map((e) => e.formattedMessage).join('\n'));
+  const all = o.contracts['BearFactory.sol'];
+  const art = (n) => ({ abi: all[n].abi, bytecode: '0x' + all[n].evm.bytecode.object });
+  return { token: art('BearToken'), pair: art('BearPair'), factory: art('BearFactory') };
+}
+
+// Mirror math — must match BearPair / js/dex/pool-math.js exactly (floor).
+const bigSqrt = (y) => {
+  if (y > 3n) { let z = y; let x = y / 2n + 1n; while (x < z) { z = x; x = (y / x + x) / 2n; } return z; }
+  return y !== 0n ? 1n : 0n;
+};
+const getAmountOut = (amountIn, reserveIn, reserveOut) => {
+  const inFee = amountIn * 997n;
+  return (inFee * reserveOut) / (reserveIn * 1000n + inFee);
+};
+
+let failures = 0;
+function check(name, cond, extra = '') {
+  if (cond) console.log(`  ok  ${name}`);
+  else { failures++; console.log(`  FAIL ${name} ${extra}`); }
+}
+
+/** Expect a rejected tx; returns the decoded revert text for the needle test.
+ * Do NOT pass an explicit gasLimit to these calls: an explicit limit makes
+ * ethers send instead of estimating, and the node's send-time rejection
+ * carries no revert reason — the needle test would lose its teeth. */
+async function refusal(fn) {
+  try { const tx = await fn(); if (tx && tx.wait) await tx.wait(); return { rejected: false, text: '' }; }
+  catch (e) {
+    const parts = [e?.shortMessage, e?.message, e?.revert ? JSON.stringify(e.revert) : '', e?.info?.error?.message].filter(Boolean);
+    return { rejected: true, text: parts.join(' | ') };
+  }
+}
+
+const V = 10n ** 18n;
+const SUPPLY = 1_000_000n * V;
+const TOKENS_FOR_POOL = 800_000n * V;
+const QUOTE_FOR_POOL = 100n * V;
+const LOCK_30D = 30n * 86400n;
+
+const { p, provider } = await startAnvil();
+try {
+  console.log('DEX V2 end-to-end on anvil (Sepolia chain-id 11155111)');
+  const bear = compileBear();
+  const [creator, trader, outsider] = await Promise.all([0, 1, 2].map((i) => provider.getSigner(i)));
+  const creatorAddr = await creator.getAddress();
+  const traderAddr = await trader.getAddress();
+  const outsiderAddr = await outsider.getAddress();
+
+  // --- quote coin: a BearToken deployed directly (proves the token artifact) ---
+  const quote = await new ethers.ContractFactory(bear.token.abi, bear.token.bytecode, creator)
+    .deploy('Test Quote', 'TQ', '', 'quote for v2 e2e', 1_000_000n * V, { gasLimit: 2_000_000 });
+  await quote.deploymentTransaction().wait();
+  const quoteAddr = await quote.getAddress();
+  await (await quote.transfer(traderAddr, 200n * V)).wait();
+
+  // --- factory ---
+  const factory = await new ethers.ContractFactory(bear.factory.abi, bear.factory.bytecode, creator)
+    .deploy({ gasLimit: 5_000_000 });
+  await factory.deploymentTransaction().wait();
+  const factoryAddr = await factory.getAddress();
+  const fIface = new ethers.Interface(bear.factory.abi);
+
+  // --- launch: token + pool + seed + 30-day LP lock in ONE tx ---
+  const meta = ['Bear Moon', 'BMOON', 'data:image/svg+xml;utf8,<svg></svg>', 'v2 test coin'];
+  await (await quote.approve(factoryAddr, QUOTE_FOR_POOL)).wait();
+  const launchTx = await factory.launch(meta, SUPPLY, quoteAddr, TOKENS_FOR_POOL, QUOTE_FOR_POOL, LOCK_30D, { gasLimit: 9_000_000 });
+  const launchRc = await launchTx.wait();
+  check('launch tx succeeds', launchRc.status === 1);
+
+  const launchedLog = launchRc.logs.map((l) => { try { return fIface.parseLog(l); } catch { return null; } }).find((l) => l && l.name === 'Launched');
+  check('Launched event emitted', Boolean(launchedLog));
+  const tokenAddr = launchedLog.args.token;
+  const poolAddr = launchedLog.args.pair;
+  check('Launched carries creator, quote', launchedLog.args.creator === creatorAddr && launchedLog.args.quote === quoteAddr);
+
+  const token = new ethers.Contract(tokenAddr, bear.token.abi, creator);
+  const pool = new ethers.Contract(poolAddr, bear.pair.abi, creator);
+  check('token metadata round-trips', await token.name() === 'Bear Moon' && await token.symbol() === 'BMOON'
+    && await token.image() === meta[2] && await token.description() === meta[3]);
+  check('token supply fixed', await token.totalSupply() === SUPPLY);
+  check('creator keeps the leftover supply', await token.balanceOf(creatorAddr) === SUPPLY - TOKENS_FOR_POOL);
+  check('pool holds the seed token side', await token.balanceOf(poolAddr) === TOKENS_FOR_POOL);
+  check('pool holds the seed quote side', await quote.balanceOf(poolAddr) === QUOTE_FOR_POOL);
+  check('factory registry points at the pool', await factory.pairFor(tokenAddr) === poolAddr);
+  check('pool wires token/quote/factory', await pool.token() === tokenAddr && await pool.quote() === quoteAddr && await pool.factory() === factoryAddr);
+
+  const expectedShares = bigSqrt(QUOTE_FOR_POOL * TOKENS_FOR_POOL);
+  check('initial LP shares = sqrt(quote*token)', await pool.totalSupply() === expectedShares, `chain=${await pool.totalSupply()} want=${expectedShares}`);
+  check('all initial LP shares go to the creator', await pool.balanceOf(creatorAddr) === expectedShares);
+
+  const launchBlock = await provider.getBlock(launchRc.blockNumber);
+  check('LP locked for exactly lockDuration', await pool.lockedUntil(creatorAddr) === BigInt(launchBlock.timestamp) + LOCK_30D);
+
+  // --- buy: quote -> token, output must equal the JS mirror to the wei ---
+  await (await quote.connect(trader).approve(poolAddr, 50n * V)).wait();
+  const [q0, t0] = await pool.reserves();
+  const buyIn = 10n * V;
+  const wantBuy = getAmountOut(buyIn, q0, t0);
+  const beforeBuy = await token.balanceOf(traderAddr);
+  await (await pool.connect(trader).swapQuoteForToken(buyIn, wantBuy, { gasLimit: 300_000 })).wait();
+  const gotBuy = (await token.balanceOf(traderAddr)) - beforeBuy;
+  check('buy output = offchain mirror (floor)', gotBuy === wantBuy, `chain=${gotBuy} want=${wantBuy}`);
+  const [q1, t1] = await pool.reserves();
+  check('reserves move on buy', q1 === q0 + buyIn && t1 === t0 - wantBuy);
+  check('k grows on buy (fee stays in pool)', q1 * t1 > q0 * t0);
+
+  // slippage guard: same trade with minOut one wei above the true quote reverts
+  await (await quote.connect(trader).approve(poolAddr, 1n * V)).wait();
+  const slip = await refusal(() => pool.connect(trader).swapQuoteForToken(1n * V, t1));
+  check('minOut one wei too high is refused', slip.rejected && /slippage/.test(slip.text), slip.text.slice(0, 120));
+
+  // --- sell: token -> quote ---
+  const sellIn = gotBuy / 4n;
+  const wantSell = getAmountOut(sellIn, t1, q1);
+  const beforeSell = await quote.balanceOf(traderAddr);
+  await (await token.connect(trader).approve(poolAddr, sellIn)).wait();
+  await (await pool.connect(trader).swapTokenForQuote(sellIn, wantSell, { gasLimit: 300_000 })).wait();
+  const gotSell = (await quote.balanceOf(traderAddr)) - beforeSell;
+  check('sell output = offchain mirror (floor)', gotSell === wantSell, `chain=${gotSell} want=${wantSell}`);
+  const [q2, t2] = await pool.reserves();
+  check('reserves move on sell', q2 === q1 - wantSell && t2 === t1 + sellIn);
+
+  // --- addLiquidity: proportional shares, floor to the smaller side ---
+  const addQuote = 5n * V;
+  const addToken = 50_000n * V;
+  const wantShares = ((addQuote * (await pool.totalSupply())) / q2) < ((addToken * (await pool.totalSupply())) / t2)
+    ? (addQuote * (await pool.totalSupply())) / q2
+    : (addToken * (await pool.totalSupply())) / t2;
+  await (await quote.connect(trader).approve(poolAddr, addQuote)).wait();
+  await (await token.connect(trader).approve(poolAddr, addToken)).wait();
+  const sharesBefore = await pool.balanceOf(traderAddr);
+  await (await pool.connect(trader).addLiquidity(addQuote, addToken, wantShares, { gasLimit: 400_000 })).wait();
+  const sharesGot = (await pool.balanceOf(traderAddr)) - sharesBefore;
+  check('addLiquidity shares = offchain mirror', sharesGot === wantShares, `chain=${sharesGot} want=${wantShares}`);
+
+  // --- lock enforcement: creator cannot move or burn LP before the date ---
+  const move = await refusal(() => pool.transfer(traderAddr, 1n));
+  check('locked LP transfer refused', move.rejected && /locked/.test(move.text), move.text.slice(0, 120));
+  const burn = await refusal(() => pool.removeLiquidity(1n, 0n, 0n));
+  check('locked LP burn refused', burn.rejected && /locked/.test(burn.text), burn.text.slice(0, 120));
+
+  // --- time travel past the lock: shares move again ---
+  await provider.send('evm_increaseTime', [Number(LOCK_30D) + 60]);
+  await provider.send('evm_mine', []);
+  await (await pool.transfer(traderAddr, 1n)).wait();
+  check('LP moves after the lock expires', await pool.balanceOf(traderAddr) === sharesBefore + sharesGot + 1n);
+
+  // --- removeLiquidity: trader exits fully, numbers must match the mirror ---
+  const [q3, t3] = await pool.reserves();
+  const ts3 = await pool.totalSupply();
+  const traderShares = await pool.balanceOf(traderAddr);
+  const wantQuoteOut = traderShares * q3 / ts3;
+  const wantTokenOut = traderShares * t3 / ts3;
+  const qBefore = await quote.balanceOf(traderAddr);
+  const tBefore = await token.balanceOf(traderAddr);
+  await (await pool.connect(trader).removeLiquidity(traderShares, wantQuoteOut, wantTokenOut, { gasLimit: 400_000 })).wait();
+  check('removeLiquidity returns the mirror amounts',
+    (await quote.balanceOf(traderAddr)) - qBefore === wantQuoteOut
+    && (await token.balanceOf(traderAddr)) - tBefore === wantTokenOut);
+
+  // --- creator drains the rest: pool must empty exactly, nothing stranded ---
+  const creatorShares = await pool.balanceOf(creatorAddr);
+  await (await pool.connect(creator).removeLiquidity(creatorShares, 0n, 0n, { gasLimit: 400_000 })).wait();
+  const [qEnd, tEnd] = await pool.reserves();
+  check('full drain empties the pool to the wei', qEnd === 0n && tEnd === 0n, `q=${qEnd} t=${tEnd}`);
+  check('LP supply is zero after the drain', await pool.totalSupply() === 0n);
+
+  // --- a drained pool can be seeded again (never bricked) ---
+  const reseedQuote = 2n * V;
+  const reseedToken = 4_000n * V;
+  await (await quote.approve(poolAddr, reseedQuote)).wait();
+  await (await token.approve(poolAddr, reseedToken)).wait();
+  await (await pool.addLiquidity(reseedQuote, reseedToken, 1n, { gasLimit: 400_000 })).wait();
+  check('re-seed after drain works (sqrt again)', await pool.totalSupply() === bigSqrt(reseedQuote * reseedToken));
+
+  // --- createPool for an EXISTING token; duplicate refused ---
+  const ext = await new ethers.ContractFactory(bear.token.abi, bear.token.bytecode, creator)
+    .deploy('Extra Token', 'EXT', '', '', 500_000n * V, { gasLimit: 2_000_000 });
+  await ext.deploymentTransaction().wait();
+  const extAddr = await ext.getAddress();
+  await (await ext.approve(factoryAddr, 100_000n * V)).wait();
+  await (await quote.approve(factoryAddr, 10n * V)).wait();
+  const poolTx = await factory.createPool(extAddr, quoteAddr, 100_000n * V, 10n * V, { gasLimit: 6_000_000 });
+  const poolRc = await poolTx.wait();
+  const poolLog = poolRc.logs.map((l) => { try { return fIface.parseLog(l); } catch { return null; } }).find((l) => l && l.name === 'PoolCreated');
+  check('createPool emits PoolCreated', Boolean(poolLog));
+  const extPoolAddr = poolLog.args.pair;
+  const extPool = new ethers.Contract(extPoolAddr, bear.pair.abi, creator);
+  check('existing-token pool seeded', await extPool.totalSupply() === bigSqrt(10n * V * 100_000n * V));
+  check('registry holds the second pool too', await factory.pairFor(extAddr) === extPoolAddr);
+  const dup = await refusal(() => factory.createPool(extAddr, quoteAddr, 1n, 1n));
+  check('second pool for the same token refused', dup.rejected && /exists/.test(dup.text), dup.text.slice(0, 120));
+
+  // --- guards: only the factory seeds; native ETH is refused everywhere ---
+  const fakeInit = await refusal(() => extPool.connect(outsider).mintInitial(outsiderAddr, 0n));
+  check('mintInitial is factory-only', fakeInit.rejected && /factory/.test(fakeInit.text), fakeInit.text.slice(0, 120));
+  const ethToPool = await refusal(() => outsider.sendTransaction({ to: poolAddr, value: 1n }));
+  check('native ETH to the pool refused', ethToPool.rejected && /gas only/.test(ethToPool.text), ethToPool.text.slice(0, 120));
+  const ethToFactory = await refusal(() => outsider.sendTransaction({ to: factoryAddr, value: 1n }));
+  check('native ETH to the factory refused', ethToFactory.rejected && /gas only/.test(ethToFactory.text), ethToFactory.text.slice(0, 120));
+  const ethToToken = await refusal(() => outsider.sendTransaction({ to: tokenAddr, value: 1n }));
+  check('native ETH to a token refused', ethToToken.rejected && /gas only/.test(ethToToken.text), ethToToken.text.slice(0, 120));
+} catch (e) {
+  failures++;
+  console.error('  ERROR', e && (e.shortMessage || e.message) || String(e));
+  if (e && e.revert) console.error('  revert=', e.revert);
+} finally {
+  try { p.kill(); } catch { /* already gone */ }
+}
+
+console.log(failures ? `\n${failures} check(s) FAILED` : '\nall DEX V2 end-to-end checks passed');
+process.exit(failures ? 1 : 0);
