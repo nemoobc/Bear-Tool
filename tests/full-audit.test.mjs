@@ -432,7 +432,9 @@ describe('7. CROSS-CHECK: NUMBERS vs REALITY', () => {
     log(`✓ ${lines} lines in cartoon.css`);
     // Ceilings are drift alarms, not shackles: raised to the sizes the shipped
     // features actually reached (3353/906/2691 at last check) + headroom.
-    assert.ok(lines > 1500 && lines < 4000, `CSS lines ${lines} out of expected range`);
+    // 2026-10-15: the cartoon pass (ink strokes, chunky fills) took this file
+    // to 4022 — the ceiling moves with what shipped, never the reverse.
+    assert.ok(lines > 1500 && lines < 4300, `CSS lines ${lines} out of expected range`);
   });
 
   it('index.html lines reasonable', () => {
