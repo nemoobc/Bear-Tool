@@ -92,7 +92,8 @@ test('deleting a coin is a real delete, and it stays deleted', () => {
   // they rejected — none of it may come back.
   assert.ok(!/data-dex-scope="hidden"/.test(tokens), 'no Hidden tab — a delete is not a hide');
   assert.ok(!/dexUnhideAll/.test(tokens), 'no Restore-all button — a delete you can undo is a hide');
-  assert.match(tokens, /withoutDeleted\(coins\)/, 'deleted coins must actually leave the feed');
+  assert.match(tokens, /withoutDeleted\(/, 'deleted coins must actually leave the feed');
+  assert.match(tokens, /withoutDeleted\([^)]*fillMeta/, 'the chain scan rows must pass the filter too, or a refresh resurrects the coin');
   assert.match(tokens, /export function forgetLaunchedToken/, 'delete must drop the coin from the launched index too');
   assert.match(trade, /forgetLaunchedToken\(token\.address\)/, 'the coin page wires the index removal');
   assert.match(trade, /deleteCoin\(token\.address\)/, 'and the tombstone that keeps it deleted');

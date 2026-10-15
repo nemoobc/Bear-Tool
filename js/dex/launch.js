@@ -20,6 +20,7 @@ import { parseAmount, ensureAllowanceTx } from './swap.js';
 import { factoryAddress, deployFactory } from './factory.js';
 import { BEAR_FACTORY_ABI } from './bear-source.js';
 import { quotePerToken } from './pool-list.js';
+import { rememberLaunchedToken } from './tokens.js';
 
 // Symbol for whichever quote ERC-20 is selected, falling back to the first
 // preset. The pool is quoted in this token, not the chain's native coin, so
@@ -279,6 +280,9 @@ export function bindLaunch(host, onLaunched) {
       });
       if (!res.ok) { status.textContent = ''; return; }
       status.textContent = t('dex.launch.done');
+      // Remember it locally, so the feed paints it the moment it opens — the
+      // chain stays the authority, this is only the instant copy.
+      if (res.token) rememberLaunchedToken({ address: res.token, name, symbol, image });
       if (res.token && onLaunched) onLaunched(res.token);
     });
   });

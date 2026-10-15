@@ -91,11 +91,11 @@ test('the built Dex carries the feature, not just the folder', (t) => {
 
   // A stale dist/ is worse than none: the folder present but the old code inside
   // is exactly the failure that shipped. So assert the CURRENT behaviour.
-  assert.match(index, /DEX_ROUTES/, 'the built view must be the two-route launchpad');
+  assert.match(index, /DEX_ROUTES/, 'the built view must be the v2 route list');
   assert.match(tokens, /dex-card/, 'the built feed must be the card grid');
-  assert.match(tokens, /paintProgress/, 'the built feed must paint curve bars');
-  assert.ok(css.includes('.dex-card-curve'), 'the built CSS must style the curve bar');
-  assert.ok(css.includes('.dex-pct'), 'the built CSS must style the percentage row');
+  assert.match(tokens, /quotePerToken/, 'the built feed must price rows from the pool');
+  assert.ok(css.includes('.dex-card'), 'the built CSS must style the cards');
+  assert.ok(css.includes('.dex-card-price'), 'the built CSS must style the price row');
 });
 
 test('the copy step is recursive, by construction', () => {

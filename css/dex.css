@@ -293,6 +293,16 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
   font-size: 0.66rem; font-weight: 700; letter-spacing: 0.02em;
   color: var(--ink); mix-blend-mode: normal;
 }
+/* The pool price row: what this token actually trades at, read from its pair on
+   every chain pass. A dash when the chain has not answered yet — never a guess. */
+.dex-card-price {
+  margin-top: 7px; padding: 2px 8px;
+  border: 2px solid var(--ink); border-radius: 999px;
+  background: var(--cream); color: var(--ink);
+  font-size: 0.72rem; font-weight: 700; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* Graduated: the bar is full and says so. Unread: no number was learned from the
    chain, so the bar stays empty rather than showing a guess. */
 .dex-card-curve.is-done .dex-card-curve-fill { background: var(--honey, #F5C24A); }
