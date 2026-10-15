@@ -281,7 +281,11 @@ Bear-Tool/
 │   │   ├── bot.js      # the market maker: fund once, it derives its own addresses and trades until stopped
 │   │   ├── bot-engine.js  # the bot's rules, pure: when to buy/sell/hold/stop, and which address pays
 │   │   ├── bot-wallets.js # the addresses the bot makes for itself, derived from your own seed, never colliding
-│   │   └── curve.js    # bonding-curve math (constant-product, virtual reserves, fees, graduation)
+│   │   ├── curve.js    # bonding-curve math (constant-product, virtual reserves, fees, graduation)
+│   │   ├── bear-source.js # v2 DEX contracts in ONE source: BearToken, BearPair (real pools), BearFactory + ABIs
+│   │   ├── pool-math.js # v2 pool math offchain: constant-product outputs, price, LP shares, slippage (BearPair's mirror)
+│   │   ├── factory.js  # v2 factory per chain: deploy (compile → tx), remembered; ONE source for its address
+│   │   └── pools.js    # v2 discovery: the factory's Launched/PoolCreated logs → pool rows + metadata cache
 │   ├── sign-render.js  # how a signing payload is SHOWN: hex→text, binary labelled, bidi chars stripped (one copy, three sheets)
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder

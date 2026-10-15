@@ -26,9 +26,23 @@ test('every Dex module is actually imported by another module', () => {
   // A module nothing imports is code the app never runs. list.js shipped for
   // several commits with seven exported functions and zero callers — delisting
   // was "done" on paper and absent from the product.
+  //
+  // The v2 pool rebuild has a window where its engine modules (docs/DEX-V2.md
+  // M2) are proven on a REAL chain by the v2 harness before their panels land
+  // (M3/M4). Those names sit in the list below — and the list has teeth: the
+  // exemption holds only while the v2 harness imports the module RIGHT NOW, so
+  // losing that proof turns the gate red in the same commit. When a v2 panel
+  // starts importing one, delete its line.
+  const v2Harness = 'tests/dex-v2-onchain-e2e.mjs';
+  const v2PreUi = ['pool-math.js', 'pools.js'];
   for (const { f, src } of allDex) {
     const isEntry = ['index.js', 'pump-source.js'].includes(f);
     if (isEntry) continue;
+    if (v2PreUi.includes(f)) {
+      assert.ok(read(v2Harness).includes(`js/dex/${f}`),
+        `js/dex/${f} is exempt only while ${v2Harness} imports it — the exemption just expired`);
+      continue;
+    }
     // BOTH import forms count. tokens.js pulls discover.js in with a dynamic
     // `await import()`, and a gate that only understood the static form called
     // a working module dead — which is how a "stranded module" check teaches

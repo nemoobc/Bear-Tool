@@ -109,8 +109,8 @@ SISA    : testnet-only → dana nyata minim; audit pihak ketiga = non-goal v1 (d
 
 | M | Isi | Bukti |
 |---|-----|-------|
-| M1 ✅ | 3 kontrak + dex-v2-onchain e2e (anvil) — 36/36 check, exit 0 (2026-10-15) | `node tests/dex-v2-onchain-e2e.mjs` |
-| M2 | core + pool-math + discover (+ parity) | unit hijau |
+| M1 ✅ | 3 kontrak + dex-v2-onchain e2e (anvil) — 36/36 saat M1, 43/43 kini (tumbuh dengan M2), exit 0 (2026-10-15) | `node tests/dex-v2-onchain-e2e.mjs` |
+| M2 ✅ | `pool-math.js` (math mirror BearPair) + `pools.js` (discovery event factory + meta cache) + `factory.js` (deploy factory jalur app: compile→tx→ingat); parity anvil: deployFactory→launch→discovery→fillMeta; unit 29/29, npm test 1641 pass/0 fail | `node --test tests/dex-pool-math.test.js tests/dex-pools.test.js tests/dex-factory.test.js` + `node tests/dex-v2-onchain-e2e.mjs` |
 | M3 | Swap + Pools + Liquidity + Portfolio UI | unit/view hijau |
 | M4 | Launch wizard + token page (chart/tape) + i18n | unit/view hijau |
 | M5 | Bot adaptasi + feed/delete/tombstone | unit hijau |

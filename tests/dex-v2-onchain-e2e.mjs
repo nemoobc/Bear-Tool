@@ -11,6 +11,7 @@
 // floor rules and compared against the chain's answer.
 import { spawn } from 'node:child_process';
 import { ethers } from 'ethers';
+import { bigSqrt, getAmountOut } from '../js/dex/pool-math.js';
 
 const PORT = 8609;
 const ANVIL = ['--port', String(PORT), '--silent', '--chain-id', '11155111'];
@@ -52,15 +53,9 @@ function compileBear() {
   return { token: art('BearToken'), pair: art('BearPair'), factory: art('BearFactory') };
 }
 
-// Mirror math — must match BearPair / js/dex/pool-math.js exactly (floor).
-const bigSqrt = (y) => {
-  if (y > 3n) { let z = y; let x = y / 2n + 1n; while (x < z) { z = x; x = (y / x + x) / 2n; } return z; }
-  return y !== 0n ? 1n : 0n;
-};
-const getAmountOut = (amountIn, reserveIn, reserveOut) => {
-  const inFee = amountIn * 997n;
-  return (inFee * reserveOut) / (reserveIn * 1000n + inFee);
-};
+// The expected numbers come from the SAME module the swap panel will use
+// (js/dex/pool-math.js, imported at the top) instead of a copy that could
+// drift: if the panel's math ever stops matching the chain, this goes red.
 
 let failures = 0;
 function check(name, cond, extra = '') {
@@ -95,6 +90,23 @@ try {
   const traderAddr = await trader.getAddress();
   const outsiderAddr = await outsider.getAddress();
 
+  // --- the app seams: the same compiler injection, ethers global and state
+  // map the browser fills. Installed once — deployFactory below and the
+  // discovery reads at the end both run through them.
+  const ls = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (ls.has(k) ? ls.get(k) : null),
+    setItem: (k, v) => ls.set(k, String(v)),
+    removeItem: (k) => ls.delete(k),
+  };
+  globalThis.ethers = ethers;
+  const state = await import('../js/state.js');
+  const factoryJs = await import('../js/dex/factory.js');
+  solcJs.injectCompiler({ compile: (json) => solc.compile(json) });
+  state.set('networkId', 'sepolia');
+  state.set('network', { id: 'sepolia', chainId: 11155111 });
+  state.set('provider', provider);
+
   // --- quote coin: a BearToken deployed directly (proves the token artifact) ---
   const quote = await new ethers.ContractFactory(bear.token.abi, bear.token.bytecode, creator)
     .deploy('Test Quote', 'TQ', '', 'quote for v2 e2e', 1_000_000n * V, { gasLimit: 2_000_000 });
@@ -102,11 +114,20 @@ try {
   const quoteAddr = await quote.getAddress();
   await (await quote.transfer(traderAddr, 200n * V)).wait();
 
-  // --- factory ---
-  const factory = await new ethers.ContractFactory(bear.factory.abi, bear.factory.bytecode, creator)
-    .deploy({ gasLimit: 5_000_000 });
-  await factory.deploymentTransaction().wait();
-  const factoryAddr = await factory.getAddress();
+  // --- factory: deployed through the APP's own path (js/dex/factory.js) ---
+  // compile → tx → remember, with a signer handed in through the same state
+  // the wallet fills. What the user's tap will run is what runs here.
+  // The state signer is a Wallet in the app (wallet.js builds them from the
+  // keystore); anvil's default mnemonic key #0 belongs to creator — same
+  // account, and a Wallet `connect()` works where a JsonRpcSigner refuses.
+  state.set('signer', new ethers.Wallet('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', provider));
+  state.set('unlocked', true);
+  const factoryAddr = await factoryJs.deployFactory();
+  check('deployFactory deploys through the app path', /^0x[0-9a-fA-F]{40}$/.test(String(factoryAddr || '')),
+    `got=${factoryAddr}`);
+  check('deployFactory remembers the factory', factoryJs.factoryAddress() === String(factoryAddr).toLowerCase());
+  check('the remembered factory has code on chain', (await provider.getCode(factoryAddr)) !== '0x');
+  const factory = new ethers.Contract(factoryAddr, bear.factory.abi, creator);
   const fIface = new ethers.Interface(bear.factory.abi);
 
   // --- launch: token + pool + seed + 30-day LP lock in ONE tx ---
@@ -249,6 +270,37 @@ try {
   check('native ETH to the factory refused', ethToFactory.rejected && /gas only/.test(ethToFactory.text), ethToFactory.text.slice(0, 120));
   const ethToToken = await refusal(() => outsider.sendTransaction({ to: tokenAddr, value: 1n }));
   check('native ETH to a token refused', ethToToken.rejected && /gas only/.test(ethToToken.text), ethToToken.text.slice(0, 120));
+
+  // --- discovery reads both births back from the factory's own logs ---
+  // (the localStorage stub and the state bootstrap above serve this section
+  // too — pools.js reads the provider through the same state map)
+  const poolsJs = await import('../js/dex/pools.js');
+  poolsJs.setFactoryAddress(factoryAddr);
+
+  const found = await poolsJs.discoverPools({});
+  check('discovery finds both pools from the factory logs', found.ok && found.pools.length === 2,
+    `ok=${found.ok} n=${found.pools.length} reason=${found.reason || ''}`);
+  const low = (a) => String(a).toLowerCase();
+  const rowA = (found.pools || []).find((r) => low(r.address) === low(tokenAddr));
+  const rowE = (found.pools || []).find((r) => low(r.address) === low(extAddr));
+  check('a discovery row carries pair, quote and creator', Boolean(rowA)
+    && low(rowA.pair) === low(poolAddr) && low(rowA.quote) === low(quoteAddr) && low(rowA.creator) === low(creatorAddr));
+  check('the second pool appears too (PoolCreated path)', Boolean(rowE) && low(rowE.pair) === low(extPoolAddr));
+
+  // Scope 'mine': the creator's own launches only — the second pool was
+  // created by the same wallet here, so both must match; an outsider gets none.
+  const mine = await poolsJs.discoverPools({ scope: 'mine', creator: creatorAddr });
+  const theirs = await poolsJs.discoverPools({ scope: 'mine', creator: outsiderAddr });
+  check('scope mine filters on the indexed creator topic', mine.ok && mine.pools.length === 2 && theirs.ok && theirs.pools.length === 0,
+    `mine=${(mine.pools || []).length} theirs=${(theirs.pools || []).length}`);
+
+  const filled = await poolsJs.fillMeta(found.pools);
+  const filledA = (filled || []).find((r) => low(r.address) === low(tokenAddr));
+  const filledE = (filled || []).find((r) => low(r.address) === low(extAddr));
+  check('fillMeta reads name/symbol from the real token contracts',
+    filledA?.name === 'Bear Moon' && filledA?.symbol === 'BMOON'
+    && filledE?.name === 'Extra Token' && filledE?.symbol === 'EXT',
+    `A="${filledA?.name}/${filledA?.symbol}" E="${filledE?.name}/${filledE?.symbol}"`);
 } catch (e) {
   failures++;
   console.error('  ERROR', e && (e.shortMessage || e.message) || String(e));
