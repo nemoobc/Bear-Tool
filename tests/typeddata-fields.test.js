@@ -5,7 +5,7 @@
 // rather than dropped.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { typedDataFields } from '../js/native-dapp.js';
+import { typedDataFields } from '../js/sign-render.js';
 import { readFileSync } from 'node:fs';
 
 const flat = (o) => Object.fromEntries(typedDataFields(o).map((f) => [f.k, f.v]));

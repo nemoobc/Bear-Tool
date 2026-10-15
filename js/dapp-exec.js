@@ -20,6 +20,7 @@
 
 import { get, persistCustomToken } from './state.js';
 import { getNetwork, getNetworkById, sanitizeChainRequest, installRequestedChain } from './network.js';
+import { scanTransaction } from './security.js';
 
 const { ethers } = globalThis;
 
@@ -115,6 +116,114 @@ function requireAddressMatch(addr) {
   }
 }
 
+/**
+ * One builder for `eth_sendTransaction`, shared by all three send paths
+ * (this file, native-dapp.js, walletconnect.js).
+ *
+ * Each path grew its own idea of what a dApp's transaction object means: the
+ * injected branch dropped `from` but skipped the transaction's own chainId,
+ * WalletConnect passed arbitrary fields through with only `gas` renamed, and
+ * the native branch hand-picked three fields and silently dropped everything
+ * else — so the SAME request got three different verdicts depending on which
+ * surface asked. This is the function they all call now. It is PURE (the
+ * caller hands in the active address and chain id) so every refusal is
+ * unit-testable without a wallet.
+ *
+ * Refusals, in order:
+ *   - not an object                       → 32602
+ *   - `from` other than the active account→ 4100
+ *   - `chainId` other than the wallet's   → 4902
+ *   - `to` that is not a 0x address       → 32602
+ *   - `data` that is not 0x hex           → 32602
+ *   - `input` where Ethereum wants `data` → 32602. The old whitelists dropped
+ *     `input` silently, so a contract call went out as a naked value transfer
+ *     behind a sheet that had shown no calldata — refusing beats signing that.
+ *   - neither `to` nor non-empty data     → 32602 (nothing to send; ethers
+ *     would deploy an empty contract and burn gas doing it)
+ * Everything else is whitelisted to the fields ethers accepts and numeric
+ * values become BigInt. `from` is never copied — the signer IS the account.
+ */
+export function buildSendTx(raw, { activeAddress = '', chainId = null } = {}) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw err(32602, 'eth_sendTransaction expects a transaction object.');
+  }
+  if (raw.from != null && String(raw.from)
+      && String(raw.from).toLowerCase() !== String(activeAddress).toLowerCase()) {
+    throw err(4100, `The account ${raw.from} is not the active account.`);
+  }
+  if (raw.chainId != null && raw.chainId !== '') {
+    // Number() reads both spellings a dApp may use — the JSON-RPC hex string
+    // ("0x89") and a plain number; NaN (unparseable, or '') is treated as
+    // "no chain claimed", exactly how this check always degraded.
+    const want = Number(raw.chainId);
+    if (Number.isFinite(want) && chainId != null && want !== Number(chainId)) {
+      throw err(4902, `The transaction targets chain ${want} but the wallet is on chain ${chainId}.`);
+    }
+  }
+  if (raw.to != null) {
+    if (typeof raw.to !== 'string' || !ADDR_RE.test(raw.to)) {
+      throw err(32602, `The transaction's "to" (${String(raw.to).slice(0, 24)}) is not a 0x address.`);
+    }
+  }
+  if (raw.data != null) {
+    if (typeof raw.data !== 'string' || !HEX_RE.test(raw.data)) {
+      throw err(32602, "The transaction's data is not 0x hex.");
+    }
+  } else if (raw.input != null) {
+    throw err(32602,
+      'The transaction sends "input" where an Ethereum transaction carries "data" — refusing rather than broadcasting a call with no calldata.');
+  }
+  const hasData = typeof raw.data === 'string' && raw.data !== '0x';
+  if (raw.to == null && !hasData) {
+    throw err(32602, 'The transaction has no recipient and no calldata — nothing to send.');
+  }
+  const toBig = (v, name) => {
+    try { return BigInt(v); } catch { throw err(32602, `The transaction's ${name} is not a number.`); }
+  };
+  const tx = {};
+  for (const k of ['to', 'data', 'nonce', 'type', 'accessList']) if (raw[k] != null) tx[k] = raw[k];
+  if (raw.value != null) tx.value = toBig(raw.value, 'value');
+  const gas = raw.gasLimit ?? raw.gas; // WC dApps spell it `gas` (JSON-RPC); ethers v6 only reads gasLimit.
+  if (gas != null) tx.gasLimit = toBig(gas, 'gas');
+  for (const k of ['gasPrice', 'maxFeePerGas', 'maxPriorityFeePerGas']) {
+    if (raw[k] != null) tx[k] = toBig(raw[k], k);
+  }
+  return tx;
+}
+
+/**
+ * Run the transaction detectors (security.js scanTransaction — unlimited
+ * approval, operator grant, off-chain permit, unreadable selector, first-time
+ * contract, large value) over a dApp's request. One scan for the injected
+ * (app.js), native (native-dapp.js) and WalletConnect paths: it used to run
+ * in app.js alone, so the Security Center's "every signing or spending call
+ * from a dApp is scanned" was true for one surface out of three — a user
+ * pairing over WalletConnect or browsing in the native WebView saw no
+ * findings at all.
+ * Returns [] on anything unexpected: a detector that throws must never
+ * become a way to block signing, and a non-transaction request (a message, a
+ * typed payload) simply has nothing a tx-scanner can read.
+ */
+export function scanSignCall(method, params) {
+  try {
+    const tx = Array.isArray(params) ? (params[0] || {}) : {};
+    const known = (get('tokens') || []).map((tok) => tok.address).filter(Boolean);
+    // scanTransaction returns { risk, findings, approval } — an object, not a
+    // list. Returning it whole and then calling .find() on it is the kind of
+    // mistake the browser test exists to catch: it threw "findings.find is not
+    // a function" the first time a dApp actually sent a transaction.
+    const r = scanTransaction({
+      to: tx.to,
+      data: tx.data,
+      value: tx.value ?? 0,
+      knownContracts: known,
+    });
+    return Array.isArray(r?.findings) ? r.findings : [];
+  } catch {
+    return [];
+  }
+}
+
 // The chain check for anything that BROADCASTS, shared by all three send paths
 // (this file, native-dapp.js, walletconnect.js).
 //
@@ -152,9 +261,11 @@ export async function providerOnCurrentChain() {
 // literal string the dApp wants signed. A plain string signed by ethers is
 // utf8-encoded, so hex MUST be converted to bytes first — signing the literal
 // characters "0x6865…" would be a different message than the dApp showed the
-// user.
-function signPayload(raw) {
-  if (typeof raw === 'string' && raw.length % 2 === 0 && HEX_RE.test(raw)) return ethers.getBytes(raw);
+// user. Shared with the WalletConnect and native paths, which each had a local
+// copy that FLOORED the last nibble off an odd-length hex string and signed
+// different bytes than the sheet had previewed.
+export function signPayload(raw) {
+  if (typeof raw === 'string' && raw.length >= 4 && raw.length % 2 === 0 && HEX_RE.test(raw)) return ethers.getBytes(raw);
   return raw;
 }
 
@@ -259,31 +370,19 @@ export async function executeLocal({ method, params = [], origin = '', activateN
 
     case 'eth_sendTransaction': {
       const signer = requireSigner();
-      const inTx = Array.isArray(params) ? params[0] : null;
-      if (!inTx || typeof inTx !== 'object') throw err(32602, 'eth_sendTransaction expects a transaction object.');
+      // One validator for all three send paths (buildSendTx above): malformed
+      // shape, a foreign `from`, the transaction's own chainId, `to`/`data`
+      // format, field whitelist, BigInt conversions. The from/chain checks
+      // used to be hand-written here; they are not any more, so a fix in one
+      // path is a fix in all of them.
+      const tx = buildSendTx(Array.isArray(params) ? params[0] : null, {
+        activeAddress: signer.address || get('address') || '',
+        chainId: currentChainId(),
+      });
       // Not get('provider') straight from state: the id may already be switched
       // while the provider object is not, and a broadcast through the old one
       // lands on the wrong chain (see providerOnCurrentChain).
       const provider = await providerOnCurrentChain();
-      if (inTx.from && String(inTx.from).toLowerCase() !== String(signer.address || get('address') || '').toLowerCase()) {
-        throw err(4100, `The account ${inTx.from} is not the active account.`);
-      }
-      if (inTx.chainId != null) {
-        const want = typeof inTx.chainId === 'string' ? parseInt(inTx.chainId, 16) : Number(inTx.chainId);
-        if (Number.isFinite(want) && want !== currentChainId()) {
-          throw err(4902, `The transaction targets chain ${want} but the wallet is on chain ${currentChainId()}.`);
-        }
-      }
-      // Normalize the JSON-RPC shape to what ethers accepts. `from` is dropped:
-      // the signer IS the account, and ethers refuses a mismatched from.
-      const tx = {};
-      for (const k of ['to', 'data', 'nonce', 'type', 'accessList']) if (inTx[k] != null) tx[k] = inTx[k];
-      if (inTx.value != null) tx.value = BigInt(inTx.value);
-      const gas = inTx.gasLimit ?? inTx.gas;
-      if (gas != null) tx.gasLimit = BigInt(gas);
-      for (const k of ['gasPrice', 'maxFeePerGas', 'maxPriorityFeePerGas']) {
-        if (inTx[k] != null) tx[k] = BigInt(inTx[k]);
-      }
       const sent = await signer.connect(provider).sendTransaction(tx);
       return { done: true, value: sent.hash };
     }

@@ -14,16 +14,17 @@
 //   not silently executed on the local chain;
 // - locked wallet raises the unlock prompt and answers honestly.
 import { confirmTx, toast, setModalVisibilityHook } from './ui.js';
-import { renderSignMessage } from './sign-render.js';
+import { renderSignMessage, typedDataFields } from './sign-render.js';
 import { t } from './i18n.js';
 import { get, requireUnlock, on } from './state.js';
 import { getNetworkById, getNetwork, sanitizeChainRequest, installRequestedChain, rpcLabel } from './network.js';
 import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
 // One source of truth for what a signature request MEANS: the injected path
-// (dapp-exec.js) already splits both param orders, validates typed data, and
-// guards the chain a broadcast goes out on. This path re-implemented each by
-// hand and got them wrong — see the personal_sign / typed-data branches below.
-import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain } from './dapp-exec.js';
+// (dapp-exec.js) already splits both param orders, validates typed data, runs
+// the security detectors, builds/validates a send transaction, and guards the
+// chain a broadcast goes out on. This path re-implemented each by hand and
+// got them wrong — see the personal_sign / typed-data / tx branches below.
+import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId } from './dapp-exec.js';
 
 const USER_REJECTED = { code: 4001, message: 'User rejected the request.' };
 const LOCKED = { code: 5100, message: 'Wallet is locked.' };
@@ -113,15 +114,6 @@ function formatWeiNative(wei) {
     const frac = (w % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
     return (frac ? `${whole}.${frac}` : `${whole}`) + ' native';
   } catch { return String(wei).slice(0, 40); }
-}
-
-function hexToBytes(hex) {
-  const s = String(hex || '');
-  if (!/^0x[0-9a-fA-F]*$/.test(s)) return s;
-  const body = s.slice(2);
-  const bytes = new Uint8Array(body.length >> 1);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(body.slice(i * 2, i * 2 + 2), 16);
-  return bytes;
 }
 
 // The plugin object MUST be wrapped before it can cross any await/then
@@ -359,46 +351,25 @@ async function askUser(fn) {
  * parity); falls back to the wallet modal on web or on a build whose plugin
  * predates confirm(). Same rows contract as confirmTx.
  */
-// Flatten an EIP-712 payload into "Field: value" lines the confirmation sheet can
-// show. The sheet used to display only the type name — "Mail", "Permit",
-// "Order" — which says nothing about WHAT is being authorised: the site picks
-// that name, and a payload that moves tokens can call itself "Mail". The person
-// signing had nothing to compare it against. Nested structs and arrays are read
-// one level deep and mark what they truncate, because a value that cannot be
-// shown must not vanish silently.
-export function typedDataFields(message, depth = 0) {
-  if (!message || typeof message !== 'object' || Array.isArray(message)) return [];
-  const out = [];
-  for (const [k, v] of Object.entries(message)) {
-    if (v === null || v === undefined) continue;
-    if (Array.isArray(v)) {
-      const head = v.slice(0, 3).map((x) => (typeof x === 'object' && x !== null ? '{…}' : String(x))).join(', ');
-      out.push({ k, v: `[${v.length}] ${head}${v.length > 3 ? '…' : ''}` });
-    } else if (typeof v === 'object') {
-      const keys = Object.keys(v);
-      out.push({
-        k,
-        v: depth
-          ? `{${keys.slice(0, 3).join(', ')}${keys.length > 3 ? ', …' : ''}}`
-          : typedDataFields(v, depth + 1).map((f) => `${f.k}: ${f.v}`).join(' · ') || '{…}',
-      });
-    } else {
-      out.push({ k, v: String(v) });
-    }
-  }
-  return out;
-}
 
-async function askConfirm({ title, rows, confirmText }) {
+async function askConfirm({ title, rows, confirmText, danger, tx }) {
   const p = plugin;
   if (p) {
     try {
       const safe = (rows || []).map((r) => ({ k: String(r.k), v: String(r.v) }));
-      const r = await p.confirm({ title, rows: safe, confirmText: confirmText || 'Confirm' });
+      // `danger` rides along for builds whose native sheet understands it —
+      // older builds simply ignore the extra key.
+      const r = await p.confirm({ title, rows: safe, confirmText: confirmText || 'Confirm', danger: !!danger });
       if (r && typeof r.ok === 'boolean') return r.ok;
     } catch { /* no native sheet on this build — fall through to the wallet modal */ }
   }
-  return askUser(() => confirmTx({ title, rows, confirmText }));
+  return askUser(() => confirmTx({
+    title,
+    rows,
+    confirmText,
+    ...(danger ? { danger: true } : {}),
+    ...(tx ? { tx } : {}),
+  }));
 }
 
 // The wire shape of a REFUSAL, in exactly one place. The per-request responder
@@ -532,7 +503,9 @@ async function handleNativeRpc({ id, origin, payload }) {
       confirmText: t('sign.action'),
     });
     if (!ok) return respondError(USER_REJECTED);
-    return respond(await signer.signMessage(hexToBytes(hex)));
+    // signPayload (dapp-exec.js), not a local converter: display and signature
+    // must cover the same bytes — the local hexToBytes floored odd-length hex.
+    return respond(await signer.signMessage(signPayload(hex)));
   }
 
   if (method === 'eth_signTypedData_v4') {
@@ -592,30 +565,45 @@ async function handleNativeRpc({ id, origin, payload }) {
   }
 
   if (method === 'eth_sendTransaction') {
-    const localNet = getNetworkById(get('networkId'));
-    const txReq = (msg.params || [])[0] || {};
-    const reqChain = Number(txReq.chainId);
-    if (Number.isFinite(reqChain) && localNet && Number(localNet.chainId) !== reqChain) {
-      const m = `This dApp asked for chain ${reqChain}, but Bear Tool is on ${`${localNet.name} (chain ${localNet.chainId})`}. Switch network in Bear Tool and ask again — nothing was sent.`;
-      toast(m, 'error');
-      return respondError({ code: -32000, message: m });
+    // The SAME validator the injected and WalletConnect paths call
+    // (buildSendTx, dapp-exec.js): a malformed request → 32602, a foreign
+    // `from` → 4100, the transaction's own chainId → 4902, `to`/`data`
+    // format, field whitelist and BigInt. This branch used to hand-pick three
+    // fields — a dApp-supplied gas limit silently vanished — and never
+    // checked `from` or the tx's chainId at all.
+    let tx;
+    try {
+      tx = buildSendTx((msg.params || [])[0], {
+        activeAddress: signer.address || get('address') || '',
+        chainId: currentChainId(),
+      });
+    } catch (e) {
+      return respondError({ code: (e && e.code) || 32602, message: (e && e.message) || String(e) });
     }
+    // The transaction detectors — the same scanSignCall the injected and
+    // WalletConnect paths run before their sheets. This path showed none of it.
+    const findings = scanSignCall(method, msg.params || []);
+    const worst = findings.find((f) => f.level === 'fail') || findings.find((f) => f.level === 'warn');
     // Money line for the native sheet, matching the iframe path's
     // describeSignCall: value in native units (not raw hex) and the calldata
     // itself (truncated, not just a byte count) — a user signing a swap must
     // see what the dApp is spending, not "0x2386f26fc10000" and "244 bytes".
     const ok = await askConfirm({
-      title: t('sign.txTitle'),
+      title: (worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') : '') + t('sign.txTitle'),
+      danger: !!(worst && worst.level === 'fail'),
       rows: [
         { k: t('site.chain'), v: chainId },
         { k: t('site.site'), v: site },
-        { k: t('site.to'), v: txReq.to ? shortAddr(txReq.to) : t('sign.contractCreation') },
-        { k: t('site.value'), v: formatWeiNative(txReq.value) },
-        { k: t('site.data'), v: txReq.data && txReq.data !== 'x' && txReq.data !== '0x'
-            ? String(txReq.data).slice(0, 74) + (String(txReq.data).length > 74 ? '…' : '')
+        { k: t('site.to'), v: tx.to ? shortAddr(tx.to) : t('sign.contractCreation') },
+        { k: t('site.value'), v: formatWeiNative(tx.value) },
+        { k: t('site.data'), v: tx.data && tx.data !== '0x'
+            ? String(tx.data).slice(0, 74) + (String(tx.data).length > 74 ? '…' : '')
             : t('cf.none.a.plain.transfer') },
+        ...(findings.length ? [{ k: t('cf.flags'), v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }] : []),
+        ...(worst ? [{ k: t('cf.why'), v: worst.detail }] : []),
       ],
-      confirmText: t('sign.action'),
+      confirmText: worst && worst.level === 'fail' ? t('cf.sendAnyway') : t('sign.send'),
+      tx: { to: tx.to, data: tx.data, value: tx.value },
     });
     if (!ok) return respondError(USER_REJECTED);
     // Guard the TRANSPORT, not just the id. activateNetwork() writes networkId
@@ -636,13 +624,11 @@ async function handleNativeRpc({ id, origin, payload }) {
     }
     // Keystore signers are plain ethers.Wallet instances with NO provider —
     // broadcasting without .connect(provider) dies with "missing provider"
-    // (the exact bug tests/send-resilience.test.js exists to catch).
-    const tx = await signer.connect(provider).sendTransaction({
-      to: txReq.to || undefined,
-      value: txReq.value ? BigInt(txReq.value) : undefined,
-      data: txReq.data || undefined,
-    });
-    return respond(tx.hash);
+    // (the exact bug tests/send-resilience.test.js exists to catch). The tx
+    // is the validated, whitelisted object from buildSendTx: a gas limit,
+    // nonce or fee field the dApp sent now rides along instead of vanishing.
+    const sent = await signer.connect(provider).sendTransaction(tx);
+    return respond(sent.hash);
   }
 
   if (method === 'wallet_switchEthereumChain') {

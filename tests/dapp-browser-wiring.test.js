@@ -139,7 +139,11 @@ test('a re-pair replaces the dApp\'s stale sessions instead of stacking ghosts',
   // disconnected after it.
   const i = wcSrc.indexOf('async function handleProposal');
   assert.ok(i > -1, 'handleProposal exists');
-  const block = wcSrc.slice(i, i + 3000);
+  // Slice to the NEXT function, not a fixed window: the S-wave safety gate
+  // (blocklist/phishing check before the connect sheet) made handleProposal
+  // longer and a fixed 3000 chars silently cut off approve/disconnect.
+  const nextFn = wcSrc.indexOf('async function', i + 16);
+  const block = wcSrc.slice(i, nextFn === -1 ? i + 5000 : nextFn);
   const collect = block.indexOf('getActiveSessions');
   const approve = block.indexOf('approveSession({');
   const drop = block.indexOf('disconnectSession');

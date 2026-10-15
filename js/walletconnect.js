@@ -20,17 +20,23 @@
 // The heavy dependency is imported dynamically inside ensureKit(): importing
 // this module costs nothing at boot and opens no socket until the user
 // actually pastes a wc: URI.
-import { renderSignMessage, stripInvisible as stripInvisibleShared } from './sign-render.js';
+import { renderSignMessage, stripInvisible as stripInvisibleShared, typedDataFields } from './sign-render.js';
 import { openModal, closeModal, confirmTx, escapeHtml, toast } from './ui.js';
 import { t } from './i18n.js';
 import { get, set, requireUnlock } from './state.js';
 import { getNetworkById, getNetwork, sanitizeChainRequest, installRequestedChain, rpcLabel } from './network.js';
+// The user's own site lists and the same pre-load gate the dApp browser
+// applies (blocklist / phishing shapes) — a pairing request is a site asking
+// for keys, so it is vetted by the same rules before its sheet appears.
+import { listBlocked, listTrusted } from './dapp-sessions.js';
+import { inspectUrl, VERDICT } from './dapp-safety.js';
 // One source of truth shared with the injected and native paths: split both
-// personal_sign param orders, validate typed data, and guard the chain a
-// broadcast actually goes out on. This path re-implemented each by hand and
-// disagreed with the others about what was even signable — see the branches
-// below.
-import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain } from './dapp-exec.js';
+// personal_sign param orders, validate typed data, build/validate a send
+// transaction (buildSendTx), run the security detectors (scanSignCall), and
+// guard the chain a broadcast actually goes out on. This path re-implemented
+// each by hand and disagreed with the others about what was even signable —
+// see the branches below.
+import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId } from './dapp-exec.js';
 
 export const WC_PROJECT_ID =
   (import.meta.env && import.meta.env.VITE_WC_PROJECT_ID) || '99909bde486039e2102663b92be74974';
@@ -88,16 +94,6 @@ let initing = null;
 const silentDeleteTopics = new Set();
 
 // -- pure helpers (unit-tested without a browser or a network) -------------
-
-/** WC dApps spell the field `gas` (JSON-RPC spelling); ethers v6 only reads
- * gasLimit and silently DROPS `gas`, so a dapp-supplied limit never reached
- * the node. Map it — an explicit gasLimit keeps winning — and drop the alias. */
-export function normalizeWcTx(raw) {
-  const tx = { ...(raw || {}) };
-  if (tx.gasLimit === undefined && tx.gas !== undefined) tx.gasLimit = tx.gas;
-  delete tx.gas;
-  return tx;
-}
 
 /** 'eip155:137' → 137; anything unparseable → null (caller treats that as
  * "no chain claimed", not as a mismatch). */
@@ -275,6 +271,7 @@ function respondError(topic, id, err) {
 
 async function handleProposal({ id, params }) {
   const dappName = params?.proposer?.metadata?.name || 'A dApp';
+  const dappUrl = String(params?.proposer?.metadata?.url || '');
   const chains = collectEip155Chains(params?.requiredNamespaces, params?.optionalNamespaces);
   const addr = address();
   if (!addr) {
@@ -282,10 +279,34 @@ async function handleProposal({ id, params }) {
     toast('Unlock Bear Tool before connecting a dApp.', 'error');
     return;
   }
+  // The same pre-load gate the dApp browser applies to a site before it loads
+  // (dapp-safety.js). A pairing request is that site asking for the keys, and
+  // it used to arrive with zero risk signal — the sheet showed a name the dApp
+  // picked for itself and nothing else, so a homograph or phishing host got
+  // the same treatment as a catalogue app. A host the user BLOCKED, or one
+  // matching the shapes phishing actually uses, is refused BEFORE the sheet:
+  // the browser's own report sheet offers no "open anyway" for a DANGER site,
+  // and neither does this.
+  let safety = null;
+  try {
+    if (/^https?:\/\//i.test(dappUrl)) {
+      safety = inspectUrl(dappUrl, [], { blockedHosts: listBlocked(), trustedHosts: listTrusted() });
+    }
+  } catch { safety = null; }
+  if (safety && (safety.verdict === VERDICT.BLOCKED || safety.verdict === VERDICT.DANGER)) {
+    const why = safety.signals && safety.signals[0];
+    await kit.rejectSession({ id, reason: { code: 4001, message: 'This site is blocked in Bear Tool.' } }).catch(() => {});
+    toast(`Blocked ${safety.host || dappUrl}: ${why ? why.label : 'flagged by the site checks'}.`, 'error');
+    return;
+  }
   const ok = await confirmTx({
     title: t('site.connectTitle', { site: dappName }),
     rows: [
       { k: t('site.site'), v: dappName },
+      ...(safety && safety.host ? [{ k: t('wc.host'), v: safety.host }] : []),
+      ...(safety && safety.signals && safety.signals.length
+        ? [{ k: t('cf.flags'), v: safety.signals.map((s) => `${s.level.toUpperCase()}: ${s.label}`).join(' · ') }]
+        : []),
       { k: t('site.account'), v: shortAddr(addr) },
       { k: t('wc.chains'), v: chains.join(', ') },
       { k: t('site.canRequest'), v: WC_SESSION_METHODS.join(', ') },
@@ -301,10 +322,10 @@ async function handleProposal({ id, params }) {
   // entries in the session sheet, ghost publishes to topics nobody hears,
   // and duplicated approvals the user never made. Collected BEFORE approve
   // so only the pre-existing ones are killed.
-  const dappUrl = String(params?.proposer?.metadata?.url || '').toLowerCase().replace(/\/+$/, '');
-  const staleTopics = dappUrl
+  const dappUrlNorm = dappUrl.toLowerCase().replace(/\/+$/, '');
+  const staleTopics = dappUrlNorm
     ? Object.values(kit.getActiveSessions?.() || {})
-        .filter((s) => String(s?.peer?.metadata?.url || '').toLowerCase().replace(/\/+$/, '') === dappUrl)
+        .filter((s) => String(s?.peer?.metadata?.url || '').toLowerCase().replace(/\/+$/, '') === dappUrlNorm)
         .map((s) => s.topic)
     : [];
   await kit.approveSession({
@@ -340,29 +361,47 @@ async function handleRequest({ id, topic, params }) {
     return;
   }
 
+  // The same transaction detectors the injected path runs before its sheet
+  // (scanSignCall, dapp-exec.js). They lived in app.js only, so this path —
+  // and the native one — showed no findings at all while the Security Center
+  // said "every signing or spending call from a dApp is scanned". A request
+  // that is not a transaction yields [] and its sheet is unchanged.
+  const findings = scanSignCall(method, (params.request && params.request.params) || []);
+  const worst = findings.find((f) => f.level === 'fail') || findings.find((f) => f.level === 'warn');
+  const peer = wcPeerName(topic);
+
   if (method === 'personal_sign') {
     // BOTH orders — [message, address] is the spec, [address, message] the
     // legacy one real dApps still send. Taking params[0] blindly signed the
-    // ADDRESS's 20 bytes as the message: hexToBytes happily converted it, the
-    // dialog previewed "(binary, 20 bytes)", and the signature verified over
-    // the wrong payload, so the dApp's login check failed after the user
-    // approved something they could not read. splitSignParams is the same
-    // function the injected signer uses (dapp-exec.js).
+    // ADDRESS's 20 bytes as the message: the old local hex converter happily
+    // turned it into bytes, the dialog previewed "(binary, 20 bytes)", and the
+    // signature verified over the wrong payload, so the dApp's login check
+    // failed after the user approved something they could not read.
+    // splitSignParams is the same function the injected signer uses
+    // (dapp-exec.js).
     const { message: hex } = splitSignParams(params.request.params || []);
     if (hex == null) {
       return respondError(topic, id, { code: 32602, message: 'personal_sign expects [message, address].' });
     }
     const ok = await confirmTx({
       title: t('sign.title'),
+      danger: !!(worst && worst.level === 'fail'),
       rows: [
+        ...(peer ? [{ k: t('cf.site'), v: peer }] : []),
         { k: t('site.chain'), v: chainId },
         { k: t('site.account'), v: shortAddr(signer.address) },
         { k: t('site.message'), v: hexToPreview(hex) },
+        ...(findings.length ? [{ k: t('cf.flags'), v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }] : []),
+        ...(worst ? [{ k: t('cf.why'), v: worst.detail }] : []),
       ],
-      confirmText: t('sign.action'),
+      confirmText: worst && worst.level === 'fail' ? t('cf.sendAnyway') : t('sign.action'),
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);
-    return respond(topic, id, await signer.signMessage(hexToBytes(hex)));
+    // signPayload (dapp-exec.js), NOT a local converter: the old local
+    // hexToBytes floored the last nibble off an odd-length hex string, so the
+    // signature covered different bytes than the sheet had previewed. The
+    // shared function and sign-render.js agree byte for byte.
+    return respond(topic, id, await signer.signMessage(signPayload(hex)));
   }
 
   if (method === 'eth_signTypedData_v4') {
@@ -402,13 +441,22 @@ async function handleRequest({ id, topic, params }) {
     }
     const ok = await confirmTx({
       title: t('sign.typedTitle'),
+      danger: !!(worst && worst.level === 'fail'),
       rows: [
+        ...(peer ? [{ k: t('cf.site'), v: peer }] : []),
         { k: t('site.chain'), v: chainId },
         { k: t('site.domain'), v: String(domain.name || '?') + (domain.version ? ' v' + domain.version : '') },
         { k: t('site.primaryType'), v: String(parsed.primaryType || '?') },
+        // The fields themselves — the same flattener the native sheet uses
+        // (typedDataFields, sign-render.js). The type name is chosen by the
+        // site, and a payload that moves tokens can call itself "Mail"; this
+        // path used to show only the name.
+        ...typedDataFields(message).slice(0, 8).map((f) => ({ k: f.k, v: f.v })),
         { k: t('site.account'), v: shortAddr(signer.address) },
+        ...(findings.length ? [{ k: t('cf.flags'), v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }] : []),
+        ...(worst ? [{ k: t('cf.why'), v: worst.detail }] : []),
       ],
-      confirmText: t('sign.action'),
+      confirmText: worst && worst.level === 'fail' ? t('cf.sendAnyway') : t('sign.action'),
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);
     // `types` already has EIP712Domain stripped and `message` is already the
@@ -430,17 +478,42 @@ async function handleRequest({ id, topic, params }) {
       toast(msg, 'error');
       return respondError(topic, id, { code: -32000, message: msg });
     }
-    const tx = normalizeWcTx((params.request.params && params.request.params[0]) || {});
+    // The SAME validator the injected and native paths call (buildSendTx,
+    // dapp-exec.js): a malformed request → 32602 — the old `|| {}` fallback
+    // turned a dApp that sent its transaction as an object (not the [tx]
+    // array every real dApp sends) into a sheet with empty rows and a garbage
+    // send — plus a foreign `from` → 4100, the transaction's own chainId →
+    // 4902, `to`/`data` format, field whitelist and BigInt. Refusals reach
+    // the dApp as-is so it can correct the request.
+    let tx;
+    try {
+      tx = buildSendTx((params.request.params || [])[0], {
+        activeAddress: signer.address || get('address') || '',
+        chainId: Number(localNet?.chainId) || currentChainId(),
+      });
+    } catch (e) {
+      return respondError(topic, id, { code: (e && e.code) || 32602, message: (e && e.message) || String(e) });
+    }
     const ok = await confirmTx({
-      title: t('sign.txTitle'),
+      title: (worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') : '') + t('sign.txTitle'),
+      danger: !!(worst && worst.level === 'fail'),
       rows: [
+        ...(peer ? [{ k: t('cf.site'), v: peer }] : []),
         { k: t('site.chain'), v: chainId },
-        { k: t('site.to'), v: shortAddr(tx.to || '') },
+        { k: t('site.to'), v: tx.to ? shortAddr(tx.to) : t('sign.contractCreation') },
         { k: t('site.value'), v: fmtValue(tx.value, nativeUnit(localNet)) },
-        { k: t('site.data'), v: tx.data && tx.data !== '0x' ? (String(tx.data).length / 2 - 1) + ' ' + t('site.bytes') : '—' },
+        // The calldata itself, truncated — not a byte count. A user signing a
+        // swap must see what the dApp is spending, not "244 bytes".
+        { k: t('site.data'), v: tx.data && tx.data !== '0x'
+            ? String(tx.data).slice(0, 74) + (String(tx.data).length > 74 ? '…' : '')
+            : t('cf.none.a.plain.transfer') },
+        ...(findings.length ? [{ k: t('cf.flags'), v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }] : []),
+        ...(worst ? [{ k: t('cf.why'), v: worst.detail }] : []),
       ],
-      confirmText: t('sign.send'),
-      danger: !!(tx.data && tx.data !== '0x'),
+      confirmText: worst && worst.level === 'fail' ? t('cf.sendAnyway') : t('sign.send'),
+      // Money line parity with the injected sheet: confirmTx prices the value
+      // and the estimated gas for what the dApp asked to send.
+      tx: { to: tx.to, data: tx.data, value: tx.value },
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);
     // Guard the TRANSPORT, not just the id. The chain check at the top of this
@@ -573,15 +646,6 @@ function wcPeerName(topic) {
 }
 
 // -- small runtime helpers -------------------------------------------------
-
-function hexToBytes(hex) {
-  const s = String(hex || '');
-  if (!/^0x[0-9a-fA-F]*$/.test(s)) return s;
-  const body = s.slice(2);
-  const bytes = new Uint8Array(body.length >> 1);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(body.slice(i * 2, i * 2 + 2), 16);
-  return bytes;
-}
 
 function fmtValue(v, unit = 'ETH') {
   if (v === undefined || v === null || v === '') return '0';

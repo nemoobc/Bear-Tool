@@ -25,7 +25,7 @@ globalThis.localStorage = {
 };
 globalThis.window = globalThis;
 
-const { executeLocal, currentChainId, splitSignParams, splitTypedParams, isLocalMethod } = await import('../js/dapp-exec.js');
+const { executeLocal, currentChainId, splitSignParams, splitTypedParams, isLocalMethod, buildSendTx, signPayload } = await import('../js/dapp-exec.js');
 const { set } = await import('../js/state.js');
 
 const ADDR = '0x' + 'ab'.repeat(20);
@@ -563,4 +563,44 @@ test('wallet_watchAsset: non-ERC20 → 4200; bad address → 32602; no UI → -3
     () => executeLocal({ method: 'wallet_watchAsset', params: [{ type: 'ERC20', options: { address: '0x' + '11'.repeat(20) } }] }),
     (e) => e.code === -32603,
   );
+});
+
+// ── S1 (2026-10-16): buildSendTx — one validator for all three send paths ──
+test('buildSendTx: normalizes to the ethers shape, `from` never copied', () => {
+  assert.deepStrictEqual(
+    buildSendTx({ from: ADDR, to: ADDR, value: '0x1', gas: '0x5208', maxFeePerGas: '0x59682f00', data: '0x' }, { activeAddress: ADDR }),
+    { to: ADDR, data: '0x', value: 1n, gasLimit: 21000n, maxFeePerGas: 0x59682f00n });
+  // WC spelling: an explicit gasLimit wins over `gas`, and the alias never survives.
+  assert.deepStrictEqual(buildSendTx({ to: ADDR, gas: '0x1', gasLimit: '0x2' }),
+    { to: ADDR, gasLimit: 2n });
+  // Unknown fields are dropped by whitelist — including `from`.
+  assert.deepStrictEqual(buildSendTx({ to: ADDR, from: ADDR, junk: 1 }, { activeAddress: ADDR }),
+    { to: ADDR });
+});
+
+test('buildSendTx refusals: shape, from, chainId, to, data, input, empty', () => {
+  const bad = (raw, code, opts) => assert.throws(() => buildSendTx(raw, opts), (e) => e.code === code);
+  bad(undefined, 32602);    // the WC `|| {}` fallback used to turn this into an empty sheet
+  bad('0xdeadbeef', 32602); // params[0] is a string, not a tx object
+  bad([], 32602);           // an array is not a transaction
+  bad({ to: ADDR, from: OTHER }, 4100, { activeAddress: ADDR });
+  bad({ to: ADDR, chainId: 137 }, 4902, { activeAddress: ADDR, chainId: 1 });
+  bad({ to: ADDR, chainId: '0x89' }, 4902, { activeAddress: ADDR, chainId: 1 });
+  bad({ to: '0xnot-an-address' }, 32602);
+  bad({ to: ADDR, data: '0xzz' }, 32602);
+  bad({ to: ADDR, input: '0x1234' }, 32602, { activeAddress: ADDR });
+  bad({ value: '0x1' }, 32602);            // no recipient, no calldata — nothing to send
+  bad({ to: ADDR, value: 'wat' }, 32602);
+  // A contract creation (no `to`) with real initcode is legal.
+  assert.deepStrictEqual(buildSendTx({ data: '0x60016001' }), { data: '0x60016001' });
+  // A chainId it cannot read is "no claim" — the old behaviour, unchanged.
+  assert.deepStrictEqual(buildSendTx({ to: ADDR, chainId: 'eip155:1' }, { chainId: 137 }), { to: ADDR });
+});
+
+test('signPayload: even hex → bytes, everything else → the literal string (preview parity)', () => {
+  assert.deepStrictEqual(signPayload('0x68656c6c6f'), ethers.getBytes('0x68656c6c6f'));
+  assert.equal(signPayload('hello'), 'hello');
+  assert.equal(signPayload('0xabc'), '0xabc',
+    'odd nibble count is not hex — signed as the literal string, exactly as sign-render previews it');
+  assert.equal(signPayload('0x'), '0x', 'fewer than one byte is not a byte string either');
 });

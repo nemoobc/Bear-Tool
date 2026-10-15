@@ -72,15 +72,10 @@ test('the pair sheet auto-picks a copied wc: link, never blocking on the clipboa
 });
 const browserSrc = readFileSync(new URL('../js/dapp-browser.js', import.meta.url), 'utf8');
 
-test('normalizeWcTx maps the WC `gas` spelling onto ethers gasLimit', () => {
-  assert.deepStrictEqual(wc.normalizeWcTx({ gas: '0x5208' }), { gasLimit: '0x5208' });
-  assert.deepStrictEqual(wc.normalizeWcTx({ gas: '0x1', gasLimit: '0x2' }), { gasLimit: '0x2' },
-    'an explicit gasLimit must win over the alias');
-  assert.deepStrictEqual(wc.normalizeWcTx({ to: '0xabc', value: '0x0' }), { to: '0xabc', value: '0x0' });
-  assert.deepStrictEqual(wc.normalizeWcTx(undefined), {});
-  assert.ok(!('gas' in wc.normalizeWcTx({ gas: '0x1' })),
-    'the alias must be dropped — ethers v6 must never see the key it ignores');
-});
+// normalizeWcTx (the local alias mapper) is GONE — buildSendTx (dapp-exec.js)
+// owns the `gas` spelling together with the validation, so all three send
+// paths normalize identically. Its behavioural tests live in
+// dapp-exec.test.js, next to the function.
 
 
 test('nativeUnit falls back to ETH only when the network carries no symbol', () => {
@@ -101,7 +96,8 @@ test('sendTransaction path: mismatch refused BEFORE confirm, tx normalized, unit
   assert.ok(mismatchAt < confirmAt, 'mismatch must be decided BEFORE the confirm dialog — never behind it');
   assert.match(body, /respondError\(topic, id, \{ code: -32000, message: msg \}\)/,
     'a mismatch must answer the dApp with an error, not send');
-  assert.match(body, /normalizeWcTx\(/, 'the incoming tx must pass gas→gasLimit normalization');
+  assert.match(body, /buildSendTx\(/,
+    'the incoming tx must pass the shared validator (shape, from, chainId, whitelist, gas→gasLimit)');
   assert.match(body, /nativeUnit\(localNet\)/, 'value display must use the active network symbol');
   assert.ok(!/fmtValue\(tx\.value\)\s*\}/.test(body), 'fmtValue must not be called without a unit');
 });
@@ -225,3 +221,52 @@ test('accounts and chain id are answered, not refused — connect must be able t
   assert.match(src, /method === 'eth_accounts' \|\| method === 'eth_requestAccounts'/);
 });
 
+
+// ── S1 (2026-10-16): perketat — one validator, findings, proposal gate ──────
+test('eth_sendTransaction runs the SHARED validator, and the sheet shows what is signed', () => {
+  const i = src.indexOf("method === 'eth_sendTransaction'");
+  const body = src.slice(i, src.indexOf("method === 'eth_accounts'", i));
+  assert.match(body, /buildSendTx\(\(params\.request\.params \|\| \[\]\)\[0\]/,
+    'the incoming tx must pass the shared validator — malformed shape, from, chainId, whitelist');
+  assert.match(body, /t\('sign\.contractCreation'\)/,
+    'a missing `to` is a contract creation and must SAY so, not render an empty row');
+  assert.match(body, /t\('cf\.none\.a\.plain\.transfer'\)/,
+    'no calldata says "plain transfer" — not a bare em-dash');
+  assert.match(body, /String\(tx\.data\)\.slice\(0, 74\)/,
+    'the sheet shows the calldata itself, truncated — not a byte count');
+  assert.match(body, /t\('cf\.flags'\)/, 'security findings reach the WC sheet');
+  assert.match(body, /t\('cf\.why'\)/, 'and the worst finding explains itself');
+  assert.match(body, /t\('cf\.sendAnyway'\)/, 'a failing finding changes the confirm text');
+  assert.match(body, /tx: \{ to: tx\.to, data: tx\.data, value: tx\.value \}/,
+    'the money line prices the request, same as the injected sheet');
+  assert.match(body, /danger: !!\(worst && worst\.level === 'fail'\)/,
+    'danger is driven by findings, not by the mere presence of calldata');
+});
+
+test('every WC sign sheet runs the shared detectors and names the peer', () => {
+  assert.match(src, /const findings = scanSignCall\(method, \(params\.request && params\.request\.params\) \|\| \[\]\)/,
+    'scanSignCall must run on this path — it used to run in app.js only');
+  const sign = src.slice(src.indexOf("method === 'personal_sign'"));
+  assert.match(sign, /\.\.\.\(peer \? \[\{ k: t\('cf\.site'\), v: peer \}\] : \[\]\)/,
+    'the sheets name the paired dApp');
+  assert.ok(!/hexToBytes\(/.test(src), 'the local byte converter is gone — signPayload owns it');
+  assert.match(src, /signMessage\(signPayload\(hex\)\)/, 'personal_sign signs through the shared converter');
+  assert.match(src, /typedDataFields\(message\)\.slice\(0, 8\)/,
+    'the WC typed sheet shows the payload FIELDS, like the native one');
+});
+
+test('a pairing request is vetted by the same gate as the browser, and refused when blocked', () => {
+  const i = src.indexOf('async function handleProposal');
+  const body = src.slice(i, src.indexOf('async function handleRequest'));
+  assert.match(body, /inspectUrl\(dappUrl, \[\], \{ blockedHosts: listBlocked\(\), trustedHosts: listTrusted\(\) \}\)/,
+    "the proposal is scanned with the user's own lists");
+  assert.match(body, /safety\.verdict === VERDICT\.BLOCKED \|\| safety\.verdict === VERDICT\.DANGER/,
+    'blocked and danger hosts are refused');
+  const refuseAt = body.indexOf('This site is blocked in Bear Tool');
+  const sheetAt = body.indexOf('confirmTx(');
+  assert.ok(refuseAt !== -1 && sheetAt !== -1 && refuseAt < sheetAt,
+    'the refusal lands BEFORE the connect sheet');
+  assert.match(body, /rejectSession\(\{ id, reason: \{ code: 4001/,
+    'the dApp is told the pairing was rejected');
+  assert.match(body, /k: t\('wc\.host'\)/, 'the sheet shows the host it actually scanned');
+});

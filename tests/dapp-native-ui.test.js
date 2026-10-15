@@ -34,11 +34,13 @@ test('the five consent prompts prefer the NATIVE sheet and keep the wallet-modal
     'kelima konfirmasi native (connect/sign/typed/send/add-chain) wajib lewat askConfirm — sheet native di ATAS dApp, dApp tidak boleh hilang');
   assert.equal((code.match(/await confirmTx\(\{/g) || []).length, 0,
     'confirmTx telanjang = prompt digambar di bawah dapp view: tak terlihat, tak bisa diklik, RPC hang selamanya');
-  assert.match(code, /async function askConfirm\(\{ title, rows, confirmText \}\)/,
-    'helper ada: sheet native dulu, modal wallet tinggal fallback');
+  assert.match(code, /async function askConfirm\(\{ title, rows, confirmText, danger, tx \}\)/,
+    'helper ada: sheet native dulu, modal wallet tinggal fallback (S1: danger + tx ikut lewat helper)');
   assert.match(code, /await p\.confirm\(\{ title, rows: safe, confirmText/,
     'sheet native dipanggil lewat plugin.confirm (Java menggambar di atas overlay)');
-  assert.match(code, /return askUser\(\(\) => confirmTx\(\{ title, rows, confirmText \}\)/,
+  assert.match(code, /danger: !!danger/,
+    'danger diteruskan ke sheet native — build lama tinggal mengabaikan key ekstra');
+  assert.match(code, /return askUser\(\(\) => confirmTx\(\{\s*title,\s*rows,\s*confirmText,/,
     'fallback tetap lewat askUser — web/plugin lama tak boleh menggantung');
   // askUser masih hidup untuk network picker + fallback web — tapi penjaganya
   // STATE, bukan counter: openModal menyala lagi saat sheet sudah terbuka (pair

@@ -34,12 +34,12 @@ import { dappBrowserOnLock } from './dapp-browser.js';
 import { renderSecurityCenter } from './security-center.js';
 import { renderDiscord, bindDiscordPanel, finishOAuthRedirect } from './discord.js';
 import { renderDex } from './dex/index.js';
-// scanTransaction finally has a caller. It has been written and tested since
-// before the Security Center existed, and nothing invoked it — which is why
-// that panel had to be rewritten to say the checks are not applied.
-import { scanTransaction } from './security.js';
+// scanSignCall (the transaction detectors) now lives in dapp-exec.js with the
+// other shared dApp seams: the injected path, the native path and the
+// WalletConnect path all run the same scan before their approval sheets, so
+// the Security Center's wording is true for all three, not just this one.
 import { createProvider, announceLock, announceAccounts, disconnectOrigin, PROVIDER_FLAG } from './dapp-bridge.js';
-import { executeLocal, currentChainId, splitSignParams, splitTypedParams } from './dapp-exec.js';
+import { executeLocal, currentChainId, splitSignParams, splitTypedParams, scanSignCall } from './dapp-exec.js';
 import { renderSignMessage, safeJson } from './sign-render.js';
 import { siteAllowed } from './dapp-sessions.js';
 import { startUpdateGuard } from './update-guard.js';
@@ -737,31 +737,9 @@ export function repaintActiveView() {
 // Settings → Security for what the user is told.
 let bearProvider = null;
 
-// Run the transaction detectors over a dApp's request. security.js has had
-// scanTransaction — unlimited approval, operator grant, off-chain permit,
-// unreadable selector, first-time contract, large value — written and tested
-// since before this existed, and nothing ever called it. The Security Center was
-// rewritten to admit that; this is the other half, which is to actually run it.
-function scanSignCall(method, params) {
-  try {
-    const tx = Array.isArray(params) ? (params[0] || {}) : {};
-    const known = (get('tokens') || []).map((tok) => tok.address).filter(Boolean);
-    // scanTransaction returns { risk, findings, approval } — an object, not a
-    // list. Returning it whole and then calling .find() on it is the kind of
-    // mistake the browser test exists to catch: it threw "findings.find is not
-    // a function" the first time a dApp actually sent a transaction.
-    const r = scanTransaction({
-      to: tx.to,
-      data: tx.data,
-      value: tx.value ?? 0,
-      knownContracts: known,
-    });
-    return Array.isArray(r?.findings) ? r.findings : [];
-  } catch {
-    // A detector that throws must not become a way to block signing.
-    return [];
-  }
-}
+// scanSignCall lives in dapp-exec.js now (imported at the top): one scan for
+// the injected, native and WalletConnect paths. The call site below is
+// unchanged.
 
 // Describe what is being asked for, in words, before anyone signs it.
 //
@@ -873,7 +851,7 @@ function makeBearProvider(origin) {
               : []),
             ...(worst ? [{ k: t('cf.why'), v: worst.detail }] : []),
           ],
-          confirmText: worst && worst.level === 'fail' ? 'Send anyway' : 'Confirm',
+          confirmText: worst && worst.level === 'fail' ? t('cf.sendAnyway') : 'Confirm',
           cancelText: t('cf.cancel'),
           // Money line for spending calls: the request's own tx object
           // carries value + calldata, so the dialog can price what the site

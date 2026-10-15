@@ -25,7 +25,18 @@ export function renderSignMessage(message) {
   if (!raw) return '(binary)';
   if (!/^0x[0-9a-fA-F]*$/.test(raw) || raw.length < 4) return stripInvisible(raw).slice(0, 160);
   const bytes = hexBytes(raw);
-  if (!bytes) return `(binary, ${Math.max(0, (raw.length - 2) / 2)} bytes)`;
+  if (!bytes) {
+    // Odd nibble count — there is no such thing as half a byte, and the
+    // signer does NOT sign the floored bytes: signPayload (dapp-exec.js)
+    // hands an odd-length "0x…" string to the signer as ITS LITERAL TEXT
+    // (that is also what MetaMask does), while the old previews here showed
+    // "(binary, 1.5 bytes)" and the WC/native converters floored the last
+    // nibble off — the sheet and the signature covered different payloads.
+    // hexBytes can only return null for odd length (the regex above already
+    // proved every pair is hex), so this branch IS the odd-length case: the
+    // preview follows the signer and shows the literal string.
+    return stripInvisible(raw).slice(0, 160);
+  }
   const text = decodeUtf8(bytes);
   // Hex that decodes to text is shown AS TEXT. Anything else is binary and is
   // labelled binary — numbers are not a substitute for meaning.
@@ -81,4 +92,37 @@ export function safeJson(v) {
     // A cyclic object from the page must not take the dialog down with it.
     return '(could not be displayed)';
   }
+}
+
+// Flatten an EIP-712 payload into "Field: value" lines the confirmation
+// sheets show. The sheets used to display only the type name — "Mail",
+// "Permit", "Order" — which says nothing about WHAT is being authorised: the
+// site picks that name, and a payload that moves tokens can call itself
+// "Mail". The person signing had nothing to compare it against. Nested
+// structs and arrays are read one level deep and mark what they truncate,
+// because a value that cannot be shown must not vanish silently.
+// Lives here (it was exported from native-dapp.js before) so the WalletConnect
+// sheet can show the same fields the native sheet does — one flattener, one
+// rendering, no drift.
+export function typedDataFields(message, depth = 0) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return [];
+  const out = [];
+  for (const [k, v] of Object.entries(message)) {
+    if (v === null || v === undefined) continue;
+    if (Array.isArray(v)) {
+      const head = v.slice(0, 3).map((x) => (typeof x === 'object' && x !== null ? '{…}' : String(x))).join(', ');
+      out.push({ k, v: `[${v.length}] ${head}${v.length > 3 ? '…' : ''}` });
+    } else if (typeof v === 'object') {
+      const keys = Object.keys(v);
+      out.push({
+        k,
+        v: depth
+          ? `{${keys.slice(0, 3).join(', ')}${keys.length > 3 ? ', …' : ''}}`
+          : typedDataFields(v, depth + 1).map((f) => `${f.k}: ${f.v}`).join(' · ') || '{…}',
+      });
+    } else {
+      out.push({ k, v: String(v) });
+    }
+  }
+  return out;
 }

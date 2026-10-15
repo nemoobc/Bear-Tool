@@ -332,12 +332,23 @@ test('the Security Center describes the scanner accurately, in both directions',
   assert.match(sc, /do <strong>not<\/strong> run on transactions you start yourself/,
     'and be explicit about what is not covered — the wallet\'s own flows are not');
 
-  // And the scanner must genuinely be called, not merely mentioned.
-  const app = read('js/app.js');
-  assert.match(app, /import \{ scanTransaction \} from '\.\/security\.js'/,
-    'app.js must import the detector it describes');
+  // And the scanner must genuinely be called, not merely mentioned — on ALL
+  // three paths: scanSignCall lives in dapp-exec.js now (S1, 2026-10-16) and
+  // the injected, native and WalletConnect paths each run it before their
+  // sheets; running it in app.js alone is what made this claim false.
+  const exec = read('js/dapp-exec.js');
+  const native = read('js/native-dapp.js');
+  const wc = read('js/walletconnect.js');
+  assert.match(exec, /import \{ scanTransaction \} from '\.\/security\.js'/,
+    'dapp-exec.js must import the detector it runs');
+  assert.match(exec, /export function scanSignCall\(method, params\)/,
+    'the shared caller must live where all three paths can import it');
   assert.match(app, /scanSignCall\(method, params\)/,
-    'and must call it on the signing path');
+    'the injected path must call it on the signing path');
+  assert.match(wc, /scanSignCall\(method,/,
+    'the WalletConnect path must run the same scan');
+  assert.match(native, /scanSignCall\(method,/,
+    'and so must the native path');
 });
 
 test('dApp signing and spending are confirmed on every call, not once per site', () => {
@@ -385,15 +396,21 @@ test('the signing path handles what scanTransaction actually returns', () => {
   // scanTransaction returns { risk, findings, approval }, not a list. Treating its
   // return value as an array threw "findings.find is not a function" the first
   // time a dApp sent a real transaction — a type error on the signing path,
-  // found by driving a page, not by reading the source.
+  // found by driving a page, not by reading the source. The extraction moved
+  // into the shared scanSignCall (dapp-exec.js, S1 2026-10-16): all three
+  // paths consume the same array now, and the injected call site must keep
+  // treating it as one.
   const s = read('js/security.js');
   assert.match(s, /return \{ risk, findings, approval \}/,
     'scanTransaction returns an object; if that ever changes, this test is the canary');
-  const app = read('js/app.js');
-  assert.match(app, /Array\.isArray\(r\?\.findings\) \? r\.findings : \[\]/,
+  const exec = read('js/dapp-exec.js');
+  assert.match(exec, /Array\.isArray\(r\?\.findings\) \? r\.findings : \[\]/,
     'the caller must take the findings array out of the result object');
-  assert.doesNotMatch(app, /return scanTransaction\([\s\S]{0,200}?\) \|\| \[\];/,
+  assert.doesNotMatch(exec, /return scanTransaction\([\s\S]{0,200}?\) \|\| \[\];/,
     'returning the result object and calling .find() on it is the bug');
+  const app = read('js/app.js');
+  assert.match(app, /findings\.find\(\(f\) => f\.level === 'fail'\)/,
+    'the injected path consumes findings as an array');
 });
 
 test('no local binding shadows a module-level function of the same name', () => {
