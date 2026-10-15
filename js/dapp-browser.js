@@ -832,7 +832,7 @@ function reportSheet(v, { canProceed }) {
   // the frame cannot report that (a Chromium error page fires a normal "load" —
   // measured, 2026-10-07). Offering the real browser here is the honest door.
   box.querySelector('[data-act="ext"]')?.addEventListener('click', () => {
-    openExternal(v.url);
+    openExternalGated(v.url);
   });
   box.querySelector('[data-act="back"]')?.addEventListener('click', () => {
     if (previous) { el.blocked.innerHTML = previous; el.blocked.hidden = true; paint(); }
@@ -854,7 +854,12 @@ function reportSheet(v, { canProceed }) {
   });
   // Defence in depth: even if a caller ever passed canProceed:true for a
   // DANGER verdict, the button is removed here rather than trusted upstream.
-  if (v.verdict === VERDICT.DANGER) el.blocked.querySelector('[data-act="proceed"]')?.remove();
+  if (v.verdict === VERDICT.DANGER) {
+    el.blocked.querySelector('[data-act="proceed"]')?.remove();
+    // The external door is the other way past the sheet — a DANGER site must
+    // not have one (S2, 2026-10-16: only `proceed` was removed before).
+    el.blocked.querySelector('[data-act="ext"]')?.remove();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1010,6 +1015,26 @@ function openExternal(url) {
   return true;
 }
 
+/**
+ * The guarded door to a real browser. EVERY in-app path that hands a URL to
+ * the OS goes through here — the toolbar ↗, the ⋯ menu, the did-not-load
+ * sheet, the report sheet's own "Open in a new tab", and the framed-out
+ * notice. Vetting only the framed load left this door open (S2, 2026-10-16):
+ * "Open in a new tab" carried a URL the checks never saw. A new tab is still
+ * a page to trust, and the user's blocklist is a promise, not a hint.
+ * Non-http(s) never leaves: the anchor would hand the scheme to the OS.
+ */
+function openExternalGated(rawUrl) {
+  const url = String(rawUrl || '').trim();
+  if (!/^https?:\/\//i.test(url)) return false;
+  const v = inspectUrl(url, catalog, securityOpts());
+  if (v.verdict === VERDICT.BLOCKED || v.verdict === VERDICT.DANGER) {
+    reportSheet(v, { canProceed: false });
+    return false;
+  }
+  return openExternal(url);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // WIRING
 // ═══════════════════════════════════════════════════════════════
@@ -1024,7 +1049,7 @@ function toggleMenu(force) {
     ['tab', `${ICONS.plus} New tab`, () => addTab()],
     ['incog', `${ICONS.incog} Incognito tab`, () => addTab({ incognito: true })],
     ['sep'],
-    ['open', `${ICONS.ext} Open in a new browser tab`, () => { openExternal(t?.url); }],
+    ['open', `${ICONS.ext} Open in a new browser tab`, () => { openExternalGated(t?.url); }],
     ['share', `${ICONS.copy} Copy address`, async () => { try { await navigator.clipboard.writeText(t?.url || ''); toast('Address copied', 'info'); } catch { toast('Clipboard refused by the browser', 'error'); } }],
     ['wc', `${ICONS.link} Pair via WalletConnect`, () => openPairWalletConnect()],
     ['sep'],
@@ -1079,7 +1104,7 @@ function showDidNotLoad() {
   });
   if (el.peak) el.peak.onclick = () => showDidNotLoad();
   el.blocked.querySelector('[data-act="popup"]')?.addEventListener('click', () => {
-    openExternal(el.frame.src);
+    openExternalGated(el.frame.src);
   });
   // The dApp refused to be embedded: hand the connection to the relay instead.
   el.blocked.querySelector('[data-act="wc"]')?.addEventListener('click', () => { el.blocked.hidden = true; openPairWalletConnect(); });
@@ -1182,7 +1207,7 @@ function wire() {
   // embedding — X-Frame-Options fires a fake "load" on Chromium's error page,
   // measured, so no watchdog can catch it) still needs a one-press way out.
   // The ↗ sits in the toolbar instead of hiding behind the ⋯ menu for that reason.
-  el.ext?.addEventListener('click', () => { const t = active(); if (t?.url) openExternal(t.url); });
+  el.ext?.addEventListener('click', () => { const t = active(); if (t?.url) openExternalGated(t.url); });
 
   // The tab-count button opens the switcher grid; a click anywhere on the
   // stage (the grid is inside it, but not on a card) closes it.
@@ -1421,7 +1446,7 @@ export function openExternalNotice(url, name, reason) {
   el.blocked.hidden = true;
   el.url.value = '';
   el.homePage.querySelector('[data-act="popup"]')?.addEventListener('click', () => {
-    openExternal(url);
+    openExternalGated(url);
   });
   // The pairing route for the same dead end: the page lives outside the frame,
   // but the wallet still reaches it through the relay (WC_PROJECT_ID is wired).

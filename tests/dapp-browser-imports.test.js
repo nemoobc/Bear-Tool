@@ -23,6 +23,7 @@
 // could have seen this.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 // A DOM small enough that importing cannot accidentally do anything, and honest
 // enough that a module that reaches for the document at load time fails loudly here
@@ -151,4 +152,44 @@ test('sandboxFor: cross-origin gets its storage back, this origin never does', a
   // Unparseable input falls back to the minimal set — never to a wider one.
   assert.equal(mod.sandboxFor('not a url', SELF), base);
   assert.equal(mod.sandboxFor('', SELF), base);
+});
+
+// S2 (2026-10-16): the sandbox never grants more than storage — and never
+// top-navigation, downloads or a popup escape hatch (a framed page that can
+// navigate the top frame can replace the wallet UI with its own).
+test('sandboxFor never grants top-navigation, downloads or escape hatches', async () => {
+  const mod = await import('../js/dapp-browser.js');
+  for (const url of ['https://app.aave.com/', 'not a url', '', 'http://x.example/path']) {
+    for (const self of ['https://wallet.example', '']) {
+      const flags = mod.sandboxFor(url, self);
+      assert.ok(!/allow-top-navigation/.test(flags), 'top-navigation can never be granted: ' + flags);
+      assert.ok(!/allow-downloads/.test(flags), 'downloads can never be auto-granted: ' + flags);
+      assert.ok(!/allow-popups-to-escape-sandbox/.test(flags), 'no popup escape hatch: ' + flags);
+    }
+  }
+});
+
+// S2 (2026-10-16): every in-app door that hands a URL to the OS browser is
+// vetted first. "Open in a new tab" used to bypass the checks — a blocked or
+// DANGER host could still leave the app through it. One gate, all doors; this
+// is a source gate on purpose, because the doors only exist after build().
+test('every external door goes through the safety gate, not around it', () => {
+  const src = readFileSync(new URL('../js/dapp-browser.js', import.meta.url), 'utf8');
+  // The ONLY raw openExternal( calls allowed: its own definition and the gate
+  // that wraps it. Every other call site must say openExternalGated(.
+  const raw = src.match(/\bopenExternal\(/g) || [];
+  assert.equal(raw.length, 2,
+    'raw openExternal( may appear exactly twice (definition + inside the gate) — found ' + raw.length);
+  assert.match(src, /function openExternalGated\(rawUrl\)/, 'the gate exists');
+  assert.match(src, /if \(!\/\^https\?:\\\/\\\/\/i\.test\(url\)\) return false;/,
+    'non-http(s) never leaves the app — the anchor would hand the scheme to the OS');
+  assert.match(src, /v\.verdict === VERDICT\.BLOCKED \|\| v\.verdict === VERDICT\.DANGER/,
+    'the gate runs the same verdicts the framed load does');
+  assert.match(src, /reportSheet\(v, \{ canProceed: false \}\)/,
+    'a refused door says WHY (report sheet), it does not fail silently');
+  const gated = src.match(/openExternalGated\(/g) || [];
+  assert.ok(gated.length >= 6,
+    'the gate + all five doors (toolbar, menu, did-not-load, report sheet, framed-out notice) — found ' + gated.length);
+  assert.match(src, /if \(v\.verdict === VERDICT\.DANGER\) \{[\s\S]{0,240}data-act="proceed"[\s\S]{0,340}data-act="ext"/,
+    'a DANGER verdict removes proceed AND the external door');
 });

@@ -327,8 +327,11 @@ test('reportSheet: a DANGER verdict removes the proceed button even if a caller 
   assert.ok(fn.length > 0, 'reportSheet must exist');
   assert.match(fn, /\$\{canProceed \? '<button[^>]*data-act="proceed"/,
     'the proceed button only exists behind canProceed');
-  assert.match(fn, /if \(v\.verdict === VERDICT\.DANGER\) el\.blocked\.querySelector\('\[data-act="proceed"\]'\)\?\.remove\(\)/,
-    'DANGER strips the button downstream regardless of what the caller passed');
+  // S2 (2026-10-16): the external door is the OTHER way past the sheet — it
+  // must vanish for DANGER too, or a caller mistake still ends in a homograph
+  // open in a real browser tab.
+  assert.match(fn, /if \(v\.verdict === VERDICT\.DANGER\) \{[\s\S]{0,300}data-act="proceed"[\s\S]{0,420}data-act="ext"/,
+    'DANGER strips the proceed button AND the external door downstream, regardless of what the caller passed');
 });
 
 test('the secure pill knows every verdict and shows what it saw', () => {
@@ -375,8 +378,8 @@ test('↗ #dbrExt: the permanent escape hatch from a frame that renders nothing'
   assert.match(shell, /id="dbrExt"[^>]*hidden/,
     'the ↗ exists and starts hidden — the home stage has no URL to open');
   assert.match(src,
-    /el\.ext\?\.addEventListener\('click', \(\) => \{ const t = active\(\); if \(t\?\.url\) openExternal\(t\.url\); \}\)/,
-    'the ↗ opens the active tab through openExternal (target=_blank anchor, not window.open)');
+    /el\.ext\?\.addEventListener\('click', \(\) => \{ const t = active\(\); if \(t\?\.url\) openExternalGated\(t\.url\); \}\)/,
+    'the ↗ opens the active tab through the gated door — vetted first (S2), still a target=_blank anchor, never window.open');
   assert.match(src, /if \(el\.ext\) el\.ext\.hidden = true;/, 'paint(): home hides the ↗');
   assert.match(src, /if \(el\.ext\) el\.ext\.hidden = false;/, 'paint(): a real page shows the ↗');
 
