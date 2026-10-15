@@ -301,6 +301,42 @@ try {
     filledA?.name === 'Bear Moon' && filledA?.symbol === 'BMOON'
     && filledE?.name === 'Extra Token' && filledE?.symbol === 'EXT',
     `A="${filledA?.name}/${filledA?.symbol}" E="${filledE?.name}/${filledE?.symbol}"`);
+
+  // --- the surfaces' shared read layer (js/dex/pool-data.js) ---
+  const poolData = await import('../js/dex/pool-data.js');
+  const ps = await poolData.poolState(poolAddr);
+  check('poolState reads the live reserves, quote first', ps.ok
+    && low(ps.quote) === low(quoteAddr) && low(ps.token) === low(tokenAddr)
+    && ps.quoteReserve > 0n && ps.tokenReserve > 0n,
+    `ok=${ps.ok} reason=${ps.reason || ''}`);
+  const dr = await pool.reserves();
+  check('poolState reserves equal the contract\'s own read',
+    ps.ok && ps.quoteReserve === BigInt(dr[0]) && ps.tokenReserve === BigInt(dr[1])
+    && ps.supply === BigInt(await pool.totalSupply()));
+
+  const ti = await poolData.tokenInfo(tokenAddr, creatorAddr);
+  check('tokenInfo reads name/symbol/decimals/balance from the real token',
+    ti.ok && ti.name === 'Bear Moon' && ti.symbol === 'BMOON' && ti.decimals === 18
+    && ti.balance === BigInt(await token.balanceOf(creatorAddr)),
+    `ok=${ti.ok} name=${ti.name}`);
+
+  const pos = await poolData.lpPosition(poolAddr, creatorAddr);
+  const sharesDirect = BigInt(await pool.balanceOf(creatorAddr));
+  const totalDirect = BigInt(await pool.totalSupply());
+  const lockDirect = BigInt(await pool.lockedUntil(creatorAddr));
+  check('lpPosition mirrors the pair itself (shares, lock, floored value)', pos.ok
+    && pos.shares === sharesDirect && pos.lockedUntil === lockDirect
+    && pos.quoteShare === (sharesDirect * BigInt(dr[0])) / totalDirect
+    && pos.tokenShare === (sharesDirect * BigInt(dr[1])) / totalDirect,
+    `ok=${pos.ok} reason=${pos.reason || ''}`);
+
+  const al = await poolData.allowanceOf(quoteAddr, traderAddr, poolAddr);
+  check('allowanceOf mirrors the quote token\'s allowance',
+    al.ok && al.allowance === BigInt(await quote.allowance(traderAddr, poolAddr)));
+
+  const psBad = await poolData.poolState('0x0000000000000000000000000000000000000000');
+  check('a pool that is not there refuses instead of showing zeros',
+    psBad.ok === false && Boolean(psBad.reason), `ok=${psBad.ok}`);
 } catch (e) {
   failures++;
   console.error('  ERROR', e && (e.shortMessage || e.message) || String(e));
