@@ -177,3 +177,31 @@ test('bookmarking goes through the secret filter at the writer', () => {
   const fn = body('function toggleBookmark()', 'function rememberHistory(');
   assert.match(fn, /sanitizeForStore/, 'bookmarks are written to disk — they meet the same gate as history');
 });
+
+// ── the two user lists are mutually exclusive ──────────────────────────────
+// addTrustedHost has always removed the host from the blocklist (whichever the
+// user set second is what they meant), but addBlockedHost did NOT remove it
+// from the trust list — so blocking a trusted host left it flagged "trusted"
+// underneath, and later unblocking silently restored a withdrawn trust. The
+// gate stayed safe (inspectUrl checks the blocklist first, unconditional), but
+// the list kept a lie. This pins both directions.
+test('blocking a host drops it from the trust list, and the reverse', async () => {
+  const s = await import('../js/dapp-sessions.js');
+  s.removeBlockedHost('evil.example');
+  s.removeTrustedHost('evil.example');
+
+  s.addTrustedHost('evil.example');
+  assert.ok(s.listTrusted().includes('evil.example'), 'precondition: trusted');
+  s.addBlockedHost('evil.example');
+  assert.ok(s.listBlocked().includes('evil.example'), 'blocking adds to the blocklist');
+  assert.ok(!s.listTrusted().includes('evil.example'),
+    'blocking must ALSO drop the host from the trust list — the lists are mutually exclusive');
+
+  // And the direction that always worked, so it stays working.
+  s.addTrustedHost('evil.example');
+  assert.ok(!s.listBlocked().includes('evil.example'),
+    'trusting must drop the host from the blocklist (the original invariant)');
+
+  s.removeBlockedHost('evil.example');
+  s.removeTrustedHost('evil.example');
+});

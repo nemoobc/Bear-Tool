@@ -175,6 +175,13 @@ export function isBlocked(host) {
 export function addBlockedHost(host) {
   const h = hostOfOrigin(host);
   if (!h) return false;
+  // Mirror of addTrustedHost below: the two lists are mutually exclusive, so
+  // blocking a host must also drop it from the trust list. Otherwise a host
+  // the user blocked stays flagged "trusted" underneath, and unblocking it
+  // silently restores a trust the user had already withdrawn. (The gate is
+  // safe either way — inspectUrl checks the blocklist first, unconditional —
+  // but a stale trust entry is a lie the list should not keep.)
+  removeTrustedHost(h);
   const list = listBlocked();
   if (!list.includes(h)) list.push(h);
   writeArr(LS.blocked, list);

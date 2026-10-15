@@ -259,3 +259,32 @@ test('looksLikeUrl is the line between opening and filtering', () => {
   assert.equal(looksLikeUrl('2.4'), false, 'a version number is a filter, not a host');
   assert.equal(looksLikeUrl('myserver'), false, 'a bare word stays a filter');
 });
+
+// ── a literal brace leaked into every featured card icon ────────────────────
+// The featured strip (js/dapps.js renderDapps) built its icon as
+// `${dappMark(...)}${dappLogo(d.url)}}` — one `}` too many, AFTER the
+// template expression, so it was not part of any interpolation: a literal
+// brace character rendered beside every featured dApp logo. The plain
+// #dappGrid cards were built cleanly on the same line shape, so the defect
+// was visible only in the hero row. Caught by eye on an emulator screenshot,
+// not by any structural assertion — hence this behaviour test.
+
+test('featured cards render no stray brace beside the logo', () => {
+  set('address', null);
+  nodes.clear();
+  const box = container();
+  app.refreshView('dapps');
+
+  // Every .dapp-feat-icon's inner markup must not end in a bare `}` after the
+  // last tag — that trailing brace is the bug. Compare against the count of
+  // opening divs: a healthy icon has no orphan `}` text node.
+  const icons = box.innerHTML.match(/<div class="dapp-feat-icon"[^>]*>[\s\S]*?<\/div>/g) || [];
+  assert.ok(icons.length >= 6,
+    'the featured strip must render its cards (expected at least 6)');
+  for (const icon of icons) {
+    // Strip balanced tags; any `}` remaining in the text is a leaked brace.
+    const text = icon.replace(/<[^>]*>/g, '');
+    assert.ok(!text.includes('}'),
+      `a featured icon leaked a literal "}" into its visible text: ${JSON.stringify(icon)}`);
+  }
+});

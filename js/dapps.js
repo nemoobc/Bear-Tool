@@ -203,7 +203,7 @@ export function renderDapps(container) {
       <div class="dapp-featured" aria-label="Most popular" role="list">
         ${POPULAR_DAPPS.slice(0, 6).map((d) => `
           <div class="dapp-feat-card" role="listitem" data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}" data-frameable="1">
-            <div class="dapp-feat-icon" style="--cat:${catStyle(d.category).color}">${dappMark(d.name, catStyle(d.category).color, 36)}${dappLogo(d.url)}}</div>
+            <div class="dapp-feat-icon" style="--cat:${catStyle(d.category).color}">${dappMark(d.name, catStyle(d.category).color, 36)}${dappLogo(d.url)}</div>
             <div class="dapp-feat-name">${escapeHtml(d.name)}</div>
           </div>`).join('')}
       </div>
