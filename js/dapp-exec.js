@@ -89,6 +89,39 @@ function requireAddressMatch(addr) {
   }
 }
 
+// The chain check for anything that BROADCASTS, shared by all three send paths
+// (this file, native-dapp.js, walletconnect.js).
+//
+// Every one of them compared the chain against get('networkId') while taking
+// the transport from get('provider') — and those two are updated at different
+// times: activateNetwork() writes networkId SYNCHRONOUSLY, but the provider is
+// rebuilt LATER, asynchronously, inside loadDashboard behind an RPC probe that
+// costs a round trip or two. So the standard dApp flow
+// `switchChain(x); sendTransaction(...)` passed the guard against the NEW id
+// and was broadcast through the OLD provider: the transaction landed on the
+// previous chain while the dialog named the new one — the exact silent chain
+// substitution every guard here claims to kill.
+//
+// Asking the provider what chain it is actually on is the only check a
+// half-finished switch cannot fool: a mismatch means the swap has not landed,
+// and refusing with a retryable -32603 is correct — the alternative is a real
+// transaction on the wrong chain. ethers caches this per provider, so a settled
+// wallet pays one read, not one per send.
+export async function providerOnCurrentChain() {
+  const provider = get('provider');
+  if (!provider) throw err(-32603, 'No RPC provider — pick a network and try again.');
+  const want = currentChainId();
+  const probe = await provider.getNetwork().catch(() => null);
+  if (!probe) throw err(-32603, 'Could not confirm the active chain (the RPC did not answer) — try again in a moment.');
+  const on = Number(probe.chainId);
+  if (on !== want) {
+    throw err(-32603,
+      `The RPC provider is still on chain ${on} while the wallet is on chain ${want}. ` +
+      'The network switch is still settling — nothing was sent; try again in a moment.');
+  }
+  return provider;
+}
+
 // personal_sign messages are hex-encoded bytes per spec; anything else is the
 // literal string the dApp wants signed. A plain string signed by ethers is
 // utf8-encoded, so hex MUST be converted to bytes first — signing the literal
@@ -99,7 +132,7 @@ function signPayload(raw) {
   return raw;
 }
 
-function parseTyped(raw) {
+export function parseTyped(raw) {
   let data = raw;
   if (typeof data === 'string') {
     try { data = JSON.parse(data); } catch (e) { throw err(32602, 'Invalid typed data JSON: ' + e.message); }
@@ -108,7 +141,7 @@ function parseTyped(raw) {
   return data;
 }
 
-function typedParts(data) {
+export function typedParts(data) {
   const types = { ...(data.types || {}) };
   delete types.EIP712Domain; // ethers builds the domain type itself; a copy of it is an error.
   let primary = data.primaryType;
@@ -197,8 +230,10 @@ export async function executeLocal({ method, params = [], origin = '', activateN
       const signer = requireSigner();
       const inTx = Array.isArray(params) ? params[0] : null;
       if (!inTx || typeof inTx !== 'object') throw err(32602, 'eth_sendTransaction expects a transaction object.');
-      const provider = get('provider');
-      if (!provider) throw err(-32603, 'No RPC provider — pick a network and try again.');
+      // Not get('provider') straight from state: the id may already be switched
+      // while the provider object is not, and a broadcast through the old one
+      // lands on the wrong chain (see providerOnCurrentChain).
+      const provider = await providerOnCurrentChain();
       if (inTx.from && String(inTx.from).toLowerCase() !== String(signer.address || get('address') || '').toLowerCase()) {
         throw err(4100, `The account ${inTx.from} is not the active account.`);
       }

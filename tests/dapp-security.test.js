@@ -27,12 +27,35 @@ test('the approval sheet describes the payload the signer will sign', () => {
   assert.match(app, /splitSignParams\(params\)/,
     'the sheet must split the params with the same function the signer uses, '
     + 'or it describes a different payload from the one that gets signed');
-  // The typed-data path legitimately reads params[1] ?? params[0] (v4 sends
-  // [address, json]), so a blanket "no params[0]" ban would forbid the correct
-  // thing. What must not come back is personal_sign reading params[0] raw.
+  // The typed-data path splits too — see the next test. It used to read
+  // params[1] ?? params[0] on the assumption that v4 always arrives as
+  // [address, json]; it does not (real dApps send [typedData, address] as
+  // well), so that expression returned the ADDRESS. Nothing may read a raw
+  // index for a payload that gets signed.
   const signBranch = app.slice(app.indexOf("if (method === 'personal_sign')"));
   assert.match(signBranch.slice(0, 200), /splitSignParams/,
     'personal_sign must take its message from the split, not from a raw index');
+});
+
+// ── 1b. the typed-data row described the wrong half ──────────────────────
+// v4 arrives in BOTH orders, and splitSignParams is the one function that
+// knows it — dapp-exec.js uses it to pick what to SIGN (line ~189). The
+// approval sheet did not: `params[1] ?? params[0]` returned the ADDRESS for
+// the legacy order, so the dialog displayed a 0x…40 hex string as "typed data"
+// while executeLocal signed the real payload. A user could approve a Permit
+// they had never seen — the one failure the per-call confirmation exists to
+// prevent, and the file's own comment (767-772) already stated the invariant.
+test('the typed-data row comes from the same split the signer uses', () => {
+  const at = app.indexOf("startsWith('eth_signTypedData')");
+  assert.ok(at > 0, 'the typed-data branch must exist');
+  const body = app.slice(at, at + 700);
+  // Comments quote the old expression to explain what was wrong with it, so
+  // assert on CODE: strip line comments before hunting for the raw index.
+  const code = body.replace(/\/\/[^\n]*/g, '');
+  assert.match(code, /splitSignParams\(params\)/,
+    'describe the payload with the function that chooses what is signed');
+  assert.ok(!/params\[1\] \?\? params\[0\]/.test(code),
+    'params[1] ?? params[0] is the ADDRESS under the legacy order — that is the bug');
 });
 
 test('a sign payload is shown as text, not as a byte array', () => {
@@ -193,4 +216,103 @@ test('every sheet that shows a signed message imports the shared renderer', () =
     'app.js must not keep a private copy');
   assert.ok(!/function renderSignMessage/.test(native),
     'native-dapp.js must not keep a private copy');
+});
+
+// ── 11. the other two paths took the message from params[0] ──────────────
+// The injected path got splitSignParams (test 1); the native and
+// WalletConnect paths did not, and both read `const [hex] = params[0]`. Under
+// the legacy [address, message] order — which dapp-exec.js exists to accept,
+// and which MetaMask accepts — that converts the ADDRESS's 20 bytes and signs
+// them: the preview says "(binary, 20 bytes)", the signature verifies over the
+// wrong payload, and the dApp's login check fails after the user approved
+// something they could not read.
+test('the native and WalletConnect sheets sign the split message, not params[0]', () => {
+  for (const [name, src] of [['native-dapp.js', native], ['walletconnect.js', wc]]) {
+    const at = src.indexOf("if (method === 'personal_sign')");
+    assert.ok(at > 0, `${name} must handle personal_sign`);
+    const body = src.slice(at, at + 900);
+    assert.match(body, /splitSignParams\(/,
+      `${name} must choose the message with splitSignParams — [address, message] is a real order`);
+    assert.ok(!/const \[hex\] = /.test(body),
+      `${name} must not read a raw params[0] as the message`);
+    assert.match(body, /32602/, 'a request with no message answers 32602 rather than signing nothing');
+  }
+});
+
+// ── 12. malformed typed data was signed as {} ────────────────────────────
+// Both paths did `try { JSON.parse(raw) } catch { parsed = {} }` — so an
+// unparseable payload (or the legacy order, where params[1] is the ADDRESS and
+// cannot be JSON) became {}, the chain guard saw no chainId and refused
+// nothing, the dialog showed all-"?" rows, and the wallet SIGNED EMPTY DATA.
+// dapp-exec.js already answers 32602 for exactly this (parseTyped/typedParts);
+// all three paths now share it, so they accept and refuse identical payloads.
+test('typed data that cannot be signed is refused with 32602, never signed as {}', () => {
+  for (const [name, src] of [['native-dapp.js', native], ['walletconnect.js', wc]]) {
+    const at = src.indexOf("if (method === 'eth_signTypedData_v4')");
+    assert.ok(at > 0, `${name} must handle eth_signTypedData_v4`);
+    const body = src.slice(at, at + 1700);
+    assert.match(body, /parseTyped\(/, `${name} must parse through the shared, throwing parseTyped`);
+    assert.match(body, /typedParts\(/, `${name} must take domain/types/message from the shared typedParts`);
+    assert.ok(!/catch \{ parsed = \{\}; \}/.test(body),
+      `${name} must not swallow a parse failure into {} — {} is what used to get signed`);
+    assert.match(body, /32602/, 'the dApp must receive a code it can correct and retry on');
+  }
+  // And the validator itself must really throw — a shared helper that silently
+  // returns {} is the same bug wearing an import.
+  assert.match(exec, /throw err\(32602/, 'parseTyped/typedParts must throw the 32602 they advertise');
+});
+
+// ── 13. a native request that threw was never answered ───────────────────
+// respond()/respondError() are only reached on the success paths of
+// handleNativeRpc, and the rpcRequest listener did `catch (e) => console.warn`.
+// So a throw AFTER the prompt — insufficient funds, a reverting gas estimate,
+// a stale nonce — left the page's promise pending forever: the dApp spun on
+// "signing…" with no error for its retry logic. The WalletConnect path
+// guarantees this answer (test 4); this is the same guarantee.
+test('a native rpcRequest that throws still gets an answer', () => {
+  const at = native.indexOf("addListener('rpcRequest'");
+  assert.ok(at > 0, 'the rpcRequest listener must exist');
+  // Slice exactly the rpcRequest listener: the window must not bleed into the
+  // walletCommand listener below it — that one answers a local UI command (the
+  // ◆ network picker), not a dApp request that sits pending, so its shape is
+  // not this test's business.
+  const end = native.indexOf("addListener('walletCommand'", at);
+  assert.ok(end > at, 'the listener block must be bounded');
+  const body = native.slice(at, end);
+  assert.match(body, /\.catch\(/, 'the emit site must catch');
+  assert.match(body, /nativeErrorPayload\(ev\.id/,
+    'and must ANSWER that request id with the shared error shape — a bare console.warn hangs the page');
+  // The old shape: `.catch((e) => console.warn('[native-dapp]', e))` — an arrow
+  // whose ENTIRE body is a log. Assert against exactly that, because the
+  // positive match above would still be satisfied by an answer parked behind a
+  // warn-only path.
+  assert.ok(!/\.catch\(\(e\)\s*=>\s*console\.warn\('\[native-dapp\]',\s*e\)\)/.test(body),
+    'the catch must do more than log: it owes the page an answer');
+  // The shape itself lives in one function used by both the responder and the
+  // catch: written twice, the two would drift on the code dApps key retries on.
+  assert.equal((native.match(/function nativeErrorPayload\(/g) || []).length, 1,
+    'exactly ONE definition of the refusal shape');
+});
+
+// ── 14. the provider could be on a different chain than the tx ───────────
+// activateNetwork() writes networkId SYNCHRONOUSLY while the provider object
+// is rebuilt later, behind a multi-endpoint probe that can even fail and leave
+// the OLD provider in state. Every send path compared the chain against
+// networkId and took the transport from get('provider') — so the standard
+// switch-then-send flow passed the guard against the NEW chain and broadcast
+// through the OLD provider: transaction on the previous chain, dialog naming
+// the new one. One shared guard now asks the provider itself.
+test('every send path verifies the provider is on the wallet chain before broadcasting', () => {
+  for (const [name, src] of [['dapp-exec.js', exec], ['native-dapp.js', native], ['walletconnect.js', wc]]) {
+    assert.match(src, /await providerOnCurrentChain\(\)/,
+      `${name} must use the shared transport guard, not get('provider') straight from state`);
+  }
+  // The guard has to read the PROVIDER's own network, not networkId again —
+  // networkId is the very value that is already ahead of the provider.
+  assert.match(exec, /provider\.getNetwork\(\)/,
+    'the guard must ask the provider what chain it is on');
+  assert.match(exec, /!== want/,
+    'and compare that to the wallet chain, refusing on a mismatch');
+  assert.ok(!/on !== currentChainId\(\)\s*;?\s*\}/.test(exec) || /getNetwork/.test(exec),
+    'comparing networkId to networkId is the bug, not the fix');
 });

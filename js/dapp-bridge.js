@@ -169,9 +169,21 @@ export function createProvider(cfg) {
       // Not named `approved`: this module already has a module-level function of
       // that name (the consent helper, used at line ~85), and a local boolean
       // shadowing it is a trap — the next edit inside this block that reaches
-      // for the helper gets a boolean instead.
-      const okToSign = await cfg.onRequest?.({ method, params, kind: 'sign', origin });
-      if (!okToSign) throw makeProviderError(4001, `The user refused ${method} for ${origin}.`);
+      // for the helper gets a boolean instead. It is also NOT a boolean: it is
+      // the execution result (tx hash / signature), because `kind:'sign'` does
+      // far more than ask.
+      const signed = await cfg.onRequest?.({ method, params, kind: 'sign', origin });
+      if (!signed) throw makeProviderError(4001, `The user refused ${method} for ${origin}.`);
+
+      // Return HERE. `kind:'sign'` confirms AND executes — the wallet's handler
+      // runs executeLocal, which broadcasts the transaction or takes the
+      // signature and returns its hash. Falling through to `kind:'call'` below
+      // hit that same executeLocal a SECOND time: one confirmation, two
+      // eth_sendTransaction broadcasts (each fetches a fresh nonce from
+      // getTransactionCount('pending'), so both landed — a double spend) or two
+      // signatures, the second produced with no prompt at all. The result of the
+      // sign call is the page's response; there is no second call to make.
+      return signed;
     }
 
     return cfg.onRequest?.({ method, params, kind: 'call', origin });

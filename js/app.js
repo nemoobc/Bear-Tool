@@ -782,8 +782,15 @@ function describeSignCall(method, params) {
       const { message } = splitSignParams(params);
       rows.push({ k: t('cf.message'), v: renderSignMessage(message) });
     } else if (String(method).startsWith('eth_signTypedData')) {
-      const p = Array.isArray(params) ? (params[1] ?? params[0]) : {};
-      rows.push({ k: t('cf.typed.data'), v: safeJson(p) });
+      // The SAME split the signer uses, exactly as the personal_sign branch
+      // above: params arrive as [typedData, address] OR [address, typedData],
+      // and `params[1] ?? params[0]` handed back the ADDRESS for the legacy
+      // order — the dialog showed a 0x…40 hex string as "typed data" while
+      // executeLocal signed the real payload, so a user could approve a Permit
+      // they had never seen. splitSignParams is the one function that knows
+      // both orders (dapp-exec.js, also used by the signer at line ~189).
+      const p = splitSignParams(params).message;
+      rows.push({ k: t('cf.typed.data'), v: safeJson(p ?? {}) });
     } else {
       const p = Array.isArray(params) ? (params[0] || {}) : {};
       if (p.to) rows.push({ k: t('site.to'), v: String(p.to) });

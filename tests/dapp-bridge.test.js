@@ -125,6 +125,28 @@ test('a granted signature method is remembered per origin', async () => {
   assert.equal(hasPermission(ORIGIN, 'eth_sendTransaction'), false);
 });
 
+// ── one confirmation, exactly one execution ─────────────────────────────
+// `kind:'sign'` does not merely ask for approval: the wallet's handler
+// confirms AND runs executeLocal (broadcast / take signature). The bridge used
+// to send `kind:'call'` afterwards as well, whose handler falls through to that
+// very same executeLocal — so a single confirmation produced TWO
+// eth_sendTransaction broadcasts (each reads getTransactionCount('pending'),
+// so both landed: a double spend) or two signatures, the second unprompted.
+// This pins the call sequence: one per-method grant, one confirm/execute, and
+// no second call that could re-run the execution.
+for (const method of ['eth_sendTransaction', 'personal_sign']) {
+  test(`${method} executes exactly once per confirmation`, async () => {
+    addSite(ORIGIN);
+    const { p, calls } = build();
+    const params = method === 'eth_sendTransaction' ? [{ to: ADDR, value: '0x1' }] : [ADDR, '0xdead'];
+    const out = await p.request({ method, params });
+    const kinds = calls.map((c) => c.kind);
+    assert.deepEqual(kinds, ['permission', 'sign'],
+      `grant + confirm/execute only; a trailing 'call' re-runs executeLocal. Got: ${kinds.join(' -> ')}`);
+    assert.equal(out, '0xresult', 'the execution result is what the page receives');
+  });
+}
+
 test('a read call needs no extra grant once connected', async () => {
   addSite(ORIGIN);
   const { p, calls } = build();

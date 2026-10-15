@@ -2024,6 +2024,9 @@ select.input option, select.select option, .input option {
   font-weight: 700;
 }
 .deploy-preview-icon { font-size: 1.5rem; }
+/* The standard's preview label sits in a flex row beside the icon; without a
+   min-width it could not shrink below its content and overflowed the box. */
+.deploy-preview-text { min-width: 0; }
 .deploy-card { display: flex; flex-direction: column; gap: var(--sp-12); }
 /* deploy result / progress box — every state is announced here, never a bare toast */
 .deploy-status {

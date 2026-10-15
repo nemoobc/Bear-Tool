@@ -19,6 +19,11 @@ import { t } from './i18n.js';
 import { get, requireUnlock, on } from './state.js';
 import { getNetworkById, getNetwork } from './network.js';
 import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
+// One source of truth for what a signature request MEANS: the injected path
+// (dapp-exec.js) already splits both param orders, validates typed data, and
+// guards the chain a broadcast goes out on. This path re-implemented each by
+// hand and got them wrong — see the personal_sign / typed-data branches below.
+import { splitSignParams, parseTyped, typedParts, providerOnCurrentChain } from './dapp-exec.js';
 
 const USER_REJECTED = { code: 4001, message: 'User rejected the request.' };
 const LOCKED = { code: 5100, message: 'Wallet is locked.' };
@@ -227,7 +232,23 @@ export function initNativeDappRpc() {
         applyBrowserVisibility();
       });
       p.addListener('rpcRequest', (ev) => {
-        handleNativeRpc(ev).catch((e) => console.warn('[native-dapp]', e));
+        handleNativeRpc(ev).catch((e) => {
+          console.warn('[native-dapp]', e);
+          // Every request MUST end in an answer. respond()/respondError() are
+          // only reached on the success paths of handleNativeRpc, and both
+          // swallow their own transport errors — so a throw after the prompt
+          // (insufficient funds, a gas estimate that reverts, a stale nonce, a
+          // malformed payload) used to die right here: the page's promise never
+          // settled and the dApp spun on "signing…" forever, with no error for
+          // its retry logic to see. The WalletConnect path already guarantees
+          // exactly this answer (walletconnect.js session_request catch); this
+          // is the same guarantee for the native path. Because a responder can
+          // only have been SKIPPED — never completed — when we get here, this
+          // is the missing answer, not a second one.
+          try {
+            plugin?.resolve(nativeErrorPayload(ev.id, e)).catch(() => { /* dApp view gone */ });
+          } catch { /* the view is already gone — nothing left to answer */ }
+        });
       });
       // The native ◆ chip asks the wallet to run its own Networks picker. One
       // listener, one boot — a second initNativeDappRpc() must not double-bind.
@@ -380,15 +401,29 @@ async function askConfirm({ title, rows, confirmText }) {
   return askUser(() => confirmTx({ title, rows, confirmText }));
 }
 
+// The wire shape of a REFUSAL, in exactly one place. The per-request responder
+// inside handleNativeRpc builds it, and the listener's last-resort catch below
+// builds it too — a response shape written twice is a shape that drifts, and
+// the two would then disagree about the very code the dApp keys its retry logic
+// on. code defaults to -32603 (internal) the same way respondError always did.
+function nativeErrorPayload(id, error) {
+  return {
+    id,
+    response: JSON.stringify({
+      error: {
+        code: error && error.code != null ? error.code : -32603,
+        message: (error && error.message) || String(error),
+      },
+    }),
+  };
+}
+
 async function handleNativeRpc({ id, origin, payload }) {
   if (!plugin) return;
   let msg = {};
   try { msg = JSON.parse(payload || '{}'); } catch { msg = {}; }
   const respond = (result) => plugin.resolve({ id, response: JSON.stringify({ result }) }).catch(() => { /* dApp view gone */ });
-  const respondError = (error) => plugin.resolve({
-    id,
-    response: JSON.stringify({ error: { code: error && error.code != null ? error.code : -32603, message: (error && error.message) || String(error) } }),
-  }).catch(() => { /* dApp view gone */ });
+  const respondError = (error) => plugin.resolve(nativeErrorPayload(id, error)).catch(() => { /* dApp view gone */ });
 
   const method = msg.method;
   const site = originOf(origin);
@@ -476,7 +511,16 @@ async function handleNativeRpc({ id, origin, payload }) {
   }
 
   if (method === 'personal_sign') {
-    const [hex] = msg.params || [];
+    // BOTH orders — [message, address] is the spec, [address, message] is the
+    // legacy one real dApps still send, and splitSignParams is the function
+    // that already knows both (dapp-exec.js, used by the injected signer).
+    // Taking params[0] blindly meant the legacy order put the requester's
+    // ADDRESS on screen as "the message" and then signed those 20 bytes: the
+    // user approved content they could never read, and the dApp's login check
+    // verified over the wrong payload. Display and signature now cover the
+    // same, correct string.
+    const { message: hex } = splitSignParams(msg.params || []);
+    if (hex == null) return respondError({ code: 32602, message: 'personal_sign expects [message, address].' });
     const ok = await askConfirm({
       title: t('sign.title'),
       rows: [
@@ -492,10 +536,26 @@ async function handleNativeRpc({ id, origin, payload }) {
   }
 
   if (method === 'eth_signTypedData_v4') {
-    const raw = (msg.params || [])[1];
-    let parsed = {};
-    try { parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw || {}); } catch { parsed = {}; }
-    const domain = parsed.domain || {};
+    // BOTH param orders, exactly as personal_sign above: the legacy
+    // [typedData, address] puts the ADDRESS in params[1] — which is precisely
+    // where this branch used to look.
+    const { message: raw } = splitSignParams(msg.params || []);
+    if (raw == null) return respondError({ code: 32602, message: 'Expected [typedData, address].' });
+    // parseTyped/typedParts THROW 32602 on a payload that cannot be signed —
+    // that is their entire job. The local try/catch they replace turned every
+    // failure into {}: the chain guard then saw no chainId (so refused
+    // nothing), the dialog showed all-"?" rows, and the wallet went on to SIGN
+    // EMPTY DATA. A dApp sending something unparseable received a useless
+    // signature instead of the 32602 it can correct and retry on. Same two
+    // functions the injected signer uses, so every path accepts and refuses
+    // identical payloads.
+    let parsed, domain, types, message;
+    try {
+      parsed = parseTyped(raw);
+      ({ domain, types, message } = typedParts(parsed));
+    } catch (e) {
+      return respondError({ code: (e && e.code) || 32602, message: (e && e.message) || String(e) });
+    }
     // Same refusal as the WalletConnect path: a signature is only valid for
     // its domain's chain — never sign one that does not match the wallet.
     const domChain = Number(domain.chainId);
@@ -513,16 +573,17 @@ async function handleNativeRpc({ id, origin, payload }) {
         { k: t('site.primaryType'), v: String(parsed.primaryType || '?') },
         // The fields themselves, not just the type name: that name is chosen by
         // the site, and can be called anything.
-        ...typedDataFields(parsed.message).slice(0, 8).map((f) => ({ k: f.k, v: f.v })),
+        ...typedDataFields(message).slice(0, 8).map((f) => ({ k: f.k, v: f.v })),
         { k: t('site.site'), v: site },
         { k: t('site.account'), v: shortAddr(signer.address) },
       ],
       confirmText: t('sign.action'),
     });
     if (!ok) return respondError(USER_REJECTED);
-    const types = { ...(parsed.types || {}) };
-    delete types.EIP712Domain;
-    return respond(await signer.signTypedData(domain, types, parsed.message || {}));
+    // `types` already has EIP712Domain stripped and `message` is already the
+    // object-or-{} the signer needs — typedParts owns both, so the local
+    // copy/delete/default that used to sit here is gone.
+    return respond(await signer.signTypedData(domain, types, message));
   }
 
   if (method === 'eth_sendTransaction') {
@@ -534,8 +595,6 @@ async function handleNativeRpc({ id, origin, payload }) {
       toast(m, 'error');
       return respondError({ code: -32000, message: m });
     }
-    const provider = get('provider');
-    if (!provider) return respondError({ code: -32000, message: 'No provider for the current network.' });
     // Money line for the native sheet, matching the iframe path's
     // describeSignCall: value in native units (not raw hex) and the calldata
     // itself (truncated, not just a byte count) — a user signing a swap must
@@ -554,6 +613,22 @@ async function handleNativeRpc({ id, origin, payload }) {
       confirmText: t('sign.action'),
     });
     if (!ok) return respondError(USER_REJECTED);
+    // Guard the TRANSPORT, not just the id. activateNetwork() writes networkId
+    // SYNCHRONOUSLY while the provider object is rebuilt later, behind a probe
+    // that tries several endpoints — and when that probe fails it can leave the
+    // OLD provider in state for good. The reqChain check at the top of this
+    // branch compares against networkId, so it saw the NEW chain and waved the
+    // request through while the broadcast still went out the OLD provider:
+    // wrong chain, behind a dialog naming the right one. Checked here, at the
+    // last possible moment, the dialog's own wait has already given a transient
+    // swap time to land — so this refuses only a provider genuinely still
+    // elsewhere, which is exactly the one that must not broadcast.
+    let provider;
+    try {
+      provider = await providerOnCurrentChain();
+    } catch (e) {
+      return respondError({ code: (e && e.code) || -32603, message: (e && e.message) || String(e) });
+    }
     // Keystore signers are plain ethers.Wallet instances with NO provider —
     // broadcasting without .connect(provider) dies with "missing provider"
     // (the exact bug tests/send-resilience.test.js exists to catch).

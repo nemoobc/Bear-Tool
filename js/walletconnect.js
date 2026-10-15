@@ -25,6 +25,12 @@ import { openModal, closeModal, confirmTx, escapeHtml, toast } from './ui.js';
 import { t } from './i18n.js';
 import { get, set, requireUnlock } from './state.js';
 import { getNetworkById, getNetwork } from './network.js';
+// One source of truth shared with the injected and native paths: split both
+// personal_sign param orders, validate typed data, and guard the chain a
+// broadcast actually goes out on. This path re-implemented each by hand and
+// disagreed with the others about what was even signable — see the branches
+// below.
+import { splitSignParams, parseTyped, typedParts, providerOnCurrentChain } from './dapp-exec.js';
 
 export const WC_PROJECT_ID =
   (import.meta.env && import.meta.env.VITE_WC_PROJECT_ID) || '99909bde486039e2102663b92be74974';
@@ -335,7 +341,17 @@ async function handleRequest({ id, topic, params }) {
   }
 
   if (method === 'personal_sign') {
-    const [hex] = params.request.params || [];
+    // BOTH orders — [message, address] is the spec, [address, message] the
+    // legacy one real dApps still send. Taking params[0] blindly signed the
+    // ADDRESS's 20 bytes as the message: hexToBytes happily converted it, the
+    // dialog previewed "(binary, 20 bytes)", and the signature verified over
+    // the wrong payload, so the dApp's login check failed after the user
+    // approved something they could not read. splitSignParams is the same
+    // function the injected signer uses (dapp-exec.js).
+    const { message: hex } = splitSignParams(params.request.params || []);
+    if (hex == null) {
+      return respondError(topic, id, { code: 32602, message: 'personal_sign expects [message, address].' });
+    }
     const ok = await confirmTx({
       title: t('sign.title'),
       rows: [
@@ -350,10 +366,27 @@ async function handleRequest({ id, topic, params }) {
   }
 
   if (method === 'eth_signTypedData_v4') {
-    const raw = params.request.params && params.request.params[1];
-    let parsed = {};
-    try { parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw || {}); } catch { parsed = {}; }
-    const domain = parsed.domain || {};
+    // BOTH param orders again: the legacy [typedData, address] puts the
+    // ADDRESS in params[1], which is exactly where this used to look — so the
+    // parse below silently failed and produced {}.
+    const { message: raw } = splitSignParams(params.request.params || []);
+    if (raw == null) {
+      return respondError(topic, id, { code: 32602, message: 'Expected [typedData, address].' });
+    }
+    // parseTyped/typedParts THROW 32602 on anything that cannot be signed —
+    // that is their job. The local try/catch they replace turned every failure
+    // into {}: the chain guard then saw no chainId (so refused nothing), the
+    // dialog showed all-"?" rows, and the wallet signed EMPTY DATA. A dApp
+    // sending an unparseable payload got a useless signature instead of the
+    // 32602 it can correct and retry on. Same functions as the injected and
+    // native paths, so all three accept and refuse identical payloads.
+    let parsed, domain, types, message;
+    try {
+      parsed = parseTyped(raw);
+      ({ domain, types, message } = typedParts(parsed));
+    } catch (e) {
+      return respondError(topic, id, { code: (e && e.code) || 32602, message: (e && e.message) || String(e) });
+    }
     // A typed-data signature is only valid for the domain's chain. Signing a
     // Polygon-domain payload while the wallet sits on Ethereum produces a
     // signature the dApp can never use, behind a dialog that looked fine.
@@ -376,9 +409,10 @@ async function handleRequest({ id, topic, params }) {
       confirmText: t('sign.action'),
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);
-    const types = { ...(parsed.types || {}) };
-    delete types.EIP712Domain;
-    return respond(topic, id, await signer.signTypedData(domain, types, parsed.message || {}));
+    // `types` already has EIP712Domain stripped and `message` is already the
+    // object-or-{} the signer needs — typedParts owns both, exactly as in the
+    // injected and native paths, so the local copy/delete/default is gone.
+    return respond(topic, id, await signer.signTypedData(domain, types, message));
   }
 
   if (method === 'eth_sendTransaction') {
@@ -395,10 +429,6 @@ async function handleRequest({ id, topic, params }) {
       return respondError(topic, id, { code: -32000, message: msg });
     }
     const tx = normalizeWcTx((params.request.params && params.request.params[0]) || {});
-    const provider = get('provider');
-    if (!provider) {
-      return respondError(topic, id, { code: -32000, message: 'No provider for the current network.' });
-    }
     const ok = await confirmTx({
       title: t('sign.txTitle'),
       rows: [
@@ -411,6 +441,21 @@ async function handleRequest({ id, topic, params }) {
       danger: !!(tx.data && tx.data !== '0x'),
     });
     if (!ok) return respondError(topic, id, USER_REJECTED);
+    // Guard the TRANSPORT, not just the id. The chain check at the top of this
+    // branch compares against networkId — which activateNetwork() writes
+    // SYNCHRONOUSLY, while the provider object is rebuilt later behind a
+    // multi-endpoint probe that can even fail and leave the OLD provider in
+    // state. So a switch-then-send passed that check against the NEW chain and
+    // still broadcast through the OLD provider: wrong chain, dialog naming the
+    // right one. Checked here, at the last possible moment, the dialog's own
+    // wait has given a transient swap time to land — this refuses only a
+    // provider genuinely still elsewhere, which must not broadcast.
+    let provider;
+    try {
+      provider = await providerOnCurrentChain();
+    } catch (e) {
+      return respondError(topic, id, { code: (e && e.code) || -32603, message: (e && e.message) || String(e) });
+    }
     const sent = await signer.connect(provider).sendTransaction(tx);
     toast('Transaction sent: ' + sent.hash.slice(0, 18) + '...', 'info');
     return respond(topic, id, sent.hash);

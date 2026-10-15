@@ -56,6 +56,15 @@ function fakeActivate(switches) {
   };
 }
 
+// A provider must be able to say WHAT CHAIN IT IS ON: the send path now
+// refuses to broadcast through one that cannot answer, and refuses even harder
+// one that answers with a chain other than the wallet's (providerOnCurrentChain
+// in dapp-exec.js). Default = the chain the wallet is on, so a test about some
+// OTHER concern (from-account, tx chainId) still reaches that concern.
+function installProvider(chainId = currentChainId()) {
+  set('provider', { tag: 'fake-provider', getNetwork: async () => ({ chainId: BigInt(chainId) }) });
+}
+
 beforeEach(() => {
   mem.clear();
   set('signer', null);
@@ -213,7 +222,7 @@ test('eth_signTypedData_v4: wrong signing account → 4100', async () => {
 
 // ── eth_sendTransaction ───────────────────────────────────────────
 test('eth_sendTransaction: signs LOCALLY through the signer, returns the hash', async () => {
-  set('provider', { tag: 'fake-provider' });
+  installProvider();
   const calls = installSigner();
   const r = await executeLocal({
     method: 'eth_sendTransaction',
@@ -238,7 +247,7 @@ test('eth_sendTransaction: signs LOCALLY through the signer, returns the hash', 
 });
 
 test('eth_sendTransaction: another from-account → 4100, nothing sent', async () => {
-  set('provider', { tag: 'fake-provider' });
+  installProvider();
   const calls = installSigner();
   await assert.rejects(
     () => executeLocal({ method: 'eth_sendTransaction', params: [{ from: OTHER, to: ADDR, value: '0x1' }] }),
@@ -248,7 +257,7 @@ test('eth_sendTransaction: another from-account → 4100, nothing sent', async (
 });
 
 test('eth_sendTransaction: chainId mismatch → 4902, nothing sent', async () => {
-  set('provider', { tag: 'fake-provider' });
+  installProvider();
   const calls = installSigner();
   await assert.rejects(
     () => executeLocal({
@@ -258,6 +267,25 @@ test('eth_sendTransaction: chainId mismatch → 4902, nothing sent', async () =>
     (e) => e.code === 4902 && /polygon|137|chain/i.test(e.message),
   );
   assert.equal(calls.length, 0);
+});
+
+// The TRANSPORT has to match too, not only the tx's declared chainId.
+// activateNetwork() writes networkId SYNCHRONOUSLY while the provider object
+// is rebuilt later, behind a multi-endpoint probe — so a dApp doing
+// switchChain(x) then sendTransaction(...) back-to-back passed the 4902 check
+// against the NEW id and still broadcast through the OLD provider: the
+// transaction landed on the previous chain while the dialog named the new one.
+// This is the silent chain substitution every other guard here kills, so the
+// provider itself is asked what chain it is on before anything is sent.
+test('eth_sendTransaction: provider still on ANOTHER chain → -32603, nothing sent', async () => {
+  installProvider(137);            // the wallet is on ethereum (1); this provider says polygon
+  const calls = installSigner();
+  await assert.rejects(
+    () => executeLocal({ method: 'eth_sendTransaction', params: [{ from: ADDR, to: ADDR, value: '0x1' }] }),
+    (e) => e.code === -32603 && /still on chain/i.test(e.message),
+    'a broadcast through a provider on the wrong chain must be refused',
+  );
+  assert.equal(calls.length, 0, 'nothing may reach the signer');
 });
 
 test('eth_sendTransaction: no signer → 4100; no provider → -32603', async () => {

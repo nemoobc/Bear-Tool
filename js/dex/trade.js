@@ -222,7 +222,13 @@ export function bindTokenTrade(host, token, onBack) {
     const me = get('address');
     // NOTE: this order MUST match the Promise.all below it. It did not, once:
     // ethBal was bound to the ticker's string and the balance rendered as NaN.
-    const [vE, vT, reserve, graduated, mine, quoteAddr, name, sym, img, desc] = await Promise.all([
+    // Bound FIRST as one value, destructured only after it is known to be an
+    // array. The old one-liner destructured the `.catch()` result directly —
+    // and that result is `null` on failure, so `const [vE, …] = null` threw
+    // TypeError BEFORE the `if (!vE) return` guard below could ever run: the
+    // graceful "read failed" path was itself a crash, leaving the every-5s
+    // refresh ticking unhandled rejections instead of a marked-stale page.
+    const read = await Promise.all([
       c.virtualQuote(), c.virtualTokens(), c.realQuoteReserve(), c.graduated(),
       me ? c.balanceOf(me) : Promise.resolve(0n),
       // Which coin this curve is quoted in. Everything else — the balance, the
@@ -251,7 +257,9 @@ export function bindTokenTrade(host, token, onBack) {
       }
       return null;
     });
-    if (!vE) return;
+    if (!read) return;   // the catch above already marked the page unreadable
+    const [vE, vT, reserve, graduated, mine, quoteAddr, name, sym, img, desc] = read;
+    if (!vE) return;      // a contract whose virtualQuote() reads 0 is not a quote we can render
     state.readable = true;
 
     // Resolve the quote coin once: its symbol labels every price, and its
@@ -464,6 +472,27 @@ export function bindTokenTrade(host, token, onBack) {
     // label that said 1%.
     const minOut = (q.tokensOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
 
+    // Confirm INTENT first. The sheet states what you get and the worst case,
+    // and the buyer commits to the purchase BEFORE anything is granted or
+    // signed. The approval used to fire first, so a wallet prompt asking to
+    // let the contract spend your quote tokens popped while the buyer had not
+    // yet confirmed they wanted to buy at all — cancelling the sheet then left
+    // a pointless allowance behind. Now the order is confirm → approve → buy:
+    // one decision, then only the transactions that decision implies.
+    const ok = await confirmTx({
+      title: t('dex.trade.buyTitle', { sym: state.sym }),
+      rows: [
+        { k: t('dex.trade.ethIn'), v: `${raw} ${state.quoteSym}` },
+        { k: t('dex.trade.youGet'), v: fmtTok(q.tokensOut, 18, 2) + ' ' + state.sym },
+        { k: t('dex.trade.worstCase'), v: fmtTok(minOut, 18, 2) + ' ' + state.sym },
+        { k: t('dex.trade.gas'), v: state.quoteSym },
+      ],
+      confirmText: t('dex.trade.buy'),
+      danger: true,
+      valueWei: 0n,
+    });
+    if (!ok) return;
+
     // Approve only what this trade needs, and only when the current allowance
     // is short. An existing allowance is reused rather than re-granted.
     const quote = new E.Contract(state.quoteAddr, ERC20_ABI, signer);
@@ -481,19 +510,6 @@ export function bindTokenTrade(host, token, onBack) {
       if (!approved) return;
     }
 
-    const ok = await confirmTx({
-      title: t('dex.trade.buyTitle', { sym: state.sym }),
-      rows: [
-        { k: t('dex.trade.ethIn'), v: `${raw} ${state.quoteSym}` },
-        { k: t('dex.trade.youGet'), v: fmtTok(q.tokensOut, 18, 2) + ' ' + state.sym },
-        { k: t('dex.trade.worstCase'), v: fmtTok(minOut, 18, 2) + ' ' + state.sym },
-        { k: t('dex.trade.gas'), v: state.quoteSym },
-      ],
-      confirmText: t('dex.trade.buy'),
-      danger: true,
-      valueWei: 0n,
-    });
-    if (!ok) return;
     const cs = new E.Contract(token.address, PUMP_ABI, signer);
     const rc = await sendDexTx(() => cs.buy(amount, minOut), t('dex.trade.buy'));
     if (!rc) return;
@@ -621,8 +637,16 @@ export function bindTokenTrade(host, token, onBack) {
     ctx.beginPath();
     pts.forEach((p, i) => { const px = x(p.eth), py = y(p.price); if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
     ctx.strokeStyle = '#E8963C'; ctx.lineWidth = 2; ctx.stroke();
-    // "now" marker at the current virtual reserve
-    const nowX = x(Number(ve)), nowY = y(Number(ve) / Number(vt));
+    // "now" marker at the coin's ACTUAL position: state.vE/state.vT are the
+    // live reserves (re-read every 5s), falling back to the launch reserves
+    // before the first read. The loop variables CANNOT be used — the walk above
+    // runs all the way to the graduation line, so they hold the POST-graduation
+    // reserves, and the marker sat pinned at the curve's far right on every
+    // coin: a brand-new, untraded token showed it at graduation, flatly
+    // contradicting the live price and the graduation bar right above it.
+    const nowE = state.vE || startE;
+    const nowT = state.vT || startT;
+    const nowX = x(Number(nowE)), nowY = y(Number(nowE) / Number(nowT));
     ctx.beginPath(); ctx.arc(nowX, nowY, 5, 0, Math.PI * 2);
     ctx.fillStyle = '#1B8F4E'; ctx.fill();
     ctx.strokeStyle = '#2D2A32'; ctx.lineWidth = 2; ctx.stroke();

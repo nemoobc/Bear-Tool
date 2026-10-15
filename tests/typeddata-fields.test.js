@@ -46,7 +46,11 @@ test('an empty or missing payload produces no rows and does not throw', () => {
 
 test('the sign sheet puts the fields between the type and the site', () => {
   const src = readFileSync(new URL('../js/native-dapp.js', import.meta.url), 'utf8');
-  const at = src.indexOf('typedDataFields(parsed.message)');
+  // Anchor on the call itself — the ARGUMENT changed name (it is now `message`,
+  // the validated, normalized copy typedParts returns, i.e. exactly the value
+  // passed to signTypedData below), but the intent is untouched: the sheet must
+  // render the payload's FIELDS, not just the type name the site chose.
+  const at = src.indexOf('typedDataFields(message)');
   assert.ok(at > 0, 'sheet harus memuat isi payload');
   const row = src.slice(at - 400, at + 120);
   assert.match(row, /site\.primaryType/,
