@@ -139,9 +139,18 @@ test.describe('MAX amount', () => {
     await waitForTokens(page);
 
     await appClick(page, '.pct-btn[data-pct="100"]');
-    await page.waitForTimeout(900);
-
-    const value = await page.inputValue('#sendAmount');
+    // resolveMax asks the node for the live balance and the gas price before it
+    // writes anything; on a loaded CI fork those reads outlive any fixed sleep,
+    // and a fixed 900ms read reported "MAX must write something" while the
+    // handler was still inside its first await. Wait for the ANSWER — the field
+    // filling or the note explaining a refusal — not for the clock.
+    let value = '';
+    for (let i = 0; i < 30; i++) {
+      value = await page.inputValue('#sendAmount');
+      if (value !== '') break;
+      if (await page.locator('#sendMaxNote.show').count() > 0) break;
+      await page.waitForTimeout(500);
+    }
     if (value === '') {
       // resolveMax's refusal reason only reaches #sendMaxNote; an empty field
       // alone cannot say WHY it refused. Carry the note plus hard facts into

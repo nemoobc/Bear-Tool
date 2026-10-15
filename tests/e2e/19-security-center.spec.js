@@ -20,11 +20,18 @@ test.describe('Security Center', () => {
     await page.waitForSelector('#securityCenter .sec-block', { timeout: 10_000 });
   });
 
-  test('it says plainly that a cross-origin dApp cannot detect this wallet', async ({ page }) => {
+  test('it says plainly what a cross-origin dApp can see in this build', async ({ page }) => {
     const text = await page.locator('#securityCenter').textContent();
-    expect(text).toMatch(/not possible/i);
-    // The reason matters as much as the fact.
-    expect(text).toMatch(/native|proxy|extension/i);
+    // The copy answers "Depends on the build" since the native WebView build:
+    // an in-app dApp DOES see window.ethereum (it still cannot sign without
+    // asking), a plain browser tab sees nothing. The old /not possible/ phrase
+    // only described the browser build; asserting it kept this suite red.
+    expect(text).toMatch(/depends on the build/i);
+    expect(text).toMatch(/webview|native/i);
+    expect(text).toMatch(/window\.ethereum/);
+    expect(text).toMatch(/cannot sign without asking/i);
+    // The reason matters as much as the fact: the plain-tab half too.
+    expect(text).toMatch(/browser tab|no page can see/i);
   });
 
   test('it lists the signing guardrails rather than just asserting "safe"', async ({ page }) => {

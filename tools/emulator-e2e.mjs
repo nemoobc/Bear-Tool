@@ -1434,23 +1434,34 @@ async function main() {
   await page.wait('#dexPanelHost', 12000).catch(() => {});
   let tabs = 0;
   let hiddenTab = false;
+  let scopes = [];
   let coinCards = 0;
   for (let i = 0; i < 40; i++) {
     const snap = await page.evaluate(`JSON.stringify({
       tabs: document.querySelectorAll('#dexPanelHost [data-dex-scope]').length,
       hidden: !!document.querySelector('#dexPanelHost [data-dex-scope="hidden"]'),
+      scopes: Array.from(document.querySelectorAll('#dexPanelHost [data-dex-scope]')).map((b) => b.dataset.dexScope),
       cards: document.querySelectorAll('#dexPanelHost [data-dex-token]').length,
       text: (document.querySelector('#dexPanelHost') || {}).innerText ? (document.querySelector('#dexPanelHost').innerText || '').trim().length : 0,
     })`).catch(() => '{}');
     const o = JSON.parse(snap || '{}');
-    tabs = o.tabs || 0; hiddenTab = !!o.hidden; coinCards = o.cards || 0;
+    tabs = o.tabs || 0; hiddenTab = !!o.hidden; scopes = o.scopes || []; coinCards = o.cards || 0;
     if (tabs > 0) break;
     await sleep(250);
   }
-  report.dex = { shell: shellInfo, tabs, hiddenTab, coinCards, gateUp, gateCleared };
+  report.dex = { shell: shellInfo, tabs, hiddenTab, scopes, coinCards, gateUp, gateCleared };
   await page.shot('32-dex-feed');
   if (!tabs) die('Dex: #dexPanelHost tidak punya satu pun scope tab — feed tidak ter-render');
-  if (!hiddenTab) die('Dex: tab Hidden tidak ada — delisting tidak terjangkau dari UI');
+  // The delisting UX changed on user order ("bener² hapus coin bukan hide coin",
+  // APK 2026-10-15): delete is real — the coin leaves the feed for good
+  // (tombstone, no restore path) and the Hidden tab is GONE by design. The old
+  // check demanded that tab, so it failed against the design it had asked for.
+  // What must hold now: the two live scopes render, and no Hidden scope crept
+  // back — its return would mean hidden-coin delisting came back with it.
+  if (hiddenTab) die('Dex: tab Hidden muncul lagi — hapus coin harus nyata (tombstone), bukan delisting tersembunyi');
+  if (!scopes.includes('all') || !scopes.includes('mine')) {
+    die('Dex: scope feed tidak lengkap — butuh "all" + "mine", dapat: ' + JSON.stringify(scopes));
+  }
 
   // The launch form is a second screen of the same view. It must open from the
   // feed and paint its own fields — a control that exists in source but cannot
