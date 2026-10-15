@@ -49,7 +49,9 @@ import WebSocket from 'ws';
 const ADB = process.env.ADB || 'adb';
 const SERIAL = process.env.EMULATOR_SERIAL || '';
 const OUT = process.env.E2E_OUT || 'emulator-artifacts';
-const PASSWORD = 'e2e-bear-123';
+// Throwaway password typed into the wallet this script creates on the test
+// emulator — a fixture, not a credential.
+const WALLET_PW = 'e2e-bear-123';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const adb = (...args) =>
@@ -538,8 +540,8 @@ async function main() {
   step('create form');
   await page.wait('#createPw');
   await page.type('#createName', 'CI Bear');
-  await page.type('#createPw', PASSWORD);
-  await page.type('#createPw2', PASSWORD);
+  await page.type('#createPw', WALLET_PW);
+  await page.type('#createPw2', WALLET_PW);
   step('submit create');
   await page.click('#createBtn');
   await page.wait('.seed-word');

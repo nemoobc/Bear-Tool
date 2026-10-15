@@ -24,7 +24,7 @@ import { renderSignMessage, stripInvisible as stripInvisibleShared } from './sig
 import { openModal, closeModal, confirmTx, escapeHtml, toast } from './ui.js';
 import { t } from './i18n.js';
 import { get, set, requireUnlock } from './state.js';
-import { getNetworkById, getNetwork } from './network.js';
+import { getNetworkById, getNetwork, sanitizeChainRequest, installRequestedChain, rpcLabel } from './network.js';
 // One source of truth shared with the injected and native paths: split both
 // personal_sign param orders, validate typed data, and guard the chain a
 // broadcast actually goes out on. This path re-implemented each by hand and
@@ -489,13 +489,25 @@ async function handleRequest({ id, topic, params }) {
     if (!Number.isFinite(want)) {
       return respondError(topic, id, { code: -32602, message: 'Invalid chain id: ' + (raw || 'missing') });
     }
-    // wallet_addEthereumChain is deliberately treated as "switch if we know
-    // this chain, refuse otherwise". The dApp's rpcUrls / blockExplorerUrls
-    // are NEVER installed: a page must not be able to point the wallet at an
-    // RPC it controls, where it could answer whatever it likes to any later
-    // read. Bear Tool's own registry is the only source of chain truth.
-    const net = getNetwork(want);
-    if (!net) return respondError(topic, id, CHAIN_UNKNOWN(want));
+    // A chain the wallet already knows is SWITCHED to — what dApps actually
+    // want, for both methods.
+    //
+    // A chain the wallet does NOT know is where EIP-3085 says the wallet may
+    // ask, and as of 2026-10-15 it does: "wc connect add network gabisa" for
+    // a dApp on a new testnet — the flat 4902 left no road forward at all.
+    // The raw dApp payload still never installs itself: offerAddChainWc runs
+    // it through network.js's sanitizer (https/loopback-only URL, capped
+    // name, symbol/decimals clamped), shows a cancel/confirm sheet with the
+    // SANITIZED values, and only then registers + probes via
+    // installRequestedChain. wallet_switchEthereumChain for an unknown chain
+    // keeps returning 4902 (EIP-3326): a switch must not double as an add.
+    let net = getNetwork(want);
+    if (!net) {
+      if (method === 'wallet_switchEthereumChain') return respondError(topic, id, CHAIN_UNKNOWN(want));
+      const added = await offerAddChainWc(topic, (params.request.params && params.request.params[0]) || {});
+      if (added.error) return respondError(topic, id, added.error);
+      net = added.net;
+    }
     if (net.id !== get('networkId')) {
       // The same two writes the network menu performs (app.js [data-net]),
       // followed by the same repaint, so the topbar pill and the dashboard
@@ -523,6 +535,41 @@ async function handleRequest({ id, topic, params }) {
   }
 
   await respondError(topic, id, METHOD_UNSUPPORTED);
+}
+
+// ── EIP-3085, WalletConnect flavour ──────────────────────────────
+// Sanitize → cancel/confirm sheet → install. `params0` is the raw
+// request params[0]; its rpcUrls are read ONLY inside network.js's
+// sanitizer, which is the single gate into the registry.
+// @returns {{net:object} | {error:{code:number,message:string}}}
+async function offerAddChainWc(topic, params0) {
+  const san = sanitizeChainRequest(params0);
+  if (!san.ok) return { error: { code: san.code || -32602, message: san.message } };
+  const peer = wcPeerName(topic);
+  const ok = await confirmTx({
+    title: t('dapp.addChain.title'),
+    rows: [
+      ...(peer ? [{ k: t('cf.site'), v: peer }] : []),
+      { k: t('dapp.addChain.name'), v: san.net.name },
+      { k: t('dapp.addChain.id'), v: 'eip155:' + san.net.chainId },
+      { k: t('dapp.addChain.rpc'), v: rpcLabel(san.net.rpc[0]) },
+      { k: t('dapp.addChain.symbol'), v: san.net.symbol },
+      { k: t('dapp.addChain.note'), v: t('dapp.addChain.noteText') },
+    ],
+    confirmText: t('dapp.addChain.confirm'),
+  });
+  if (!ok) return { error: USER_REJECTED };
+  const ins = await installRequestedChain(san.net);
+  if (!ins.ok) return { error: { code: ins.code || -32602, message: ins.message } };
+  return { net: ins.net };
+}
+
+// Session peer name for a confirm sheet — best effort, never blocks the flow.
+function wcPeerName(topic) {
+  try {
+    const meta = kit?.getActiveSessions?.()?.[topic]?.peer?.metadata;
+    return String(meta?.name || '').slice(0, 40);
+  } catch { return ''; }
 }
 
 // -- small runtime helpers -------------------------------------------------

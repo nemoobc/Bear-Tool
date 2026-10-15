@@ -56,25 +56,34 @@ const POPULAR_DAPPS = [
 // The browser itself lives in dapp-browser.js: tabs, the pre-load security
 // gate, the omnibox and the menu. This file stays the catalogue plus the
 // discovery view, so the security checks can be unit-tested without the grid.
-// ── category face — OKX-style icon tiles ─────────────────────────────────
+// ── category face — cartoon icon tiles ───────────────────────────────────
 // One source for BOTH dApps surfaces: this view's filter row and the browser
-// overlay's category row (passed through initDappBrowser below). The old face
-// was a text pill; the tile colour rides as a --cat custom property so the CSS
-// never hardcodes a palette. A category missing from the map falls back to a
-// neutral tile, so a new catalogue entry renders instead of breaking the row.
+// overlay's category row (passed through initDappBrowser below). The tile
+// colour rides as a --cat custom property so the CSS never hardcodes a
+// palette; the face is a DRAWN cartoon mark — chunky round strokes, ink on
+// the light tiles, white on the dark ones — never an emoji glyph: emoji
+// render from the device font and look different on every phone (user, APK
+// 2026-10-15: "ga kayak okx icon²nya, tapi versi cartoon gitu"). A category
+// missing from the map falls back to a neutral folder tile, so a new
+// catalogue entry renders instead of breaking the row.
+const INK = '#2D2A32';
+const WHITE = '#FFFFFF';
+const FOLDER = 'M4 8a1.5 1.5 0 0 1 1.5-1.5h3.4l2.1 2.5h6.5A1.5 1.5 0 0 1 19 10.5V17a1.5 1.5 0 0 1-1.5 1.5h-12A1.5 1.5 0 0 1 4 17z';
+const face = (fg, paths) =>
+  `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="${fg}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 export const CAT_STYLE = {
-  All:        { glyph: '🌐', color: '#FFC93C' },
-  Swap:       { glyph: '🔁', color: '#6366F1' },
-  Lending:    { glyph: '🏦', color: '#0EA5E9' },
-  Staking:    { glyph: '🌾', color: '#10B981' },
-  NFT:        { glyph: '🖼️', color: '#F59E0B' },
-  Explorer:   { glyph: '🔍', color: '#64748B' },
-  Governance: { glyph: '🗳️', color: '#A855F7' },
-  Identity:   { glyph: '🏷️', color: '#EC4899' },
-  Wallet:     { glyph: '🛡️', color: '#22C55E' },
-  Bridge:     { glyph: '🌉', color: '#F97316' },
+  All:        { glyph: face(INK, '<circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4M12 3.8c2.4 2.5 2.4 13.9 0 16.4M12 3.8c-2.4 2.5-2.4 13.9 0 16.4"/>'), color: '#FFC93C' },
+  Swap:       { glyph: face(WHITE, '<path d="M7 8.5h9M13 5.5l3 3-3 3M17 15.5H8M11 18.5l-3-3 3-3"/>'), color: '#6366F1' },
+  Lending:    { glyph: face(INK, '<path d="M4.5 9.5 12 5l7.5 4.5M6.5 9.5V16M10.5 9.5V16M13.5 9.5V16M17.5 9.5V16M4.5 19h15"/>'), color: '#0EA5E9' },
+  Staking:    { glyph: face(INK, '<rect x="6" y="11" width="12" height="9" rx="2.5"/><path d="M8.5 11V7.5a3.5 3.5 0 0 1 7 0V11"/>'), color: '#10B981' },
+  NFT:        { glyph: face(INK, '<rect x="4.5" y="5" width="15" height="14" rx="2.5"/><circle cx="9.2" cy="9.8" r="1.6"/><path d="M6.5 17.5l4.5-4.5 3 3 2-2 1.5 1.5"/>'), color: '#F59E0B' },
+  Explorer:   { glyph: face(WHITE, '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/>'), color: '#64748B' },
+  Governance: { glyph: face(INK, '<path d="M7 11.5 12 8l5 3.5V19a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1z"/><path d="M9.5 14.5l2 2 3.5-3.5"/>'), color: '#A855F7' },
+  Identity:   { glyph: face(INK, '<path d="M4.5 11V5.5a1 1 0 0 1 1-1H11l8.5 8.5-6.5 6.5z"/><circle cx="8.6" cy="8.6" r="1.3"/>'), color: '#EC4899' },
+  Wallet:     { glyph: face(INK, '<path d="M12 4l7 2.5V11c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9V6.5z"/>'), color: '#22C55E' },
+  Bridge:     { glyph: face(INK, '<path d="M4.5 18v-4.5a7.5 7.5 0 0 1 15 0V18M9 18v-4a3 3 0 0 1 6 0v4M3 18h18"/>'), color: '#F97316' },
 };
-export const catStyle = (name) => CAT_STYLE[name] || { glyph: '📁', color: '#94A3B8' };
+export const catStyle = (name) => CAT_STYLE[name] || { glyph: face(INK, FOLDER), color: '#94A3B8' };
 
 initDappBrowser({ catalog: POPULAR_DAPPS, catStyle: CAT_STYLE });
 

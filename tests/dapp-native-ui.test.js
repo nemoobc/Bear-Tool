@@ -26,9 +26,12 @@ const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n'
 const java = readFileSync(path.join(here, '..', 'android', 'app', 'src', 'main', 'java', 'com', 'nemoobc', 'beartool', 'BearDappBrowserPlugin.java'), 'utf8');
 const fixture = readFileSync(path.join(here, '..', 'public', 'dapp-rpc-fixture.html'), 'utf8');
 
-test('the four consent prompts prefer the NATIVE sheet and keep the wallet-modal fallback', () => {
-  assert.equal((code.match(/await askConfirm\(\{/g) || []).length, 4,
-    'keempat konfirmasi native (connect/sign/typed/send) wajib lewat askConfirm — sheet native di ATAS dApp, dApp tidak boleh hilang');
+test('the five consent prompts prefer the NATIVE sheet and keep the wallet-modal fallback', () => {
+  // connect / personal_sign / typed-data / send / wallet_addEthereumChain
+  // (EIP-3085 — the fifth, added 2026-10-15: a dApp on a new testnet could
+  // not get its chain added; that sheet must draw above the dApp too).
+  assert.equal((code.match(/await askConfirm\(\{/g) || []).length, 5,
+    'kelima konfirmasi native (connect/sign/typed/send/add-chain) wajib lewat askConfirm — sheet native di ATAS dApp, dApp tidak boleh hilang');
   assert.equal((code.match(/await confirmTx\(\{/g) || []).length, 0,
     'confirmTx telanjang = prompt digambar di bawah dapp view: tak terlihat, tak bisa diklik, RPC hang selamanya');
   assert.match(code, /async function askConfirm\(\{ title, rows, confirmText \}\)/,
@@ -540,15 +543,40 @@ test('the native toolbar is fully OPAQUE, cartoon-styled — no bleed-through, n
   assert.doesNotMatch(java, /0xFF0E0E16/, 'page band gelap tidak boleh kembali');
 });
 
-test('cartoon chrome: emoji icons, cream surfaces, ink text, honey accent (user 2026-10-11)', () => {
-  // Toolbar icons are colour emoji — the literal "cartoon" the user asked for.
-  assert.match(java, /backBtn\.setText\("\\u2B05\\uFE0F"\)/, 'back → ⬅️');
-  assert.match(java, /forwardBtn\.setText\("\\u27A1\\uFE0F"\)/, 'forward → ➡️');
-  assert.match(java, /netBtn\.setText\("\\uD83C\\uDF10"\)/, 'network → 🌐');
-  assert.match(java, /tabBtn\.setText\("\\uD83D\\uDCD1"\)/, 'tabs → 📑');
-  assert.match(java, /reloadBtn\.setText\("\\uD83D\\uDD04"\)/, 'reload → 🔄');
-  assert.match(java, /closeBtn\.setText\("\\u274C"\)/, 'close → ❌');
-  assert.match(java, /menuBtn\.setText\("\\uD83D\\uDC3E"\)/, 'menu → 🐾 (bear paw, on-brand)');
+test('cartoon chrome: DRAWN vector icons, cream surfaces, ink text, honey accent (user 2026-10-15)', () => {
+  // The toolbar + sheet wore colour emoji (user 2026-10-11). The user tested
+  // the APK and asked again — "dalam daaps icon belum berubah", "ga kayak okx
+  // icon²nya, tapi versi cartoon gitu". Emoji are device-font glyphs that look
+  // different on every phone; these are DRAWN vectors (res/drawable/ic_dbr_*):
+  // chunky ink strokes + palette fills, the same cartoon on every device.
+  assert.doesNotMatch(java, /setText\("\\u/, 'chrome text is never a unicode/emoji escape');
+  assert.doesNotMatch(java, /\p{Extended_Pictographic}/u,
+    'no colour-emoji glyph may survive anywhere in the chrome — drawn vectors only');
+  const drawable = (f) => readFileSync(path.join(here, '..', 'android', 'app', 'src', 'main', 'res', 'drawable', f), 'utf8');
+  const drawn = ['ic_dbr_back', 'ic_dbr_fwd', 'ic_dbr_globe', 'ic_dbr_tabs', 'ic_dbr_reload',
+    'ic_dbr_paw', 'ic_dbr_close', 'ic_dbr_x', 'ic_dbr_plus', 'ic_dbr_copy', 'ic_dbr_star',
+    'ic_dbr_share', 'ic_dbr_desktop', 'ic_dbr_history', 'ic_dbr_trash'];
+  for (const f of drawn) {
+    const xml = drawable(`${f}.xml`);
+    assert.match(xml, /android:strokeColor="#(2D2A32|4ECDC4|FF6B6B)"/, `${f} wears the cartoon ink/accent stroke`);
+    assert.match(xml, /android:pathData="/, `${f} is a drawn path, not a glyph`);
+  }
+  for (const [f, fill] of [['ic_dbr_globe', '#4ECDC4'], ['ic_dbr_tabs', '#FFC93C'],
+    ['ic_dbr_paw', '#FFC93C'], ['ic_dbr_star', '#FFC93C'], ['ic_dbr_desktop', '#4ECDC4'],
+    ['ic_dbr_history', '#06D6A0']]) {
+    assert.ok(drawable(`${f}.xml`).includes(`android:fillColor="${fill}"`), `${f} carries its cartoon palette fill`);
+  }
+  // Every control wires a drawn icon — and keeps the contentDescription the
+  // emulator driver taps by (tapNativeButton).
+  assert.match(java, /backBtn\.setImageResource\(R\.drawable\.ic_dbr_back\)/, 'back → drawn arrow');
+  assert.match(java, /forwardBtn\.setImageResource\(R\.drawable\.ic_dbr_fwd\)/, 'forward → drawn arrow');
+  assert.match(java, /netBtn\.setCompoundDrawables\(globe, null, null, null\)/, 'network chip = drawn globe + chain name');
+  assert.match(java, /tabBtn\.setImageResource\(R\.drawable\.ic_dbr_tabs\)/, 'tabs → drawn tab stack');
+  assert.match(java, /reloadBtn\.setImageResource\(R\.drawable\.ic_dbr_reload\)/, 'reload → drawn circular arrow');
+  assert.match(java, /closeBtn\.setImageResource\(R\.drawable\.ic_dbr_close\)/, 'close → drawn berry X');
+  assert.match(java, /menuBtn\.setImageResource\(R\.drawable\.ic_dbr_paw\)/, 'menu → drawn bear paw (on-brand)');
+  assert.match(java, /menuIconTile\(density, R\.drawable\.ic_dbr_copy, ORANGE, "Copy URL", "dapp-menu-copy"/, 'Copy tile = drawn icon on orange');
+  assert.match(java, /menuRow\(density, R\.drawable\.ic_dbr_desktop, "Switch to desktop mode", "dapp-menu-desktop"/, 'desktop row = drawn monitor');
   // Surfaces ride the wallet palette.
   assert.match(java, /private static final int CREAM = 0xFFFFF8E7/, 'cream = --cream');
   assert.match(java, /private static final int INK = 0xFF2D2A32/, 'ink = --ink');
@@ -564,7 +592,7 @@ test('cartoon chrome: emoji icons, cream surfaces, ink text, honey accent (user 
   assert.match(java, /t\.wrap\.setColorSchemeColors\(HONEY, ORANGE, BERRY\)/, 'progress bar = palet kartun');
   assert.match(java, /int\[\] palette = \{ HONEY, MINT, BERRY, SKY, ORANGE, GRAPE \}/,
     'warna tile situs = palet kartun, bukan ungu-gelap OKX');
-  assert.match(java, /ib\.setColor\(tileColorForGlyph\(glyph\)\)/, 'tile ikon menu = warna kartun per-glyph');
+  assert.match(java, /menuIconTile\(density, R\.drawable\.ic_dbr_star, HONEY, "Favourite", "dapp-menu-fav"/, 'tile Favourite = honey (warna pindah dari glyph ke tile)');
 });
 
 test('a user-closed native browser must not resurrect when a wallet sheet closes', () => {

@@ -571,6 +571,36 @@ export function detectNetworkType(chainId, rpcUrl) {
   return 'mainnet';
 }
 
+// ── RPC URL safety ────────────────────────────────────────────────
+/**
+ * Is this RPC URL safe to put in front of a signing wallet?
+ *
+ * Moved here from app.js (2026-10-15): the manual Add Network handler was the
+ * only caller, and the dApp-requested add flow (EIP-3085) now needs the same
+ * rule — one source of truth, or the two installers drift.
+ *
+ * https is required for anything remote, because a transaction signed here is
+ * broadcast in clear over plain HTTP to whatever answers — that is not a
+ * theoretical risk, it is the transaction. Loopback is exempt because the
+ * traffic never leaves the machine, and because it is the only way the app's
+ * own fork workflow (run-fork-all.sh and its anvils on localhost) can be used
+ * through the UI at all. The previous rule demanded https unconditionally,
+ * which silently threw away "Custom RPC added for Ethereum" and left the
+ * balance at zero with no clue why.
+ */
+export function isSafeRpcUrl(url) {
+  const s = String(url || '').trim();
+  if (/^https:\/\//i.test(s)) return true;
+  if (!/^http:\/\//i.test(s)) return false;
+  let host;
+  try { host = new URL(s).hostname.toLowerCase(); } catch { return false; }
+  return host === 'localhost'
+    || host === '127.0.0.1'
+    || host === '::1'
+    || host === '[::1]'
+    || host.endsWith('.localhost');
+}
+
 export function addCustomNetwork(net) {
   const list = getCustomNetworks();
   // Fallback type is DETECTED, not assumed mainnet.
@@ -585,6 +615,124 @@ export function removeCustomNetwork(id) {
   const list = getCustomNetworks().filter(n => n.id !== id);
   localStorage.setItem(CUSTOM_KEY, JSON.stringify(list));
   return list;
+}
+
+// ── dApp-requested networks (EIP-3085 wallet_addEthereumChain) ────
+// One shared pipeline for every path a dApp can ask from (WalletConnect, the
+// injected bridge, the native browser): sanitize its payload → the CALLER
+// shows a cancel/confirm sheet → installRequestedChain probes and registers.
+// The registry stays the wallet's own; what changed (2026-10-15, user report:
+// "add network gabisa" for a dApp on a new testnet) is that a chain the wallet
+// does not know can be added WITH the user's explicit approval, sanitized —
+// instead of a flat 4902 with no road forward. A chain that IS known still
+// switches, never re-adds. The dApp's raw parameters are never installed
+// directly; only this sanitizer's output reaches addCustomNetwork.
+
+/** Host to show on a confirm sheet — never the full URL/key path. */
+export function rpcLabel(url) {
+  try { return new URL(String(url)).host; }
+  catch { return String(url || '').slice(0, 60); }
+}
+
+/**
+ * Validate an EIP-3085 chain payload the way the manual Add Network flow
+ * would. Pure: no network, no storage — the caller shows the sheet and then
+ * calls installRequestedChain().
+ * @returns {{ok:true, net:object} | {ok:false, code:number, message:string}}
+ */
+export function sanitizeChainRequest(payload) {
+  const p = payload && typeof payload === 'object' ? payload : null;
+  if (!p) return { ok: false, code: 32602, message: 'wallet_addEthereumChain expects [{ chainId, chainName, rpcUrls }].' };
+  const rawId = p.chainId;
+  let chainId = NaN;
+  if (typeof rawId === 'string' && /^0x[0-9a-fA-F]+$/.test(rawId)) chainId = parseInt(rawId, 16);
+  else if (typeof rawId === 'number' && Number.isInteger(rawId)) chainId = rawId;
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    return { ok: false, code: 32602, message: 'Invalid chain id: ' + (rawId ?? 'missing') };
+  }
+  const urls = Array.isArray(p.rpcUrls) ? p.rpcUrls.map((u) => String(u)) : [];
+  const rpc = urls.find((u) => isSafeRpcUrl(u));
+  if (!rpc) return { ok: false, code: 32602, message: 'The chain needs at least one https:// RPC endpoint (http only for localhost).' };
+  const name = String(p.chainName || '').trim().slice(0, 40);
+  if (!name) return { ok: false, code: 32602, message: 'The chain needs a name.' };
+  const cur = p.nativeCurrency && typeof p.nativeCurrency === 'object' ? p.nativeCurrency : {};
+  const symRaw = String(cur.symbol || '').trim();
+  const symbol = /^[A-Za-z0-9]{1,10}$/.test(symRaw) ? symRaw : 'ETH';
+  const dRaw = Number(cur.decimals);
+  const decimals = Number.isInteger(dRaw) && dRaw >= 0 && dRaw <= 36 ? dRaw : 18;
+  let explorer = '';
+  for (const e of (Array.isArray(p.blockExplorerUrls) ? p.blockExplorerUrls : [])) {
+    const s = String(e || '').trim();
+    if (/^https?:\/\//i.test(s)) { explorer = s.slice(0, 200); break; }
+  }
+  return { ok: true, net: {
+    name, chainId, symbol, decimals, rpc: [rpc], explorer,
+    type: detectNetworkType(chainId, rpc), icon: '🔗', color: '#9B5DE5',
+  } };
+}
+
+/**
+ * Ask an RPC what chain it is on. null = did not answer (dead, blocked by
+ * CORS, or garbage) — which is NOT taken as proof the chain is wrong.
+ */
+export async function probeChainId(rpcUrl, timeoutMs = 7000) {
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch { /* already gone */ } }, timeoutMs) : null;
+  try {
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      ...(ctrl ? { signal: ctrl.signal } : {}),
+    });
+    const json = await res.json();
+    // Strictly 0x-hex. parseInt('banana', 16) reads "ba" and answers 186 —
+    // a garbage result must be "did not answer", never a chain id.
+    const raw = json && json.result != null ? String(json.result) : '';
+    const got = /^0x[0-9a-fA-F]+$/.test(raw) ? parseInt(raw, 16) : NaN;
+    return Number.isFinite(got) ? got : null;
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Probe + register a sanitized chain the user just approved.
+ * - RPC answers with a DIFFERENT chain id → refused (that is a spoof, not a
+ *   fluke; the manual flow refuses it too).
+ * - RPC does not answer → still installed: the endpoint is exactly what the
+ *   user approved on the sheet, and every later read through it fails
+ *   benignly if it is dead. (MetaMask installs without probing at all;
+ *   refusing here would re-create the "add network gabisa" for any RPC
+ *   without CORS headers.)
+ * @returns {{ok:true, net:object, reused:boolean} | {ok:false, code:number, message:string}}
+ */
+export async function installRequestedChain(net) {
+  const chainId = Number(net && net.chainId);
+  const rpc = Array.isArray(net?.rpc) ? net.rpc[0] : net?.rpc;
+  if (!Number.isSafeInteger(chainId) || chainId <= 0 || !rpc) {
+    return { ok: false, code: 32602, message: 'The requested chain is incomplete.' };
+  }
+  const got = await probeChainId(rpc);
+  if (got !== null && got !== chainId) {
+    return { ok: false, code: 32602, message: `That RPC reports chain ${got}, not ${chainId} — the network was not added.` };
+  }
+  const dupe = getCustomNetworks().find((n) =>
+    Number(n.chainId) === chainId && String((Array.isArray(n.rpc) ? n.rpc[0] : n.rpc) || '') === rpc);
+  if (dupe) return { ok: true, net: dupe, reused: true };
+  const list = addCustomNetwork({
+    name: net.name,
+    chainId,
+    symbol: net.symbol || 'ETH',
+    decimals: Number.isInteger(Number(net.decimals)) ? Number(net.decimals) : 18,
+    rpc: [rpc],
+    explorer: net.explorer || '',
+    type: net.type,
+    icon: net.icon || '🔗',
+  });
+  return { ok: true, net: list[list.length - 1], reused: false };
 }
 
 // Per-network custom RPC overrides. A built-in network's rpc list lives in a

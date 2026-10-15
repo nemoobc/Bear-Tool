@@ -77,27 +77,36 @@ test('the pool panel states what a deposit does NOT do', () => {
   }
 });
 
-test('delisting is reversible from the UI, not only in code', () => {
+test('deleting a coin is a real delete, and it stays deleted', () => {
   const tokens = read('js/dex/tokens.js');
   const trade = read('js/dex/trade.js');
-  // Hiding a coin with no way back is a bad delete wearing a delete button.
-  assert.match(tokens, /data-dex-scope="hidden"/, 'the feed needs a place to see what was hidden');
-  assert.match(tokens, /withoutHidden\(coins\)/, 'hidden coins must actually leave the main feed');
-  assert.match(tokens, /dexUnhideAll/, 'and there must be a way to restore all of them at once');
-  assert.match(trade, /hideCoin\(/, 'the coin page needs a hide action');
-  assert.match(trade, /unhideCoin\(/, 'and a restore action — the same button must undo it');
-  // The chain keeps the coin; the panel must not imply otherwise.
-  assert.ok(/dex\.list\.hidden': '[^']*chain[^']*'/i.test(read('js/i18n.js')),
-    'the note must say the coin still exists on the chain, or hiding reads as deleting');
+  // The user (APK, 2026-10-15): "fitur dex itu bener² hapus coin bukan hide
+  // coin". A hide behind a Hidden tab with a Restore-all button is exactly what
+  // they rejected — none of it may come back.
+  assert.ok(!/data-dex-scope="hidden"/.test(tokens), 'no Hidden tab — a delete is not a hide');
+  assert.ok(!/dexUnhideAll/.test(tokens), 'no Restore-all button — a delete you can undo is a hide');
+  assert.match(tokens, /withoutDeleted\(coins\)/, 'deleted coins must actually leave the feed');
+  assert.match(tokens, /export function forgetLaunchedToken/, 'delete must drop the coin from the launched index too');
+  assert.match(trade, /forgetLaunchedToken\(token\.address\)/, 'the coin page wires the index removal');
+  assert.match(trade, /deleteCoin\(token\.address\)/, 'and the tombstone that keeps it deleted');
+  assert.match(trade, /confirmTx\(/, 'a permanent delete must ask first');
+  assert.ok(!/unhideCoin|isHidden/.test(trade), 'no restore path may survive on the coin page');
+  // The chain keeps the coin; the note must not pretend the coin itself is gone.
+  assert.ok(/dex\.list\.deleteNote': '[^']*chain[^']*'/i.test(read('js/i18n.js')),
+    'the note must say the contract still lives on the chain, or delete reads as burning the coin');
 });
 
-test('delisting cannot hide a coin the chain no longer has', () => {
-  // withoutHidden() is applied to coins that came FROM the chain, so it can
-  // only ever remove things from a list that was already real. What it must not
-  // do is invent entries or drop the scope it was asked for.
+test('a deleted coin cannot be resurrected by the chain scan', () => {
+  // withoutDeleted() is applied to coins that came FROM the chain, and the
+  // Launched-event scan is creator-scoped — so without the tombstone every
+  // refresh would re-find the coin and put it back on the grid, reading as
+  // "delete didn't work". The tombstone is the difference. It is applied to a
+  // list that was already real; it can only remove, never invent.
   const list = read('js/dex/list.js');
-  assert.match(list, /function withoutHidden/, 'the filter must exist');
-  assert.match(list, /localStorage/, 'hiding must survive a reload, or it is a filter that lies');
+  assert.match(list, /function withoutDeleted/, 'the filter must exist');
+  assert.match(list, /localStorage/, 'the tombstone must survive a reload, or the coin returns tomorrow');
+  assert.match(list, /bear\.dex\.deleted/, 'the delete log is its own key');
+  assert.match(list, /bear\.dex\.hidden/, 'coins hidden before the delete design stay gone (migration)');
   assert.match(list, /try\s*\{/, 'storage writes must be guarded — private mode is not an error to crash on');
 });
 
@@ -163,16 +172,18 @@ test('the liquidity panel cannot render a position for a signed-out reader', () 
     'and must handle there being no address yet — "undefined" is not an address');
 });
 
-test('delisting cannot be the only way a coin disappears', () => {
-  // Hiding is per-chain and reversible. If it were the ONLY removal path, a user
-  // could lose sight of a coin with no route back, which is the difference
-  // between a filter and a delete.
+test('the delete design leaves no way to bring a coin back', () => {
+  // The old design was reversible BY CONSTRUCTION (hidden tab + restore all).
+  // The delete design replaces it wholesale: one confirmation, one tombstone,
+  // and no UI anywhere that can bring the coin back.
   const list = read('js/dex/list.js');
-  assert.ok(!/localStorage\.removeItem/.test(list),
-    'delisting must never delete the coin record itself — only hide it');
-  assert.ok(/withoutHidden/, 'and there must be a filter the UI applies');
+  assert.ok(!/unhideAll|unhideCoin/.test(list), 'no restore functions may exist in the delete design');
+  assert.match(list, /export function deleteCoin/, 'one delete entry point');
+  assert.match(list, /export function withoutDeleted/, 'and one filter the UI applies');
+  const index = read('js/dex/index.js');
+  assert.ok(!/unhideAll/.test(index), 'the feed nav must not wire a restore handler');
   const tokens = read('js/dex/tokens.js');
-  assert.match(tokens, /scope === 'hidden'/, 'plus a view that shows what was hidden');
+  assert.ok(!/scope === 'hidden'/.test(tokens), 'and no scope shows what was hidden');
 });
 
 // ── duplicate ids ───────────────────────────────────────────────────

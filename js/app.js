@@ -8,7 +8,8 @@
 import { POPULAR_TOKENS, ERC20_ABI,
          NETWORKS, getAllNetworks, getNetworkById, getProvider, getDelegation,
          addCustomNetwork, removeCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
-         applyRpcOverrides, providerEndpoint, detectNetworkType, isBundledContract} from './network.js';
+         applyRpcOverrides, providerEndpoint, detectNetworkType, isBundledContract,
+         isSafeRpcUrl, rpcLabel} from './network.js';
 import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
@@ -903,6 +904,22 @@ function makeBearProvider(origin) {
             { k: t('cf.address'), v: info.address },
           ],
           confirmText: t('cf.add'),
+        }),
+        // EIP-3085: a page asking for a chain the wallet does not know gets a
+        // cancel/confirm sheet with the SANITIZED request (dapp-exec validates
+        // before this is called). Declined → 4902 in dapp-exec; approved →
+        // installed via network.js installRequestedChain (probe + registry).
+        offerAddChain: ({ net, origin: o }) => confirmTx({
+          title: t('dapp.addChain.title'),
+          rows: [
+            { k: t('cf.site'), v: o || t('dapp.addChain.siteFallback') },
+            { k: t('dapp.addChain.name'), v: net.name },
+            { k: t('dapp.addChain.id'), v: String(net.chainId) },
+            { k: t('dapp.addChain.rpc'), v: rpcLabel(net.rpc[0]) },
+            { k: t('dapp.addChain.symbol'), v: net.symbol },
+            { k: t('dapp.addChain.note'), v: t('dapp.addChain.noteText') },
+          ],
+          confirmText: t('dapp.addChain.confirm'),
         }),
       });
       if (local.done) return local.value;
@@ -3130,30 +3147,9 @@ async function showActivityDetail(a) {
 }
 
 // ── settings ──
-/**
- * Is this RPC URL safe to put in front of a signing wallet?
- *
- * https is required for anything remote, because a transaction signed here is
- * broadcast in clear over plain HTTP to whatever answers — that is not a
- * theoretical risk, it is the transaction. Loopback is exempt because the
- * traffic never leaves the machine, and because it is the only way the app's
- * own fork workflow (run-fork-all.sh and its anvils on localhost) can be used
- * through the UI at all. The previous rule demanded https unconditionally,
- * which silently threw away "Custom RPC added for Ethereum" and left the
- * balance at zero with no clue why.
- */
-export function isSafeRpcUrl(url) {
-  const s = String(url || '').trim();
-  if (/^https:\/\//i.test(s)) return true;
-  if (!/^http:\/\//i.test(s)) return false;
-  let host;
-  try { host = new URL(s).hostname.toLowerCase(); } catch { return false; }
-  return host === 'localhost'
-    || host === '127.0.0.1'
-    || host === '::1'
-    || host === '[::1]'
-    || host.endsWith('.localhost');
-}
+// isSafeRpcUrl moved to network.js (2026-10-15): the dApp-requested chain
+// sanitizer needs the same rule, and a second copy here would be the one that
+// drifts. app.js still owns the manual Add Network flow, which calls it.
 
 /**
  * Point the wallet at the current network's first RPC again.

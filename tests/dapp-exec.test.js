@@ -404,7 +404,7 @@ test('wallet_switchEthereumChain: garbage chainId → 32602', async () => {
   );
 });
 
-test('wallet_addEthereumChain: known chain switches; unknown → 4902 (registry is truth)', async () => {
+test('wallet_addEthereumChain: known chain switches; unknown without a sheet → 4902', async () => {
   const switches = [];
   const ok = await executeLocal({
     method: 'wallet_addEthereumChain',
@@ -422,6 +422,99 @@ test('wallet_addEthereumChain: known chain switches; unknown → 4902 (registry 
     (e) => e.code === 4902,
   );
   assert.equal(switches.length, 1, 'an unknown chain must never reach activateNetwork');
+});
+
+// ── EIP-3085: an unknown chain, sanitized + user-confirmed ────────
+// 2026-10-15 (user: "add network gabisa" for a dApp on a new testnet): the
+// wallet may ASK. Scroll-Sepolia (534351) is deliberately a chain the
+// registry does not carry — the add path is the only way it can land.
+test('wallet_addEthereumChain: approved sheet → installed (sanitized) + switched', async () => {
+  const chainId = 534351;
+  const rpc = 'https://sepolia-rpc.scroll.io';
+  globalThis.fetch = async (url, opts) => {
+    assert.equal(url, rpc, 'the probe must go to the requested RPC');
+    assert.equal(JSON.parse(opts.body).method, 'eth_chainId');
+    return { json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x' + chainId.toString(16) }) };
+  };
+  const offered = [];
+  const switches = [];
+  const r = await executeLocal({
+    method: 'wallet_addEthereumChain',
+    params: [{
+      chainId: '0x' + chainId.toString(16),
+      chainName: 'Scroll Sepolia',
+      rpcUrls: [rpc],
+      nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+      blockExplorerUrls: ['https://sepolia.scrollscan.com'],
+    }],
+    origin: 'https://dapp.example',
+    offerAddChain: async (info) => { offered.push(info); return true; },
+    activateNetwork: fakeActivate(switches),
+  });
+  assert.equal(r.done, true);
+  assert.equal(r.value, null, 'success answers null');
+  assert.equal(offered.length, 1, 'exactly one sheet, carrying the SANITIZED chain');
+  assert.equal(offered[0].net.chainId, chainId);
+  assert.equal(offered[0].net.name, 'Scroll Sepolia');
+  assert.equal(offered[0].origin, 'https://dapp.example');
+  const stored = JSON.parse(mem.get('bear.customNetworks') || '[]');
+  assert.equal(stored.length, 1, 'approved → registered');
+  assert.equal(stored[0].chainId, chainId);
+  assert.deepEqual(stored[0].rpc, [rpc]);
+  assert.equal(stored[0].custom, true);
+  assert.equal(stored[0].type, 'testnet', 'a listed testnet id classifies as testnet');
+  assert.equal(switches.length, 1, 'the wallet switches to what was added');
+  assert.equal(switches[0][0], stored[0].id);
+});
+
+test('wallet_addEthereumChain: declined sheet → 4001, nothing installed', async () => {
+  await assert.rejects(
+    () => executeLocal({
+      method: 'wallet_addEthereumChain',
+      params: [{ chainId: '0x99999', chainName: 'Nope', rpcUrls: ['https://rpc.example'] }],
+      offerAddChain: async () => false,
+    }),
+    (e) => e.code === 4001,
+  );
+  assert.equal(JSON.parse(mem.get('bear.customNetworks') || '[]').length, 0);
+});
+
+test('wallet_addEthereumChain: an RPC answering with another chain id installs nothing', async () => {
+  globalThis.fetch = async () => ({ json: async () => ({ result: '0x1' }) }); // says mainnet
+  const switches = [];
+  await assert.rejects(
+    () => executeLocal({
+      method: 'wallet_addEthereumChain',
+      params: [{ chainId: '0x99999', chainName: 'Fake', rpcUrls: ['https://rpc.fake.example'] }],
+      offerAddChain: async () => true,
+      activateNetwork: fakeActivate(switches),
+    }),
+    (e) => e.code === 32602 && /reports chain/i.test(e.message),
+  );
+  assert.equal(JSON.parse(mem.get('bear.customNetworks') || '[]').length, 0, 'a lying RPC installs nothing');
+  assert.equal(switches.length, 0);
+});
+
+test('wallet_addEthereumChain: unsafe RPC / missing name → 32602 before any sheet', async () => {
+  let sheets = 0;
+  await assert.rejects(
+    () => executeLocal({
+      method: 'wallet_addEthereumChain',
+      params: [{ chainId: '0x99999', chainName: 'Evil', rpcUrls: ['http://evil.example'] }],
+      offerAddChain: async () => { sheets += 1; return true; },
+    }),
+    (e) => e.code === 32602,
+  );
+  await assert.rejects(
+    () => executeLocal({
+      method: 'wallet_addEthereumChain',
+      params: [{ chainId: '0x99999', rpcUrls: ['https://rpc.example'] }],
+      offerAddChain: async () => { sheets += 1; return true; },
+    }),
+    (e) => e.code === 32602 && /name/i.test(e.message),
+  );
+  assert.equal(sheets, 0, 'a malformed request never reaches the user');
+  assert.equal(JSON.parse(mem.get('bear.customNetworks') || '[]').length, 0);
 });
 
 // ── wallet_watchAsset ─────────────────────────────────────────────

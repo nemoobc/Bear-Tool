@@ -1,0 +1,10 @@
+<!-- Cartoon chrome icon — chunky ink arrow, round caps. Replaces the ⬅️ emoji:
+     same mark everywhere on every device, drawn in the wallet's own ink. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+  <path android:pathData="M19.5 12 H5.5 M11.5 5.5 L5 12 L11.5 18.5"
+      android:strokeColor="#2D2A32" android:strokeWidth="2.6"
+      android:strokeLineCap="round" android:strokeLineJoin="round"
+      android:fillColor="#00000000"/>
+</vector>

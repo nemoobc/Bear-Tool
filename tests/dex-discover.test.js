@@ -243,8 +243,8 @@ test('a filter that matches nothing must not leave the old rows on screen', asyn
   assert.match(fn, /box\.hidden = \w+\.length > 0/,
     'and the empty box must be hidden exactly when the grid has cards');
   // …and the list it renders must be the one the view filters, not the raw set.
-  assert.match(fn, /withoutHidden\(/,
-    'a coin the user hid must not be back on the grid just because it is on chain');
+  assert.match(fn, /withoutDeleted\(/,
+    'a coin the user deleted must not be back on the grid just because it is on chain');
   assert.ok(!/if \(ok && coins\.length\) \{\s*list\.innerHTML/.test(fn),
     'the "only replace when non-empty" guard must not come back');
 });

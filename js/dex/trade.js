@@ -20,7 +20,8 @@ import { quoteBuy, quoteSell, graduationProgress, fmtEth, fmtPrice, GRADUATION_Q
 import { drawCandles } from './chart.js';
 import { botHtml, bindBot } from './bot.js';
 import { liquidityHtml, bindLiquidity } from './liquidity.js';
-import { isHidden, hideCoin, unhideCoin } from './list.js';
+import { deleteCoin } from './list.js';
+import { forgetLaunchedToken } from './tokens.js';
 import { loadHistory, historyCandles, tradesHtml } from './history.js';
 
 function readToken(token) {
@@ -131,8 +132,8 @@ export function tokenTradeHtml(token) {
 
     ${botHtml()}
 
-    <button id="dexTradeHide" type="button" class="btn btn-ghost btn-block mt-8"></button>
-    <div class="small" id="dexTradeHideNote" hidden></div>
+    <button id="dexTradeDelete" type="button" class="btn btn-danger btn-block mt-8">${escapeHtml(t('dex.list.delete'))}</button>
+    <div class="small" id="dexTradeDeleteNote">${escapeHtml(t('dex.list.deleteNote'))}</div>
 
     ${liquidityHtml()}
 
@@ -658,27 +659,26 @@ export function bindTokenTrade(host, token, onBack) {
   // leaving this page leaves the bot trading.
   bindBot(host, token);
 
-  // Hide / restore. The chain keeps the coin either way — this only takes it out
-  // of THIS feed, per chain, and the button says so, because a hide that reads
-  // as a delete is a lie the user acts on.
-  const hideBtn = $('#dexTradeHide', host);
-  const hideNote = $('#dexTradeHideNote', host);
-  const paintHide = () => {
-    if (!hideBtn) return;
-    const hidden = isHidden(token.address);
-    hideBtn.textContent = t(hidden ? 'dex.list.restore' : 'dex.list.hide');
-    hideBtn.setAttribute('aria-pressed', String(hidden));
-    if (hideNote) {
-      hideNote.hidden = !hidden;
-      if (hidden) hideNote.textContent = t('dex.list.hidden');
-    }
-  };
-  paintHide();
-  hideBtn?.addEventListener('click', () => {
-    const wasHidden = isHidden(token.address);
-    if (wasHidden) unhideCoin(token.address); else hideCoin(token.address);
-    paintHide();
-    toast(t(wasHidden ? 'dex.list.restoredToast' : 'dex.list.hiddenToast'), 'success');
+  // Delete — for real, and only after asking. This wallet's feed forgets the
+  // coin: it leaves the launched index (tokens.js) and a tombstone (list.js)
+  // keeps the creator-scoped chain scan from resurrecting it on the next
+  // refresh. The contract stays on the chain — nobody can undo that — which is
+  // exactly why the button says "delete from MY feed" and the note never
+  // pretends the coin itself is gone.
+  const delBtn = $('#dexTradeDelete', host);
+  delBtn?.addEventListener('click', async () => {
+    const ok = await confirmTx({
+      title: t('dex.list.deleteConfirmTitle'),
+      rows: [{ k: t('dex.list.deleteRowCoin'), v: `${token.symbol || token.name} · ${token.address.slice(0, 6)}…${token.address.slice(-4)}` }],
+      confirmText: t('dex.list.deleteConfirmCta'),
+      danger: true,
+    });
+    if (!ok) return;
+    forgetLaunchedToken(token.address);
+    deleteCoin(token.address);
+    toast(t('dex.list.deletedToast'), 'success');
+    // The feed is the coin's only home now that it is out of it — go back.
+    if (typeof onBack === 'function') onBack();
   });
 
   // The pool. Its contract functions shipped a commit before this call existed,

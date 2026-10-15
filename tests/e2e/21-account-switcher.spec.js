@@ -14,7 +14,7 @@
 import { test, expect } from '@playwright/test';
 import {
   gotoApp, skipIntro, createWallet, expectUnlocked, appClick,
-  collectErrors, assertNoErrors,
+  collectErrors, assertNoErrors, TEST_PW,
 } from './helpers.js';
 
 // Read the active-account index out of the page rather than from the module, so
@@ -27,7 +27,7 @@ const activeIndex = (page) => page.evaluate(async () => {
 
 const topbarLabel = (page) => page.locator('#accountShort').textContent();
 
-async function addSecondAccount(page, password = 'password123') {
+async function addSecondAccount(page, password = TEST_PW) {
   await appClick(page, '#accountPill');
   await page.waitForSelector('#addAccBtn', { timeout: 10_000 });
   await appClick(page, '#addAccBtn');

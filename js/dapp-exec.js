@@ -19,7 +19,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { get, persistCustomToken } from './state.js';
-import { getNetwork, getNetworkById } from './network.js';
+import { getNetwork, getNetworkById, sanitizeChainRequest, installRequestedChain } from './network.js';
 
 const { ethers } = globalThis;
 
@@ -221,8 +221,10 @@ async function switchTo(chainId, activateNetwork) {
  * @param {string}   [opts.origin]        requesting site (for prompts)
  * @param {(id:string, o?:object) => boolean} [opts.activateNetwork]  app.js chokepoint
  * @param {(info:object) => Promise<boolean>} [opts.confirmAsset]  watchAsset dialog
+ * @param {(info:{net:object, origin:string}) => Promise<boolean>} [opts.offerAddChain]
+ *   EIP-3085 add-network dialog (caller shows the sanitized chain + Cancel/Confirm)
  */
-export async function executeLocal({ method, params = [], origin = '', activateNetwork, confirmAsset } = {}) {
+export async function executeLocal({ method, params = [], origin = '', activateNetwork, confirmAsset, offerAddChain } = {}) {
   if (!isLocalMethod(method)) return { done: false };
 
   switch (method) {
@@ -289,13 +291,33 @@ export async function executeLocal({ method, params = [], origin = '', activateN
     case 'wallet_switchEthereumChain':
       return { done: true, value: await switchTo(parseChainIdParam(params), activateNetwork) };
 
-    case 'wallet_addEthereumChain':
-      // EIP-3085 lets a wallet REFUSE a chain it does not know, and Bear Tool
-      // does: the registry (Settings → Networks) is the only source of chain
-      // truth here — a dApp-invented endpoint is how a wallet reads a fake
-      // balance. Known chain → switch to it (what dApps actually want); 4902
-      // otherwise, with the place to add it.
-      return { done: true, value: await switchTo(parseChainIdParam(params), activateNetwork) };
+    case 'wallet_addEthereumChain': {
+      const want = parseChainIdParam(params);
+      // Known chain → switch to it (what dApps actually want — same as before).
+      if (getNetwork(want)) {
+        return { done: true, value: await switchTo(want, activateNetwork) };
+      }
+      // Unknown chain. The registry is still the only source of chain truth —
+      // but EIP-3085 says the wallet may ASK, and as of 2026-10-15 it does
+      // (user report: "add network gabisa" for a dApp on a new testnet). The
+      // dApp's raw parameters never install themselves: sanitizeChainRequest
+      // validates (https/loopback URL only, capped name, clamped currency),
+      // the offerAddChain sheet shows the SANITIZED request with Cancel /
+      // Confirm, and only an approved sheet reaches installRequestedChain
+      // (probe: an RPC answering with a different chain id is refused).
+      // No sheet available (headless caller) → 4902, exactly the old answer.
+      // No sheet available (headless caller) → 4902, exactly the old answer.
+      if (typeof offerAddChain !== 'function') {
+        throw err(4902, `Bear Tool has no network with chain id ${want}. Add it in Settings → Networks, then ask again.`);
+      }
+      const san = sanitizeChainRequest(Array.isArray(params) ? params[0] : null);
+      if (!san.ok) throw err(san.code || 32602, san.message);
+      const approved = await offerAddChain({ net: san.net, origin });
+      if (!approved) throw err(4001, 'The user refused wallet_addEthereumChain.');
+      const ins = await installRequestedChain(san.net);
+      if (!ins.ok) throw err(ins.code || 4902, ins.message);
+      return { done: true, value: await switchTo(Number(ins.net.chainId), activateNetwork) };
+    }
 
     case 'wallet_watchAsset': {
       const spec = Array.isArray(params) ? params[0] : null;

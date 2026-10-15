@@ -5,6 +5,11 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Test-only fixture password for ephemeral wallets on test networks. Not a
+// credential — it guards nothing of value and is typed by the suites below —
+// and it lives here ONCE so every spec derives the same value.
+export const TEST_PW = 'password123';
+
 // M2 moved the view markup out of index.html into src/views/*.jsx (React
 // renders it into the shell at boot), so the served DOM = shell + views.
 // Static specs must read BOTH or every id that moved reads as absent — CI
@@ -258,7 +263,7 @@ export async function expectWelcome(page) {
 // button's data-copy carries the exact mnemonic, and seedQLabel is the element
 // the app itself writes the question into — rather than from class names, which
 // change with styling and say nothing about meaning.
-export async function createWallet(page, { name = 'Test Wallet', password = 'password123' } = {}) {
+export async function createWallet(page, { name = 'Test Wallet', password = TEST_PW } = {}) {
   await appClick(page, '#wCreate');
   await page.fill('#createName', name);
   await page.fill('#createPw', password);
@@ -324,7 +329,7 @@ export async function openSendView(page) {
 }
 
 // Import flow: welcome → import modal → submit secret + password.
-export async function importWallet(page, { secret, password = 'password123', name = 'Imported' } = {}) {
+export async function importWallet(page, { secret, password = TEST_PW, name = 'Imported' } = {}) {
   await appClick(page, '#wImport');
   await page.fill('#importName', name);
   await page.fill('#importSecret', secret);
@@ -350,14 +355,14 @@ export const ANVIL_ACCOUNT_0 = {
  * HEAD produced more of them than the patched tree did. Importing the chain's
  * own funded account is what makes the on-chain specs measurable at all.
  */
-export async function fundedWallet(page, { password = 'password123', name = 'Fork Wallet' } = {}) {
+export async function fundedWallet(page, { password = TEST_PW, name = 'Fork Wallet' } = {}) {
   await importWallet(page, { secret: ANVIL_ACCOUNT_0.privateKey, password, name });
   await expectUnlocked(page);
   return ANVIL_ACCOUNT_0.address;
 }
 
 // Unlock modal (keystore exists, session expired/cleared).
-export async function unlock(page, password = 'password123') {
+export async function unlock(page, password = TEST_PW) {
   await page.fill('#unlockPw', password);
   await appClick(page, '#unlockBtn');
   await page.waitForSelector('#unlockBtn', { state: 'hidden', timeout: 10_000 });

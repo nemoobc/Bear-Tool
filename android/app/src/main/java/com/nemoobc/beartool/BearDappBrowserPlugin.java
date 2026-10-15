@@ -59,7 +59,7 @@ public class BearDappBrowserPlugin extends Plugin {
     // dappView / refreshLayout always point at the ACTIVE tab, so the existing
     // confirm/visibility plumbing (and its tests) keep one obvious target.
     private WebView dappView = null;
-    // Did the USER dismiss the browser (❌ / back with no history), as opposed
+    // Did the USER dismiss the browser (close / back with no history), as opposed
     // to a wallet sheet merely moving it aside? The tab session deliberately
     // survives a hide, so without this flag a later modal round-trip called
     // setVisible(true) and RESURRECTED a browser the user had closed — they
@@ -73,9 +73,9 @@ public class BearDappBrowserPlugin extends Plugin {
     private ViewGroup parent = null;
     private View toolbar = null;
     private android.widget.EditText addressField = null;
-    private Button backBtn = null;
-    private Button forwardBtn = null;
-    private Button menuBtn = null;
+    private android.widget.ImageButton backBtn = null;
+    private android.widget.ImageButton forwardBtn = null;
+    private android.widget.ImageButton menuBtn = null;
     private android.widget.TextView tabCountBadge = null;
 
     // ⋯ overflow sheet. Built fresh per open (its rows reflect THIS tab's URL)
@@ -86,7 +86,7 @@ public class BearDappBrowserPlugin extends Plugin {
     private android.widget.FrameLayout stack = null;
     private View tabPanel = null;
     private LinearLayout tabList = null;
-    private Button tabBtn = null;
+    private android.widget.ImageButton tabBtn = null;
     private Button netBtn = null;
     private final java.util.List<Tab> tabs = new java.util.ArrayList<>();
     private int activeTab = -1;
@@ -485,7 +485,11 @@ public class BearDappBrowserPlugin extends Plugin {
         stack.setVisibility(View.GONE);
     }
 
-    // Cartoon toolbar: [ ⬅️ ] [ ➡️ ] [ address ....... ] [ 🌐 net ] [ 📑 n ] [ 🔄 ] [ 🐾 ] [ ❌ ].
+    // Cartoon toolbar: [ back ] [ fwd ] [ address ....... ] [ globe net ] [
+    // tabs n ] [ reload ] [ paw ] [ close ]. Every icon is a DRAWN vector
+    // (res/drawable/ic_dbr_*) — chunky ink strokes + palette fills, the same
+    // cartoon mark on every device — never an emoji glyph (user, APK
+    // 2026-10-15: "ga kayak okx icon²nya, tapi versi cartoon gitu").
     // Opaque, full-width band: the page is padded BELOW it (never under it) and
     // the wallet dashboard can never bleed through it.
     private void buildToolbar(final float density) {
@@ -495,20 +499,16 @@ public class BearDappBrowserPlugin extends Plugin {
         bar.setElevation(8 * density);
         int navW = (int) (40 * density);
 
-        backBtn = new Button(getContext());
-        backBtn.setText("\u2B05\uFE0F");
+        backBtn = new android.widget.ImageButton(getContext());
+        backBtn.setImageResource(R.drawable.ic_dbr_back);
         backBtn.setContentDescription("dapp-back");
-        backBtn.setAllCaps(false);
-        backBtn.setTextColor(INK);
         backBtn.setBackgroundColor(0x00000000);
         backBtn.setEnabled(false);
         backBtn.setOnClickListener(v -> doBack());
 
-        forwardBtn = new Button(getContext());
-        forwardBtn.setText("\u27A1\uFE0F");
+        forwardBtn = new android.widget.ImageButton(getContext());
+        forwardBtn.setImageResource(R.drawable.ic_dbr_fwd);
         forwardBtn.setContentDescription("dapp-forward");
-        forwardBtn.setAllCaps(false);
-        forwardBtn.setTextColor(INK);
         forwardBtn.setBackgroundColor(0x00000000);
         forwardBtn.setEnabled(false);
         forwardBtn.setOnClickListener(v -> {
@@ -541,7 +541,16 @@ public class BearDappBrowserPlugin extends Plugin {
         // wallet owns the network list). The answer comes back through
         // setChain(), which updates this chip and tells every tab.
         netBtn = new Button(getContext());
-        netBtn.setText("\uD83C\uDF10");
+        // Chip = [globe][chain name]. The globe is a DRAWN vector, not the
+        // globe emoji: emoji render from the device font and read as "text
+        // stuck in a button" (user, APK 2026-10-15: "dalam daaps icon belum
+        // berubah" + "ga kayak okx iconnya, tapi versi cartoon gitu").
+        android.graphics.drawable.Drawable globe = getContext().getDrawable(R.drawable.ic_dbr_globe);
+        globe.setBounds(0, 0, (int) (16 * density), (int) (16 * density));
+        netBtn.setCompoundDrawables(globe, null, null, null);
+        netBtn.setCompoundDrawablePadding((int) (4 * density));
+        netBtn.setSingleLine(true);
+        netBtn.setEllipsize(android.text.TextUtils.TruncateAt.END);
         netBtn.setContentDescription("dapp-network");
         netBtn.setAllCaps(false);
         netBtn.setTextColor(INK);
@@ -555,11 +564,9 @@ public class BearDappBrowserPlugin extends Plugin {
         // ⧉ Tabs — opens the switcher sheet. The count is a BADGE pinned to the
         // icon's top-right (OKX's "2"), not text jammed into the glyph: a
         // multi-digit count would otherwise squeeze the bar.
-        tabBtn = new Button(getContext());
-        tabBtn.setText("\uD83D\uDCD1");
+        tabBtn = new android.widget.ImageButton(getContext());
+        tabBtn.setImageResource(R.drawable.ic_dbr_tabs);
         tabBtn.setContentDescription("dapp-tabs");
-        tabBtn.setAllCaps(false);
-        tabBtn.setTextColor(INK);
         tabBtn.setBackgroundColor(0x00000000);
         tabBtn.setOnClickListener(v -> toggleTabPanel());
         tabCountBadge = new android.widget.TextView(getContext());
@@ -572,32 +579,26 @@ public class BearDappBrowserPlugin extends Plugin {
         tabCountBadge.setBackground(badgeBg);
         tabCountBadge.setContentDescription("dapp-tabs-count");
 
-        Button reloadBtn = new Button(getContext());
-        reloadBtn.setText("\uD83D\uDD04");
+        android.widget.ImageButton reloadBtn = new android.widget.ImageButton(getContext());
+        reloadBtn.setImageResource(R.drawable.ic_dbr_reload);
         reloadBtn.setContentDescription("dapp-reload");
-        reloadBtn.setAllCaps(false);
-        reloadBtn.setTextColor(INK);
         reloadBtn.setBackgroundColor(0x00000000);
         reloadBtn.setOnClickListener(v -> reloadActive());
 
-        Button closeBtn = new Button(getContext());
-        closeBtn.setText("\u274C");
+        android.widget.ImageButton closeBtn = new android.widget.ImageButton(getContext());
+        closeBtn.setImageResource(R.drawable.ic_dbr_close);
         closeBtn.setContentDescription("dapp-close");
-        closeBtn.setAllCaps(false);
-        closeBtn.setTextColor(INK);
         closeBtn.setBackgroundColor(0x00000000);
         closeBtn.setOnClickListener(v -> doClose());
 
-        // 🐾 Menu — the OKX overflow. Everything that is NOT a one-tap
-        // navigation action lives here instead of crowding the 48dp bar:
-        // copy/share/favorite, plus the page-level tools (reminder, desktop
-        // mode, this site's transactions, cache). The bear paw is the Bear
-        // Tool brand mark as the cartoon chrome the user asked for.
-        menuBtn = new Button(getContext());
-        menuBtn.setText("\uD83D\uDC3E");
+        // Menu (the bear paw mark) — the OKX overflow. Everything that is NOT
+        // a one-tap navigation action lives here instead of crowding the 48dp
+        // bar: copy/share/favorite, plus the page-level tools (desktop mode,
+        // this site's transactions, cache). Drawn as a vector so the paw is
+        // the same mark on every device font.
+        menuBtn = new android.widget.ImageButton(getContext());
+        menuBtn.setImageResource(R.drawable.ic_dbr_paw);
         menuBtn.setContentDescription("dapp-menu");
-        menuBtn.setAllCaps(false);
-        menuBtn.setTextColor(INK);
         menuBtn.setBackgroundColor(0x00000000);
         menuBtn.setOnClickListener(v -> showDappMenu());
 
@@ -606,7 +607,7 @@ public class BearDappBrowserPlugin extends Plugin {
         bar.addView(backBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         bar.addView(forwardBtn, new LinearLayout.LayoutParams(navW, ViewGroup.LayoutParams.MATCH_PARENT));
         bar.addView(addressField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        bar.addView(netBtn, new LinearLayout.LayoutParams((int) (52 * density), ViewGroup.LayoutParams.MATCH_PARENT));
+        bar.addView(netBtn, new LinearLayout.LayoutParams((int) (64 * density), ViewGroup.LayoutParams.MATCH_PARENT));
         android.widget.FrameLayout tabWrap = new android.widget.FrameLayout(getContext());
         tabWrap.addView(tabBtn, new android.widget.FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -641,7 +642,11 @@ public class BearDappBrowserPlugin extends Plugin {
         h.setPadding((int) (14 * density), 0, 0, 0);
 
         Button add = new Button(getContext());
-        add.setText("+ New tab");
+        android.graphics.drawable.Drawable plus = getContext().getDrawable(R.drawable.ic_dbr_plus);
+        plus.setBounds(0, 0, (int) (18 * density), (int) (18 * density));
+        add.setCompoundDrawables(plus, null, null, null);
+        add.setCompoundDrawablePadding((int) (6 * density));
+        add.setText("New tab");
         add.setAllCaps(false);
         add.setTextColor(INK);
         add.setBackgroundColor(0x00000000);
@@ -652,10 +657,8 @@ public class BearDappBrowserPlugin extends Plugin {
             closeTabPanel();
         });
 
-        Button done = new Button(getContext());
-        done.setText("\u2715");
-        done.setAllCaps(false);
-        done.setTextColor(INK);
+        android.widget.ImageButton done = new android.widget.ImageButton(getContext());
+        done.setImageResource(R.drawable.ic_dbr_x);
         done.setBackgroundColor(0x00000000);
         done.setContentDescription("dapp-tab-done");
         done.setOnClickListener(v -> closeTabPanel());
@@ -724,17 +727,18 @@ public class BearDappBrowserPlugin extends Plugin {
         hlp.bottomMargin = (int) (14 * density);
         sheet.addView(handle, hlp);
 
-        // Icon row: Copy URL / Favorite / Refresh / Share — colour-emoji cartoon marks.
+        // Icon row: Copy URL / Favourite / Refresh / Share — drawn cartoon
+        // icons on candy tiles, one palette colour per action.
         LinearLayout icons = new LinearLayout(getContext());
         icons.setOrientation(LinearLayout.HORIZONTAL);
         icons.setGravity(android.view.Gravity.CENTER);
-        icons.addView(menuIconTile(density, "\uD83D\uDCCB", "Copy URL", "dapp-menu-copy",
+        icons.addView(menuIconTile(density, R.drawable.ic_dbr_copy, ORANGE, "Copy URL", "dapp-menu-copy",
             v -> { copyToClipboard(getContext(), url); closeDappMenu(); }));
-        icons.addView(menuIconTile(density, "\u2B50", "Favourite", "dapp-menu-fav",
+        icons.addView(menuIconTile(density, R.drawable.ic_dbr_star, HONEY, "Favourite", "dapp-menu-fav",
             v -> { toggleBookmark(url); closeDappMenu(); }));
-        icons.addView(menuIconTile(density, "\uD83D\uDD04", "Refresh", "dapp-menu-refresh",
+        icons.addView(menuIconTile(density, R.drawable.ic_dbr_reload, SKY, "Refresh", "dapp-menu-refresh",
             v -> { closeDappMenu(); reloadActive(); }));
-        icons.addView(menuIconTile(density, "\uD83D\uDCE4", "Share", "dapp-menu-share",
+        icons.addView(menuIconTile(density, R.drawable.ic_dbr_share, GRAPE, "Share", "dapp-menu-share",
             v -> { shareUrl(url); closeDappMenu(); }));
         sheet.addView(icons, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -742,11 +746,11 @@ public class BearDappBrowserPlugin extends Plugin {
         // "Set DApp reminder" was dropped from the OKX reference on purpose —
         // Bear Tool has no reminder store, so the row would have been a button
         // that looks alive and does nothing.
-        sheet.addView(menuRow(density, "\uD83D\uDCDD", "Switch to desktop mode", "dapp-menu-desktop",
+        sheet.addView(menuRow(density, R.drawable.ic_dbr_desktop, "Switch to desktop mode", "dapp-menu-desktop",
             v -> { openExternally(url); closeDappMenu(); }));
-        sheet.addView(menuRow(density, "\uD83E\uDDFE", "Transaction history", "dapp-menu-history",
+        sheet.addView(menuRow(density, R.drawable.ic_dbr_history, "Transaction history", "dapp-menu-history",
             v -> { walletCommand("openActivity", url); closeDappMenu(); }));
-        sheet.addView(menuRow(density, "\uD83D\uDDD1", "Clear cache", "dapp-menu-clearcache",
+        sheet.addView(menuRow(density, R.drawable.ic_dbr_trash, "Clear cache", "dapp-menu-clearcache",
             v -> { clearDappCache(); closeDappMenu(); }));
 
         root.addView(sheet, new android.widget.FrameLayout.LayoutParams(
@@ -759,21 +763,19 @@ public class BearDappBrowserPlugin extends Plugin {
         if (toolbar != null) toolbar.bringToFront();
     }
 
-    /** A sheet icon + its caption. Square tile, label under it. */
-    private View menuIconTile(float density, String glyph, String label, String desc, android.view.View.OnClickListener onClick) {
+    /** A sheet icon + its caption. Square cartoon tile, drawn icon, label below. */
+    private View menuIconTile(float density, int iconRes, int tileFill, String label, String desc, android.view.View.OnClickListener onClick) {
         LinearLayout tile = new LinearLayout(getContext());
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
         tile.setClickable(true);
         tile.setContentDescription(desc);
         tile.setOnClickListener(onClick);
-        android.widget.TextView icon = new android.widget.TextView(getContext());
-        icon.setText(glyph);
-        icon.setTextColor(INK);
-        icon.setTextSize(20);
-        icon.setGravity(android.view.Gravity.CENTER);
+        android.widget.ImageView icon = new android.widget.ImageView(getContext());
+        icon.setImageResource(iconRes);
+        icon.setScaleType(android.widget.ImageView.ScaleType.CENTER);
         android.graphics.drawable.GradientDrawable ib = new android.graphics.drawable.GradientDrawable();
-        ib.setColor(tileColorForGlyph(glyph));
+        ib.setColor(tileFill);
         ib.setCornerRadius(14 * density);
         icon.setBackground(ib);
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams((int) (52 * density), (int) (52 * density));
@@ -792,18 +794,17 @@ public class BearDappBrowserPlugin extends Plugin {
         return tile;
     }
 
-    /** A full-width sheet row: icon, title, tap target. */
-    private View menuRow(float density, String glyph, String label, String desc, android.view.View.OnClickListener onClick) {
+    /** A full-width sheet row: drawn icon, title, tap target. */
+    private View menuRow(float density, int iconRes, String label, String desc, android.view.View.OnClickListener onClick) {
         LinearLayout row = new LinearLayout(getContext());
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row.setClickable(true);
         row.setContentDescription(desc);
         row.setOnClickListener(onClick);
-        android.widget.TextView icon = new android.widget.TextView(getContext());
-        icon.setText(glyph);
-        icon.setTextColor(INK);
-        icon.setTextSize(16);
+        android.widget.ImageView icon = new android.widget.ImageView(getContext());
+        icon.setImageResource(iconRes);
+        icon.setScaleType(android.widget.ImageView.ScaleType.CENTER);
         row.addView(icon, new LinearLayout.LayoutParams((int) (30 * density), (int) (44 * density)));
         android.widget.TextView tv = new android.widget.TextView(getContext());
         tv.setText(label);
@@ -903,15 +904,6 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         return palette[Math.abs(h) % palette.length];
     }
 
-    // Deterministic per-glyph colour for the ⋯ sheet icon tiles: same glyph,
-    // same tile, every open (cartoon palette — bright, never dark).
-    private static int tileColorForGlyph(String glyph) {
-        int h = 0;
-        for (int i = 0; i < glyph.length(); i++) h = h * 31 + glyph.charAt(i);
-        int[] palette = { HONEY, MINT, SKY, BERRY, ORANGE, GRAPE };
-        return palette[Math.abs(h) % palette.length];
-    }
-
     private void openTabPanel() {
         if (tabPanel == null || tabList == null) return;
         final float density = getActivity().getResources().getDisplayMetrics().density;
@@ -957,10 +949,8 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
             });
             row.addView(tv, new LinearLayout.LayoutParams(0, (int) (52 * density), 1));
 
-            Button x = new Button(getContext());
-            x.setText("\u2715");
-            x.setAllCaps(false);
-            x.setTextColor(INK);
+            android.widget.ImageButton x = new android.widget.ImageButton(getContext());
+            x.setImageResource(R.drawable.ic_dbr_x);
             x.setBackgroundColor(0x00000000);
             x.setContentDescription("dapp-tab-close-" + i);
             x.setOnClickListener(v -> closeTab(idx));
@@ -1177,7 +1167,7 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
                 dappView.setVisibility(View.VISIBLE);
                 // The ACTIVE tab is the destination — the E2E and card taps
                 // both expect one obvious view, and tabs are opened explicitly
-                // by the user ("+ New tab"), never implicitly per navigation.
+                // by the user ("New tab"), never implicitly per navigation.
                 dappView.loadUrl(url);
                 JSObject ret = new JSObject();
                 ret.put("ok", true);
@@ -1223,7 +1213,7 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         }
         hideDappView();
         // Back with nothing to go back to IS leaving the browser — same rule as
-        // the ❌: a later sheet must not resurrect it.
+        // the close button: a later sheet must not resurrect it.
         userClosed = true;
         return false;
     }
@@ -1275,7 +1265,7 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         getActivity().runOnUiThread(() -> {
             // A wallet sheet closing asks for visible=true to put the browser
             // back. That is right while the browser IS the screen behind the
-            // sheet — and wrong after the user dismissed it (❌/back). Honor
+            // sheet — and wrong after the user dismissed it (close/back). Honor
             // the dismissal: never resurrect a closed browser. Hiding (false)
             // is always safe and still applied.
             if (dappView != null && Boolean.TRUE.equals(visible) && userClosed) {

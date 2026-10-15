@@ -264,8 +264,18 @@ test('M9: the deploy reads the fields and sends two transactions, proxy last', (
     'the proxy is deployed WITH the initialisation — no uninitialised window');
   assert.match(deploySrc, /const proxyArt = compiled\.contracts\?\.\[PROXY_CONTRACT\]/,
     'the proxy ABI/bytecode comes from the same compilation as the token');
-  assert.match(deploySrc, /await provider\.estimateGas\(\{\s*\.\.\.\(await proxyFactory\.getDeployTransaction/,
+  assert.match(deploySrc, /proxyGas = await provider\.estimateGas\(\{ \.\.\.proxyDeployTx, from: get\('address'\) \}\);/,
     'the proxy gas is estimated once its address input actually exists');
+  // 2026-10-15 (user report: "ada yang g ada cancel + confirm... auto
+  // deploy"): the proxy used to go out behind tx 1's single signature — the
+  // one deploy in the app with no gate of its own. It now has its OWN
+  // cancel/confirm sheet, with its own estimate, BEFORE it is deployed.
+  assert.match(deploySrc, /const proxyOk = await confirmTx\(\{/, 'the proxy must have its own cancel/confirm sheet');
+  assert.match(deploySrc, /if \(!proxyOk\)/, 'a cancelled proxy must stop the flow');
+  const proxyGateAt = deploySrc.indexOf('const proxyOk = await confirmTx');
+  const proxyDeployAt = deploySrc.indexOf('const proxyContract = await proxyFactory.deploy(');
+  assert.ok(proxyGateAt !== -1 && proxyDeployAt !== -1 && proxyGateAt < proxyDeployAt,
+    'the proxy sheet must gate the proxy deploy');
 
   // Admin choice: UUPS is adminless, Transparent is admin\'d by the deployer.
   assert.match(deploySrc, /adminAddr = plan\.flags\.proxyType === 'transparent' \? get\('address'\) : ethers\.ZeroAddress/,

@@ -3355,6 +3355,10 @@ select.input option, select.select option, .input option {
 .dapp-chip-lb { max-width: 66px; text-align: center; }
 .dapp-chip.active { background: transparent; color: inherit; border-color: transparent; }
 .dapp-chip.active .dapp-chip-ic { background: var(--honey); }
+/* Active repaints the tile honey — the DRAWN face (svg, user 2026-10-15) must
+   become ink on it whatever its resting colour was, or light marks vanish. */
+.dapp-chip.active .dapp-chip-ic svg,
+.dbr-chip-cat.on .dbr-chip-ic svg { stroke: var(--ink); }
 .dapp-chip.active .dapp-chip-lb { font-weight: 800; }
 .dapp-chip:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .dapp-card:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }

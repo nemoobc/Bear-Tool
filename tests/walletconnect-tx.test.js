@@ -153,7 +153,7 @@ test('the session grants the read/chain methods a dApp needs to connect', () => 
     'approveSession must grant WC_SESSION_METHODS — granting WC_SIGN_METHODS here is the bug');
 });
 
-test('wallet_switchEthereumChain: unknown chain → 4902, dApp rpcUrls never installed', () => {
+test('wallet_switchEthereumChain: unknown chain → 4902, refusal before any write', () => {
   const i = src.indexOf("method === 'wallet_switchEthereumChain'");
   assert.ok(i !== -1, 'the switch branch must exist');
   const body = src.slice(i, src.indexOf('respondError(topic, id, METHOD_UNSUPPORTED)'));
@@ -163,18 +163,34 @@ test('wallet_switchEthereumChain: unknown chain → 4902, dApp rpcUrls never ins
   const actAt = body.indexOf("set('networkId', net.id)");
   assert.ok(lookupAt !== -1 && refuseAt !== -1, 'an unknown chain must be refused');
   assert.ok(refuseAt < actAt, 'the refusal must come BEFORE any state is written');
-  // wallet_addEthereumChain lands in this same branch: switch-if-known only.
-  // Comments are stripped first: the WHY-comment above deliberately says
-  // "rpcUrls are never installed", and a regex that reads prose as code
-  // turns honest documentation into a red test.
-  const code = body.replace(/\/\/[^\n]*/g, '');
-  assert.ok(!/rpcUrls|blockExplorerUrls|addNetwork|addCustomNetwork/.test(code),
-    'the dApp\'s chain parameters must never be installed — only our registry counts');
   assert.match(body, /respond\(topic, id, null\)/, 'a successful switch answers null (EIP-3326)');
   // Covered by both entry points, so an add for a known chain cannot slip through
   // a switch-only check.
   assert.match(src, /method === 'wallet_switchEthereumChain' \|\| method === 'wallet_addEthereumChain'/,
     'switch and add must share one handler');
+});
+
+// 2026-10-15 (user: "wc connect add network gabisa", dApp on a new testnet):
+// the flat 4902 left no road forward. wallet_addEthereumChain for an UNKNOWN
+// chain now OFFERS a sanitized, user-confirmed add — but the dApp's raw
+// parameters still never install themselves: the sanitizer is the only gate,
+// the sheet shows the sanitized values, and a cancel refuses the dApp.
+test('wallet_addEthereumChain: unknown chain → sanitize → sheet → install, never raw', () => {
+  const i = src.indexOf("method === 'wallet_switchEthereumChain'");
+  const body = src.slice(i, src.indexOf('respondError(topic, id, METHOD_UNSUPPORTED)'));
+  assert.match(body, /offerAddChainWc\(topic,/, 'the add path must go through the WC offer helper');
+  const code = body.replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/rpcUrls|blockExplorerUrls/.test(code),
+    'the raw dApp chain parameters must never be touched here — the sanitizer owns them');
+  // ...and the helper itself is the only road into the registry.
+  const h = src.indexOf('async function offerAddChainWc');
+  assert.ok(h !== -1, 'the helper must exist');
+  const hb = src.slice(h, src.indexOf('// -- small runtime helpers'));
+  assert.match(hb, /sanitizeChainRequest\(params0\)/, 'sanitize before anything');
+  assert.match(hb, /await confirmTx\(\{/, 'the user must get a cancel/confirm sheet');
+  assert.match(hb, /confirmText: t\('dapp\.addChain\.confirm'\)/, 'the sheet confirms the add explicitly');
+  assert.match(hb, /await installRequestedChain\(/, 'only an approved sheet reaches the registry');
+  assert.match(hb, /USER_REJECTED/, 'a declined sheet refuses the dApp');
 });
 
 test('a dApp-driven switch repaints the wallet and tells the dApp (chainChanged)', () => {

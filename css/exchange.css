@@ -1,28 +1,31 @@
 /* ═══════════════════════════════════════════════════════════════
-   EXCHANGE — dark surface vocabulary for panels that land on a dark
-   canvas (DApps Discover, Dex launchpad). The rest of the app keeps
-   the cartoon light theme (cartoon.css). Only these surfaces re-paint
-   themselves, so the wallet shell stays friendly.
+   DAPPS — the cartoon surface.
+   This file USED to be a dark OKX-style island (--ex-bg:#0b0e11) on a
+   cream app. User, APK 2026-10-15: "ui dappas masih hitam, kan cartoon
+   harusnya". The DApps view is part of the cartoon wallet, so it now
+   paints with the wallet's own vocabulary: cream surfaces, ink edges,
+   hard offset shadows, honey accents. Class names and layout are
+   unchanged — only the paint. Coins/tokens stay ink-on-cartoon: ≥4.5:1.
    ═══════════════════════════════════════════════════════════════ */
 
 .dapps-browser {
-  --ex-bg: #0b0e11;
-  --ex-surf: #161a1e;
-  --ex-surf-2: #20252b;
-  --ex-surf-3: #282c33;
-  --ex-border: #2b3139;
-  --ex-text: #eaecee;
-  --ex-dim: #858b92;
-  --ex-accent: #EF476F;        /* okx-style pink accent */
-  --ex-accent-2: #F59E0B;
+  --ex-bg: var(--cream, #FFF8E7);
+  --ex-surf: #FFFFFF;
+  --ex-surf-2: #FFF3D0;        /* honey tint — active washes */
+  --ex-surf-3: var(--cream, #FFF8E7);
+  --ex-border: var(--ink, #2D2A32);
+  --ex-text: var(--ink, #2D2A32);
+  --ex-dim: var(--ink-soft, #6B6478);
+  --ex-accent: var(--honey, #FFC93C);
+  --ex-accent-2: var(--orange, #FF8A3D);
   --ex-radius: 16px;
   --ex-radius-lg: 20px;
-  background: linear-gradient(180deg, #0d1114 0%, #0b0e11 100%);
+  background: var(--ex-bg);
   color: var(--ex-text);
   padding: 14px;
   border-radius: 18px;
-  border: 1px solid var(--ex-border);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  border: 2px solid var(--ex-border);
+  box-shadow: var(--shadow-sm, 2px 2px 0 var(--ink));
 }
 .dapps-browser .dapps-hero {
   padding: 14px 12px 18px;
@@ -31,7 +34,7 @@
 .dapps-hero-title {
   font-size: 22px;
   font-weight: 700;
-  color: #fff;
+  color: var(--ex-text);
   letter-spacing: -0.3px;
   margin-bottom: 6px;
 }
@@ -52,8 +55,8 @@
 .dapp-feat-card {
   flex: 0 0 130px;
   scroll-snap-align: start;
-  background: linear-gradient(135deg, var(--ex-surf) 0%, var(--ex-surf-2) 100%);
-  border: 1px solid var(--ex-border);
+  background: var(--ex-surf);
+  border: 2px solid var(--ex-border);
   border-radius: var(--ex-radius);
   padding: 14px 10px 12px;
   display: flex;
@@ -66,7 +69,7 @@
 .dapp-feat-card:hover, .dapp-feat-card:focus-visible {
   transform: translateY(-3px);
   border-color: var(--ex-accent);
-  box-shadow: 0 6px 18px rgba(239, 71, 111, .18);
+  box-shadow: 4px 4px 0 var(--ex-border);   /* cartoon pop: hard, not blurry */
   outline: none;
 }
 .dapp-feat-icon {
@@ -76,7 +79,7 @@
   background: var(--cat, var(--ex-surf-3));
   display: flex; align-items: center; justify-content: center;
   font-size: 24px;
-  border: 1.5px solid var(--ex-border);
+  border: 2px solid var(--ex-border);
   overflow: hidden;
 }
 .dapp-feat-icon .dapp-logo-img { border-radius: 14px; }
@@ -88,20 +91,20 @@
   width: 100%;
   padding: 12px 14px 12px 40px;
   border-radius: 14px;
-  border: 1px solid var(--ex-border);
-  background: var(--ex-surf) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23858b92' stroke-width='2'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cline x1='11' y1='11' x2='15' y2='15'/%3E%3C/svg%3E") 14px center no-repeat;
+  border: 2px solid var(--ex-border);
+  background: var(--ex-surf) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236B6478' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cline x1='11' y1='11' x2='15' y2='15'/%3E%3C/svg%3E") 14px center no-repeat;
   color: var(--ex-text);
   font-size: 14px;
   outline: none;
   transition: border-color .15s, box-shadow .15s;
 }
 .dapps-browser .dapps-omni-input:focus {
-  border-color: var(--ex-accent);
-  box-shadow: 0 0 0 3px rgba(239, 71, 111, .18);
+  border-color: var(--ex-text);
+  box-shadow: 0 0 0 3px rgba(255, 201, 60, .35);   /* honey focus ring */
 }
 .dapps-browser .dapps-omni-input::placeholder { color: var(--ex-dim); }
 
-/* Category tile chips (OKX-style) */
+/* Category tile chips (cartoon tiles: ink edge, candy face) */
 .dapps-browser .dapp-chips {
   display: flex;
   gap: 10px;
@@ -113,7 +116,7 @@
 .dapps-browser .dapp-chips::-webkit-scrollbar { display: none; }
 .dapps-browser .dapp-chip {
   background: var(--ex-surf);
-  border: 1px solid var(--ex-border);
+  border: 2px solid var(--ex-border);
   border-radius: 14px;
   padding: 4px 10px;
   color: var(--ex-text);
@@ -122,9 +125,8 @@
 .dapps-browser .dapp-chip-ic {
   background: var(--cat, var(--ex-surf-3));
   border-color: var(--ex-border);
-  box-shadow: none;
 }
-.dapps-browser .dapp-chip.active .dapp-chip-ic { background: var(--honey, #F5A623); border-color: var(--ex-accent); }
+.dapps-browser .dapp-chip.active .dapp-chip-ic { background: var(--ex-accent); border-color: var(--ex-text); }
 .dapps-browser .dapp-chip-lb { color: var(--ex-text); font-size: 11.5px; }
 .dapps-browser .dapp-chip:hover .dapp-chip-ic { transform: translateY(-2px); }
 
@@ -134,7 +136,7 @@
 .dapps-browser .dapp-sec-n { background: var(--ex-surf-3); border-color: var(--ex-border); color: var(--ex-text); }
 .dapps-browser .dapp-card {
   background: var(--ex-surf);
-  border: 1px solid var(--ex-border);
+  border: 2px solid var(--ex-border);
   border-radius: var(--ex-radius);
   padding: 12px 8px;
   gap: 6px;
@@ -144,7 +146,7 @@
 .dapps-browser .dapp-card:focus-visible {
   transform: translateY(-2px);
   border-color: var(--ex-accent);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+  box-shadow: 4px 4px 0 var(--ex-border);   /* same hard pop as the rail */
 }
 .dapps-browser .dapp-icon {
   border-color: var(--ex-border);
@@ -152,10 +154,10 @@
   width: 54px; height: 54px;
   overflow: hidden;
 }
-.dapps-browser .dapp-name { color: #fff; font-size: 12.5px; }
+.dapps-browser .dapp-name { color: var(--ex-text); font-size: 12.5px; }
 .dapps-browser .dapp-category { color: var(--ex-dim); }
 .dapps-browser .dapp-frame-note { color: var(--ex-dim); }
-.dapps-browser .dapp-card[data-frameable="1"] .dapp-frame-note { color: #34d399; }
+.dapps-browser .dapp-card[data-frameable="1"] .dapp-frame-note { color: var(--mint, #06D6A0); }
 .dapps-browser .dapp-no-match { color: var(--ex-dim); }
 
 /* Loading state */

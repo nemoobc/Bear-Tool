@@ -16,10 +16,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+// The rule moved to network.js (2026-10-15) so the dApp-requested chain
+// sanitizer (EIP-3085) can share it — the declaration is lifted from THERE;
+// app.js still owns the manual Add Network flow this file also pins.
+const netSrc = readFileSync(new URL('../js/network.js', import.meta.url), 'utf8');
 
-// app.js touches the DOM at import time, so the rule is lifted out and evaluated
-// on its own rather than pulling the whole module into a Node test.
-const decl = src.match(/export function isSafeRpcUrl[\s\S]*?\n}/);
+// Both modules touch the DOM at import time, so the rule is lifted out and
+// evaluated on its own rather than pulling the whole module into a Node test.
+const decl = netSrc.match(/export function isSafeRpcUrl[\s\S]*?\n}/);
 assert.ok(decl, 'isSafeRpcUrl must be exported');
 const isSafeRpcUrl = new Function('return (' + decl[0].replace('export function', 'function') + ');')();
 
@@ -72,5 +76,7 @@ test('the save handler actually calls the rule instead of the old inline test', 
   // rejected every localhost URL.
   assert.match(src, /if \(!isSafeRpcUrl\(rpc\)\)/, 'the handler must use the shared rule');
   assert.ok(!/if \(!\/\^https:\\\/\\\/\/\/\.test\(rpc\)\)/.test(src), 'the old unconditional https test must be gone');
-  assert.match(src, /Custom RPC added for/, 'the success path must still exist');
+  // The success path itself (app.js:2005). The old assertion matched a doc
+  // comment that moved to network.js with the rule — the TOAST is the fact.
+  assert.match(src, /toast\(`\$\{picked\.name\} added!`, 'success'\)/, 'the success path must still exist');
 });

@@ -8,7 +8,7 @@
 //
 // Nothing is a hardcoded feed: it is whatever this wallet actually deployed,
 // newest first, with each coin's live graduation progress read from chain.
-import { withoutHidden, isHidden, hiddenCount, unhideAll } from './list.js';
+import { withoutDeleted } from './list.js';
 import { t } from '../i18n.js';
 import { get, set } from '../state.js';
 import { $, escapeHtml } from '../ui.js';
@@ -84,6 +84,22 @@ export function rememberLaunchedToken(entry) {
 }
 
 /**
+ * Drop a coin from the local launched index — the app's own record of it.
+ *
+ * Called together with list.js deleteCoin(): the index forgets the coin and
+ * the tombstone keeps the creator-scoped chain scan from putting it back on
+ * the grid. The chain itself is untouched — the contract, the trades and the
+ * price stay exactly where they were.
+ */
+export function forgetLaunchedToken(address) {
+  const a = String(address || '').toLowerCase();
+  const kept = launchedTokens().filter((x) => String(x.address).toLowerCase() !== a);
+  set('dex.launched', kept);
+  writeStore(kept);
+  return kept.length;
+}
+
+/**
  * The coins the feed shows: what the chain says this wallet launched, unioned
  * with whatever this browser remembers.
  *
@@ -109,16 +125,15 @@ export async function feedCoins(scope = 'all') {
 export function tokensHtml() {
   const launched = launchedTokens();
   // The instant local paint. refreshFeed() re-renders from the chain right after,
-  // so this is only what the user sees for the moment it takes to query.
-  const rows = launched.map(rowHtml).join('');
+  // so this is only what the user sees for the moment it takes to query. It is
+  // filtered too: a deleted coin must not flash back for even that moment.
+  const rows = withoutDeleted(launched).map(rowHtml).join('');
 
   return `
     <div class="dex-feedhead">
       <div class="dex-tabstrip" role="group" aria-label="${escapeHtml(t('dex.tokens.filter'))}">
         <button type="button" class="dex-tab" data-dex-scope="all" aria-pressed="true">${escapeHtml(t('dex.tokens.all'))}</button>
         <button type="button" class="dex-tab" data-dex-scope="mine" aria-pressed="false">${escapeHtml(t('dex.tokens.mine'))}</button>
-        <button type="button" class="dex-tab" data-dex-scope="hidden" aria-pressed="false">${escapeHtml(t('dex.tokens.hidden'))} (${hiddenCount()})</button>
-        <button type="button" class="dex-btn-ghost" id="dexUnhideAll" hidden>${escapeHtml(t('dex.tokens.restoreAll'))}</button>
       </div>
     </div>
     <div id="dexTokenList" class="dex-grid">${rows}</div>
@@ -175,18 +190,11 @@ export async function refreshFeed(host, scope = 'all') {
 
   const { coins, ok, reason, more } = await feedCoins(scope);
 
-  // Delisting is per-view, not a deletion: the chain keeps the coin either way.
-  // The "hidden" tab therefore shows the very coins every other tab filters
-  // out, which is what makes hiding reversible from the UI instead of a
-  // one-way trip the user can only undo by clearing storage.
-  const shown = scope === 'hidden' ? coins.filter((c) => isHidden(c.address)) : withoutHidden(coins);
-  const hideAll = $('#dexUnhideAll', host);
-  if (hideAll) hideAll.hidden = scope !== 'hidden' || hiddenCount() === 0;
-  // The count in the tab label was frozen at panel-build time, so after "Restore
-  // all" it still read "Hidden (3)" above an empty list. Rewritten from the
-  // same number the filter uses, on every pass.
-  const tab = host.querySelector('[data-dex-scope="hidden"]');
-  if (tab) tab.textContent = `${t('dex.tokens.hidden')} (${hiddenCount()})`;
+  // Deleted coins never come back: the filter drops them from every scope,
+  // including the instant local paint — so a chain re-scan (which re-reads the
+  // Launched log by creator) cannot resurrect one. There is no hidden tab and
+  // no restore path; that design was rejected (user, APK 2026-10-15).
+  const shown = withoutDeleted(coins);
 
   // The grid and the empty box are ONE thing with two states, so both are set on
   // every pass. The first version only replaced the grid when it had coins, so
@@ -205,7 +213,7 @@ export async function refreshFeed(host, scope = 'all') {
     if (box) {
       box.hidden = shown.length > 0;
       if (!shown.length) {
-        say(scope === 'hidden' ? t('dex.tokens.noneHidden') : t('dex.tokens.noneOnChain'));
+        say(t('dex.tokens.noneOnChain'));
       }
     }
   } else {
@@ -218,7 +226,7 @@ export async function refreshFeed(host, scope = 'all') {
     say(t('dex.tokens.none'));
     if (status) status.textContent = t('dex.tokens.scanFailed', { err: reason || '' });
     // The local list stays on screen — it is not wrong, just not confirmed.
-    return { coins, ok: false };
+    return { coins: withoutDeleted(coins), ok: false };
   }
 
   if (status) {
@@ -232,8 +240,9 @@ export async function refreshFeed(host, scope = 'all') {
 
 export function bindTokens(host, onOpen) {
   const list = $('#dexTokenList', host);
-  // Live graduation progress for each curve token, read from chain.
-  for (const tk of launchedTokens()) {
+  // Live graduation progress for each curve token, read from chain. Deleted
+  // coins have no card on screen, so there is nothing to paint for them.
+  for (const tk of withoutDeleted(launchedTokens())) {
     paintProgress(tk, host);
   }
   if (list) {

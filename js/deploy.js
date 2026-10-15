@@ -348,14 +348,43 @@ export async function doDeploy() {
       const proxyArt = compiled.contracts?.[PROXY_CONTRACT];
       if (!proxyArt?.bytecode) throw new Error(`${PROXY_CONTRACT} missing from the compilation output`);
       const proxyFactory = new ethers.ContractFactory(proxyArt.abi, proxyArt.bytecode, signer);
-      // The one gas figure we could not know at signing time.
+      // The one gas figure we could not know at signing time. It used to be
+      // estimated and thrown away: the first sheet admitted "tx 1 only", and
+      // the proxy then deployed behind a single signature with no second
+      // question — the one deploy in this app with no cancel+confirm of its
+      // own (user report 2026-10-15: "ada yang g ada cancel + confirm...
+      // auto deploy"). Now the number feeds a SECOND cancel/confirm sheet:
+      // tx 1 is already live either way, and the proxy is the user's call.
+      const proxyDeployTx = await proxyFactory.getDeployTransaction(implAddress, initData, adminAddr);
+      let proxyGas;
       try {
-        await provider.estimateGas({
-          ...(await proxyFactory.getDeployTransaction(implAddress, initData, adminAddr)),
-          from: get('address')
-        });
+        proxyGas = await provider.estimateGas({ ...proxyDeployTx, from: get('address') });
       } catch (e) {
         throw new Error('Proxy gas estimation failed: ' + (e?.shortMessage || e?.message || String(e)));
+      }
+      const proxyGasPrice = await getGasPrice(provider);
+      const proxyCost = proxyGas * proxyGasPrice;
+      const proxyCostLabel = proxyGasPrice > 0n
+        ? `${ethers.formatEther(proxyCost)} ${net.symbol} (${proxyGas.toString()} gas @ ${ethers.formatUnits(proxyGasPrice, 'gwei')} gwei)`
+        : 'unknown';
+      const proxyOk = await confirmTx({
+        title: t('deploy.proxy.title'),
+        rows: [
+          { k: t('deploy.proxy.impl'), v: implAddress },
+          { k: t('deploy.proxy.action'), v: t('deploy.proxy.actionV') },
+          { k: t('cf.network'), v: net.name },
+          { k: t('deploy.proxy.cost'), v: proxyCostLabel },
+        ],
+        confirmText: t('cf.confirm'),
+        cancelText: t('cf.cancel'),
+        danger: net.type === 'mainnet',
+        gasWei: proxyCost,
+        valueWei: 0,
+      });
+      if (!proxyOk) {
+        setDeployStatus(`Implementation <strong>${escapeHtml(implAddress)}</strong> is live — the proxy was cancelled. ${escapeHtml(t('deploy.proxy.cancelled'))}`, 'warn');
+        toast(t('deploy.proxy.cancelled'), 'info');
+        return;
       }
       const proxyContract = await proxyFactory.deploy(implAddress, initData, adminAddr);
       tx = proxyContract.deploymentTransaction();

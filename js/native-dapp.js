@@ -17,7 +17,7 @@ import { confirmTx, toast, setModalVisibilityHook } from './ui.js';
 import { renderSignMessage } from './sign-render.js';
 import { t } from './i18n.js';
 import { get, requireUnlock, on } from './state.js';
-import { getNetworkById, getNetwork } from './network.js';
+import { getNetworkById, getNetwork, sanitizeChainRequest, installRequestedChain, rpcLabel } from './network.js';
 import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
 // One source of truth for what a signature request MEANS: the injected path
 // (dapp-exec.js) already splits both param orders, validates typed data, and
@@ -665,6 +665,54 @@ async function handleNativeRpc({ id, origin, payload }) {
     }
     const m = 'Switch the network inside Bear Tool, then ask the dApp again.';
     return respondError({ code: 4902, message: m });
+  }
+
+  if (method === 'wallet_addEthereumChain') {
+    const payload = (msg.params || [])[0] || {};
+    const want = Number(payload.chainId);
+    const target = Number.isFinite(want) ? getNetwork(want) : null;
+    // Known chain: switch to it (already on it → nothing to do). One
+    // chokepoint, same as the switch branch above.
+    if (target) {
+      const localNet = getNetworkById(get('networkId'));
+      if (localNet && Number(localNet.chainId) === Number(target.chainId)) return respond(null);
+      try {
+        const { activateNetwork } = await import('./app.js');
+        activateNetwork(target.id);
+        return respond(null);
+      } catch (e) {
+        return respondError({ code: 4902, message: (e && e.message) || 'Switch failed.' });
+      }
+    }
+    // Unknown chain: EIP-3085 — the wallet may ASK (user report 2026-10-15:
+    // "add network gabisa" for a dApp on a new testnet; this browser had no
+    // add path at all). Sanitize → Cancel/Confirm sheet with the SANITIZED
+    // values → only an approved sheet reaches the registry. The dApp's raw
+    // parameters are never installed directly.
+    const san = sanitizeChainRequest(payload);
+    if (!san.ok) return respondError({ code: san.code || 32602, message: san.message });
+    const ok = await askConfirm({
+      title: t('dapp.addChain.title'),
+      rows: [
+        { k: t('cf.site'), v: site },
+        { k: t('dapp.addChain.name'), v: san.net.name },
+        { k: t('dapp.addChain.id'), v: String(san.net.chainId) },
+        { k: t('dapp.addChain.rpc'), v: rpcLabel(san.net.rpc[0]) },
+        { k: t('dapp.addChain.symbol'), v: san.net.symbol },
+        { k: t('dapp.addChain.note'), v: t('dapp.addChain.noteText') },
+      ],
+      confirmText: t('dapp.addChain.confirm'),
+    });
+    if (!ok) return respondError(USER_REJECTED);
+    const ins = await installRequestedChain(san.net);
+    if (!ins.ok) return respondError({ code: ins.code || 4902, message: ins.message });
+    try {
+      const { activateNetwork } = await import('./app.js');
+      activateNetwork(ins.net.id);
+      return respond(null);
+    } catch (e) {
+      return respondError({ code: 4902, message: (e && e.message) || 'Switch failed.' });
+    }
   }
 
 

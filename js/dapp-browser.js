@@ -556,9 +556,15 @@ const originOf = (u) => { try { return new URL(u).origin.toLowerCase(); } catch 
 const securityOpts = () => ({ blockedHosts: listBlocked(), trustedHosts: listTrusted() });
 
 // ── the home / discover page ─────────────────────────────────────────────
-/** Glyph + colour for a category chip — injected via initDappBrowser; a
- *  category the palette does not know renders a neutral tile, never nothing. */
-const catFace = (name) => catStyles[name] || { glyph: '📁', color: '#94A3B8' };
+/** Face + colour for a category chip — injected via initDappBrowser (CAT_STYLE
+ *  in dapps.js). A category the palette does not know renders a neutral folder
+ *  tile, never nothing. The face is a DRAWN cartoon svg — the same vocabulary
+ *  as CAT_STYLE (user, APK 2026-10-15), never an emoji glyph. */
+const CAT_FALLBACK = {
+  glyph: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#2D2A32" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8a1.5 1.5 0 0 1 1.5-1.5h3.4l2.1 2.5h6.5A1.5 1.5 0 0 1 19 10.5V17a1.5 1.5 0 0 1-1.5 1.5h-12A1.5 1.5 0 0 1 4 17z"/></svg>',
+  color: '#94A3B8',
+};
+const catFace = (name) => catStyles[name] || CAT_FALLBACK;
 
 function paintHome() {
   const cats = [...new Set(catalog.map((d) => d.category))];

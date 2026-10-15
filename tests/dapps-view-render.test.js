@@ -195,6 +195,15 @@ test('category chips are icon tiles and the filter contract survives the face-li
     'each chip announces its pressed state');
   assert.ok(/class="dapp-chip[^>]*--cat:/.test(html),
     'each chip declares its tile colour as a --cat custom property');
+  // The face itself: a DRAWN cartoon mark, never an emoji glyph (user, APK
+  // 2026-10-15 — "ga kayak okx icon²nya, tapi versi cartoon gitu"). The svg
+  // must sit INSIDE the tile span; a whole-page count would pass on a stray
+  // svg while every tile stayed empty.
+  const chipHtml = html.slice(html.indexOf('class="dapp-chips"'), html.indexOf('class="dapp-grid"'));
+  assert.equal((chipHtml.match(/class="dapp-chip-ic" aria-hidden="true"><svg /g) || []).length, cats.length + 1,
+    'every chip tile carries its drawn cartoon face');
+  assert.ok(!/\p{Extended_Pictographic}/u.test(chipHtml),
+    'no emoji glyph may survive in the chip row');
 });
 
 // ── the OKX pass: one omnibox, two sections, no tip line ────────────────────
