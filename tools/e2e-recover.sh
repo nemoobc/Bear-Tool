@@ -27,7 +27,11 @@ OUT="${E2E_OUT:-emulator-artifacts}"
 : > e2e-stdout.log
 
 run_driver() {
-  timeout 480 env E2E_OUT="$OUT" node tools/emulator-e2e.mjs >> e2e-stdout.log 2>&1
+  # Per-attempt driver budget. The driver now runs a LONG multi-phase sweep
+  # (deploy-confirm gate + soak nav cycles), so 480s would trip a healthy run.
+  # E2E_SOAK rides in from the parent env (workflow sets it) and stretches the
+  # stability phase; this ceiling is the backstop, not the target.
+  timeout "${E2E_DRIVER_TIMEOUT:-3000}" env E2E_OUT="$OUT" E2E_SOAK="${E2E_SOAK:-8}" node tools/emulator-e2e.mjs >> e2e-stdout.log 2>&1
 }
 
 fatal_of() { # report's fatal field ('' when the report is missing/invalid)

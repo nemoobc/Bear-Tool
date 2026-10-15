@@ -1493,6 +1493,67 @@ async function main() {
     if (!(sp.options > 0)) die('Tools: daftar sponsor wallet KOSONG padahal dompet sudah dibuat — bug 2026-10-14 kembali');
   }
 
+  // ── Deploy must STOP at a confirm sheet, never auto-broadcast ─────────────
+  // Live bug report 2026-10-15 ("deploy cuman ada compiler, setelah compiler
+  // malah auto deploy, harusnya ada cancel + confirm + total price usd"). The
+  // code path (js/deploy.js doDeploy) calls confirmTx() AFTER compile+gas, so
+  // the claim is surprising — but "surprising" is not a refutation, and the
+  // user is the one holding the device. This phase presses Deploy on a real
+  // build and records what actually happens: a confirm sheet (with a Cancel
+  // button and a Total price row), or a named stop (gas estimation failed on
+  // an empty wallet). The ONE outcome that fails the run is a deployment that
+  // broadcast WITHOUT asking — no sheet, no Cancel, straight to success.
+  //
+  // Nothing is signed: the wallet is empty, so a real gas estimate either
+  // fails (no funds) or the sheet appears and this phase clicks #confirmNo.
+  step('deploy: pressing Deploy stops at a confirm sheet (never auto-broadcast)');
+  if (await openView('deploy')) {
+    await sleep(1000);
+    // A name + symbol are required before the button does anything real.
+    await page.evaluate(`(() => {
+      const n = document.querySelector('#deployName'); if (n) { n.value = 'E2E Probe'; n.dispatchEvent(new Event('input', { bubbles: true })); }
+      const s = document.querySelector('#deploySymbol'); if (s) { s.value = 'E2E'; s.dispatchEvent(new Event('input', { bubbles: true })); }
+      return true;
+    })()`).catch(() => {});
+    await jsClick('#btnDeploy');
+    // Watch for up to ~40s: solc compiles in-browser, then gas is estimated.
+    // Two good endings (sheet, or a named stop), one bad (auto-deployed).
+    let seenSheet = false, sawCancel = false, sawUsd = false, sawStop = false, autoDeployed = false, statusText = '';
+    for (let i = 0; i < 80; i++) {
+      const snap = await page.evaluate(`JSON.stringify({
+        sheet: !!document.querySelector('#confirmYes'),
+        cancel: !!document.querySelector('#confirmNo'),
+        usd: /\\$|Total price/i.test((document.querySelector('#modalBox .tx-detail')||{}).innerText||''),
+        status: ((document.querySelector('#deployStatus')||{}).innerText||'').trim(),
+        deployed: /deployed/i.test((document.querySelector('#deployStatus')||{}).innerText||''),
+      })`).catch(() => '{}');
+      const o = JSON.parse(snap || '{}');
+      statusText = o.status || '';
+      if (o.sheet) { seenSheet = true; sawCancel = !!o.cancel; sawUsd = !!o.usd; break; }
+      // A named stop (estimation failed / reverted / cancelled) is a safe
+      // answer — it proves the flow did NOT silently broadcast.
+      if (/estimation failed|reverted|cancelled|failed|invalid/i.test(statusText)) { sawStop = true; break; }
+      // A success WITHOUT ever showing a sheet is the reported bug.
+      if (o.deployed && !seenSheet) { autoDeployed = true; break; }
+      await sleep(500);
+    }
+    report.deployGate = { seenSheet, sawCancel, sawUsd, sawStop, autoDeployed, statusText };
+    await page.shot('35-deploy-confirm');
+    // Never leave a confirm sheet hanging over the next phase.
+    await jsClick('#confirmNo'); await sleep(300); await jsClick('#modalBox .modal-close'); await sleep(300);
+    if (autoDeployed) {
+      die('Deploy: menekan Deploy AUTO-DEPLOY tanpa lembar konfirmasi (bug 2026-10-15). Status: ' + statusText);
+    }
+    if (!seenSheet && !sawStop) {
+      // Neither a sheet nor a named stop within 40s — the button went dead.
+      die('Deploy: tombol Deploy tidak menjawab sama sekali (tak ada lembar konfirmasi, tak ada error) — status: ' + statusText);
+    }
+    // If a sheet DID appear, it must carry a Cancel and a price line — the
+    // other half of the report ("harusnya ada cancel sama confirm + total price usd").
+    if (seenSheet && !sawCancel) die('Deploy: lembar konfirmasi tanpa tombol Cancel');
+    if (seenSheet && !sawUsd) die('Deploy: lembar konfirmasi tanpa baris Total price (USD)');
+  }
+
   // Bridge has no nav item of its own — it lives behind the Swap chooser modal,
   // and that modal only opens on the SECOND click of the Swap nav item
   // (js/app.js showSwapBridgeChooser). So: press Swap twice, the chooser modal
@@ -1944,6 +2005,46 @@ async function main() {
   })()`);
   if (modalA11y.open && !closed) throw new Error('feature sweep: Escape did not close the Receive modal');
   sweep.modal = { ...modalA11y, escapeClosed: closed };
+
+  // ── soak: repeated navigation must not leak errors or crash the WebView ──
+  // A single clean pass proves one pass. The class of bug a long session hits —
+  // a listener re-registered per view switch, a WebView that grows until the OS
+  // kills it, a modal that leaves a dangling overlay — only shows up after many
+  // cycles. This runs the app the way a restless user does: flip through every
+  // view, open and dismiss a sheet, over and over, while counting the console
+  // errors and exceptions the run has collected. Growth past a small allowance
+  // means something leaks per cycle; a crash here is caught by the fatal path.
+  //
+  // E2E_SOAK cycles (default 8; raise it to stretch a run toward the long
+  // budget). It is a real stability probe, not a timer: every cycle drives the
+  // UI and re-reads the live error counters.
+  const SOAK = Math.max(0, parseInt(process.env.E2E_SOAK || '8', 10) || 0);
+  if (SOAK > 0) {
+    step('soak: ' + SOAK + ' nav cycles leak no errors and never crash');
+    const base = { errs: report.consoleErrors.length, exc: report.exceptions.length };
+    const cycViews = ['dashboard', 'activity', 'swap', 'send', 'deploy', 'settings', 'dashboard'];
+    for (let c = 0; c < SOAK; c++) {
+      for (const v of cycViews) {
+        if (!(await openView(v))) throw new Error('soak cycle ' + c + ': view "' + v + '" stopped opening');
+        await sleep(350);
+      }
+      // Open a sheet and dismiss it, so a cycle exercises the modal path too.
+      await jsClick('#quickReceive'); await sleep(500);
+      await jsClick('#modalBox .modal-close'); await sleep(350);
+      // A snapshot per few cycles: enough to see the trend, few enough to keep
+      // the artifact small. Growth is measured against the pre-soak baseline.
+      if (c % 3 === 0) {
+        const grew = report.consoleErrors.length - base.errs + (report.exceptions.length - base.exc);
+        report.soak = { cycles: c + 1, errs: report.consoleErrors.length, exc: report.exceptions.length, grew };
+        await page.shot('50-soak-' + String(c + 1).padStart(2, '0'));
+        // The run's own guard: unfiltered errors already fail at verdict. Here
+        // we only bound the LEAK rate — a couple of transient network errors
+        // over many cycles is fine; an error per cycle is a per-cycle leak.
+        if (grew > SOAK) die('soak: ' + grew + ' new console errors/exceptions across ' + (c + 1) + ' cycles — something leaks per cycle');
+      }
+    }
+    sweep.soak = report.soak;
+  }
 
   // ── native bridge diagnostics (permanent, CDP-side) ─────────────────────
   // Where the console-to-logcat routing is a moving target, the driver reads

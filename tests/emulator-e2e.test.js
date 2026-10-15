@@ -116,10 +116,11 @@ test('every adb line is self-guarded — one failing line kills the rest of the 
   // The E2E run must fail LOUDLY without ending the diagnostics: same-line
   // capture, output to a FILE (sync writes on POSIX — no lost FATAL), cat after.
   // The run goes through the recovery wrapper (10 of 19 fleet qemu deaths);
-  // the wrapper owns the per-attempt bound (480s), the file append, and the
-  // one relaunch cycle — the YAML line must stay one self-guarded call.
-  assert.match(script, /timeout 2100 env E2E_OUT=emulator-artifacts bash tools\/e2e-recover\.sh \|\| echo E2E_FAILED_RC=\$\?/,
-    'wrapper dibatasi 2100s luar (3 attempt x 480 + 2 recovery), rc ditangkap di baris yang sama');
+  // the wrapper owns the per-attempt bound (E2E_DRIVER_TIMEOUT, 1200s for the
+  // long multi-phase sweep), the file append, and the one relaunch cycle — the
+  // YAML line must stay one self-guarded call.
+  assert.match(script, /timeout 4200 env E2E_OUT=emulator-artifacts E2E_SOAK=\d+ E2E_DRIVER_TIMEOUT=1200 bash tools\/e2e-recover\.sh \|\| echo E2E_FAILED_RC=\$\?/,
+    'wrapper dibatasi 4200s luar (3 attempt x 1200 + recovery), rc ditangkap di baris yang sama');
   assert.match(script, /cat e2e-stdout\.log \|\| true/, 'output driver harus dibaca balik ke log step');
 });
 
@@ -358,7 +359,7 @@ test('a fleet qemu death is recovered in-workflow — 3 bounded boots, death sig
   assert.match(yaml, /bash tools\/e2e-recover\.sh/, 'workflow memanggil wrapper');
   assert.doesNotMatch(yaml, /node tools\/emulator-e2e\.mjs/,
     'driver telanjang di YAML = melewati klasifikasi — dilarang');
-  assert.match(yaml, /timeout 2100/, 'wrapper dibatasi luar (3x480 + 2 recovery)');
+  assert.match(yaml, /timeout 4200/, 'wrapper dibatasi luar (3x1200 + recovery)');
 });
 
 test('the E2E boots a BARE image — GMS FontsProvider collateral kills are a closed class', () => {
