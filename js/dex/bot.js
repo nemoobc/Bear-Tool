@@ -5,8 +5,14 @@
 // The flow, in the order it happens:
 //   1. put a balance in            → the bot splits it across addresses it makes
 //   2. it makes its own addresses  → derived from your already-unlocked seed
-//   3. it trades, and keeps going  → until you stop it, the balance runs out,
-//                                    or the coin graduates
+//   3. it trades, and keeps going  → until you stop it or the balance runs out
+//
+// It trades the POOL (BearPair), not the retired curve (DEX-V2 M5c): every
+// buy and sell is the same swap the manual TradeSheet runs — swapQuote for
+// the numbers, ensureAllowanceTx + swapTx for the transactions — so the bot
+// and the button can never disagree about what a trade is. Each derived
+// address is funded with the quote coin AND a small native gas drip: a
+// wallet holding tokens but no ETH cannot send its own approve.
 //
 // No time limit and no expiry. A bot that quietly stops after half an hour is
 // worse than one that never starts, because the user finds out from a price.
@@ -22,12 +28,12 @@ import { t } from '../i18n.js';
 import { getAccounts, getSession } from '../wallet.js';
 import { $, toast, escapeHtml, confirmTx } from '../ui.js';
 import { sendDexTx, provider, ethersLib, dexChainOk, fmtTok, ERC20_ABI, get, withTxButton } from './core.js';
-import { PUMP_ABI } from './pump-source.js';
-import { quoteBuy, quoteSell, fmtEth } from './curve.js';
+import { poolState } from './pool-data.js';
+import { swapQuote, swapTx, ensureAllowanceTx } from './swap.js';
 import { decide, nextAccount, budgetBps, bandUsable, stopReason, BUY, SELL, STOP, WHY } from './bot-engine.js';
 import { canDerive, botStartIndex, deriveBotWallets, splitBudget } from './bot-wallets.js';
 
-const SLIPPAGE_BPS = 100n; // 1%, the same default the manual buy uses
+const SLIPPAGE_BPS = 100n; // 1% — wider than the manual 0.5%: the bot cannot re-quote after a revert
 const CFG = (addr) => `bear.dex.bot.${addr}`;
 
 // ── the runner ───────────────────────────────────────────────────────
@@ -36,7 +42,7 @@ const CFG = (addr) => `bear.dex.bot.${addr}`;
 // down.
 let R = null;
 // A start in progress. `if (R)` guards the RUNNING bot, but R is not assigned
-// until after the curve read, the confirm sheet, the address derivation and the
+// until after the pool read, the confirm sheet, the address derivation and the
 // funding transfers — a window of several seconds in which a second click passed
 // the guard, queued a second confirm, and paid for a second round of funding.
 // The second run then overwrote R, orphaning the first runner, which was already
@@ -133,15 +139,18 @@ function field(id, label, type, min, max, step, hint) {
 }
 
 // ── bind ─────────────────────────────────────────────────────────────
-export function bindBot(host, token) {
-  const cfg = loadCfg(token.address);
+export function bindBot(host, ctx) {
+  // ctx = { address, pair, quote, qSym, qd, td, symbol } — the pool this panel
+  // trades and the quote's decimals for every amount it prints.
+  const { address, qd = 18 } = ctx || {};
+  const cfg = loadCfg(address);
   for (const [id, key] of [
     ['dexBotFloorPct', 'floorPct'], ['dexBotCeilPct', 'ceilPct'], ['dexBotSize', 'size'],
     ['dexBotBudget', 'budget'], ['dexBotWallets', 'wallets'], ['dexBotSeconds', 'seconds'],
   ]) {
     const el = $('#' + id, host);
     if (el) el.value = cfg[key];
-    el?.addEventListener('change', () => saveCfg(token.address, { [key]: el.value }));
+    el?.addEventListener('change', () => saveCfg(address, { [key]: el.value }));
   }
 
   const toggle = $('#dexBotToggle', host);
@@ -161,7 +170,7 @@ export function bindBot(host, token) {
   // untouched through all of it is the dead-button bug the shared tx-button
   // exists to kill. The dots own the button until the last tx settles.
   startBtn?.addEventListener('click', () => withTxButton(startBtn, t('dex.bot.starting'), async () => {
-    await start(token).catch((e) => say(String(e.message || e)));
+    await start(ctx).catch((e) => say(String(e.message || e)));
   }));
 
   const say = (msg, kind = '') => {
@@ -178,8 +187,8 @@ export function bindBot(host, token) {
   // The panel only LISTENS. Leaving the page unsubscribes and the bot keeps
   // trading; coming back repaints from the live state rather than restarting.
   const off = subscribe((s) => {
-    if (!s.on || s.address !== token.address) {
-      if (R && R.address !== token.address) return;
+    if (!s.on || s.address !== address) {
+      if (R && R.address !== address) return;
       startBtn.hidden = s.on; stopBtn.hidden = !s.on; meterEl.hidden = !s.on;
       return;
     }
@@ -195,7 +204,7 @@ export function bindBot(host, token) {
     if (bar) bar.setAttribute('aria-valuenow', String(Math.round(pct)));
 
     const spentEl = $('#dexBotMeterText', host);
-    if (spentEl) spentEl.textContent = `${t('dex.bot.spent')} ${fmtEth(s.spent, 4)} / ${fmtEth(s.cap, 4)}`;
+    if (spentEl) spentEl.textContent = `${t('dex.bot.spent')} ${fmtTok(s.spent, qd, 4)} / ${fmtTok(s.cap, qd, 4)}`;
     const trEl = $('#dexBotTrades', host);
     if (trEl) trEl.textContent = `${t('dex.bot.trades')} ${s.trades}`;
 
@@ -213,11 +222,12 @@ export function bindBot(host, token) {
 
   // Build the panel from whatever the live state says, including a bot that was
   // started on another screen.
-  if (R && R.address === token.address) body.hidden = false;
+  if (R && R.address === address) body.hidden = false;
 }
 
 // ── start ────────────────────────────────────────────────────────────
-export async function start(token) {
+export async function start(ctx) {
+  const { address, pair, quote: quoteAddr, qSym = '', qd = 18, td = 18 } = ctx || {};
   if (!dexChainOk()) { toast(t('dex.bot.wrongChain'), 'error'); return; }
   if (R) { toast(t('dex.bot.alreadyRunning'), 'error'); return; }
   if (starting) { toast(t('dex.bot.alreadyRunning'), 'error'); return; }
@@ -225,29 +235,29 @@ export async function start(token) {
   try {
 
   const E = ethersLib();
-  const cfg = loadCfg(token.address);
+  const cfg = loadCfg(address);
 
   let floorPct, ceilPct, sizeWei, budgetWei;
   try {
     floorPct = BigInt(Math.round(Number(cfg.floorPct)));
     ceilPct = BigInt(Math.round(Number(cfg.ceilPct)));
-    sizeWei = E.parseUnits(String(cfg.size || '0'), 18);
-    budgetWei = E.parseUnits(String(cfg.budget || '0'), 18);
+    sizeWei = E.parseUnits(String(cfg.size || '0'), qd);
+    budgetWei = E.parseUnits(String(cfg.budget || '0'), qd);
   } catch { return toast(t('dex.bot.badNumber'), 'error'); }
 
   // Everything that would make the bot useless is refused BEFORE the user is
   // asked to unlock anything or fund anything. A bot that unlocks the wallet,
   // creates four addresses, spends gas moving coins to them, and then never
   // trades is the worst outcome this panel could produce.
-  const curve = await readCurve(token.address);
-  if (!curve.ok) return toast(t('dex.bot.unreadable'), 'error');
+  const pool = await readPool(pair);
+  if (!pool.ok) return toast(t('dex.bot.unreadable'), 'error');
   if (floorPct >= ceilPct) return toast(t('dex.bot.badBand'), 'error');
   if (budgetWei <= 0n) return toast(t('dex.bot.noBudget'), 'error');
   if (sizeWei <= 0n) return toast(t('dex.bot.badNumber'), 'error');
   if (sizeWei > budgetWei) return toast(t('dex.bot.sizeOverBudget'), 'error');
 
-  const floor = (curve.price * floorPct) / 100n;
-  const ceil = (curve.price * ceilPct) / 100n;
+  const floor = (pool.price * floorPct) / 100n;
+  const ceil = (pool.price * ceilPct) / 100n;
   if (!bandUsable(floor, ceil)) return toast(t('dex.bot.badBand'), 'error');
 
   const secret = getSession();
@@ -262,16 +272,24 @@ export async function start(token) {
   // the engine directly, which is how it survived a green on-chain run.
   const master = get('signer');
   if (!master) return toast(t('dex.bot.locked'), 'error');
-  const masterAddr = await master.getAddress();
+  // A keystore signer is a plain ethers.Wallet with NO provider — every send
+  // through it dies with "missing provider" (the same bug the dApp send branch
+  // documents). Connect it once, up front: the funding and the gas drip below
+  // both send from it.
+  const net = provider();
+  const masterC = master.connect(net);
+  const masterAddr = await masterC.getAddress();
+  const gasDrip = E.parseEther('0.002');
 
   const ok = await confirmTx({
     title: t('dex.bot.confirmTitle'),
     rows: [
-      { k: t('dex.bot.budget'), v: fmtEth(budgetWei, 4) + ' ' + t('dex.bot.truthShort') },
+      { k: t('dex.bot.budget'), v: fmtTok(budgetWei, qd, 4) + ' ' + qSym },
       { k: t('dex.bot.size'), v: cfg.size },
       { k: t('dex.bot.floor'), v: floorPct + '%' },
       { k: t('dex.bot.ceil'), v: ceilPct + '%' },
       { k: t('dex.bot.wallets'), v: String(cfg.wallets) },
+      { k: t('dex.bot.gasRow'), v: E.formatUnits(gasDrip, 18) + ' ETH × ' + String(cfg.wallets) },
     ],
     confirmText: t('dex.bot.start'),
     danger: true,
@@ -294,27 +312,34 @@ export async function start(token) {
   // A derived wallet is pure key maths — it has no network attached, so every
   // call through it throws "missing provider". Attaching the Dex's provider is
   // what turns it into something that can actually send a transaction.
-  const E2 = ethersLib();
-  const net = provider();
   for (const w of wallets) w.signer = w.signer.connect(net);
 
-  const quoteAddr = curve.quoteToken;
-  const quote = new E.Contract(quoteAddr, ERC20_ABI, master);
+  const quote = new E.Contract(quoteAddr, ERC20_ABI, masterC);
   const shares = splitBudget(budgetWei, wallets.length, 0n);
 
   // Fund first, ask second. If the funding cannot happen there is no point
   // announcing a running bot, and the user is not left watching a live-looking
-  // panel with nothing behind it.
+  // panel with nothing behind it. Gas first: a derived address holding quote
+  // but no ETH cannot send its own approve or swap — the old bot funded quote
+  // only, which is why it could never actually trade.
   for (let i = 0; i < wallets.length; i++) {
-    if (shares[i] <= 0n) continue;
-    const sent = await sendDexTx(
-      () => quote.transfer(wallets[i].address, shares[i]),
-      t('dex.bot.funding', { n: String(i + 1), of: String(wallets.length) }),
+    const gasSent = await sendDexTx(
+      () => masterC.sendTransaction({ to: wallets[i].address, value: gasDrip }),
+      t('dex.bot.fundingGas', { n: String(i + 1), of: String(wallets.length) }),
     );
     // stop() does nothing when R is still null, which it is here — the failure
     // happens BEFORE the runner exists. So the explanation has to be given here,
     // where the user can act on it: k of n addresses are funded, the rest are
     // not, and the panel looking untouched would hide that.
+    if (!gasSent) {
+      toast(t('dex.bot.fundFailed'), 'error');
+      return;
+    }
+    if (shares[i] <= 0n) continue;
+    const sent = await sendDexTx(
+      () => quote.transfer(wallets[i].address, shares[i]),
+      t('dex.bot.funding', { n: String(i + 1), of: String(wallets.length) }),
+    );
     if (!sent) {
       toast(t('dex.bot.fundFailed'), 'error');
       return;
@@ -322,7 +347,7 @@ export async function start(token) {
   }
 
   R = {
-    address: token.address, signer: master, quoteAddr,
+    address, pair, signer: masterC, quoteAddr, qd, td, qSym,
     wallets, balances: new Map(), cursor: 0, spent: 0n, cap: budgetWei,
     trades: 0, halted: null, lastNote: t('dex.bot.running'),
     floor, ceil, size: sizeWei, seconds: cfg.seconds,
@@ -359,10 +384,12 @@ async function oneTick() {
   const cur = R;
   const E = ethersLib();
   const p = provider();
-  const cs = new E.Contract(cur.address, PUMP_ABI, p);
 
-  const [vq, vt, graduated] = await Promise.all([cs.virtualQuote(), cs.virtualTokens(), cs.graduated()]);
-  const price = vt > 0n ? (vq * 10n ** 18n) / vt : 0n;
+  // The pool, read fresh every tick — the same seam the token page reads.
+  const ps = await poolState(cur.pair);
+  if (!ps.ok || !ps.tokenReserve || ps.tokenReserve === 0n) return; // next tick retries
+  const { quoteReserve, tokenReserve } = ps;
+  const price = (quoteReserve * 10n ** 18n) / tokenReserve;
   // The configured size is a QUOTE figure; the sell leg is denominated in
   // TOKENS and is sized to be worth the same, so the band is symmetric in VALUE.
   // Handing the engine the same number for both sides made each sell ~10^12 too
@@ -373,8 +400,9 @@ async function oneTick() {
   // wallet for money it spent an hour ago, and then fails forever.
   const accs = [];
   const qc = new E.Contract(cur.quoteAddr, ERC20_ABI, p);
+  const tc = new E.Contract(cur.address, ERC20_ABI, p);
   for (const w of cur.wallets) {
-    const [qb, tb] = await Promise.all([qc.balanceOf(w.address), cs.balanceOf(w.address)]);
+    const [qb, tb] = await Promise.all([qc.balanceOf(w.address), tc.balanceOf(w.address)]);
     const row = { ...w, quoteBal: qb, tokenBal: tb };
     cur.balances.set(w.address, row);
     accs.push(row);
@@ -383,10 +411,10 @@ async function oneTick() {
   // Decide with the aggregate view to learn WHAT is wanted, then pick a wallet
   // that can actually pay, then re-decide for that wallet. Splitting it this
   // way keeps every rule in decide() and leaves the two files free to disagree
-  // about nothing.
+  // about nothing. Pools never graduate — that stop rule simply never fires.
   const want = decide({
     price, floor: cur.floor, ceil: cur.ceil, size: cur.size, sizeOut,
-    spent: cur.spent, cap: cur.cap, graduated: Boolean(graduated),
+    spent: cur.spent, cap: cur.cap, graduated: false,
     quoteBal: accs.reduce((a, b) => a + b.quoteBal, 0n),
     tokenBal: accs.reduce((a, b) => a + b.tokenBal, 0n),
   });
@@ -399,7 +427,7 @@ async function oneTick() {
   const d = decide({
     price, floor: cur.floor, ceil: cur.ceil, size: cur.size, sizeOut,
     quoteBal: account.quoteBal, tokenBal: account.tokenBal,
-    spent: cur.spent, cap: cur.cap, graduated: Boolean(graduated),
+    spent: cur.spent, cap: cur.cap, graduated: false,
   });
   if (d.action === STOP) { if (stopReason(d.why)) halt(d.why); return; }
   if (d.action !== BUY && d.action !== SELL) { note(''); return; }
@@ -408,34 +436,28 @@ async function oneTick() {
   // through wallets and make the "next address" readout meaningless.
   cur.cursor = (cur.balances.size ? accs.indexOf(account) + 1 : 0) % accs.length;
 
-  const signer = new E.Contract(cur.address, PUMP_ABI, account.signer);
-  const quote = new E.Contract(cur.quoteAddr, ERC20_ABI, account.signer);
-
   if (d.action === BUY) {
-    // Allowance is granted only when it is short, and only for this trade —
-    // never unlimited.
-    const allowed = await quote.allowance(account.address, cur.address).catch(() => 0n);
-    if (allowed < d.amount) {
-      const approved = await sendDexTx(
-        () => quote.approve(cur.address, d.amount),
-        t('dex.bot.approving', { sym: t('dex.bot.quoteShort') }),
-      );
-      if (!approved) return;
-    }
-    const q = quoteBuy(vq, vt, d.amount);
-    const minOut = (q.tokensOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
-    const sent = await sendDexTx(() => signer.buy(d.amount, minOut), t('dex.bot.buying'));
+    // The quote moves to the PAIR: approve exactly this trade, only when the
+    // allowance is short — the same ensureAllowanceTx the manual sheet runs.
+    const a = await ensureAllowanceTx({ token: cur.quoteAddr, spender: cur.pair, amount: d.amount, owner: account.address, signer: account.signer });
+    if (!a.ok) return;
+    const q = swapQuote({ quoteReserve, tokenReserve, direction: 'buy', amountIn: d.amount, slippageBps: Number(SLIPPAGE_BPS) });
+    if (!q.ok) return;
+    const sent = await swapTx({ pair: cur.pair, direction: 'buy', amountIn: d.amount, minOut: q.minOut, signer: account.signer });
     if (!sent) return;
     cur.spent += d.amount;
     cur.trades += 1;
-    note(t('dex.bot.bought', { amt: fmtEth(d.amount, 4), addr: account.address }));
+    note(t('dex.bot.bought', { amt: fmtTok(d.amount, cur.qd, 4), addr: account.address }));
   } else {
-    const q = quoteSell(vq, vt, d.amount);
-    const minOut = (q.quoteOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
-    const sent = await sendDexTx(() => signer.sell(d.amount, minOut), t('dex.bot.selling'));
+    // The token moves to the pair this time: allowance on the TOKEN.
+    const a = await ensureAllowanceTx({ token: cur.address, spender: cur.pair, amount: d.amount, owner: account.address, signer: account.signer });
+    if (!a.ok) return;
+    const q = swapQuote({ quoteReserve, tokenReserve, direction: 'sell', amountIn: d.amount, slippageBps: Number(SLIPPAGE_BPS) });
+    if (!q.ok) return;
+    const sent = await swapTx({ pair: cur.pair, direction: 'sell', amountIn: d.amount, minOut: q.minOut, signer: account.signer });
     if (!sent) return;
     cur.trades += 1;
-    note(t('dex.bot.sold', { amt: fmtTok(d.amount, 18, 2), addr: account.address }));
+    note(t('dex.bot.sold', { amt: fmtTok(d.amount, cur.td, 2), addr: account.address }));
   }
   publish();
 }
@@ -464,13 +486,12 @@ export function stop(msg) {
 }
 
 // ── reads ────────────────────────────────────────────────────────────
-async function readCurve(address) {
+/** The pool this panel trades: reserves live, price = quote per token (1e18). */
+async function readPool(pair) {
   try {
-    const E = ethersLib();
-    const cs = new E.Contract(address, PUMP_ABI, provider());
-    const [vq, vt, quoteToken] = await Promise.all([cs.virtualQuote(), cs.virtualTokens(), cs.quoteToken()]);
-    if (!vt || vt === 0n) return { ok: false };
-    return { ok: true, price: (vq * 10n ** 18n) / vt, quoteToken };
+    const ps = await poolState(pair);
+    if (!ps.ok || !ps.tokenReserve || ps.tokenReserve === 0n) return { ok: false };
+    return { ok: true, price: (ps.quoteReserve * 10n ** 18n) / ps.tokenReserve };
   } catch { return { ok: false }; }
 }
 

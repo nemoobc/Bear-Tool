@@ -16,7 +16,7 @@
 import { confirmTx, toast, setModalVisibilityHook } from './ui.js';
 import { renderSignMessage, typedDataFields } from './sign-render.js';
 import { t } from './i18n.js';
-import { get, requireUnlock, on, waitForSigner } from './state.js';
+import { get, requireUnlock, on, waitForSigner, addActivity } from './state.js';
 import { getNetworkById, getNetwork, getAllNetworks, sanitizeChainRequest, installRequestedChain, rpcLabel } from './network.js';
 import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
 // One source of truth for what a signature request MEANS: the injected path
@@ -398,6 +398,29 @@ async function handleWalletCommand(ev) {
       const { switchView } = await import('./app.js');
       switchView('activity');
     } catch { /* activity view unavailable */ }
+    return;
+  }
+  if (cmd === 'openWalletConnect') {
+    // The ⋯ menu's WalletConnect row, a wc: URI typed into the address bar, or
+    // a wc: link tapped inside a page. The pair sheet lives in the wallet —
+    // which the dApp overlay covers — so a dApp showing a wc: QR had no way to
+    // reach it from the native browser ("other wallet pas di klik gabisa
+    // connect", report 2026-10-16). Empty url = the sheet reads the clipboard.
+    try {
+      const { openPairWalletConnect } = await import('./walletconnect.js');
+      openPairWalletConnect(String(ev.url || ''));
+    } catch { toast('WalletConnect is not ready yet.', 'error'); }
+    return;
+  }
+  if (cmd === 'browserClosed') {
+    // The browser just hid with its tabs still open: the DApps view under it
+    // was painted BEFORE those tabs existed, so its "Browser · N" entry only
+    // appeared after a view switch ("diluar daaps ga ada fitur tabs",
+    // re-report 2026-10-16). Repaint it now.
+    try {
+      const { refreshView } = await import('./app.js');
+      refreshView('dapps');
+    } catch { /* wallet still booting — the next view switch repaints anyway */ }
     return;
   }
   if (cmd !== 'openNetworkPicker') return;
@@ -783,7 +806,10 @@ async function handleNativeRpc({ id, origin, payload }) {
           : `${tokenCall.amount} · ${tx.to ? shortAddr(tx.to) : ''}`)
       : null;
     const ok = await askConfirm({
-      title: (worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') : '') + t('sign.txTitle'),
+      // An approve call says APPROVE on the title and the button — the sheet
+      // only named the action in a subhead before ("ask tx approved ga ada",
+      // report 2026-10-16). The amount stays the headline.
+      title: (worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') : '') + (tokenCall && tokenCall.kind === 'approve' ? t('sign.approveTitle') : t('sign.txTitle')),
       danger: !!(worst && worst.level === 'fail'),
       // The money line ON TOP and BIG — OKX draws the amount as the sheet's
       // headline; ours used to be one 13sp row among seven ("ask tx dalam
@@ -806,7 +832,7 @@ async function handleNativeRpc({ id, origin, payload }) {
         ...(findings.length ? [{ k: t('cf.flags'), v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }] : []),
         ...(worst ? [{ k: t('cf.why'), v: worst.detail }] : []),
       ],
-      confirmText: worst && worst.level === 'fail' ? t('cf.sendAnyway') : t('sign.send'),
+      confirmText: worst && worst.level === 'fail' ? t('cf.sendAnyway') : (tokenCall && tokenCall.kind === 'approve' ? t('sign.approve') : t('sign.send')),
       tx: { to: tx.to, data: tx.data, value: tx.value },
     });
     if (!ok) return respondError(USER_REJECTED);
@@ -832,6 +858,13 @@ async function handleNativeRpc({ id, origin, payload }) {
     // is the validated, whitelisted object from buildSendTx: a gas limit,
     // nonce or fee field the dApp sent now rides along instead of vanishing.
     const sent = await signer.connect(provider).sendTransaction(tx);
+    // The wallet's own history must not lose a transaction the user approved
+    // here: a dApp send showed up in NO wallet list ("ask tx approved ga ada",
+    // report 2026-10-16). MetaMask records dApp sends in Activity; the pending
+    // row is healed to its receipt by loadActivity like every other send.
+    try {
+      addActivity({ hash: sent.hash, type: 'dapp', status: 'pending', ts: Date.now(), detail: `${site} · ${actionLabel(tx.data)}` });
+    } catch { /* history is a courtesy — the hash already went back to the dApp */ }
     return respond(sent.hash);
   }
 

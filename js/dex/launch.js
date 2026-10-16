@@ -41,6 +41,10 @@ const ONCHAIN_MAX_BYTES = 12 * 1024;       // hard cap on the stored data URI
 const ONCHAIN_QUALITY_START = 0.72;
 
 const LOCK_CHOICES = [7, 30, 90, 365]; // days
+// Quick supply presets: the field alone read as "no supply choice" (report
+// 2026-10-16). Values keep the 80%-to-the-pool ratio the form ships with.
+const SUPPLY_PRESETS = [1_000_000, 10_000_000, 100_000_000, 1_000_000_000];
+const supplyPresetLabel = (n) => (n >= 1_000_000_000 ? `${n / 1_000_000_000}B` : `${n / 1_000_000}M`);
 
 export function launchHtml() {
   const lockOpts = LOCK_CHOICES
@@ -98,6 +102,9 @@ export function launchHtml() {
       <div class="dex-create-fields mt-8">
         <label class="field-label" for="dexLaunchSupply">${escapeHtml(t('dex.launch.supply'))}</label>
         <input id="dexLaunchSupply" class="input" inputmode="numeric" autocomplete="off" value="1000000000">
+        <div class="dex-tabstrip mt-8" id="dexLaunchSupplyPresets" role="group" aria-label="${escapeHtml(t('dex.launch.supplyPresets'))}">
+          ${SUPPLY_PRESETS.map((n) => `<button type="button" class="dex-tab" data-supply="${n}" aria-pressed="${n === 1_000_000_000}">${supplyPresetLabel(n)}</button>`).join('')}
+        </div>
         <label class="field-label mt-8" for="dexLaunchTokens">${escapeHtml(t('dex.launch.poolTokens'))}</label>
         <input id="dexLaunchTokens" class="input" inputmode="numeric" autocomplete="off" value="800000000">
         <label class="field-label mt-8" for="dexLaunchQuoteIn" id="dexLaunchQuoteLabel"></label>
@@ -287,6 +294,30 @@ export function bindLaunch(host, onLaunched) {
 
   quoteEl.addEventListener('change', () => { paintQuoteLabel(); refreshPreview(); });
   for (const el of [supplyEl, tokensEl, quoteInEl, devBuyEl].filter(Boolean)) el.addEventListener('input', refreshPreview);
+
+  // Supply presets: one tap sets the supply AND keeps the 80% pool seed — a
+  // preset that left pool tokens above the supply would fail the form's own
+  // validation and read as broken, not quick (report 2026-10-16).
+  const presetRow = $('#dexLaunchSupplyPresets', host);
+  const paintPresets = () => {
+    if (!presetRow || !supplyEl) return;
+    const cur = String(supplyEl.value || '').replace(/[^0-9]/g, '');
+    for (const b of presetRow.querySelectorAll('[data-supply]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.supply === cur));
+    }
+  };
+  presetRow?.addEventListener('click', (ev) => {
+    const btn = ev.target && ev.target.closest ? ev.target.closest('[data-supply]') : null;
+    if (!btn) return;
+    const supply = Number(btn.dataset.supply);
+    if (!Number.isFinite(supply) || supply <= 0) return;
+    supplyEl.value = String(supply);
+    if (tokensEl) tokensEl.value = String(Math.floor(supply * 0.8));
+    for (const el of [supplyEl, tokensEl].filter(Boolean)) el.dispatchEvent(new Event('input', { bubbles: true }));
+    paintPresets();
+  });
+  supplyEl?.addEventListener('input', paintPresets);
+  paintPresets();
   paintQuoteLabel();
   refreshPreview();
 

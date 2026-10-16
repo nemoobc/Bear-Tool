@@ -18,7 +18,6 @@ import { sendDexTx, provider, ethersLib, dexChainOk, needSigner, fmtTok, withTxB
 import { PUMP_ABI } from './pump-source.js';
 import { quoteBuy, quoteSell, graduationProgress, fmtEth, fmtPrice, GRADUATION_QUOTE, VIRTUAL_QUOTE, VIRTUAL_TOKENS } from './curve.js';
 import { drawCandles } from './chart.js';
-import { botHtml, bindBot } from './bot.js';
 import { liquidityHtml, bindLiquidity } from './liquidity.js';
 import { deleteCoin } from './list.js';
 import { forgetLaunchedToken } from './tokens.js';
@@ -129,8 +128,6 @@ export function tokenTradeHtml(token) {
 
     <button id="dexTradeClaim" type="button" class="btn btn-secondary btn-block mt-8" hidden>${escapeHtml(t('dex.trade.claimFees'))}</button>
     <button id="dexTradeGraduate" type="button" class="btn btn-primary btn-block mt-8" hidden>${escapeHtml(t('dex.trade.graduate'))}</button>
-
-    ${botHtml()}
 
     <button id="dexTradeDelete" type="button" class="btn btn-danger btn-block mt-8">${escapeHtml(t('dex.list.delete'))}</button>
     <div class="small" id="dexTradeDeleteNote">${escapeHtml(t('dex.list.deleteNote'))}</div>
@@ -666,10 +663,6 @@ export function bindTokenTrade(host, token, onBack) {
   };
 
   paintHistory();
-
-  // The market maker. It subscribes to the runner rather than owning it, so
-  // leaving this page leaves the bot trading.
-  bindBot(host, token);
 
   // Delete — for real, and only after asking. This wallet's feed forgets the
   // coin: it leaves the launched index (tokens.js) and a tombstone (list.js)

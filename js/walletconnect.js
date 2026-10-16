@@ -36,7 +36,7 @@ import { inspectUrl, VERDICT } from './dapp-safety.js';
 // guard the chain a broadcast actually goes out on. This path re-implemented
 // each by hand and disagreed with the others about what was even signable —
 // see the branches below.
-import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId } from './dapp-exec.js';
+import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId, decodeTokenCall } from './dapp-exec.js';
 
 export const WC_PROJECT_ID =
   (import.meta.env && import.meta.env.VITE_WC_PROJECT_ID) || '99909bde486039e2102663b92be74974';
@@ -498,8 +498,11 @@ async function handleRequest({ id, topic, params }) {
     } catch (e) {
       return respondError(topic, id, { code: (e && e.code) || 32602, message: (e && e.message) || String(e) });
     }
+    // An approve call says APPROVE on the title and the button — the same
+    // naming the native sheet uses ("ask tx approved ga ada", report 2026-10-16).
+    const tokenCall = decodeTokenCall(tx.data);
     const ok = await confirmTx({
-      title: (worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') : '') + t('sign.txTitle'),
+      title: (worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') : '') + (tokenCall && tokenCall.kind === 'approve' ? t('sign.approveTitle') : t('sign.txTitle')),
       danger: !!(worst && worst.level === 'fail'),
       rows: [
         ...(peer ? [{ k: t('cf.site'), v: peer }] : []),
@@ -514,7 +517,7 @@ async function handleRequest({ id, topic, params }) {
         ...(findings.length ? [{ k: t('cf.flags'), v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }] : []),
         ...(worst ? [{ k: t('cf.why'), v: worst.detail }] : []),
       ],
-      confirmText: worst && worst.level === 'fail' ? t('cf.sendAnyway') : t('sign.send'),
+      confirmText: worst && worst.level === 'fail' ? t('cf.sendAnyway') : (tokenCall && tokenCall.kind === 'approve' ? t('sign.approve') : t('sign.send')),
       // Money line parity with the injected sheet: confirmTx prices the value
       // and the estimated gas for what the dApp asked to send.
       tx: { to: tx.to, data: tx.data, value: tx.value },

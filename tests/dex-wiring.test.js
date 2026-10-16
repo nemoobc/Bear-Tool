@@ -152,12 +152,15 @@ test('the Dex contract ABI is fully wired: no capability stranded in pump-source
 // than a missing one: the user acts on it.
 test('every Dex panel is rendered by the coin page, not merely defined', () => {
   const trade = read('js/dex/trade.js');
-  // liquidityHtml/botHtml exist and are called. A panel defined in a module and
-  // never inserted into the page is the same stranded code wearing a UI.
-  for (const fn of ['liquidityHtml', 'botHtml']) {
-    assert.ok(new RegExp(`\\b${fn}\\(`).test(trade), `the coin page must render ${fn}()`);
-  }
+  // A panel defined in a module and never inserted into the page is the same
+  // stranded code wearing a UI. The legacy coin page carries Liquidity; the
+  // market maker moved to the pool token page (DEX-V2 M5c) — the page the
+  // feed actually opens for a launched coin.
+  assert.ok(/\bliquidityHtml\(/.test(trade), 'the legacy coin page must render liquidityHtml()');
   assert.ok(/bindLiquidity\(/.test(trade), 'and bind it, or the buttons do nothing');
+  const tp = read('js/dex/token-page.js');
+  assert.ok(/\bbotHtml\(/.test(tp), 'the v2 token page must render botHtml()');
+  assert.ok(/bindBot\(/.test(tp), 'and bind it, or the Start button does nothing');
 });
 
 test('a panel number is never rendered before the chain has been asked', () => {
@@ -203,20 +206,23 @@ test('the delete design leaves no way to bring a coin back', () => {
 // A gate that regex-matches `botHtml(` cannot tell one call from two.
 test('the coin page renders each panel exactly once', () => {
   const trade = read('js/dex/trade.js');
-  for (const fn of ['botHtml', 'liquidityHtml']) {
-    const n = (trade.match(new RegExp(`\\$\\{${fn}\\(\\)\\}`, 'g')) || []).length;
-    assert.equal(n, 1, `${fn}() is rendered ${n} times — every copy past the first is inert, because $() always resolves to the first`);
-  }
+  const tp = read('js/dex/token-page.js');
+  const count = (src, fn) => (src.match(new RegExp(`\\$\\{${fn}\\(\\)\\}`, 'g')) || []).length;
+  assert.equal(count(trade, 'liquidityHtml'), 1, 'liquidityHtml() on the legacy coin page');
+  assert.equal(count(tp, 'botHtml'), 1, 'botHtml() on the v2 token page — every copy past the first is inert, because $() always resolves to the first');
 });
 
 test('no id is rendered twice on the coin page', () => {
   // The general form of the bug above, so the next duplicate is caught whatever
-  // its name is.
-  const trade = read('js/dex/trade.js');
-  const ids = [...trade.matchAll(/id="(dex[A-Za-z0-9_]+)"/g)].map((m) => m[1]);
-  const dupes = ids.filter((v, i) => ids.indexOf(v) !== i);
-  assert.deepEqual([...new Set(dupes)], [],
-    'duplicate ids on one page: the second copy is unreachable and the first is ambiguous');
+  // its name is. Each page is checked on its own — trade.js and token-page.js
+  // never render at the same time (the router picks one per token).
+  for (const rel of ['js/dex/trade.js', 'js/dex/token-page.js']) {
+    const src = read(rel);
+    const ids = [...src.matchAll(/id="(dex[A-Za-z0-9_]+)"/g)].map((m) => m[1]);
+    const dupes = ids.filter((v, i) => ids.indexOf(v) !== i);
+    assert.deepEqual([...new Set(dupes)], [],
+      `duplicate ids in ${rel}: the second copy is unreachable and the first is ambiguous`);
+  }
 });
 
 // ── temporal dead zone ──────────────────────────────────────────────

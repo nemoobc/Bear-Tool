@@ -655,13 +655,14 @@ test('the ⋯ overflow menu is a real sheet — every row does the thing it says
   assert.match(java, /Gravity\.BOTTOM/, 'sheet menempel di bawah seperti OKX');
   assert.match(java, /root\.setBackgroundColor\(0x99000000\)/, 'scrim redup — dApp tetap kelihatan di belakang');
   assert.match(java, /root\.setOnClickListener\(v -> closeDappMenu\(\)\)/, 'tap di luar menutup');
-  // Four icon actions + three rows, each with its own labelled tap target so
+  // Four icon actions + four rows, each with its own labelled tap target so
   // the E2E driver can reach them without guessing coordinates.
   for (const [desc, what] of [
     ['dapp-menu-copy', 'Copy URL'], ['dapp-menu-fav', 'Favourite'],
     ['dapp-menu-refresh', 'Refresh'], ['dapp-menu-share', 'Share'],
     ['dapp-menu-desktop', 'Switch to desktop mode'],
     ['dapp-menu-history', 'Transaction history'],
+    ['dapp-menu-walletconnect', 'WalletConnect'],
     ['dapp-menu-clearcache', 'Clear cache'],
   ]) {
     assert.match(java, new RegExp('"' + desc + '"'), what + ' punya contentDescription');
@@ -769,7 +770,9 @@ test('BrowserClient overrides only real WebViewClient methods (no WebChromeClien
   const overrides = [...java.matchAll(/@Override\s+[^\n]*?(?:public|protected)\s+[^\n]*?\b(\w+)\s*\(/g)].map((m) => m[1]);
   // dispatchTouchEvent: a View method on the stack subclass (the activity
   // ping) — real override, unlike a WebChromeClient callback.
-  const allowed = new Set(['onPageStarted', 'onPageCommitVisible', 'onPageFinished', 'onReceivedError', 'handleOnDestroy', 'onCreate', 'onDestroy', 'onStart', 'onStop', 'dispatchTouchEvent']);
+  // shouldOverrideUrlLoading: a real WebViewClient method (the WebResourceRequest
+  // overload is API 24+; minSdk is 33) — intercepts wc: links inside a page.
+  const allowed = new Set(['onPageStarted', 'onPageCommitVisible', 'onPageFinished', 'onReceivedError', 'handleOnDestroy', 'onCreate', 'onDestroy', 'onStart', 'onStop', 'dispatchTouchEvent', 'shouldOverrideUrlLoading']);
   for (const name of overrides) {
     assert.ok(allowed.has(name), `@Override tak dikenal bisa gagal compile: ${name}`);
   }
@@ -1009,5 +1012,65 @@ test('the fixture proves consent-once and permissions with zero extra taps', () 
   const driverSrc = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8');
   assert.match(driverSrc, /'reconnect=0x', 'perms=eth_accounts', 'reqPerms=eth_accounts'/,
     'driver menuntut bukti consent-once dari #out fixture');
+});
+
+test('a wc: pairing request reaches the wallet from every native entry point', () => {
+  // "other wallet pas di klik gabisa connect" (report 2026-10-16): the pair
+  // sheet lives in the wallet webview, which the dApp overlay covers — a wc:
+  // QR inside the browser had no door to it at all.
+  assert.match(java, /walletCommand\("openWalletConnect", ""\)/,
+    'the ⋯ menu carries a WalletConnect row (clipboard read, no prefill)');
+  assert.match(java, /"dapp-menu-walletconnect"/,
+    'baris menu berlabel untuk driver + a11y');
+  assert.match(java, /if \(raw\.startsWith\("wc:"\)\)/,
+    'a wc: URI pasted into the address bar is a pairing request, not a page');
+  assert.match(java, /public boolean shouldOverrideUrlLoading\(WebView view, android\.webkit\.WebResourceRequest request\)/,
+    'a wc: link tapped inside a page is intercepted');
+  assert.match(java, /url\.startsWith\("wc:"\)[\s\S]{0,160}walletCommand\("openWalletConnect", url\)/,
+    'and handed to the wallet');
+  assert.match(code, /if \(cmd === 'openWalletConnect'\)/,
+    'the wallet-side handler exists');
+  assert.match(code, /openPairWalletConnect\(String\(ev\.url \|\| ''\)\)/,
+    'prefill kosong = sheet membaca clipboard sendiri');
+});
+
+test('closing the native browser repaints the DApps tabs entry underneath', () => {
+  // The DApps view was painted BEFORE the browser opened, so its "Browser · N"
+  // entry only appeared after a view switch ("diluar daaps ga ada fitur tabs",
+  // re-report 2026-10-16).
+  assert.match(java, /walletCommand\("browserClosed", ""\)/,
+    'doClose/doBack memberitahu wallet');
+  assert.equal((java.match(/walletCommand\("browserClosed", ""\)/g) || []).length, 2,
+    'kedua jalur keluar: tombol ✕ dan back tanpa history');
+  assert.match(code, /if \(cmd === 'browserClosed'\)/);
+  assert.match(code, /refreshView\('dapps'\)/,
+    'wallet merender ulang DApps view — entry tabs muncul tanpa pindah view');
+});
+
+test('an approve call says Approve on the sheet — and the send lands in Activity', () => {
+  // "ask tx approved ga ada" (report 2026-10-16): the sheet named the action
+  // only in a subhead, and an approved dApp send showed up in NO wallet list.
+  assert.match(code, /tokenCall && tokenCall\.kind === 'approve' \? t\('sign\.approveTitle'\)/,
+    'judul sheet menyebut Approve untuk call approve');
+  assert.match(code, /tokenCall && tokenCall\.kind === 'approve' \? t\('sign\.approve'\)/,
+    'tombolnya juga');
+  const exec = readFileSync(path.join(here, '..', 'js', 'dapp-exec.js'), 'utf8');
+  assert.match(exec, /kind: sel === '0x095ea7b3' \? 'approve' : 'transfer'/,
+    'decodeTokenCall mengenali approve vs transfer');
+  assert.match(code, /addActivity\(\{ hash: sent\.hash, type: 'dapp', status: 'pending'/,
+    'tx dApp yang disetujui tercatat di Activity');
+  const wc = readFileSync(path.join(here, '..', 'js', 'walletconnect.js'), 'utf8');
+  assert.match(wc, /sign\.approveTitle/, 'jalur WalletConnect memakai penamaan yang sama');
+});
+
+test('a confirm sheet taller than the screen scrolls its rows instead of clipping', () => {
+  assert.match(java, /final android\.widget\.ScrollView rowsScroll = new android\.widget\.ScrollView\(getContext\(\)\)/,
+    'baris sheet dibungkus ScrollView');
+  assert.match(java, /rowsScroll\.addView\(confirmRowsBox/,
+    'rows box masuk ke scroll, bukan langsung ke sheet');
+  assert.match(java, /int maxH = \(int\) \(root\.getHeight\(\) \* 0\.92f\)/,
+    'cap 92% layar setelah layout pertama');
+  assert.match(java, /lp\.height = Math\.max\(\(int\) \(120 \* density\), maxH - chrome\)/,
+    'tinggi rows dipotong ke sisa ruang — tombol tidak pernah keluar layar');
 });
 

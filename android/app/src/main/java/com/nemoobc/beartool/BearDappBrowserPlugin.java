@@ -381,7 +381,15 @@ public class BearDappBrowserPlugin extends Plugin {
                 addSheetRow(confirmRowsBox, o.optString("k", ""), o.optString("v", ""), density);
             }
         }
-        sheet.addView(confirmRowsBox, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // A long sheet (send tx: money line + eight rows + findings) can grow
+        // taller than the screen and clip its own top on a small phone. The
+        // rows ride a ScrollView whose height is capped after the first layout
+        // (92% of the screen): past that the rows scroll, and the title and
+        // buttons never leave the screen (report 2026-10-16, "ask tx").
+        final android.widget.ScrollView rowsScroll = new android.widget.ScrollView(getContext());
+        rowsScroll.setFillViewport(false);
+        rowsScroll.addView(confirmRowsBox, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        sheet.addView(rowsScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout btns = new LinearLayout(getContext());
         // VERTICAL, full width: the two actions used to sit side by side at
@@ -431,6 +439,20 @@ public class BearDappBrowserPlugin extends Plugin {
             parent.addView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             root.bringToFront();
             setBackgroundA11yInert(true);   // modal: the page behind is inert now
+            // Cap the sheet once it has been measured: taller than 92% of the
+            // screen and the rows area starts scrolling instead of pushing the
+            // sheet's top (and its title) off the screen.
+            root.post(() -> {
+                try {
+                    int maxH = (int) (root.getHeight() * 0.92f);
+                    if (maxH > 0 && sheet.getHeight() > maxH && rowsScroll.getHeight() > 0) {
+                        int chrome = sheet.getHeight() - rowsScroll.getHeight();
+                        ViewGroup.LayoutParams lp = rowsScroll.getLayoutParams();
+                        lp.height = Math.max((int) (120 * density), maxH - chrome);
+                        rowsScroll.setLayoutParams(lp);
+                    }
+                } catch (Exception ignored) { /* a sheet that cannot cap still fits most screens */ }
+            });
             // Diagnostic, not behaviour: on some emulators `uiautomator dump`
             // dies while walking this app's WebView tree (platform bug —
             // AccessibilityNodeInfoDumper.childNafCheck dereferences a null
@@ -1015,6 +1037,13 @@ public class BearDappBrowserPlugin extends Plugin {
             v -> { openExternally(url); closeDappMenu(); }));
         sheet.addView(menuRow(density, R.drawable.ic_dbr_history, "Transaction history", "dapp-menu-history",
             v -> { walletCommand("openActivity", url); closeDappMenu(); }));
+        // WalletConnect: the pair sheet lives in the WALLET's webview, which this
+        // overlay covers — from inside a dApp that shows a wc: QR there was no
+        // way to reach it at all ("other wallet pas di klik gabisa connect",
+        // report 2026-10-16). Empty URL on purpose: the sheet reads the wc: URI
+        // from the clipboard itself.
+        sheet.addView(menuRow(density, R.drawable.ic_dbr_globe, "WalletConnect", "dapp-menu-walletconnect",
+            v -> { walletCommand("openWalletConnect", ""); closeDappMenu(); }));
         sheet.addView(menuRow(density, R.drawable.ic_dbr_trash, "Clear cache", "dapp-menu-clearcache",
             v -> { clearDappCache(); closeDappMenu(); }));
 
@@ -1334,6 +1363,21 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         }
 
         @Override
+        public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
+            // A wc: link inside a dApp is a pairing request the WALLET owns.
+            // Letting the WebView try to load it dies with ERR_UNKNOWN_URL_SCHEME
+            // and the user is stuck with a dead tap ("other wallet pas di klik
+            // gabisa connect", report 2026-10-16). Hand it to the pair sheet;
+            // everything else keeps default WebView handling.
+            String url = request == null || request.getUrl() == null ? "" : request.getUrl().toString();
+            if (url.startsWith("wc:")) {
+                walletCommand("openWalletConnect", url);
+                return true;
+            }
+            return false;
+        }
+
+        @Override
         public void onPageCommitVisible(WebView view, String url) {
             // THE RACE-CLOSER (run 38047794274): onPageStarted is
             // PRE-commit — its evaluateJavascript can execute against the
@@ -1458,6 +1502,11 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
             // The user said "leave". A wallet sheet closing later must NOT bring
             // this back (the pages stay in the tab session by design).
             userClosed = true;
+            // The DApps view underneath was painted BEFORE these tabs existed,
+            // so its "Browser · N" entry stayed missing until a view switch
+            // ("diluar daaps ga ada fitur tabs", re-report 2026-10-16). Tell
+            // the wallet to repaint it — only when there is something to show.
+            if (!tabs.isEmpty()) walletCommand("browserClosed", "");
         }
     }
 
@@ -1480,6 +1529,10 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         // Back with nothing to go back to IS leaving the browser — same rule as
         // the close button: a later sheet must not resurrect it.
         userClosed = true;
+        // Same repaint the ✕ fires: the DApps view's "Browser · N" entry was
+        // painted before these tabs existed ("diluar daaps ga ada fitur tabs",
+        // re-report 2026-10-16).
+        if (!tabs.isEmpty()) walletCommand("browserClosed", "");
         return false;
     }
 
@@ -1488,6 +1541,14 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         if (addressField == null || dappView == null) return;
         String raw = addressField.getText().toString().trim();
         if (raw.isEmpty()) return;
+        // A wc: URI is a pairing request, not a page: hand it to the wallet's
+        // pair sheet instead of prepending https:// to it (report 2026-10-16 —
+        // there was no way to pair from inside the browser at all).
+        if (raw.startsWith("wc:")) {
+            addressField.setText("");
+            walletCommand("openWalletConnect", raw);
+            return;
+        }
         String url = raw;
         if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
         if (!url.startsWith("http://") && !url.startsWith("https://")) return;

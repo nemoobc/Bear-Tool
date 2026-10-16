@@ -20,6 +20,7 @@ import { deleteCoin } from './list.js';
 import { forgetLaunchedToken } from './tokens.js';
 import { isWatched, toggleWatch, WATCH_MAX } from './watch.js';
 import { mountTradeSheet } from './trade-sheet.js';
+import { botHtml, bindBot } from './bot.js';
 import { scanHolders, holderRows, topShareBps, pool24h, chunkedGetLogs, ZERO_ADDR } from './holders.js';
 
 const shortOf = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
@@ -94,6 +95,7 @@ export function tokenPageHtml() {
       <button type="button" class="btn btn-secondary btn-block mt-8" id="dexTpHoldersMore" hidden></button>
     </div>
     <div class="card mb-8" id="dexTpTrade"></div>
+    ${botHtml()}
     <div class="card mb-8">
       <div class="field-label">${escapeHtml(t('dex.tp.chart'))}</div>
       <div class="dex-tabstrip mt-8" id="dexTpTfs" role="group" aria-label="${escapeHtml(t('dex.tp.tfGroup'))}">${CHART_TFS.map((tf) => `<button type="button" class="dex-tab" data-tf="${tf.sec}" aria-pressed="${tf.sec === DEFAULT_TF}">${tf.label}</button>`).join('')}</div>
@@ -283,6 +285,11 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
   const qSym = qMeta ? qMeta.symbol : '…';
   const qd = qMeta ? qMeta.decimals : 18;
   const td = ti.ok ? ti.decimals : 18;
+
+  // The market maker (DEX-V2 M5c): it trades THIS pool — swapQuote + swapTx,
+  // the same engine the sheet above runs. The runner is a module-level
+  // singleton, so leaving the page does not stop it.
+  bindBot(host, { address: token, pair, quote: ps.quote, qSym, qd, td, symbol: sym });
   const priceEl = el('dexTpPrice');
   const resEl = el('dexTpReserves');
   const myEl = el('dexTpMy');

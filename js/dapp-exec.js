@@ -462,7 +462,7 @@ export function decodeTokenCall(data) {
   const sel = d.slice(0, 10).toLowerCase();
   if (sel !== '0xa9059cbb' && sel !== '0x095ea7b3') return null;
   try {
-    return { to: '0x' + d.slice(34, 74).toLowerCase(), amount: BigInt('0x' + d.slice(74, 138)) };
+    return { to: '0x' + d.slice(34, 74).toLowerCase(), amount: BigInt('0x' + d.slice(74, 138)), kind: sel === '0x095ea7b3' ? 'approve' : 'transfer' };
   } catch {
     return null;
   }
