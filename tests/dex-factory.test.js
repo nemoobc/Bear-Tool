@@ -46,7 +46,7 @@ test('storage that throws reads as empty and refuses the write, without crashing
 test('the ABI carries everything factory.js and the launch UI will call', () => {
   const joined = BEAR_FACTORY_ABI.join('\n');
   assert.match(joined, /function pairFor\(address\) view returns \(address\)/);
-  assert.match(joined, /function launch\(\(string,string,string,string\), uint256, address, uint256, uint256, uint256\) returns \(address, address\)/);
+  assert.match(joined, /function launch\(\(string,string,string,string,string,string,string\), uint256, address, uint256, uint256, uint256, uint256, uint256\) returns \(address, address\)/);
   assert.match(joined, /function createPool\(address, address, uint256, uint256\) returns \(address\)/);
   assert.match(joined, /event Launched\(/);
   assert.match(joined, /event PoolCreated\(/);

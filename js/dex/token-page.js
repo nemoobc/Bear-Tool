@@ -9,7 +9,7 @@
 // The router keeps last say: only tokens the factory actually knows get this
 // page. Anything else falls back to the legacy coin view — never a half-made
 // v2 page over a token that has no pool.
-import { t, escapeHtml, fmtTok, fmtPrice, $, get, provider, ethersLib, isAddr, dexChainOk, quoteBy, confirmTx, toast, openEdu } from './core.js';
+import { t, escapeHtml, fmtTok, fmtPrice, $, get, provider, ethersLib, isAddr, dexChainOk, quoteBy, confirmTx, toast, openEdu, pctOfBps } from './core.js';
 import { poolState, tokenInfo, lpPosition } from './pool-data.js';
 import { quotePerToken } from './pool-list.js';
 import { BEAR_TOKEN_ABI, BEAR_FACTORY_ABI, BEAR_PAIR_ABI } from './bear-source.js';
@@ -56,6 +56,7 @@ export function tokenPageHtml() {
         <div class="dex-create-fields">
           <div class="field-label" id="dexTpName"></div>
           <div class="small" id="dexTpDesc"></div>
+          <div class="dex-socials small mt-8" id="dexTpSocials"></div>
         </div>
       </div>
     </div>
@@ -103,7 +104,35 @@ export function tokenPageHtml() {
 // M8 rule. The static two are the shipped contracts' own shape: 0.3% stays in
 // the pool (pool-math.js SWAP_FEE_BPS, pinned by the anvil e2e "k grows"), and
 // no owner/pause/fee-switch exists in the source (bear-source.js).
-export function securityChips({ hasLaunch = false, untilSec = 0, ageSec = null, nowSec = 0 } = {}) {
+// R9 — socials, rendered honestly: a link only when the text actually looks
+// like a URL (http(s), or a bare domain); anything else is plain text — never
+// a clickable lie, never a silent rewrite of what the creator stored.
+const SOCIAL_SAFE_HREF = /^https?:\/\/[^\s]+$/i;
+const SOCIAL_BARE_DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+(\/[^\s]*)?$/i;
+
+export function socialHref(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (SOCIAL_SAFE_HREF.test(s)) return s;
+  if (SOCIAL_BARE_DOMAIN.test(s)) return `https://${s}`;
+  return '';
+}
+
+function paintSocials(box, { twitter = '', telegram = '', website = '' } = {}) {
+  if (!box) return;
+  const bits = [];
+  for (const raw of [twitter, telegram, website]) {
+    const v = String(raw || '').trim();
+    if (!v) continue;
+    const href = socialHref(v);
+    bits.push(href
+      ? `<a class="dex-social" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(t('dex.tp.openSocial', { h: v }))}">${escapeHtml(v)}</a>`
+      : `<span class="dex-social-plain">${escapeHtml(v)}</span>`);
+  }
+  box.innerHTML = bits.join('');
+}
+
+export function securityChips({ hasLaunch = false, untilSec = 0, ageSec = null, nowSec = 0, feeBps = 0 } = {}) {
   const chips = [];
   if (hasLaunch) {
     if (untilSec > 0) {
@@ -121,7 +150,9 @@ export function securityChips({ hasLaunch = false, untilSec = 0, ageSec = null, 
       else chips.push({ key: 'dex.sec.ageDay', params: { n: String(Math.floor(ageSec / 86400)) }, tone: 'dex-badge-safe' });
     }
   }
-  chips.push({ key: 'dex.sec.fee', tone: 'dex-badge-safe' });
+  chips.push(feeBps > 0
+    ? { key: 'dex.sec.feeCreator', params: { p: pctOfBps(feeBps) }, tone: 'dex-badge-safe' }
+    : { key: 'dex.sec.fee', tone: 'dex-badge-safe' });
   chips.push({ key: 'dex.sec.noOwner', tone: 'dex-badge-safe' });
   return chips;
 }
@@ -192,10 +223,13 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
 
   const me = get('address');
   const tc = new E.Contract(token, BEAR_TOKEN_ABI, provider());
-  const [ti, face, desc, ps, lp, supplyRaw] = await Promise.all([
+  const [ti, face, desc, tw, tg, wb, ps, lp, supplyRaw] = await Promise.all([
     tokenInfo(token, me),
     tc.image().catch(() => ''),
     tc.description().catch(() => ''),
+    tc.twitter().catch(() => ''),
+    tc.telegram().catch(() => ''),
+    tc.website().catch(() => ''),
     poolState(pair),
     lpPosition(pair, me),
     tc.totalSupply().catch(() => null),
@@ -210,6 +244,7 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
   const imgEmpty = el('dexTpImgEmpty');
   if (nameEl) nameEl.textContent = `${name} (${sym}) · ${shortOf(token)}`;
   if (descEl) descEl.textContent = String(desc || '');
+  paintSocials(el('dexTpSocials'), { twitter: tw, telegram: tg, website: wb });
   if (img && /^data:image\//.test(String(face || ''))) {
     img.src = String(face);
     img.hidden = false;
@@ -345,7 +380,14 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
     let hasLaunch = false;
     let untilSec = 0;
     let ageSec = null;
+    let feeBps = 0;
     if (isAddr(f) && p) {
+      // The creator's slice, straight from the pair. Old pairs (pre-R6) have
+      // no such getter — the catch leaves 0, and 0 is what they truly charge.
+      try {
+        const pcFee = new E.Contract(pair, BEAR_PAIR_ABI, p);
+        feeBps = Number(await pcFee.creatorFeeBps()) || 0;
+      } catch { feeBps = 0; }
       try {
         const latest = await p.getBlockNumber();
         const sigs = [E.id('Launched(address,address,address,address)'), E.id('PoolCreated(address,address,address,address)')];
@@ -371,7 +413,7 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
       } catch { /* no launch read = no lock/age claim */ }
     }
     if (!gone() && secEl) {
-      secEl.innerHTML = securityChips({ hasLaunch, untilSec, ageSec, nowSec: Math.floor(Date.now() / 1000) })
+      secEl.innerHTML = securityChips({ hasLaunch, untilSec, ageSec, nowSec: Math.floor(Date.now() / 1000), feeBps })
         .map((c) => `<span class="dex-badge ${c.tone}">${escapeHtml(t(c.key, c.params))}</span>`)
         .join(' ')
         + ` <button type="button" class="dex-edu" data-edu-lock aria-label="${escapeHtml(t('dex.edu.lock.title'))}">?</button>`;

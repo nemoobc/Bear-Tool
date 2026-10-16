@@ -7,11 +7,12 @@
 // Positions that are empty are not drawn; a position that cannot be read says
 // so (same honest-states rule as discovery). Nothing here is computed or
 // remembered locally — this tab is a mirror, not a ledger.
-import { t, escapeHtml, fmtTok, fmtPrice, $, get, provider, ethersLib, dexChainOk, quoteBy } from './core.js';
+import { t, escapeHtml, fmtTok, fmtPrice, $, get, provider, ethersLib, dexChainOk, quoteBy, isAddr, toast, withTxButton, sendDexTx, needSigner, pctOfBps } from './core.js';
 import { discoverPools, fillMeta } from './pools.js';
 import { lpPosition, tokenInfo, poolState } from './pool-data.js';
 import { quotePerToken } from './pool-list.js';
 import { chunkedGetLogs } from './holders.js';
+import { BEAR_PAIR_ABI } from './bear-source.js';
 
 const LIST_LIMIT = 24;
 
@@ -84,6 +85,7 @@ export function portfolioHtml() {
         <div class="dex-launchbar-sub">${escapeHtml(t('dex.pf.hint'))}</div>
       </div>
     </div>
+    <div id="dexPfFees" class="mt-8"></div>
     <div class="small" id="dexPfLpHdr"></div>
     <div id="dexPfLp" class="dex-grid"></div>
     <div class="small mt-8" id="dexPfTokenHdr"></div>
@@ -106,6 +108,9 @@ export async function bindPortfolio(host, { onManageLp, onSwap } = {}) {
   if (!me) { say(t('dex.needWallet')); return; }
 
   say(t('dex.pools.loading'));
+  // The creator's own panel reads its own pool set (the launches of this
+  // wallet); it patches itself in when it lands, in parallel with the lists.
+  paintMyFees($('#dexPfFees', host), me).catch(() => {});
   const out = await discoverPools({ scope: 'all', limit: LIST_LIMIT });
   if (!out.ok) {
     say(out.reason === 'no factory' ? t('dex.swap.noFactory') : t('dex.pools.unreadable'));
@@ -260,4 +265,182 @@ function pnlText(r, st) {
   const money = `${neg ? '-' : '+'}${fmtTok(abs, qDec, 4)} ${qSym}`;
   const pct = `${neg ? '-' : '+'}${(Number(absBps) / 100).toFixed(2)}%`;
   return { txt: `${avg} · ${t('dex.pf.pnl', { v: money, p: pct })}`, cls: neg ? 'dex-pf-down' : 'dex-pf-up' };
+}
+
+// ── "My fees": the creator's slice, pool by pool (R6) ──────────
+// Only pools this wallet launched that actually carry a slice get a card —
+// the number is read from the pair itself (totalFeesCreator), never a
+// remembered ledger. Claiming is a pull payment per pool; "Claim all" walks
+// them one by one, because every claim is its own transaction.
+const FEES_CLAIM_TOPIC = 'FeesClaimed(address,uint256)';
+const FEES_WINDOW = 54_000;
+
+/** The pools worth a card: read OK, actually mine, slice enabled. Pure. */
+export function mineFeeRows(read) {
+  return (read || []).filter((x) => x && x.ok && x.mine && x.bps > 0);
+}
+
+/** Sum of decoded FeesClaimed amounts; a log that will not decode is skipped,
+ *  never guessed. Pure — tests feed it logs directly. */
+export function sumClaimed(E, logs) {
+  let sum = 0n;
+  for (const log of logs || []) {
+    try { sum += BigInt(E.AbiCoder.defaultAbiCoder().decode(['uint256'], log.data)[0]); } catch { /* not ours to sum */ }
+  }
+  return sum;
+}
+
+async function readMyFees(rows) {
+  const E = ethersLib();
+  const p = provider();
+  const me = String(get('address') || '').toLowerCase();
+  return Promise.all(rows.map(async (r) => {
+    try {
+      const pc = new E.Contract(r.pair, BEAR_PAIR_ABI, p);
+      const [bpsRaw, creatorRaw, accruedRaw] = await Promise.all([
+        pc.creatorFeeBps(), pc.creator(), pc.totalFeesCreator(),
+      ]);
+      return {
+        r,
+        ok: true,
+        bps: Number(bpsRaw) || 0,
+        mine: String(creatorRaw).toLowerCase() === me,
+        accrued: BigInt(accruedRaw),
+      };
+    } catch { return { r, ok: false }; }
+  }));
+}
+
+async function readClaimed(pair, me) {
+  const E = ethersLib();
+  const p = provider();
+  try {
+    const tip = await p.getBlockNumber();
+    const read = await chunkedGetLogs({
+      getLogs: (lo, hi) => p.getLogs({
+        address: pair, fromBlock: lo, toBlock: hi,
+        topics: [E.id(FEES_CLAIM_TOPIC), E.zeroPadValue(String(me).toLowerCase(), 32)],
+      }),
+      fromBlock: Math.max(0, tip - FEES_WINDOW),
+      toBlock: tip,
+      lenient: true,
+    });
+    return { sum: sumClaimed(E, read.logs), partial: !!read.partial, n: Math.min(tip + 1, FEES_WINDOW) };
+  } catch {
+    return null; // unreadable history → the card simply omits the line
+  }
+}
+
+async function paintMyFees(box, me) {
+  if (!box || !isAddr(String(me || ''))) return;
+  const out = await discoverPools({ scope: 'mine', creator: me, limit: LIST_LIMIT });
+  if (!box.isConnected) return;
+  if (!out.ok && !(out.pools && out.pools.length)) {
+    box.innerHTML = `<div class="small">${escapeHtml(out.reason === 'no factory' ? t('dex.swap.noFactory') : t('dex.pf.fees.unread'))}</div>`;
+    return;
+  }
+  const rows = await fillMeta((out.pools || []).slice());
+  const read = await readMyFees(rows);
+  if (!box.isConnected) return;
+  const mine = mineFeeRows(read);
+  if (!mine.length) { box.innerHTML = ''; return; }
+
+  const qMetaOf = (addr) => quoteBy(addr) || { symbol: '…', decimals: 18 };
+  const card = (x) => {
+    const q = qMetaOf(x.r.quote);
+    const sym = x.r.symbol || shortOf(String(x.r.address));
+    return `
+      <div class="dex-fee-card mt-8" data-fee-card="${escapeHtml(String(x.r.pair).toLowerCase())}">
+        <div class="small"><strong>${escapeHtml(sym)}</strong> · ${escapeHtml(t('dex.pf.fees.rate', { p: pctOfBps(x.bps) }))}</div>
+        <div class="small mt-8">${escapeHtml(t('dex.pf.fees.accrued'))}: <strong data-fee-accrued>${escapeHtml(fmtTok(x.accrued, q.decimals, 6))} ${escapeHtml(q.symbol)}</strong></div>
+        <div class="small" data-fee-claimed-line></div>
+        <div class="small" data-fee-card-status role="status"></div>
+        <button type="button" class="btn btn-secondary mt-8" data-fee-claim="${escapeHtml(String(x.r.pair).toLowerCase())}"${x.accrued <= 0n ? ' disabled' : ''}>${escapeHtml(t('dex.pf.fees.claim'))}</button>
+      </div>`;
+  };
+
+  box.innerHTML = `
+    <div class="card">
+      <div class="dex-launchbar-txt">
+        <div class="dex-launchbar-title">${escapeHtml(t('dex.pf.fees.title'))}</div>
+        <div class="small">${escapeHtml(t('dex.pf.fees.sub'))}</div>
+      </div>
+      <div class="small mt-8" data-fees-status role="status"></div>
+      <button type="button" class="btn btn-primary btn-block mt-8" data-fees-all>${escapeHtml(t('dex.pf.fees.claimAll'))}</button>
+      <div>${mine.map(card).join('')}</div>
+    </div>`;
+
+  const statusEl = box.querySelector('[data-fees-status]');
+  const say = (m) => { if (statusEl) statusEl.textContent = m || ''; };
+
+  // History per pool — best-effort, and honest about the window it read.
+  for (const x of mine) {
+    readClaimed(x.r.pair, me).then((h) => {
+      if (!h || !box.isConnected) return;
+      const line = box.querySelector(`[data-fee-card="${String(x.r.pair).toLowerCase()}"] [data-fee-claimed-line]`);
+      if (!line) return;
+      const q = qMetaOf(x.r.quote);
+      line.textContent = `${t('dex.pf.fees.claimedSoFar')}: ${fmtTok(h.sum, q.decimals, 6)} ${q.symbol} · ${t('dex.pf.fees.window', { n: String(h.n) })}`;
+    }).catch(() => {});
+  }
+
+  const patch = (x) => {
+    const cardEl = box.querySelector(`[data-fee-card="${String(x.r.pair).toLowerCase()}"]`);
+    if (!cardEl) return;
+    const q = qMetaOf(x.r.quote);
+    const accEl = cardEl.querySelector('[data-fee-accrued]');
+    if (accEl) accEl.textContent = `${fmtTok(x.accrued, q.decimals, 6)} ${q.symbol}`;
+    const btn = cardEl.querySelector('[data-fee-claim]');
+    if (btn) btn.disabled = x.accrued <= 0n;
+  };
+
+  const claimOne = async (x) => {
+    const btn = box.querySelector(`[data-fee-card="${String(x.r.pair).toLowerCase()}"] [data-fee-claim]`);
+    if (!btn || btn.disabled) return { ok: true, skipped: true };
+    const signer = needSigner();
+    if (!signer) return { ok: false };
+    const E = ethersLib();
+    const before = x.accrued;
+    const rc = await withTxButton(btn, t('dex.pf.fees.claiming'), () => sendDexTx(
+      () => new E.Contract(x.r.pair, BEAR_PAIR_ABI, signer).claimFees(),
+      t('dex.pf.fees.claim'),
+    ));
+    if (!rc) {
+      const st = box.querySelector(`[data-fee-card="${String(x.r.pair).toLowerCase()}"] [data-fee-card-status]`);
+      if (st) st.textContent = t('dex.pf.fees.fail');
+      return { ok: false };
+    }
+    // Re-read the pair — the chain, not our arithmetic, says what remains.
+    try { x.accrued = BigInt(await new E.Contract(x.r.pair, BEAR_PAIR_ABI, provider()).totalFeesCreator()); }
+    catch { x.accrued = 0n; }
+    patch(x);
+    const q = qMetaOf(x.r.quote);
+    toast(t('dex.pf.fees.claimed', { v: fmtTok(before, q.decimals, 6), q: q.symbol }));
+    return { ok: true, amount: before };
+  };
+
+  box.querySelectorAll('[data-fee-claim]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pair = String(btn.dataset.feeClaim || '').toLowerCase();
+      const x = mine.find((y) => String(y.r.pair).toLowerCase() === pair);
+      if (x) claimOne(x).catch(() => {});
+    });
+  });
+
+  box.querySelector('[data-fees-all]')?.addEventListener('click', (e) => {
+    const allBtn = e.currentTarget;
+    const todo = mine.filter((x) => x.accrued > 0n);
+    if (!todo.length) return;
+    withTxButton(allBtn, t('dex.pf.fees.claiming'), async () => {
+      for (let i = 0; i < todo.length; i++) {
+        say(t('dex.pf.fees.claiming'));
+        const r = await claimOne(todo[i]);
+        if (!r.ok && !r.skipped) {
+          say(t('dex.pf.fees.stopped', { i: String(i + 1), n: String(todo.length) }));
+          return;
+        }
+      }
+      say(t('dex.pf.fees.claimAllDone', { n: String(todo.length) }));
+    });
+  });
 }

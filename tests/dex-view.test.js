@@ -398,7 +398,7 @@ test('the launch waits for the transaction ethers actually gives it', () => {
   // token address comes back out of the Launched event on that receipt —
   // parsed, never assumed. The pre-v6 deploy property must never return.
   const launch = read('../js/dex/launch.js');
-  assert.match(launch, /c\.launch\(\[name, symbol, image, description\]/,
+  assert.match(launch, /c\.launch\(\s*\[name, symbol, image, description, twitter, telegram, website\]/,
     'the one launch call must carry the whole LaunchMeta tuple');
   assert.match(launch, /sendDexTx\(/, 'the launch tx must ride the shared spine');
   assert.match(launch, /parseLog\(log\)/, 'the token address must be parsed from the receipt logs');

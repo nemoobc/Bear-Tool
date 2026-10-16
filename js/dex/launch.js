@@ -13,7 +13,7 @@
 // deployer, so nothing is compiled in the browser, and the token address is
 // read back out of the Launched event — never assumed.
 import {
-  t, $, toast, escapeHtml, fmtTok, withTxButton,
+  t, $, toast, escapeHtml, fmtTok, withTxButton, openEdu,
   QUOTE_PRESETS, quoteBy, provider, ethersLib, sendDexTx, needSigner, isAddr, dexChainOk,
 } from './core.js';
 import { parseAmount, ensureAllowanceTx } from './swap.js';
@@ -78,6 +78,16 @@ export function launchHtml() {
       </div>
 
       <div class="dex-create-fields mt-8">
+        <label class="field-label" for="dexCreateTwitter">${escapeHtml(t('dex.create.twitter'))}</label>
+        <input id="dexCreateTwitter" class="input" maxlength="80" placeholder="x.com/…">
+        <label class="field-label mt-8" for="dexCreateTelegram">${escapeHtml(t('dex.create.telegram'))}</label>
+        <input id="dexCreateTelegram" class="input" maxlength="80" placeholder="t.me/…">
+        <label class="field-label mt-8" for="dexCreateWebsite">${escapeHtml(t('dex.create.website'))}</label>
+        <input id="dexCreateWebsite" class="input" maxlength="80" placeholder="example.com">
+        <div class="small mt-8">${escapeHtml(t('dex.create.socialsWhy'))}</div>
+      </div>
+
+      <div class="dex-create-fields mt-8">
         <label class="field-label" for="dexCreateQuote">${escapeHtml(t('dex.create.quote'))}</label>
         <select id="dexCreateQuote" class="input" aria-describedby="dexCreateQuoteWhy">
           ${QUOTE_PRESETS.map((q, i) => `<option value="${escapeHtml(q.address)}"${i === 0 ? ' selected' : ''}>${escapeHtml(q.symbol)} — ${escapeHtml(q.name)}</option>`).join('')}
@@ -94,6 +104,20 @@ export function launchHtml() {
         <input id="dexLaunchQuoteIn" class="input" inputmode="decimal" autocomplete="off" placeholder="0.5">
         <label class="field-label mt-8" for="dexLaunchLock">${escapeHtml(t('dex.launch.lock'))}</label>
         <select id="dexLaunchLock" class="input">${lockOpts}</select>
+        <label class="field-label mt-8" for="dexLaunchFee">${escapeHtml(t('dex.launch.feeLabel'))}</label>
+        <select id="dexLaunchFee" class="input" aria-describedby="dexLaunchFeeWhy">
+          <option value="0">${escapeHtml(t('dex.launch.feeOff'))}</option>
+          <option value="10" selected>${escapeHtml(t('dex.launch.feeThird'))}</option>
+          <option value="15">${escapeHtml(t('dex.launch.feeHalf'))}</option>
+        </select>
+        <div class="small mt-8" id="dexLaunchFeeWhy">${escapeHtml(t('dex.launch.feeWhy'))}</div>
+        <label class="field-label mt-8" for="dexLaunchDevBuy" id="dexLaunchDevBuyLabel">${escapeHtml(t('dex.launch.devBuy', { q: quoteSymFor(QUOTE_PRESETS[0].address) }))}</label>
+        <input id="dexLaunchDevBuy" class="input" inputmode="decimal" autocomplete="off" placeholder="0">
+        <div class="small mt-8">${escapeHtml(t('dex.launch.devBuyWhy'))}</div>
+        <div class="dex-ts-inforow small mt-8">
+          <div>${escapeHtml(t('dex.launch.antiSniper'))}</div>
+          <button type="button" class="dex-edu" id="dexLaunchEdu" aria-label="${escapeHtml(t('dex.edu.sniper.title'))}">?</button>
+        </div>
         <div class="small mt-8" id="dexLaunchPreview"></div>
       </div>
 
@@ -112,18 +136,26 @@ export function launchHtml() {
  */
 export async function launchTx({
   name, symbol, image = '', description = '',
-  supply, quote, tokensForPool, quoteForPool, lockDuration = 0, signer,
+  twitter = '', telegram = '', website = '',
+  supply, quote, tokensForPool, quoteForPool, lockDuration = 0,
+  creatorFeeBps = 0, devBuyQuote = 0n, signer,
 }) {
   const s = signer || needSigner();
   if (!s) return { ok: false, token: '' };
   const E = ethersLib();
   const f = factoryAddress();
   if (!E || !provider() || !isAddr(f)) return { ok: false, token: '' };
-  const appr = await ensureAllowanceTx({ token: quote, spender: f, amount: quoteForPool, owner: s.address, signer: s });
+  // The approve covers the seed plus the optional dev buy — both are pulled
+  // by the factory inside the one launch transaction.
+  const appr = await ensureAllowanceTx({ token: quote, spender: f, amount: quoteForPool + BigInt(devBuyQuote || 0), owner: s.address, signer: s });
   if (!appr.ok) return { ok: false, token: '' };
   const c = new E.Contract(f, BEAR_FACTORY_ABI, s);
   const rc = await sendDexTx(
-    () => c.launch([name, symbol, image, description], supply, quote, tokensForPool, quoteForPool, lockDuration),
+    () => c.launch(
+      [name, symbol, image, description, twitter, telegram, website],
+      supply, quote, tokensForPool, quoteForPool, lockDuration,
+      creatorFeeBps, devBuyQuote || 0,
+    ),
     t('dex.create.launch'),
   );
   if (!rc) return { ok: false, token: '' };
@@ -220,9 +252,16 @@ export function bindLaunch(host, onLaunched) {
   const quoteInEl = $('#dexLaunchQuoteIn', host);
   const lockEl = $('#dexLaunchLock', host);
   const prevEl = $('#dexLaunchPreview', host);
+  const feeEl = $('#dexLaunchFee', host);
+  const devBuyEl = $('#dexLaunchDevBuy', host);
+  const devBuyLabelEl = $('#dexLaunchDevBuyLabel', host);
+  const eduBtn = $('#dexLaunchEdu', host);
+  eduBtn?.addEventListener('click', () => openEdu('sniper'));
 
   const paintQuoteLabel = () => {
-    quoteLabelEl.textContent = t('dex.launch.poolQuote', { sym: quoteSymFor(quoteEl.value) });
+    const sym = quoteSymFor(quoteEl.value);
+    quoteLabelEl.textContent = t('dex.launch.poolQuote', { sym });
+    if (devBuyLabelEl) devBuyLabelEl.textContent = t('dex.launch.devBuy', { q: sym });
   };
 
   // A live read of the launch maths: the opening price the pool will show,
@@ -235,15 +274,19 @@ export function bindLaunch(host, onLaunched) {
     const tk = parseAmount(tokensEl.value, 18);
     const q = parseAmount(quoteInEl.value, dec);
     if (!s.ok || !tk.ok || !q.ok || tk.value > s.value) { prevEl.textContent = ''; return; }
+    const dev = devBuyEl && devBuyEl.value.trim() ? parseAmount(devBuyEl.value, dec) : null;
+    const devBit = dev && dev.ok && dev.value > 0n
+      ? ` · ${t('dex.launch.previewDev', { v: fmtTok(dev.value, dec, 6), q: quoteSymFor(quoteEl.value) })}`
+      : '';
     prevEl.textContent = t('dex.launch.preview', {
       price: fmtTok(quotePerToken(q.value, tk.value, 18), dec, 6),
       q: quoteSymFor(quoteEl.value),
       keep: fmtTok(s.value - tk.value, 18, 0),
-    });
+    }) + devBit;
   };
 
   quoteEl.addEventListener('change', () => { paintQuoteLabel(); refreshPreview(); });
-  for (const el of [supplyEl, tokensEl, quoteInEl]) el.addEventListener('input', refreshPreview);
+  for (const el of [supplyEl, tokensEl, quoteInEl, devBuyEl].filter(Boolean)) el.addEventListener('input', refreshPreview);
   paintQuoteLabel();
   refreshPreview();
 
@@ -252,6 +295,11 @@ export function bindLaunch(host, onLaunched) {
     const name = $('#dexCreateName', host).value.trim();
     const symbol = $('#dexCreateSymbol', host).value.trim();
     const description = $('#dexCreateDesc', host).value.trim();
+    const twitter = ($('#dexCreateTwitter', host)?.value || '').trim();
+    const telegram = ($('#dexCreateTelegram', host)?.value || '').trim();
+    const website = ($('#dexCreateWebsite', host)?.value || '').trim();
+    const creatorFeeBps = feeEl ? (Number(feeEl.value) || 0) : 0;
+    const devBuyRaw = (devBuyEl && devBuyEl.value.trim()) || '';
     if (!name) return toast(t('dex.create.needName'), 'error');
     if (!symbol) return toast(t('dex.create.needSymbol'), 'error');
     const quote = quoteEl.value || (QUOTE_PRESETS[0] && QUOTE_PRESETS[0].address);
@@ -263,6 +311,10 @@ export function bindLaunch(host, onLaunched) {
       || tokensForPool.value > supply.value || quoteForPool.value <= 0n) {
       return toast(t('dex.launch.badAmounts'), 'error');
     }
+    const devBuy = devBuyRaw ? parseAmount(devBuyRaw, dec) : null;
+    if (devBuyRaw && (!devBuy.ok || devBuy.value <= 0n)) {
+      return toast(t('dex.launch.badDevBuy'), 'error');
+    }
     if (!isAddr(factoryAddress())) return toast(t('dex.launch.needFactory'), 'error');
     const signer = needSigner();
     if (!signer) return;
@@ -271,11 +323,14 @@ export function bindLaunch(host, onLaunched) {
       status.textContent = t('dex.launch.sending');
       const res = await launchTx({
         name, symbol, image, description,
+        twitter, telegram, website,
         supply: supply.value,
         quote,
         tokensForPool: tokensForPool.value,
         quoteForPool: quoteForPool.value,
         lockDuration: Number(lockEl.value) || 0,
+        creatorFeeBps,
+        devBuyQuote: devBuy && devBuy.ok ? devBuy.value : 0n,
         signer,
       });
       if (!res.ok) { status.textContent = ''; return; }

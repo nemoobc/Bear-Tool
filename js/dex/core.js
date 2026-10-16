@@ -94,6 +94,14 @@ export async function sendDexTx(promiseFactory, label) {
   return v.receipt;
 }
 
+// Basis points → the display percent the UI shows ("0.1%", "0.15%"),
+// trailing zeros trimmed. One home, so every surface rounds the same way.
+export function pctOfBps(bps) {
+  const n = Number(bps);
+  if (!Number.isFinite(n) || n <= 0) return '0%';
+  return `${Number((n / 100).toFixed(2))}%`;
+}
+
 export function fmtTok(units, dec = 18, digits = 6) {
   const n = Number(units) / 10 ** dec;
   if (!Number.isFinite(n)) return '0';
@@ -157,7 +165,7 @@ export async function withTxButton(btn, label, fn) {
   }
 }
 
-// ── the three explainers + the glossary (R16) ──────────────────
+// ── the four explainers + the glossary (R16, R9) ───────────────
 // One open path for every "?" the trade surfaces show. The copy lives in
 // i18n (both languages); the sheet closes through the app's one modal path
 // (data-close-modal), and the glossary is reachable from every explainer.
@@ -170,10 +178,11 @@ const EDU_GLOSSARY = [
   ['dex.edu.g.lock.n', 'dex.edu.g.lock.d'],
   ['dex.edu.g.min.n', 'dex.edu.g.min.d'],
   ['dex.edu.g.fee.n', 'dex.edu.g.fee.d'],
+  ['dex.edu.g.dev.n', 'dex.edu.g.dev.d'],
 ];
 
 export function openEdu(topic) {
-  const key = ['lp', 'impact', 'lock', 'glossary'].includes(String(topic)) ? String(topic) : 'glossary';
+  const key = ['lp', 'impact', 'lock', 'sniper', 'glossary'].includes(String(topic)) ? String(topic) : 'glossary';
   if (typeof document === 'undefined') return null; // no DOM (tests): nothing to open
   const terms = key === 'glossary'
     ? EDU_GLOSSARY.map(([n, d]) => `<p class="small"><strong>${escapeHtml(t(n))}</strong> — ${escapeHtml(t(d))}</p>`).join('')

@@ -602,3 +602,13 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
   font-size: 12px; font-weight: 700; line-height: 1; padding: 0; cursor: pointer;
 }
 .dex-ts-retry { min-height: 44px; }
+
+/* R9 — the coin's socials (token page): links when URL-shaped, plain text
+   otherwise. R6 — the "My fees" cards in Portfolio. No new colors: the
+   palette vars only. */
+.dex-socials { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.dex-social { color: var(--ink); text-decoration: underline; word-break: break-all; }
+.dex-social:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dex-social-plain { opacity: 0.75; word-break: break-all; }
+.dex-fee-card { border: 2px solid var(--ink); border-radius: 12px; background: var(--white); padding: 10px 12px; }
+.dex-fee-card [data-fee-accrued] { font-variant-numeric: tabular-nums; }

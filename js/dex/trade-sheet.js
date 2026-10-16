@@ -23,10 +23,11 @@
 // engine (parseAmount/swapQuote/swapTx), this file owns the sheet UI, and the
 // swap PANEL mounts the sheet. Both directions are used only at call time,
 // never at module top level, so the cycle is inert (ESM live bindings).
-import { t, get, toast, escapeHtml, isAddr, provider, ethersLib, fmtTok, quoteBy, confirmTx, withTxButton, needSigner, openEdu } from './core.js';
+import { t, get, toast, escapeHtml, isAddr, provider, ethersLib, fmtTok, quoteBy, confirmTx, withTxButton, needSigner, openEdu, pctOfBps } from './core.js';
 import { parseAmount, swapQuote, swapTx, ensureAllowanceTx, DEFAULT_SLIPPAGE_BPS } from './swap.js';
 import { priceImpact, SWAP_FEE_BPS } from './pool-math.js';
 import { poolState, tokenInfo } from './pool-data.js';
+import { BEAR_PAIR_ABI } from './bear-source.js';
 
 const shortOf = (addr) => {
   const a = String(addr || '');
@@ -167,7 +168,12 @@ export async function mountTradeSheet(container, row = {}) {
       : TS_SELL_PRESETS.map((v) => `<button type="button" class="dex-ts-preset" data-ts-preset="${v}">${v}%</button>`).join('');
   };
 
-  const infoLine = () => `${t('dex.ts.slippage')} ${(DEFAULT_SLIPPAGE_BPS / 100)}% · ${t('dex.ts.fee')} ${(SWAP_FEE_BPS / 100)}%`;
+  const infoLine = () => {
+    const feeBit = cur && cur.feeBps > 0
+      ? t('dex.ts.feeCreator', { p: pctOfBps(cur.feeBps) })
+      : `${t('dex.ts.fee')} ${(SWAP_FEE_BPS / 100)}%`;
+    return `${t('dex.ts.slippage')} ${(DEFAULT_SLIPPAGE_BPS / 100)}% · ${feeBit}`;
+  };
 
   const refresh = () => {
     // While cur is null the stall state owns the reason line — a keystroke
@@ -212,11 +218,18 @@ export async function mountTradeSheet(container, row = {}) {
     retryBtn.hidden = true;
     if (!provider() || !ethersLib()) { stall(t('dex.swap.unreadable')); return; }
     const me = String(get('address') || '');
-    const [ps, ti, qi, native] = await Promise.all([
+    const E = ethersLib();
+    // The pool's creator slice, straight from the pair. Pairs from before
+    // this feature have no getter — 0 is exactly what they charge.
+    const feeRead = (async () => {
+      try { return Number(await new E.Contract(row.pair, BEAR_PAIR_ABI, provider()).creatorFeeBps()); } catch { return 0; }
+    })();
+    const [ps, ti, qi, native, feeBps] = await Promise.all([
       poolState(row.pair),
       tokenInfo(row.address, me),
       tokenInfo(row.quote, me),
       readNative(),
+      feeRead,
     ]);
     if (!ps.ok) { stall(t('dex.swap.unreadable')); return; }
     const qPreset = quoteBy(row.quote);
@@ -229,6 +242,7 @@ export async function mountTradeSheet(container, row = {}) {
       tBal: ti.ok ? ti.balance : 0n,
       qBal: qi.ok ? qi.balance : 0n,
       native,
+      feeBps: Number(feeBps) || 0,
     };
     note('');
     refresh();
