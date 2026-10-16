@@ -342,7 +342,6 @@ async function renderTokenView(host, address) {
     host.innerHTML = tokenPageHtml();
     bindTokenPage(host, address, pair, {
       onBack: () => go('feed'),
-      onSwap: (a) => { set('dex.swapToken', a); go('swap'); },
       onLp: (a) => { set('dex.lpToken', a); go('liquidity'); },
     });
   } else {

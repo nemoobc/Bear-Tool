@@ -467,6 +467,27 @@ try {
   check('discovery finds the app-launched pool too',
     discoApp.ok && discoApp.pools.some((x) => x.address.toLowerCase() === appRes.token.toLowerCase()),
     `ok=${discoApp.ok} found=${discoApp.pools.length}`);
+
+  // --- "beli lagi": a second buy is never a dead end ---
+  // The user's own words ("…gabisa beli lagi") named a UI freeze, but the
+  // chain-level twin deserves its own proof too: the earlier exact approve was
+  // fully spent, so buying AGAIN must grant a fresh exact amount and move the
+  // pool again — the same two calls the sheet runs under its CTA.
+  const uBuy = 4n * V;
+  await (await quote.connect(trader).approve(poolAddr, 0)).wait();
+  const apprAgain = await swapJs.ensureAllowanceTx({ token: quoteAddr, spender: poolAddr, amount: uBuy, owner: traderAddr, signer: traderWallet });
+  const rBuyA = await pool.reserves();
+  const qBuyA = swapJs.swapQuote({ quoteReserve: BigInt(rBuyA[0]), tokenReserve: BigInt(rBuyA[1]), direction: 'buy', amountIn: uBuy });
+  const tokABefore = await token.balanceOf(traderAddr);
+  const rcBuyA = await swapJs.swapTx({ pair: poolAddr, direction: 'buy', amountIn: uBuy, minOut: qBuyA.minOut, signer: traderWallet });
+  const rBuyB = await pool.reserves();
+  check('buy #2 with a fresh exact approve succeeds and moves the pool',
+    apprAgain.ok && apprAgain.approved === true && qBuyA.ok === true && Boolean(rcBuyA)
+    && BigInt(rBuyB[0]) === BigInt(rBuyA[0]) + uBuy
+    && BigInt(rBuyB[1]) === BigInt(rBuyA[1]) - qBuyA.amountOut,
+    `approved=${apprAgain.approved} reserves ${rBuyA} -> ${rBuyB}`);
+  check('…and the second buy credited exactly the second quote',
+    (await token.balanceOf(traderAddr)) - tokABefore === qBuyA.amountOut);
 } catch (e) {
   failures++;
   console.error('  ERROR', e && (e.shortMessage || e.message) || String(e));

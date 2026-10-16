@@ -288,6 +288,7 @@ Bear-Tool/
 │   │   ├── pools.js    # v2 discovery: the factory's Launched/PoolCreated logs → pool rows + metadata cache
 │   │   ├── pool-data.js # v2 shared reads: reserves (quote first), token info/decimals, LP position + lock, allowance
 │   │   ├── swap.js     # v2 Swap: engine (exact parse, contract-floor quotes, approve→swap tx) + the panel
+│   │   ├── trade-sheet.js # the ONE trade sheet: direction, presets, quote line + confirm, approve→swap — mounted by the token page AND the Swap panel
 │   │   ├── pool-list.js # v2 Pools panel: live reserves + price per pool, opens the Swap tab
 │   │   ├── lp.js       # v2 Liquidity panel: add / remove / lock the pair's LP shares
 │   │   └── portfolio.js # v2 Portfolio panel: LP positions + token balances, read live

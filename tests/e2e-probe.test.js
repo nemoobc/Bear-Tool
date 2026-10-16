@@ -490,7 +490,7 @@ const dynamicSkip = new Set([
   // innerHTML and re-labelled per route; the Swap and Pools panels paint their
   // own bodies (js/dex/swap.js, js/dex/pool-list.js) because every number in
   // them depends on live chain reads.
-  'dexNav','dexSwapPool','dexSwapAmount','dexSwapMax','dexSwapBal','dexSwapQuote','dexSwapGo','dexSwapNote',
+  'dexNav','dexSwapPool','dexSwapSheet','dexSwapNote',
   'dexPoolsList','dexPoolsNote',
   // Dex v2 Liquidity + Portfolio panels (M3d): every control is painted by
   // js/dex/lp.js / js/dex/portfolio.js — their contents depend on which pool
@@ -504,7 +504,7 @@ const dynamicSkip = new Set([
   'dexLaunchDeployFactory','dexLaunchSupply','dexLaunchTokens','dexLaunchQuoteLabel','dexLaunchQuoteIn',
   'dexLaunchLock','dexLaunchPreview',
   'dexTpBack','dexTpImg','dexTpImgEmpty','dexTpName','dexTpDesc','dexTpPrice','dexTpReserves','dexTpMy',
-  'dexTpSwap','dexTpLp','dexTpNote',
+  'dexTpTrade','dexTpLp','dexTpNote',
   // + the chart, the tape and the delete the v2 page grew (M5b): the chart
   // host, its status line, the tape, the delete button and its note.
   'dexTpChart','dexTpChartNote','dexTpTape','dexTpDelete','dexTpDeleteNote',

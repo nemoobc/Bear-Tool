@@ -552,3 +552,21 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
 }
 .dex-open:hover { background: var(--cream); }
 .dex-open:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* The TradeSheet (js/dex/trade-sheet.js) — ONE component, mounted by the
+   token page and the Swap panel. The rule it must never break: a disabled
+   CTA always carries a visible reason ([data-ts-reason]), and a failed read
+   leaves a real retry ([data-ts-retry]). No silent grey, ever. */
+.dex-ts { display: block; }
+.dex-ts-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.dex-ts-preset {
+  flex: 1 1 auto; padding: 7px 10px;
+  border: 2px solid var(--ink); border-radius: 999px;
+  background: var(--white); color: var(--ink); cursor: pointer;
+  font-family: 'Fredoka', sans-serif; font-weight: 700; font-size: 0.8rem;
+}
+.dex-ts-preset:hover { background: var(--cream); }
+.dex-ts-preset:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dex-ts-go { min-height: 48px; }
+.dex-ts-reason { color: #B45309; }
+.dex-ts-retry { min-height: 44px; }

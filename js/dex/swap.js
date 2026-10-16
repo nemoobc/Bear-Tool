@@ -13,10 +13,11 @@
 //
 // Direction vocabulary: 'buy' = quote in, token out (swapQuoteForToken);
 // 'sell' = token in, quote out (swapTokenForQuote).
-import { provider, ethersLib, isAddr, get, sendDexTx, needSigner, t, escapeHtml, fmtTok, $, dexChainOk, quoteBy } from './core.js';
-import { getAmountOut, minOutWithSlippage, priceImpact } from './pool-math.js';
+import { provider, ethersLib, isAddr, get, set, sendDexTx, needSigner, t, escapeHtml, $, dexChainOk, quoteBy } from './core.js';
+import { getAmountOut, minOutWithSlippage } from './pool-math.js';
 import { discoverPools, fillMeta } from './pools.js';
-import { allowanceOf, poolState, tokenInfo } from './pool-data.js';
+import { allowanceOf } from './pool-data.js';
+import { mountTradeSheet } from './trade-sheet.js';
 import { BEAR_PAIR_ABI, BEAR_TOKEN_ABI } from './bear-source.js';
 
 // 0.5% — one place. The view may offer other values, but the default is here,
@@ -118,11 +119,11 @@ export async function ensureAllowanceTx({ token, spender, amount, owner, signer 
 }
 
 // ── the Swap panel ─────────────────────────────────────────────
-// Shell first (index.js paints it), then bindSwap wires it. Selection and
-// quoting are local until the one action button, which runs the same two
+// Shell first (index.js paints it), then bindSwap wires it: the pool PICKER
+// is the panel's own job; everything below it is the shared TradeSheet
+// (trade-sheet.js) — the same component the token page mounts, so the two
+// screens can never disagree about what buying means. The sheet runs the two
 // transactions the e2e proves on anvil: approve-only-if-needed, then swap.
-// Every read goes through pool-data.js, so the Swap tab and the Pools tab can
-// never disagree about a pool.
 
 export function swapHtml() {
   return `
@@ -135,46 +136,22 @@ export function swapHtml() {
     <div class="card mb-8">
       <label class="field-label" for="dexSwapPool">${escapeHtml(t('dex.swap.pool'))}</label>
       <select id="dexSwapPool" class="input"></select>
-      <div class="mt-8" role="group" aria-label="${escapeHtml(t('dex.swap.dir'))}">
-        <button type="button" class="dex-tab" data-dex-swap-dir="buy" aria-pressed="true">${escapeHtml(t('dex.swap.buy'))}</button>
-        <button type="button" class="dex-tab" data-dex-swap-dir="sell" aria-pressed="false">${escapeHtml(t('dex.swap.sell'))}</button>
-      </div>
-      <label class="field-label mt-8" for="dexSwapAmount">${escapeHtml(t('dex.swap.pay'))}</label>
-      <input id="dexSwapAmount" class="input" inputmode="decimal" autocomplete="off" placeholder="0.0">
-      <div class="mt-8">
-        <button type="button" class="btn btn-secondary" id="dexSwapMax">${escapeHtml(t('dex.swap.max'))}</button>
-      </div>
-      <div class="small mt-8" id="dexSwapBal"></div>
-      <div class="small mt-8" id="dexSwapQuote" aria-live="polite"></div>
-      <button type="button" class="btn btn-primary btn-block mt-8" id="dexSwapGo" disabled>${escapeHtml(t('dex.swap.pickAmount'))}</button>
+      <div id="dexSwapSheet" class="mt-8"></div>
       <div class="small mt-8" id="dexSwapNote" role="status"></div>
     </div>`;
 }
 
 export async function bindSwap(host) {
   const sel = $('#dexSwapPool', host);
-  const input = $('#dexSwapAmount', host);
-  const maxBtn = $('#dexSwapMax', host);
-  const balEl = $('#dexSwapBal', host);
-  const quoteEl = $('#dexSwapQuote', host);
-  const goBtn = $('#dexSwapGo', host);
+  const sheetEl = $('#dexSwapSheet', host);
   const noteEl = $('#dexSwapNote', host);
-  if (!sel || !input || !maxBtn || !balEl || !quoteEl || !goBtn || !noteEl) return;
+  if (!sel || !sheetEl || !noteEl) return;
 
-  let dir = 'buy';
-  let pools = [];
-  let cur = null;
   const note = (msg) => { noteEl.textContent = msg || ''; };
-  const dead = (msg) => {
-    cur = null;
-    note(msg);
-    goBtn.disabled = true;
-    quoteEl.textContent = '';
-    balEl.textContent = '';
-    sel.disabled = true;
-    input.disabled = true;
-    maxBtn.disabled = true;
-  };
+  // The panel-level dead end is only ever about the LIST (chain, factory,
+  // pools). Once a pool is picked, the sheet owns every state — and its one
+  // failure mode is a visible reason plus a retry, never a silent grey.
+  const dead = (msg) => { note(msg); sel.disabled = true; };
 
   if (!dexChainOk()) { dead(t('dex.gate.needSepolia')); return; }
   if (!provider()) { dead(t('dex.swap.unreadable')); return; }
@@ -183,7 +160,7 @@ export async function bindSwap(host) {
   const out = await discoverPools({ scope: 'all', limit: 50 });
   if (!out.ok) { dead(out.reason === 'no factory' ? t('dex.swap.noFactory') : t('dex.swap.unreadable')); return; }
   if (!out.pools.length) { dead(t('dex.swap.noPools')); return; }
-  pools = await fillMeta(out.pools.slice());
+  const pools = await fillMeta(out.pools.slice());
 
   const shortOf = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
   const labelOf = (r) => {
@@ -196,120 +173,15 @@ export async function bindSwap(host) {
   const pick = pools.find((r) => r.address.toLowerCase() === wanted) || pools[0];
   sel.value = pick.address;
 
-  const loadPool = async () => {
-    const row = pools.find((r) => r.address === sel.value) || pools[0];
+  // One mount per pick: the sheet is emptied and rebuilt, so there is exactly
+  // ONE trade form, always reading the pool the select shows.
+  const show = (row) => {
     set('dex.swapToken', row.address);
-    note(t('dex.swap.loading'));
-    const [ps, ti, qi] = await Promise.all([
-      poolState(row.pair),
-      tokenInfo(row.address, get('address')),
-      tokenInfo(row.quote, get('address')),
-    ]);
-    if (!ps.ok) { dead(t('dex.swap.unreadable')); return; }
-    const qPreset = quoteBy(row.quote);
-    cur = {
-      row,
-      ps,
-      td: ti.ok ? ti.decimals : 18,
-      tSym: ti.ok && ti.symbol ? ti.symbol : shortOf(row.address),
-      qd: qi.ok ? qi.decimals : (qPreset ? qPreset.decimals : 18),
-      qSym: qPreset ? qPreset.symbol : '…',
-      tBal: ti.ok ? ti.balance : 0n,
-      qBal: qi.ok ? qi.balance : 0n,
-    };
     note('');
-    refresh();
+    mountTradeSheet(sheetEl, { address: row.address, pair: row.pair, quote: row.quote, symbol: row.symbol });
   };
-
-  const quoteOf = () => {
-    if (!cur) return null;
-    const parsed = parseAmount(input.value, dir === 'buy' ? cur.qd : cur.td);
-    if (!parsed.ok) return null;
-    const q = swapQuote({
-      quoteReserve: cur.ps.quoteReserve,
-      tokenReserve: cur.ps.tokenReserve,
-      direction: dir,
-      amountIn: parsed.value,
-    });
-    return q.ok ? { parsed, q } : null;
-  };
-
-  const refresh = () => {
-    if (!cur) return;
-    const inSym = dir === 'buy' ? cur.qSym : cur.tSym;
-    const inDec = dir === 'buy' ? cur.qd : cur.td;
-    const outSym = dir === 'buy' ? cur.tSym : cur.qSym;
-    const outDec = dir === 'buy' ? cur.td : cur.qd;
-    const bal = dir === 'buy' ? cur.qBal : cur.tBal;
-    balEl.textContent = t('dex.swap.balance', { amt: fmtTok(bal, inDec, 6), sym: inSym });
-    const got = quoteOf();
-    if (!got) {
-      quoteEl.textContent = input.value.trim() ? t('dex.swap.pickAmount') : '';
-      goBtn.disabled = true;
-    } else {
-      const inRes = dir === 'buy' ? cur.ps.quoteReserve : cur.ps.tokenReserve;
-      const outRes = dir === 'buy' ? cur.ps.tokenReserve : cur.ps.quoteReserve;
-      const impact = priceImpact(got.parsed.value, inRes, outRes);
-      quoteEl.innerHTML =
-        `<strong>≈ ${escapeHtml(fmtTok(got.q.amountOut, outDec, 6))} ${escapeHtml(outSym)}</strong> · `
-        + `${escapeHtml(t('dex.swap.min'))}: ${escapeHtml(fmtTok(got.q.minOut, outDec, 6))} ${escapeHtml(outSym)}`
-        + (impact > 0.00005 ? ` · ${escapeHtml(t('dex.swap.impact'))}: ${(impact * 100).toFixed(2)}%` : '');
-      goBtn.disabled = false;
-    }
-    goBtn.textContent = dir === 'buy' ? t('dex.swap.go.buy', { sym: cur.tSym }) : t('dex.swap.go.sell', { sym: cur.tSym });
-  };
-
-  for (const btn of host.querySelectorAll('[data-dex-swap-dir]')) {
-    btn.addEventListener('click', () => {
-      dir = btn.dataset.dexSwapDir === 'sell' ? 'sell' : 'buy';
-      for (const b of host.querySelectorAll('[data-dex-swap-dir]')) {
-        b.setAttribute('aria-pressed', String(b === btn));
-      }
-      input.value = '';
-      refresh();
-    });
-  }
-  sel.addEventListener('change', () => { loadPool(); });
-  input.addEventListener('input', refresh);
-  maxBtn.addEventListener('click', () => {
-    if (!cur) return;
-    const E = ethersLib();
-    if (!E) return;
-    const bal = dir === 'buy' ? cur.qBal : cur.tBal;
-    if (bal <= 0n) return;
-    input.value = E.formatUnits(bal, dir === 'buy' ? cur.qd : cur.td);
-    refresh();
+  sel.addEventListener('change', () => {
+    show(pools.find((r) => r.address === sel.value) || pools[0]);
   });
-  goBtn.addEventListener('click', async () => {
-    if (!cur) return;
-    const got = quoteOf();
-    if (!got) { note(t('dex.swap.pickAmount')); return; }
-    const signer = needSigner();
-    if (!signer) return;
-    goBtn.disabled = true;
-    const inAddr = dir === 'buy' ? cur.row.quote : cur.row.address;
-    const appr = await ensureAllowanceTx({
-      token: inAddr,
-      spender: cur.row.pair,
-      amount: got.parsed.value,
-      owner: signer.address,
-      signer,
-    });
-    if (!appr.ok) { refresh(); return; }
-    const rc = await swapTx({
-      pair: cur.row.pair,
-      direction: dir,
-      amountIn: got.parsed.value,
-      minOut: got.q.minOut,
-      signer,
-    });
-    if (rc) {
-      input.value = '';
-      await loadPool(); // reserves and balances moved — re-read, never assume
-    } else {
-      refresh();
-    }
-  });
-
-  await loadPool();
+  show(pick);
 }

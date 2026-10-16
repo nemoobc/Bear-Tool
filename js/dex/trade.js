@@ -361,7 +361,7 @@ export function bindTokenTrade(host, token, onBack) {
     // No live read means no quote: a price computed off the last-known reserves
     // is a guess, and a guess rendered as a number is how someone gets hurt.
     if (!state.readable) { buyQuote.textContent = t('dex.trade.quoteStale'); return; }
-    if (eth <= 0n || state.graduated) { buyQuote.textContent = state.graduated ? t('dex.trade.graduated') : ''; return; }
+    if (eth <= 0n || state.graduated) { buyQuote.textContent = state.graduated ? t('dex.trade.graduatedWhy') : ''; return; }
     const q = quoteBuy(state.vE, state.vT, eth);
     buyQuote.textContent = t('dex.trade.youGetTok', { amt: fmtTok(q.tokensOut, 18, 2), sym: state.sym });
   };
@@ -370,7 +370,7 @@ export function bindTokenTrade(host, token, onBack) {
     if (!raw) { sellQuote.textContent = ''; return; }
     let tok; try { tok = E.parseUnits(raw, 18); } catch { sellQuote.textContent = ''; return; }
     if (!state.readable) { sellQuote.textContent = t('dex.trade.quoteStale'); return; }
-    if (tok <= 0n || state.graduated) { sellQuote.textContent = state.graduated ? t('dex.trade.graduated') : ''; return; }
+    if (tok <= 0n || state.graduated) { sellQuote.textContent = state.graduated ? t('dex.trade.graduatedWhy') : ''; return; }
     const q = quoteSell(state.vE, state.vT, tok);
     sellQuote.textContent = t('dex.trade.youGetEth', { amt: fmtEth(q.quoteOut, 6), q: state.quoteSym || 'ETH' });
   };
@@ -462,7 +462,7 @@ export function bindTokenTrade(host, token, onBack) {
     let amount;
     try { amount = E.parseUnits(raw, state.quoteDec || 18); } catch { return toast(t('dex.trade.needEth'), 'error'); }
     if (amount <= 0n) return toast(t('dex.trade.needEth'), 'error');
-    if (state.graduated) return toast(t('dex.trade.graduated'), 'error');
+    if (state.graduated) return toast(t('dex.trade.graduatedWhy'), 'error');
     if (amount > state.quoteBal) return toast(t('dex.trade.insufficient', { sym: state.quoteSym }), 'error');
 
     const q = quoteBuy(state.vE, state.vT, amount);
@@ -573,7 +573,7 @@ export function bindTokenTrade(host, token, onBack) {
     let tok; try { tok = E.parseUnits(raw, 18); } catch { return toast(t('dex.trade.needTok'), 'error'); }
     if (tok > state.mine) return toast(t('dex.trade.insufficient', { sym: state.sym }), 'error');
     if (tok <= 0n) return toast(t('dex.trade.needTok'), 'error');
-    if (state.graduated) return toast(t('dex.trade.graduated'), 'error');
+    if (state.graduated) return toast(t('dex.trade.graduatedWhy'), 'error');
     const q = quoteSell(state.vE, state.vT, tok);
     // Same floor, mirrored: the contract reverts rather than pay less than this.
     const minOut = (q.quoteOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;

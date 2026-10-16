@@ -18,6 +18,7 @@ import { loadPoolHistory, poolCandles, tradesHtml } from './history.js';
 import { drawCandles } from './chart.js';
 import { deleteCoin } from './list.js';
 import { forgetLaunchedToken } from './tokens.js';
+import { mountTradeSheet } from './trade-sheet.js';
 
 const shortOf = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 
@@ -61,11 +62,11 @@ export function tokenPageHtml() {
       <div class="small" id="dexTpReserves"></div>
       <div class="small mt-8" id="dexTpMy"></div>
       <div class="mt-8">
-        <button type="button" class="btn btn-primary" id="dexTpSwap"></button>
         <button type="button" class="btn btn-secondary" id="dexTpLp"></button>
       </div>
       <div class="small mt-8" id="dexTpNote" role="status"></div>
     </div>
+    <div class="card mb-8" id="dexTpTrade"></div>
     <div class="card mb-8">
       <div class="field-label">${escapeHtml(t('dex.tp.chart'))}</div>
       <div id="dexTpChart" class="dex-chart-host" role="img" aria-label="${escapeHtml(t('dex.tp.chart'))}"></div>
@@ -79,18 +80,15 @@ export function tokenPageHtml() {
     <div class="small" id="dexTpDeleteNote">${escapeHtml(t('dex.list.deleteNote'))}</div>`;
 }
 
-export async function bindTokenPage(host, token, pair, { onBack, onSwap, onLp } = {}) {
+export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
   const el = (id) => $(`#${id}`, host);
   const backBtn = el('dexTpBack');
-  const swapBtn = el('dexTpSwap');
   const lpBtn = el('dexTpLp');
   const noteEl = el('dexTpNote');
-  if (!backBtn || !swapBtn || !lpBtn || !noteEl) return;
+  if (!backBtn || !lpBtn || !noteEl) return;
 
   if (onBack) backBtn.addEventListener('click', onBack);
-  swapBtn.textContent = t('dex.pf.swap');
   lpBtn.textContent = t('dex.pf.manage');
-  if (onSwap) swapBtn.addEventListener('click', () => onSwap(token));
   if (onLp) lpBtn.addEventListener('click', () => onLp(token));
 
   // Delete first, so it works even when every read below fails: the tombstone
@@ -144,8 +142,20 @@ export async function bindTokenPage(host, token, pair, { onBack, onSwap, onLp } 
     if (imgEmpty) imgEmpty.hidden = true;
   }
 
-  if (!ps.ok) { noteEl.textContent = t('dex.swap.unreadable'); return; }
+  if (!ps.ok) {
+    noteEl.textContent = t('dex.swap.unreadable');
+    const tradeEl = el('dexTpTrade');
+    if (tradeEl) tradeEl.innerHTML = `<div class="small">${escapeHtml(t('dex.swap.unreadable'))}</div>`;
+    return;
+  }
   noteEl.textContent = '';
+
+  // Trade right here: the ONE sheet (trade-sheet.js) — the same component the
+  // Swap panel mounts, so the two screens cannot disagree about what buying
+  // means. The header above is already painted; the sheet reads the pool
+  // fresh for itself before anything can be signed.
+  const tradeEl = el('dexTpTrade');
+  if (tradeEl) mountTradeSheet(tradeEl, { address: token, pair, quote: ps.quote, symbol: sym });
 
   const qMeta = quoteBy(ps.quote);
   const qSym = qMeta ? qMeta.symbol : '…';

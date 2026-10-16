@@ -99,11 +99,12 @@ test('the Swap tab renders the v2 form, and says honestly when it cannot read', 
   assert.equal(state.get('dex.route'), 'swap', 'the nav tab must route to swap');
   assert.equal($('[data-dex-tab="swap"]').getAttribute('aria-pressed'), 'true',
     'the active tab must follow the route');
-  for (const id of ['dexSwapPool', 'dexSwapAmount', 'dexSwapMax', 'dexSwapBal', 'dexSwapQuote', 'dexSwapGo', 'dexSwapNote']) {
+  for (const id of ['dexSwapPool', 'dexSwapSheet', 'dexSwapNote']) {
     assert.ok($(`#${id}`), `the swap tab must carry #${id}`);
   }
-  // Direction is a real toggle with an accessible state.
-  assert.equal($('[data-dex-swap-dir="buy"]').getAttribute('aria-pressed'), 'true');
+  // With no chain the panel says so before ever mounting the trade form: the
+  // ONE sheet component stays out, and the note explains why.
+  assert.equal($('#dexSwapSheet').children.length, 0, 'no trade form without a readable pool list');
   // No provider in this gate: the panel must SAY it cannot read — never zeros.
   assert.ok($('#dexSwapNote').textContent.trim().length > 0,
     'the swap tab must explain its empty state');
