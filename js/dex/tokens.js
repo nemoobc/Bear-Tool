@@ -25,6 +25,7 @@ import { discoverPools, fillMeta } from './pools.js';
 import { poolState, tokenInfo } from './pool-data.js';
 import { quotePerToken } from './pool-list.js';
 import { watchList, pairOf } from './watch.js';
+import { chunkedGetLogs } from './holders.js';
 
 // Where the launched-token index is KEPT, and why it is not in state.js.
 //
@@ -141,7 +142,19 @@ export function feedView(rows, { q = '', sort = 'new' } = {}) {
     : [...rows];
   const byNew = (a, b) => (Number(b.block) || 0) - (Number(a.block) || 0)
     || String(a.address || '').localeCompare(String(b.address || ''));
-  if (sort === 'liq') {
+  const bigOf = (v) => { try { return BigInt(v ?? 0); } catch { return 0n; } };
+  if (sort === 'trend') {
+    // R15: volume first, then the same facts the other sorts use. A row the
+    // scan could not size carries zero — it is placed, never invented, and
+    // never rendered with a volume claim it does not have.
+    out.sort((a, b) => {
+      const x = bigOf(a.vol1h); const y = bigOf(b.vol1h);
+      if (x !== y) return x > y ? -1 : 1;
+      const lx = bigOf(a.liq); const ly = bigOf(b.liq);
+      if (lx !== ly) return lx > ly ? -1 : 1;
+      return byNew(a, b);
+    });
+  } else if (sort === 'liq') {
     const liqOf = (r) => { try { return BigInt(r.liq ?? 0); } catch { return 0n; } };
     out.sort((a, b) => {
       const x = liqOf(a); const y = liqOf(b);
@@ -177,6 +190,7 @@ export function tokensHtml() {
           placeholder="${escapeHtml(t('dex.feed.search'))}" aria-label="${escapeHtml(t('dex.feed.search'))}">
         <select id="dexFeedSort" class="dex-sort" aria-label="${escapeHtml(t('dex.feed.sortAria'))}">
           <option value="new">${escapeHtml(t('dex.feed.sortNew'))}</option>
+          <option value="trend">${escapeHtml(t('dex.feed.sortTrend'))}</option>
           <option value="liq">${escapeHtml(t('dex.feed.sortLiq'))}</option>
           <option value="name">${escapeHtml(t('dex.feed.sortName'))}</option>
         </select>
@@ -210,6 +224,7 @@ function rowHtml(tk) {
     isLocked(tk.lockedUntil, Math.floor(Date.now() / 1000))
       ? `<span class="dex-badge dex-badge-lock" title="${escapeHtml(t('dex.feed.lockUntil', { date: dateOf(tk.lockedUntil) }))}">${escapeHtml(t('dex.feed.badgeLock'))}</span>`
       : '',
+    tk.vol1hTxt ? `<span class="dex-badge dex-badge-vol">${escapeHtml(t('dex.feed.badgeVol', { v: tk.vol1hTxt }))}</span>` : '',
   ].join('');
   return `
     <button type="button" class="dex-card" data-dex-token="${escapeHtml(tk.address)}">
@@ -319,6 +334,85 @@ function setEmptyCopy(host, scope) {
   if (hint) hint.textContent = t(watch ? 'dex.watch.emptyHint' : 'dex.tokens.emptyHint');
 }
 
+// ── the trending sort's own read: last hour's quote volume ─────
+// ONE filtered log query over the SAME pairs the page already shows — the
+// node does the filtering, and the window is bounded (a launchpad that asks
+// for its whole history on every paint hangs). The scan is cached for a few
+// minutes: the 20-second refresh must not re-read the same window, but the
+// number itself is never older than that cache — a row without a fresh scan
+// shows no badge instead of a stale one.
+const VOL_TTL_MS = 180_000;
+const VOL_WINDOW_BLOCKS = 300; // ~1h on a 12s-block chain
+const volCache = { at: 0, map: new Map(), ok: false };
+
+/** What did this swap move on the QUOTE side? A buy ran quote in (amountIn),
+ *  a sell ran quote out (amountOut) — the one number a "volume" may
+ *  legitimately add up. Exported for the tests, which build logs the way a
+ *  node hands them back rather than through a chain. */
+export function decodeSwapQuote(E, log) {
+  try {
+    const [quoteIn, amountIn, amountOut] = E.AbiCoder.defaultAbiCoder()
+      .decode(['bool', 'uint256', 'uint256'], log.data);
+    return quoteIn ? amountIn : amountOut;
+  } catch {
+    return null; // a log we cannot read adds nothing — never a guess
+  }
+}
+
+/** Attach vol1h/vol1hTxt to priced rows. Returns whether the volume was
+ *  actually readable: false means no badge, and the trend sort says out loud
+ *  that the order fell back instead of pretending a trend. */
+async function attachVol1h(priced, tip) {
+  const pairs = [...new Set(priced.map((r) => String(r.pair || '').toLowerCase()).filter(isAddr))];
+  if (!pairs.length || !Number.isFinite(Number(tip))) return false;
+  const now = Date.now();
+  if (now - volCache.at > VOL_TTL_MS) {
+    const p = provider();
+    const E = ethersLib();
+    if (!p || !E) {
+      volCache.at = now;
+      volCache.ok = false;
+      return false;
+    }
+    try {
+      const from = Math.max(0, Number(tip) - VOL_WINDOW_BLOCKS);
+      const logs = await chunkedGetLogs({
+        getLogs: (lo, to) => p.getLogs({
+          address: pairs,
+          topics: [E.id('Swap(address,bool,uint256,uint256)')],
+          fromBlock: lo,
+          toBlock: to,
+        }),
+        fromBlock: from,
+        toBlock: Number(tip),
+      });
+      const map = new Map();
+      for (const log of logs) {
+        const quote = decodeSwapQuote(E, log);
+        if (quote == null) continue;
+        const key = String(log.address || '').toLowerCase();
+        map.set(key, (map.get(key) || 0n) + quote);
+      }
+      volCache.map = map;
+      volCache.ok = true;
+    } catch {
+      volCache.map = new Map();
+      volCache.ok = false; // retried after the TTL, not on every 20s paint
+    }
+    volCache.at = now;
+  }
+  if (!volCache.ok) return false;
+  for (const r of priced) {
+    const v = volCache.map.get(String(r.pair || '').toLowerCase());
+    if (v && v > 0n) {
+      const q = quoteBy(r.quote);
+      r.vol1h = v;
+      r.vol1hTxt = `${fmtTok(v, q ? q.decimals : 18, 2)} ${q ? q.symbol : ''}`.trim();
+    }
+  }
+  return true;
+}
+
 // Paints whatever the chain knows, and says so honestly when it could not look.
 // The three outcomes are kept apart on purpose:
 //   • pools found        → show them, each priced from its own pair
@@ -410,12 +504,22 @@ export async function refreshFeed(host, scope = 'all') {
     };
   }));
 
+  // R15: the last hour's quote volume, attached to the rows it belongs to.
+  // A failed scan hands back false — no badge is invented and the trend sort
+  // says out loud that it fell back; the feed still paints.
+  const volOk = await attachVol1h(priced, out.latest);
+
   // The view state lives on the module: search and sort must repaint from the
   // LAST chain-verified rows without re-scanning (typing must never cost an
   // RPC pass), and the chain paint and the filter paint share one renderer so
   // the screen can never show two different feeds.
   feedState.rows = priced;
   feedState.status = out.more ? t('dex.tokens.moreOnChain') : '';
+  // A "Trending" order with no readable volume is not an order — say so
+  // instead of quietly letting liquidity pretend to be a trend.
+  if (!volOk && priced.length && viewControls(host).sort === 'trend') {
+    feedState.status = feedState.status || t('dex.feed.trendFallback');
+  }
   if (box) {
     box.hidden = priced.length > 0;
     if (!priced.length) say(t('dex.tokens.noneOnChain'));

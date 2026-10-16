@@ -2,7 +2,8 @@
 //
 // The feed (user: "fitur launchpad kurang lengkap" → riset launchpad-ux R3)
 // must be SEARCHABLE (name / ticker / contract address), SORTABLE (newest /
-// liquidity / name) and every row must carry an honest status badge — "New"
+// trending / liquidity / name) and every row must carry an honest status badge
+// — "New"
 // only while it really is new, "LP locked" only when the pair's own
 // lockedUntil(creator) says so. No badge is ever invented: a pool the chain
 // did not confirm simply carries neither.
@@ -22,7 +23,9 @@ globalThis.localStorage = {
   removeItem: (k) => store.delete(k),
 };
 
-const { feedView, isFresh, isLocked, FRESH_BLOCKS } = await import('../js/dex/tokens.js');
+const { feedView, isFresh, isLocked, FRESH_BLOCKS, decodeSwapQuote } = await import('../js/dex/tokens.js');
+const { ethers: E } = await import('ethers');
+const { t, setLang } = await import('../js/i18n.js');
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
 
 const row = (over = {}) => ({
@@ -162,4 +165,50 @@ test('the view state survives the 20s auto-refresh: it is read from the DOM each
 test('discovery reports the tip it looked at — freshness needs an anchor', () => {
   const src = read('../js/dex/pools.js');
   assert.match(src, /more: full,\s*latest/, 'discoverPools must return the tip block in its result');
+});
+
+// ── R15: the trending sort — volume, and no invented volume ─────────
+
+test('feedView: trend sorts by last-hour volume, then liquidity, then newest', () => {
+  const hot = row({ address: '0x' + '11'.repeat(20), vol1h: 5n, liq: 1n, block: 1 });
+  const warm = row({ address: '0x' + '22'.repeat(20), vol1h: 5n, liq: 9n, block: 2 });
+  const cold = row({ address: '0x' + '33'.repeat(20), vol1h: 0n, liq: 99n, block: 3 });
+  const noVol = row({ address: '0x' + '44'.repeat(20), liq: 100n, block: 4 });
+  const out = feedView([cold, noVol, warm, hot], { sort: 'trend' });
+  assert.deepEqual(out.map((r) => r.address), [warm.address, hot.address, noVol.address, cold.address],
+    'same volume falls to liquidity; no volume is a zero, not an error; newest breaks the rest');
+});
+
+test('a swap log yields its QUOTE-side amount — both directions, no guesses', () => {
+  const data = (quoteIn, aIn, aOut) => E.AbiCoder.defaultAbiCoder()
+    .encode(['bool', 'uint256', 'uint256'], [quoteIn, aIn, aOut]);
+  const pair = '0x' + 'b2'.repeat(20);
+  assert.equal(decodeSwapQuote(E, { address: pair, data: data(true, 111n, 222n) }), 111n,
+    'quote in: the quote amount is amountIn');
+  assert.equal(decodeSwapQuote(E, { address: pair, data: data(false, 333n, 444n) }), 444n,
+    'quote out: the quote amount is amountOut');
+  assert.equal(decodeSwapQuote(E, { address: pair, data: '0xdead' }), null,
+    'an unreadable log adds nothing — a volume is never guessed');
+});
+
+test('R15 wiring: the option, the scan, the cache, the badge, the honest fallback', () => {
+  const src = read('../js/dex/tokens.js');
+  assert.ok(src.includes('value="trend"'), 'the sort select must offer Trending');
+  assert.match(src, /attachVol1h\(priced, out\.latest\)/, 'the refresh attaches volume to the rows it painted');
+  assert.match(src, /VOL_TTL_MS/, 'the scan is cached — 20s refreshes must not re-read the same window');
+  assert.match(src, /chunkedGetLogs\(/, 'the scan rides the shared chunked log reader');
+  assert.ok(src.includes("'Swap(address,bool,uint256,uint256)'"), 'the window is filtered on the pair Swap log');
+  assert.match(src, /dex\.feed\.trendFallback/, 'a failed scan says so in the status line');
+  assert.ok(src.includes('dex-badge-vol'), 'rows carry the volume badge');
+});
+
+test('R15 strings answer in both languages', () => {
+  for (const lang of ['en', 'id']) {
+    setLang(lang);
+    for (const k of ['dex.feed.sortTrend', 'dex.feed.badgeVol', 'dex.feed.trendFallback']) {
+      assert.ok(t(k).length > 0 && t(k) !== k, `${k} must be translated in ${lang}`);
+    }
+  }
+  setLang('en');
+  assert.match(t('dex.feed.badgeVol', { v: '1.20 ETH' }), /1\.20 ETH/);
 });
