@@ -452,6 +452,13 @@ public class BearDappBrowserPlugin extends Plugin {
     }
 
     private void addSheetRow(LinearLayout box, String k, String v, float density) {
+        // Diagnostic, not behaviour: the host-side E2E cross-checks the sheet's
+        // Account row against the account the dApp received — but the platform
+        // dumper cannot read this WebView tree on every run (see the rect log
+        // in showNativeConfirm). Reporting each drawn row lets the driver
+        // verify the sheet through the app's own record when the dumper is
+        // blind (driver: sheetRowFromLogcat).
+        android.util.Log.i("BearToolE2E", "sheet-row " + k + " " + v);
         LinearLayout row = new LinearLayout(getContext());
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setPadding(0, (int) (6 * density), 0, (int) (6 * density));

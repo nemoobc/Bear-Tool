@@ -142,10 +142,23 @@ function tapReportedRect(tag) {
   } catch { return false; }
 }
 
+// One sheet row's value, as the APP itself reported drawing it (BearToolE2E
+// tag, written by addSheetRow in BearDappBrowserPlugin). Same channel the
+// rect fallback presses through, for the same reason: on some runs the
+// platform dumper cannot read this screen at all, and the sheet's Account
+// row would otherwise be unverifiable. Last match wins — the newest sheet.
+function sheetRowFromLogcat(key) {
+  try {
+    const out = String(adb('shell', 'logcat', '-d', '-s', 'BearToolE2E:I'));
+    const m = [...out.matchAll(new RegExp('sheet-row ' + key + ' (\\S+)', 'g'))].pop();
+    return m ? m[1] : '';
+  } catch { return ''; }
+}
+
 // All TEXT the native layer currently shows (uiautomator dump). The confirm
 // sheet is native — its rows exist here, not in any WebView DOM — so this is
 // the only place the E2E can cross-check what the user sees.
-async function readSheetTexts() {
+async function readSheetTexts(tries = 8) {
   // UIAutomator's dump is famously unable to reach every dialog on every
   // run: while the sheet IS visible (the BearToolE2E rect log confirms so),
   // dumpUi() can still return an empty/partial hierarchy, which used to make
@@ -155,15 +168,26 @@ async function readSheetTexts() {
   // attribute an item's node-carrier actually carries), dedup, and KEEP
   // empties transparent: the caller treats an empty list as a dump failure
   // (fail safe — no phantom pass) but does not assert on emptiness alone.
-  const xml = dumpUi();
-  if (!xml) return [];
-  const fromText = (xml.match(/(?:^|\s)text="([^"]*)"/g) || [])
-    .map((m) => m.replace(/^.*text="/, '').replace(/"$/, ''));
-  const fromDesc = (xml.match(/content-desc="([^"]*)"/g) || [])
-    .map((m) => m.slice('content-desc="'.length, -1));
-  const out = new Set();
-  for (const v of [...fromText, ...fromDesc]) if (v && v.trim()) out.add(v.trim());
-  return [...out];
+  //
+  // The dumper dies INTERMITTENTLY, not permanently: run 38951280365 found
+  // the confirm button (a dump carrying content-desc) and then got an empty
+  // hierarchy from the very next call, seconds later, while the sheet was
+  // plainly on screen. One dead dump is a flake, not a verdict — retry until
+  // a dump actually carries text before reporting emptiness to the caller.
+  for (let i = 0; i < tries; i++) {
+    const xml = dumpUi();
+    if (xml) {
+      const fromText = (xml.match(/(?:^|\s)text="([^"]*)"/g) || [])
+        .map((m) => m.replace(/^.*text="/, '').replace(/"$/, ''));
+      const fromDesc = (xml.match(/content-desc="([^"]*)"/g) || [])
+        .map((m) => m.slice('content-desc="'.length, -1));
+      const out = new Set();
+      for (const v of [...fromText, ...fromDesc]) if (v && v.trim()) out.add(v.trim());
+      if (out.size) return [...out];
+    }
+    if (i < tries - 1) await sleep(700);
+  }
+  return [];
 }
 
 // Console noise that is known, external, and not this app's fault. The price
@@ -833,8 +857,17 @@ async function main() {
       // failed a perfectly correct connect on exactly that.
       const texts = report.dapp.sheetTexts || [];
       const rowAt = texts.indexOf('Account');
-      const short = (rowAt >= 0 ? texts[rowAt + 1] : '')
+      let short = (rowAt >= 0 ? texts[rowAt + 1] : '')
         || texts.find((t) => t.startsWith('0x') && t.includes('…')) || '';
+      report.dapp.sheetTextsFrom = short ? 'dump' : '';
+      if (!short) {
+        // The dump can die on this screen (see readSheetTexts) — the app's
+        // own row log is the fallback witness, same discipline as the rect
+        // tap: what the APP reports it drew, cross-checked against what the
+        // fixture received. Only when BOTH eyes are blind does this fail.
+        short = sheetRowFromLogcat('Account');
+        if (short) report.dapp.sheetTextsFrom = 'logcat';
+      }
       if (!short) throw new Error(`native sheet has no Account row to cross-check ${acc} against: ${JSON.stringify(texts)}`);
       const head = short.slice(0, 6), tail = short.slice(-4);
       if (!acc.toLowerCase().startsWith(head.toLowerCase().replace('…', '')) || !acc.toLowerCase().endsWith(tail.toLowerCase())) {

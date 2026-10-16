@@ -78,6 +78,22 @@ test('a failed journey captures the stuck screen before reporting', () => {
     'shot(99-failure) di catch: layar yang macet = diagnosis');
 });
 
+test('the sheet account cross-check survives a dead dumper — retries, then the app\'s own row log', () => {
+  // Run 38951280365: the dump found the confirm button (content-desc) and the
+  // very next call got an empty hierarchy, so the cross-check threw on an
+  // otherwise-perfect connect (the screenshot shows the right Account row).
+  // One dead dump is a flake; the check must retry it, and when the dumper
+  // stays blind, read the row the app logged when it drew it.
+  assert.match(driverSrc, /async function readSheetTexts\(tries = 8\)/,
+    'dump dibaca ulang sampai benar-benar berisi teks — satu dump mati bukan vonis');
+  assert.match(driverSrc, /sheetRowFromLogcat\('Account'\)/,
+    'fallback logcat saat dumper tetap buta');
+  assert.match(driverSrc, /sheet-row /, 'tag BearToolE2E sheet-row dipakai driver');
+  const java = readFileSync(path.join(here, '..', 'android', 'app', 'src', 'main', 'java', 'com', 'nemoobc', 'beartool', 'BearDappBrowserPlugin.java'), 'utf8');
+  assert.match(java, /BearToolE2E", "sheet-row " \+ k \+ " " \+ v/,
+    'Java wajib melaporkan tiap row yang digambar — itu mata kedua driver');
+});
+
 // ── how android-emulator-runner REALLY executes `script` ──────────────────
 // Source read 2026-10-10 (src/script-parser.ts + src/main.ts @v2): the input
 // is split PER NEWLINE, `#` comment lines are DROPPED, and every line runs as

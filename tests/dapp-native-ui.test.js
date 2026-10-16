@@ -142,6 +142,8 @@ test('the connect sheet names the account it is exposing, and makes the page beh
   // actually drew the control from the outside.
   assert.match(java, /android\.util\.Log\.i\("BearToolE2E", "confirm-ok-rect "/,
     'sheet meng-log rect tombol OK (tag BearToolE2E)');
+  assert.match(java, /android\.util\.Log\.i\("BearToolE2E", "sheet-row " \+ k \+ " " \+ v\)/,
+    'tiap row yang digambar dilaporkan juga — mata kedua E2E saat dumper platform buta (run 38951280365)');
   assert.match(java, /ok\.post\(\(\) -> \{[\s\S]{0,400}getLocationOnScreen\(loc\)/,
     'rect diambil setelah layout (post), bukan sebelum');
 });
