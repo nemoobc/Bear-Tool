@@ -131,9 +131,14 @@ try {
   const fIface = new ethers.Interface(bear.factory.abi);
 
   // --- launch: token + pool + seed + 30-day LP lock in ONE tx ---
-  const meta = ['Bear Moon', 'BMOON', 'data:image/svg+xml;utf8,<svg></svg>', 'v2 test coin'];
+  // R9/R6: the meta tuple now carries socials, and the launch fixes the
+  // creator fee (0..30 bps of the quote side, immutable) plus an optional
+  // atomic dev buy. This first launch keeps both at zero — the baseline
+  // checks below must still see the pool behave exactly as before.
+  const meta = ['Bear Moon', 'BMOON', 'data:image/svg+xml;utf8,<svg></svg>', 'v2 test coin',
+    'x.com/bearmoon', 't.me/bearmoon', 'bearmoon.test'];
   await (await quote.approve(factoryAddr, QUOTE_FOR_POOL)).wait();
-  const launchTx = await factory.launch(meta, SUPPLY, quoteAddr, TOKENS_FOR_POOL, QUOTE_FOR_POOL, LOCK_30D, { gasLimit: 9_000_000 });
+  const launchTx = await factory.launch(meta, SUPPLY, quoteAddr, TOKENS_FOR_POOL, QUOTE_FOR_POOL, LOCK_30D, 0n, 0n, { gasLimit: 9_000_000 });
   const launchRc = await launchTx.wait();
   check('launch tx succeeds', launchRc.status === 1);
 
@@ -147,12 +152,19 @@ try {
   const pool = new ethers.Contract(poolAddr, bear.pair.abi, creator);
   check('token metadata round-trips', await token.name() === 'Bear Moon' && await token.symbol() === 'BMOON'
     && await token.image() === meta[2] && await token.description() === meta[3]);
+  check('socials round-trip on-chain, sealed by the launch itself',
+    await token.twitter() === 'x.com/bearmoon' && await token.telegram() === 't.me/bearmoon'
+    && await token.website() === 'bearmoon.test' && await token.socialsSet() === true);
   check('token supply fixed', await token.totalSupply() === SUPPLY);
   check('creator keeps the leftover supply', await token.balanceOf(creatorAddr) === SUPPLY - TOKENS_FOR_POOL);
   check('pool holds the seed token side', await token.balanceOf(poolAddr) === TOKENS_FOR_POOL);
   check('pool holds the seed quote side', await quote.balanceOf(poolAddr) === QUOTE_FOR_POOL);
   check('factory registry points at the pool', await factory.pairFor(tokenAddr) === poolAddr);
   check('pool wires token/quote/factory', await pool.token() === tokenAddr && await pool.quote() === quoteAddr && await pool.factory() === factoryAddr);
+  check('pool carries its creator and the launch-fixed fee (0 = every basis point to LPs)',
+    await pool.creator() === creatorAddr && await pool.creatorFeeBps() === 0n && await pool.totalFeesCreator() === 0n);
+  const reSocials = await refusal(() => token.setSocials('a.example', 'b.example', 'c.example'));
+  check('socials are write-once — the launch tx sealed them', reSocials.rejected && /socials/.test(reSocials.text), reSocials.text.slice(0, 120));
 
   const expectedShares = bigSqrt(QUOTE_FOR_POOL * TOKENS_FOR_POOL);
   check('initial LP shares = sqrt(quote*token)', await pool.totalSupply() === expectedShares, `chain=${await pool.totalSupply()} want=${expectedShares}`);
@@ -442,6 +454,7 @@ try {
   const appLock = 90n * 86400n;
   const appRes = await launchJs.launchTx({
     name: 'App Bear', symbol: 'APB', image: '', description: 'via the app path',
+    twitter: 'x.com/appbear', telegram: '', website: 'appbear.test',
     supply: SUPPLY, quote: quoteAddr, tokensForPool: 600_000n * V, quoteForPool: 3n * V,
     lockDuration: appLock, signer: creatorWallet,
   });
@@ -462,11 +475,116 @@ try {
     BigInt(await appPool.lockedUntil(creatorWalletAddr)) >= BigInt(Math.floor(Date.now() / 1000)) + appLock - 60n,
     `lock=${await appPool.lockedUntil(creatorWalletAddr)}`);
   check('token metadata round-trips through the app path',
-    await appToken.name() === 'App Bear' && await appToken.symbol() === 'APB');
+    await appToken.name() === 'App Bear' && await appToken.symbol() === 'APB'
+    && await appToken.twitter() === 'x.com/appbear' && await appToken.telegram() === ''
+    && await appToken.website() === 'appbear.test' && await appToken.socialsSet() === true);
   const discoApp = await (await import('../js/dex/pools.js')).discoverPools({ scope: 'all', limit: 10 });
   check('discovery finds the app-launched pool too',
     discoApp.ok && discoApp.pools.some((x) => x.address.toLowerCase() === appRes.token.toLowerCase()),
     `ok=${discoApp.ok} found=${discoApp.pools.length}`);
+
+  // --- R9/R6: creator fee + atomic dev buy, end to end -------------------
+  // A third launch, through the app path WITH the new arguments: the creator
+  // buys the opening tokens inside the launch transaction itself (one tx —
+  // no window between pool birth and first price) and fixes a 15 bps creator
+  // slice of the 0.3% swap fee — immutable from birth.
+  const feeRes = await launchJs.launchTx({
+    name: 'Fee Bear', symbol: 'FB', image: '', description: 'fee + dev buy',
+    supply: SUPPLY, quote: quoteAddr, tokensForPool: 500_000n * V, quoteForPool: 4n * V,
+    lockDuration: 0, creatorFeeBps: 15, devBuyQuote: 2n * V, signer: creatorWallet,
+  });
+  check('fee launch through the app path succeeds', feeRes.ok && /^0x[0-9a-fA-F]{40}$/.test(String(feeRes.token)), `ok=${feeRes.ok} token=${feeRes.token}`);
+  const feeToken = new ethers.Contract(feeRes.token, bear.token.abi, provider);
+  const feePoolAddr = await factory.pairFor(feeRes.token);
+  const feePool = new ethers.Contract(feePoolAddr, bear.pair.abi, creatorWallet);
+  check('pool records the creator and the 15 bps fee from birth',
+    await feePool.creator() === creatorWalletAddr && await feePool.creatorFeeBps() === 15n);
+
+  const wantDev = getAmountOut(2n * V, 4n * V, 500_000n * V);
+  const devCut = 2n * V * 15n / 10000n;
+  check('dev buy landed in the SAME tx: creator holds leftover + exactly the pool-math output',
+    BigInt(await feeToken.balanceOf(creatorWalletAddr)) === SUPPLY - 500_000n * V + wantDev,
+    `held=${await feeToken.balanceOf(creatorWalletAddr)} want=${SUPPLY - 500_000n * V + wantDev}`);
+  const feeLatest = await provider.getBlockNumber();
+  const devSwaps = await provider.getLogs({
+    address: feePoolAddr,
+    fromBlock: Math.max(0, feeLatest - 50),
+    toBlock: 'latest',
+    topics: [ethers.id('Swap(address,bool,uint256,uint256)')],
+  });
+  const devEvt = devSwaps.map((l) => { try { return new ethers.Interface(bear.pair.abi).parseLog(l); } catch { return null; } }).find((l) => l && l.name === 'Swap');
+  check('the dev-buy Swap names the CREATOR as trader (never the factory)',
+    Boolean(devEvt) && devEvt.args.trader === creatorWalletAddr && devEvt.args.amountIn === 2n * V && devEvt.args.amountOut === wantDev,
+    devEvt ? `trader=${devEvt.args.trader}` : 'no Swap log');
+  const feeR0 = await feePool.reserves();
+  check('reserves already exclude the slice taken at launch; the dues show it',
+    feeR0[0] === 4n * V + 2n * V - devCut && feeR0[1] === 500_000n * V - wantDev
+    && await feePool.totalFeesCreator() === devCut,
+    `q=${feeR0[0]} t=${feeR0[1]} fees=${await feePool.totalFeesCreator()}`);
+
+  // A public buy accrues the creator slice without changing the trader math.
+  const feeBuyIn = 10n * V;
+  const feeWantBuy = getAmountOut(feeBuyIn, feeR0[0], feeR0[1]);
+  const cutBuy = feeBuyIn * 15n / 10000n;
+  const feeTraderBefore = await feeToken.balanceOf(traderAddr);
+  await (await quote.connect(trader).approve(feePoolAddr, feeBuyIn)).wait();
+  await (await feePool.connect(trader).swapQuoteForToken(feeBuyIn, feeWantBuy, { gasLimit: 300_000 })).wait();
+  check('public buy output still equals the offchain mirror to the wei',
+    (await feeToken.balanceOf(traderAddr)) - feeTraderBefore === feeWantBuy);
+  const feeR1 = await feePool.reserves();
+  check('buy: reserves grow by input minus the slice; the slice is set aside',
+    feeR1[0] === feeR0[0] + feeBuyIn - cutBuy && feeR1[1] === feeR0[1] - feeWantBuy
+    && await feePool.totalFeesCreator() === devCut + cutBuy,
+    `q=${feeR1[0]} fees=${await feePool.totalFeesCreator()}`);
+
+  // A sell accrues on the quote side too: cut = payout * bps / 10000.
+  const feeSellIn = feeWantBuy / 2n;
+  const feeWantSell = getAmountOut(feeSellIn, feeR1[1], feeR1[0]);
+  const cutSell = feeWantSell * 15n / 10000n;
+  await (await feeToken.connect(trader).approve(feePoolAddr, feeSellIn)).wait();
+  await (await feePool.connect(trader).swapTokenForQuote(feeSellIn, feeWantSell, { gasLimit: 300_000 })).wait();
+  const feeR2 = await feePool.reserves();
+  check('sell: payout untouched, reserves drop by payout + slice',
+    feeR2[0] === feeR1[0] - feeWantSell - cutSell && feeR2[1] === feeR1[1] + feeSellIn
+    && await feePool.totalFeesCreator() === devCut + cutBuy + cutSell,
+    `q=${feeR2[0]} fees=${await feePool.totalFeesCreator()}`);
+
+  // The accounting identity that keeps LPs honest: the raw balance is the
+  // pool's reserves plus what sits owed to the creator.
+  const owed = await feePool.totalFeesCreator();
+  check('raw balance = reserves + creator dues (the pool never counts fee money)',
+    BigInt(await quote.balanceOf(feePoolAddr)) === feeR2[0] + owed);
+
+  // Only the creator can claim; claiming pays exactly what was set aside.
+  const strangerClaim = await refusal(() => feePool.connect(trader).claimFees());
+  check('a stranger cannot claim the creator fees', strangerClaim.rejected && /creator/.test(strangerClaim.text), strangerClaim.text.slice(0, 120));
+  const creatorQBefore = BigInt(await quote.balanceOf(creatorWalletAddr));
+  const claimTx = await feePool.connect(creatorWallet).claimFees({ gasLimit: 200_000 });
+  const claimRc = await claimTx.wait();
+  check('claim pays the exact accrued amount and zeroes the dues',
+    BigInt(await quote.balanceOf(creatorWalletAddr)) === creatorQBefore + owed
+    && await feePool.totalFeesCreator() === 0n,
+    `delta=${BigInt(await quote.balanceOf(creatorWalletAddr)) - creatorQBefore} owed=${owed}`);
+  const claimEvt = claimRc.logs.map((l) => { try { return new ethers.Interface(bear.pair.abi).parseLog(l); } catch { return null; } }).find((l) => l && l.name === 'FeesClaimed');
+  check('FeesClaimed carries the creator and the exact amount', Boolean(claimEvt)
+    && claimEvt.args.creator === creatorWalletAddr && claimEvt.args.amount === owed);
+  const doubleClaim = await refusal(() => feePool.connect(creatorWallet).claimFees());
+  check('a second claim with nothing owed is refused', doubleClaim.rejected && /none/.test(doubleClaim.text), doubleClaim.text.slice(0, 120));
+
+  // The dev buy is a factory move, never a public door.
+  const outsiderDev = await refusal(() => feePool.connect(trader).devBuy(traderAddr, 1n * V));
+  check('devBuy is factory-only', outsiderDev.rejected && /factory/.test(outsiderDev.text), outsiderDev.text.slice(0, 120));
+
+  // Fee cap: the contract itself refuses anything above the whole 0.3%.
+  const capMeta = ['Cap', 'CAP', '', '', '', '', ''];
+  const capTry = await refusal(() => factory.launch(capMeta, 1000n * V, quoteAddr, 1000n * V, 1n * V, 0n, 31n, 0n));
+  check('creatorFeeBps above 30 is refused by the contract', capTry.rejected && /fee/.test(capTry.text), capTry.text.slice(0, 120));
+
+  // createPool pools carry no creator fee — the feature belongs to launches.
+  check('an existing-token pool has fee 0 and its creator recorded',
+    await extPool.creatorFeeBps() === 0n && await extPool.creator() === creatorAddr);
+  const extClaim = await refusal(() => extPool.claimFees());
+  check('claiming from a pool with no dues is refused', extClaim.rejected && /none/.test(extClaim.text), extClaim.text.slice(0, 120));
 
   // --- "beli lagi": a second buy is never a dead end ---
   // The user's own words ("…gabisa beli lagi") named a UI freeze, but the

@@ -11,12 +11,14 @@
 //   - Native ETH never enters these contracts: receive()/fallback() revert on
 //     all three (user order: "coin native eth itu buat gas fee aja only").
 //   - One pool per token per factory: pairFor[token] IS the registry.
-//   - A launch is atomic: deploy token + pool + seed + optional LP lock in ONE
-//     transaction. There is no window where the token exists without a pool.
+//   - A launch is atomic: deploy token + pool + seed + optional dev buy +
+//     optional LP lock in ONE transaction. There is no window where the token
+//     exists without a pool.
 //   - LP shares owned by a locked address cannot move or burn before `until`.
-//   - Swap fee is 0.3% (997/1000) and all of it stays in the pool for the LPs.
-//     There is no protocol fee and no creator fee: the lock is the creator's
-//     commitment, the pool is the market.
+//   - Swap fee is 0.3% (997/1000). By default all of it stays in the pool for
+//     the LPs; a launch may route a slice of that fee to its creator
+//     (creatorFeeBps, fixed at launch — no owner, no switch, no protocol fee).
+//     Owed creator fees are excluded from reserves(): never the pool's money.
 //
 // Math parity: js/dex/pool-math.js mirrors getAmountOut / add / remove exactly
 // (same floor rule, same fee), and tests assert the JS number equals the chain
@@ -40,6 +42,11 @@ contract BearToken {
     uint256 public totalSupply;
     string public image;
     string public description;
+    string public twitter;
+    string public telegram;
+    string public website;
+    address public immutable factory;
+    bool public socialsSet;
 
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
@@ -59,9 +66,21 @@ contract BearToken {
         symbol = symbol_;
         image = image_;
         description = description_;
+        factory = msg.sender;
         totalSupply = supply;
         balanceOf[msg.sender] = supply;
         emit Transfer(address(0), msg.sender, supply);
+    }
+
+    // Socials land in the same transaction that creates the token: factory
+    // only, once, never changeable after. A launch is atomic, so there is no
+    // window where a token exists with socials still writable.
+    function setSocials(string calldata twitter_, string calldata telegram_, string calldata website_) external {
+        require(msg.sender == factory && !socialsSet, "socials");
+        socialsSet = true;
+        twitter = twitter_;
+        telegram = telegram_;
+        website = website_;
     }
 
     function transfer(address to, uint256 amount) external returns (bool) {
@@ -103,6 +122,15 @@ contract BearPair {
     IErc20 public immutable token;
     address public immutable factory;
 
+    // Creator fee: a slice of the swap fee, fixed at launch (0..30 = bps of
+    // the quote side moved per swap). Immutable — no owner, no switch, no
+    // pause. totalFeesCreator is owed to the creator and sits in this contract
+    // until claimFees(); it is excluded from reserves() everywhere, so the
+    // pool never trades against it and LPs can never withdraw it.
+    address public immutable creator;
+    uint256 public immutable creatorFeeBps;
+    uint256 public totalFeesCreator;
+
     string public name;
     string public symbol;
     uint8 public constant decimals = 18;
@@ -119,6 +147,7 @@ contract BearPair {
     event Burn(address indexed provider, uint256 quoteOut, uint256 tokenOut, uint256 shares);
     event Swap(address indexed trader, bool quoteIn, uint256 amountIn, uint256 amountOut);
     event Lock(address indexed owner, uint256 until);
+    event FeesClaimed(address indexed creator, uint256 amount);
 
     uint256 private unlocked = 1;
     modifier nonReentrant() {
@@ -128,17 +157,21 @@ contract BearPair {
         unlocked = 1;
     }
 
-    constructor(address token_, address quote_, address factory_) {
+    constructor(address token_, address quote_, address factory_, address creator_, uint256 creatorFeeBps_) {
         require(token_ != address(0) && quote_ != address(0) && token_ != quote_, "addr");
+        require(creator_ != address(0), "creator");
+        require(creatorFeeBps_ <= 30, "fee");
         token = IErc20(token_);
         quote = IErc20(quote_);
         factory = factory_;
+        creator = creator_;
+        creatorFeeBps = creatorFeeBps_;
         name = "Bear LP";
         symbol = "BLP";
     }
 
     function reserves() external view returns (uint256 quoteReserve, uint256 tokenReserve) {
-        return (quote.balanceOf(address(this)), token.balanceOf(address(this)));
+        return (quote.balanceOf(address(this)) - totalFeesCreator, token.balanceOf(address(this)));
     }
 
     // The launch seed. Factory-only, once: the factory has already moved the
@@ -149,7 +182,7 @@ contract BearPair {
         require(msg.sender == factory, "factory");
         require(!initialized, "init");
         initialized = true;
-        uint256 q = quote.balanceOf(address(this));
+        uint256 q = quote.balanceOf(address(this)) - totalFeesCreator;
         uint256 t = token.balanceOf(address(this));
         require(q > 0 && t > 0, "empty");
         uint256 shares = _sqrt(q * t);
@@ -171,7 +204,7 @@ contract BearPair {
             _pullTo(address(token), msg.sender, address(this), tokenIn);
             shares = _sqrt(quoteIn * tokenIn);
         } else {
-            uint256 qb = quote.balanceOf(address(this));
+            uint256 qb = quote.balanceOf(address(this)) - totalFeesCreator;
             uint256 tb = token.balanceOf(address(this));
             require(qb > 0 && tb > 0, "empty");
             _pullTo(address(quote), msg.sender, address(this), quoteIn);
@@ -193,7 +226,7 @@ contract BearPair {
         require(lockedUntil[msg.sender] <= block.timestamp, "locked");
         uint256 ts = totalSupply;
         require(shares > 0 && shares <= balanceOf[msg.sender], "shares");
-        uint256 qb = quote.balanceOf(address(this));
+        uint256 qb = quote.balanceOf(address(this)) - totalFeesCreator;
         uint256 tb = token.balanceOf(address(this));
         quoteOut = shares * qb / ts;
         tokenOut = shares * tb / ts;
@@ -212,8 +245,13 @@ contract BearPair {
     {
         uint256 qb = quote.balanceOf(address(this));
         uint256 tb = token.balanceOf(address(this));
+        uint256 feesBefore = totalFeesCreator;
+        // A slice of the fee goes to the creator when enabled — the trader's
+        // math (amountIn through 997/1000) is untouched; the pool's reserves
+        // simply grow by amountIn minus the creator's cut.
+        totalFeesCreator = feesBefore + amountIn * creatorFeeBps / 10000;
         _pullTo(address(quote), msg.sender, address(this), amountIn);
-        amountOut = getAmountOut(amountIn, qb, tb);
+        amountOut = getAmountOut(amountIn, qb - feesBefore, tb);
         require(amountOut >= minOut, "slippage");
         require(amountOut < tb, "deep");
         require(token.transfer(msg.sender, amountOut), "send");
@@ -228,13 +266,53 @@ contract BearPair {
     {
         uint256 qb = quote.balanceOf(address(this));
         uint256 tb = token.balanceOf(address(this));
+        uint256 qbNet = qb - totalFeesCreator;
         _pullTo(address(token), msg.sender, address(this), amountIn);
-        amountOut = getAmountOut(amountIn, tb, qb);
+        amountOut = getAmountOut(amountIn, tb, qbNet);
         require(amountOut >= minOut, "slippage");
-        require(amountOut < qb, "deep");
+        // The creator's cut joins the comparison: the payout plus what is
+        // newly owed can never exceed what the pool actually holds.
+        uint256 cut = amountOut * creatorFeeBps / 10000;
+        require(amountOut + cut < qbNet, "deep");
+        totalFeesCreator += cut;
         require(quote.transfer(msg.sender, amountOut), "send");
         _checkK(qb, tb);
         emit Swap(msg.sender, false, amountIn, amountOut);
+    }
+
+    // The launch dev buy: the factory buys the opening tokens FOR the creator
+    // inside the launch transaction itself — same math as a public buy, same
+    // fee rules, and the Swap event names the wallet that paid (never the
+    // factory), so tape, volume and P&L attribute it correctly.
+    function devBuy(address buyer, uint256 amountIn)
+        external
+        nonReentrant
+        returns (uint256 amountOut)
+    {
+        require(msg.sender == factory, "factory");
+        require(buyer != address(0), "zero");
+        uint256 qb = quote.balanceOf(address(this));
+        uint256 tb = token.balanceOf(address(this));
+        uint256 feesBefore = totalFeesCreator;
+        totalFeesCreator = feesBefore + amountIn * creatorFeeBps / 10000;
+        _pullTo(address(quote), msg.sender, address(this), amountIn);
+        amountOut = getAmountOut(amountIn, qb - feesBefore, tb);
+        require(amountOut < tb, "deep");
+        require(token.transfer(buyer, amountOut), "send");
+        _checkK(qb, tb);
+        emit Swap(buyer, true, amountIn, amountOut);
+    }
+
+    // The creator's fee, paid by pull. Only the creator can claim, and only
+    // what swaps actually set aside — reserves() already excludes this money,
+    // so the pool was never trading against it.
+    function claimFees() external nonReentrant returns (uint256 amount) {
+        require(msg.sender == creator, "creator");
+        amount = totalFeesCreator;
+        require(amount > 0, "none");
+        totalFeesCreator = 0;
+        require(quote.transfer(msg.sender, amount), "send");
+        emit FeesClaimed(msg.sender, amount);
     }
 
     function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
@@ -356,6 +434,9 @@ contract BearFactory {
         string symbol;
         string image;
         string description;
+        string twitter;
+        string telegram;
+        string website;
     }
 
     event Launched(address indexed creator, address indexed token, address indexed pair, address quote);
@@ -375,17 +456,49 @@ contract BearFactory {
         address quote_,
         uint256 tokensForPool,
         uint256 quoteForPool,
-        uint256 lockDuration
+        uint256 lockDuration,
+        uint256 creatorFeeBps,
+        uint256 devBuyQuote
     ) external nonReentrant returns (address token, address pool) {
         require(supply > 0 && tokensForPool > 0 && tokensForPool <= supply && quoteForPool > 0, "seed");
-        BearToken t = new BearToken(meta.name, meta.symbol, meta.image, meta.description, supply);
-        token = address(t);
-        pool = _openPool(token, quote_);
+        require(creatorFeeBps <= 30, "fee");
+        token = _newToken(meta, supply);
+        _setSocials(token, meta);
+        pool = _openPool(token, quote_, msg.sender, creatorFeeBps);
         _pullTo(quote_, msg.sender, pool, quoteForPool);
-        require(t.transfer(pool, tokensForPool), "seed");
-        if (supply > tokensForPool) require(t.transfer(msg.sender, supply - tokensForPool), "leftover");
+        require(BearToken(payable(token)).transfer(pool, tokensForPool), "seed");
+        if (supply > tokensForPool) require(BearToken(payable(token)).transfer(msg.sender, supply - tokensForPool), "leftover");
         BearPair(payable(pool)).mintInitial(msg.sender, lockDuration);
+        if (devBuyQuote > 0) _devBuy(quote_, pool, msg.sender, devBuyQuote);
         emit Launched(msg.sender, token, pool, quote_);
+    }
+
+    // The dev buy rides the same transaction: the factory pulls the quote,
+    // approves the pair, and the pair sends the opening tokens straight to the
+    // creator. Atomic — nobody can trade in between.
+    function _devBuy(address quote_, address pool, address buyer, uint256 amount) internal {
+        _pullTo(quote_, msg.sender, address(this), amount);
+        _approveQuote(quote_, pool, amount);
+        BearPair(payable(pool)).devBuy(buyer, amount);
+    }
+
+    // Split out so the launch() frame stays shallow enough without viaIR:
+    // one fresh frame for the token creation, one for the socials write.
+    function _newToken(LaunchMeta calldata meta, uint256 supply) internal returns (address) {
+        return address(new BearToken(meta.name, meta.symbol, meta.image, meta.description, supply));
+    }
+
+    function _setSocials(address token, LaunchMeta calldata meta) internal {
+        BearToken(payable(token)).setSocials(meta.twitter, meta.telegram, meta.website);
+    }
+
+    // Approve that tolerates both ERC-20 dialects: bool-returning and
+    // no-return-value tokens both pass; a revert or a false fails.
+    function _approveQuote(address quote_, address spender, uint256 amount) internal {
+        (bool ok, bytes memory ret) = quote_.call(
+            abi.encodeWithSelector(IErc20.approve.selector, spender, amount)
+        );
+        require(ok && (ret.length == 0 || abi.decode(ret, (bool))), "approve");
     }
 
     function createPool(
@@ -396,17 +509,17 @@ contract BearFactory {
     ) external nonReentrant returns (address pool) {
         require(token != address(0), "token");
         require(tokensForPool > 0 && quoteForPool > 0, "seed");
-        pool = _openPool(token, quote_);
+        pool = _openPool(token, quote_, msg.sender, 0);
         _pullTo(quote_, msg.sender, pool, quoteForPool);
         _pullTo(token, msg.sender, pool, tokensForPool);
         BearPair(payable(pool)).mintInitial(msg.sender, 0);
         emit PoolCreated(msg.sender, token, pool, quote_);
     }
 
-    function _openPool(address token, address quote_) internal returns (address pool) {
+    function _openPool(address token, address quote_, address creator_, uint256 creatorFeeBps_) internal returns (address pool) {
         require(pairFor[token] == address(0), "exists");
         require(quote_ != address(0) && quote_ != token, "quote");
-        pool = address(new BearPair(token, quote_, address(this)));
+        pool = address(new BearPair(token, quote_, address(this), creator_, creatorFeeBps_));
         pairFor[token] = pool;
     }
 
@@ -437,6 +550,9 @@ export const BEAR_TOKEN_ABI = [
   'function transferFrom(address, address, uint256) returns (bool)',
   'function image() view returns (string)',
   'function description() view returns (string)',
+  'function twitter() view returns (string)',
+  'function telegram() view returns (string)',
+  'function website() view returns (string)',
   'event Transfer(address indexed from, address indexed to, uint256 value)',
   'event Approval(address indexed owner, address indexed spender, uint256 value)',
 ];
@@ -456,6 +572,11 @@ export const BEAR_PAIR_ABI = [
   'function factory() view returns (address)',
   'function initialized() view returns (bool)',
   'function lockedUntil(address) view returns (uint256)',
+  'function creator() view returns (address)',
+  'function creatorFeeBps() view returns (uint256)',
+  'function totalFeesCreator() view returns (uint256)',
+  'function devBuy(address, uint256) returns (uint256)',
+  'function claimFees() returns (uint256)',
   'function reserves() view returns (uint256, uint256)',
   'function getAmountOut(uint256, uint256, uint256) pure returns (uint256)',
   'function addLiquidity(uint256, uint256, uint256) returns (uint256)',
@@ -467,12 +588,13 @@ export const BEAR_PAIR_ABI = [
   'event Burn(address indexed provider, uint256 quoteOut, uint256 tokenOut, uint256 shares)',
   'event Swap(address indexed trader, bool quoteIn, uint256 amountIn, uint256 amountOut)',
   'event Lock(address indexed owner, uint256 until)',
+  'event FeesClaimed(address indexed creator, uint256 amount)',
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 ];
 
 export const BEAR_FACTORY_ABI = [
   'function pairFor(address) view returns (address)',
-  'function launch((string,string,string,string), uint256, address, uint256, uint256, uint256) returns (address, address)',
+  'function launch((string,string,string,string,string,string,string), uint256, address, uint256, uint256, uint256, uint256, uint256) returns (address, address)',
   'function createPool(address, address, uint256, uint256) returns (address)',
   'event Launched(address indexed creator, address indexed token, address indexed pair, address quote)',
   'event PoolCreated(address indexed creator, address indexed token, address indexed pair, address quote)',
