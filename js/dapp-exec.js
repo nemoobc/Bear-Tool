@@ -449,3 +449,31 @@ export async function executeLocal({ method, params = [], origin = '', activateN
       return { done: false };
   }
 }
+
+// ── display-only calldata decode ──────────────────────────────────────────
+// transfer(address,uint256) and approve(address,uint256) carry the amount as
+// their second 32-byte word while the tx's value field stays empty — without
+// this the confirm sheets led with a bare "0" for every ERC-20 move
+// ("interaksi tx ga lengkap", report 2026-10-16). Pure BigInt, no ethers:
+// the native sheet and the wallet-modal fallback both format from here.
+export function decodeTokenCall(data) {
+  const d = typeof data === 'string' ? data : '';
+  if (d.length < 138) return null;
+  const sel = d.slice(0, 10).toLowerCase();
+  if (sel !== '0xa9059cbb' && sel !== '0x095ea7b3') return null;
+  try {
+    return { to: '0x' + d.slice(34, 74).toLowerCase(), amount: BigInt('0x' + d.slice(74, 138)) };
+  } catch {
+    return null;
+  }
+}
+
+// Smallest-unit → human string, display only (formatUnits without an ethers
+// import — same lean style as native-dapp's formatWeiNative).
+export function formatUnitsLean(v, decimals) {
+  const d = Number.isInteger(decimals) && decimals >= 0 && decimals <= 36 ? decimals : 18;
+  const base = 10n ** BigInt(d);
+  const whole = v / base;
+  const frac = (v % base).toString().padStart(d, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : String(whole);
+}

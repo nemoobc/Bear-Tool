@@ -69,3 +69,20 @@ test('pair modal has no top-right Close button — Cancel is the way out', () =>
     'the Close ✕ was removed on request (2026-10-09) — do not resurrect it');
   assert.match(body, />Cancel</, 'Cancel remains the dismiss path');
 });
+
+test('the pair sheet keeps a connection history under the live sessions', () => {
+  // "kan di wallet connect harusnya ada historynya nanti bisa disconnect gitu
+  // kayak ada list apa aja yang connect" (report 2026-10-16): live sessions
+  // come from the kit, closed ones stay on the record locally.
+  assert.match(wc, /const WC_HISTORY_KEY = 'bear\.wc\.history'/, 'history is local-only, one key');
+  assert.match(wc, /function wcHistoryAdd\(\{ topic, name, url \}\)/);
+  assert.match(wc, /function wcHistoryEnd\(topic\)/);
+  assert.match(wc, /wcHistoryAdd\(\{ topic: session\.topic, name: dappName, url: dappUrl \}\)/,
+    'approving a session records the connection');
+  assert.match(wc, /wcHistoryEnd\(topicId\)/, 'a dApp-side close ends the entry');
+  assert.match(wc, /wcHistoryEnd\(b\.dataset\.wcDisconnect\)/, 'disconnect from the sheet ends it');
+  assert.match(wc, /wcHistoryEnd\(s\.topic\)/, 'disconnectWcOrigin ends it');
+  assert.match(wc, /t\('wc\.history'\)/);
+  assert.match(wc, /t\('wc\.disconnect'\)/, 'the button is translated now');
+  assert.doesNotMatch(wc, />Disconnect</, 'no hardcoded English left in the list');
+});

@@ -115,10 +115,16 @@ export const NATIVE_PROVIDER_SCRIPT = `(function () {
       return v.toString(16);
     });
   }
+  // base64, NOT a raw <svg> data URI: a raw URI carries unescaped quotes and
+  // angle brackets, so any site that renders it through an HTML string
+  // (attribute quoting) or a strict URL parser shows a broken image — exactly
+  // what Etherscan's wallet list rendered (2026-10-16: "Bea Too" + broken
+  // img). base64 contains none of those characters; every renderer takes it.
+  // Decoded content = the bear mark (keep colors in sync with assets/bear.svg).
   var _info = Object.freeze({
     uuid: _uuid(),
     name: 'Bear Tool',
-    icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="34" r="20" fill="%238b5a2b"/><circle cx="18" cy="16" r="8" fill="%238b5a2b"/><circle cx="46" cy="16" r="8" fill="%238b5a2b"/><circle cx="24" cy="32" r="3" fill="%23000"/><circle cx="40" cy="32" r="3" fill="%23000"/><ellipse cx="32" cy="43" rx="7" ry="4" fill="%23d2b48c"/></svg>',
+    icon: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0Ij48Y2lyY2xlIGN4PSIzMiIgY3k9IjM0IiByPSIyMCIgZmlsbD0iIzhiNWEyYiIvPjxjaXJjbGUgY3g9IjE4IiBjeT0iMTYiIHI9IjgiIGZpbGw9IiM4YjVhMmIiLz48Y2lyY2xlIGN4PSI0NiIgY3k9IjE2IiByPSI4IiBmaWxsPSIjOGI1YTJiIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIzMiIgcj0iMyIgZmlsbD0iIzAwMDAwMCIvPjxjaXJjbGUgY3g9IjQwIiBjeT0iMzIiIHI9IjMiIGZpbGw9IiMwMDAwMDAiLz48ZWxsaXBzZSBjeD0iMzIiIGN5PSI0MyIgcng9IjciIHJ5PSI0IiBmaWxsPSIjZDJiNDhjIi8+PC9zdmc+',
     rdns: 'com.nemoobc.beartool',
   });
   function _announce() {

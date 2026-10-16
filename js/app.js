@@ -39,7 +39,7 @@ import { renderDex } from './dex/index.js';
 // WalletConnect path all run the same scan before their approval sheets, so
 // the Security Center's wording is true for all three, not just this one.
 import { createProvider, announceLock, announceAccounts, disconnectOrigin, PROVIDER_FLAG } from './dapp-bridge.js';
-import { executeLocal, currentChainId, splitSignParams, splitTypedParams, scanSignCall } from './dapp-exec.js';
+import { executeLocal, currentChainId, splitSignParams, splitTypedParams, scanSignCall, decodeTokenCall, formatUnitsLean } from './dapp-exec.js';
 import { renderSignMessage, safeJson } from './sign-render.js';
 import { siteAllowed } from './dapp-sessions.js';
 import { startUpdateGuard } from './update-guard.js';
@@ -782,6 +782,19 @@ function describeSignCall(method, params) {
       }
       if (p.data && p.data !== '0x') rows.push({ k: t('cf.calldata'), v: String(p.data).slice(0, 74) + '…' });
       else rows.push({ k: t('cf.calldata'), v: t('cf.none.a.plain.transfer') });
+      // The money INSIDE the calldata: transfer/approve carry the amount as
+      // their second word while the value field stays empty — the dialog used
+      // to show no amount at all for an ERC-20 move ("interaksi tx ga
+      // lengkap", report 2026-10-16). Display only; the signer signs bytes.
+      const tc = p.data && p.data !== '0x' ? decodeTokenCall(p.data) : null;
+      if (tc) {
+        const meta = p.to
+          ? (get('tokens') || []).find((x) => x && x.address && String(x.address).toLowerCase() === String(p.to).toLowerCase())
+          : null;
+        rows.push({ k: t('cf.amount'), v: meta && Number.isInteger(meta.decimals)
+          ? `${formatUnitsLean(tc.amount, meta.decimals)}${meta.symbol ? ` ${meta.symbol}` : ''}`
+          : `${tc.amount} · ${p.to ? wallet.shortAddress(String(p.to)) : ''}` });
+      }
     }
   } catch (e) {
     // Showing the raw request beats showing nothing: a prompt the user can
@@ -1515,6 +1528,12 @@ function startAutoLock() {
 function resetLock() {
   if (get('unlocked')) startAutoLock();
 }
+// The native dApp browser is a SECOND view: its taps never reach this
+// webview's window listeners, so an actively browsing user still got
+// auto-locked mid-dApp — then every connect/sign met a locked wallet and the
+// unlock sheet flashed over the page ("keluar sendiri", report 2026-10-16).
+// The plugin forwards throttled touch pings (walletCommand 'activity') here.
+export function noteActivity() { resetLock(); }
 ['click', 'keydown', 'mousemove'].forEach(ev =>
   window.addEventListener(ev, resetLock, { passive: true })
 );

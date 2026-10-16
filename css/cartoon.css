@@ -1204,6 +1204,18 @@ select.input option, select.select option, .input option {
 .tx-confirm img { width: 90px; height: 90px; margin-bottom: 10px; animation: bear-nod 1s ease infinite; }
 @keyframes bear-nod { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-6deg); } }
 .tx-confirm .question { font-size: 1.2rem; font-weight: 700; margin-bottom: 16px; }
+/* The money line, matching the native dApp sheet's shape (26sp bold /
+   13sp muted): pay leads, the receive estimate follows, rows below. */
+.tx-confirm .tx-headline { font-size: 26px; font-weight: 800; margin: -6px 0 4px; word-break: break-word; }
+.tx-confirm .tx-subhead { font-size: 13px; color: var(--ink-soft); margin-bottom: 14px; word-break: break-word; }
+
+/* WalletConnect sessions sheet: live sessions on top, local history below. */
+.wc-sessions-head { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); margin: 14px 0 6px; }
+.wc-session { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px dashed rgba(128, 128, 128, 0.25); text-align: left; }
+.wc-session-main { flex: 1; min-width: 0; }
+.wc-session-name { font-weight: 600; overflow-wrap: anywhere; }
+.wc-session-meta { font-size: 0.78rem; color: var(--ink-soft); overflow-wrap: anywhere; }
+.wc-session-past { opacity: 0.72; }
 .tx-detail {
   background: var(--white);
   border: 2px solid var(--ink);

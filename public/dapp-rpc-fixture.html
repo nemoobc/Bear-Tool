@@ -115,6 +115,30 @@
     ]);
   }).then(function (again) {
     rec('accountsAgain', ((again || [])[0] || '').toLowerCase());
+    return Promise.race([
+      window.ethereum.request({ method: 'eth_requestAccounts' }),
+      deadline(15000, 'reconnect'),
+    ]);
+  }).then(function (reconnect) {
+    // A SECOND eth_requestAccounts on the SAME origin must answer WITHOUT a
+    // sheet — consent is asked once per origin (MetaMask/OKX parity). The
+    // driver taps nothing after the first connect; if a sheet appeared here,
+    // the race would time out and the run would FAIL. Self-enforcing proof.
+    rec('reconnect', ((reconnect || [])[0] || '').toLowerCase());
+    return Promise.race([
+      window.ethereum.request({ method: 'wallet_getPermissions' }),
+      deadline(15000, 'wallet_getPermissions'),
+    ]);
+  }).then(function (perms) {
+    rec('perms', Array.isArray(perms) && perms[0] ? String(perms[0].parentCapability || 'none') : String(perms));
+    return Promise.race([
+      window.ethereum.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] }),
+      deadline(15000, 'wallet_requestPermissions'),
+    ]);
+  }).then(function (reqPerms) {
+    // wagmi/AppKit connect through THIS method — it must answer in the
+    // MetaMask shape, silently, because the origin is already granted.
+    rec('reqPerms', Array.isArray(reqPerms) && reqPerms[0] ? String(reqPerms[0].parentCapability || 'none') : String(reqPerms));
     rec('done', 'ok');
   }).catch(function (e) {
     rec('error', e && e.message ? e.message : String(e));

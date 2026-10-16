@@ -32,7 +32,7 @@
 //      a different spender than we just approved aborts honestly.
 // ═══════════════════════════════════════════════════════════════
 
-import { $, toast, confirmTx, escapeHtml, spinnerDots } from './ui.js';
+import { $, toast, confirmTx, escapeHtml, spinnerDots, fmtAmount } from './ui.js';
 import { resolveMax } from './max-ui.js';
 import { get, set, addActivity, requireUnlock, emit } from './state.js';
 import { runTx, waitForReceipt, receiptVerdict, withTimeout } from './safetx.js';
@@ -449,6 +449,10 @@ function validateQuote(q, context) {
     // Destination output for the Auto best-route comparison (see
     // bridgeRouterCandidates). Missing/odd field → 0n, which ranks last.
     toAmount: bigOrZero(est?.toAmountMin ?? est?.toAmount),
+    // The quote's own destination ESTIMATE — display only, for the sign
+    // sheet's "receive ≈ …" line ("ask tx swap bridge ga ada pay eth receive
+    // brp", report 2026-10-16). Ranking keeps using toAmount above.
+    toAmountEst: bigOrZero(est?.toAmount),
   };
 }
 
@@ -543,6 +547,11 @@ export async function doBridge() {
   const tok = $('#bridgeToken').value;
   let tokenMeta = null;
   let toTokenAddress = null;
+  // Destination token, display only: the curated twin (same family) or the
+  // chain's own coin. The sign sheet's receive line reads these; nothing in
+  // validateQuote or the tx path touches them.
+  let toTokenSymbol = toNet.symbol || 'native';
+  let toTokenDecimals = 18;
   if (tok !== 'native') {
     const meta = (POPULAR_TOKENS[fromNet.chainId] || []).find(x => sameAddr(x.address, tok));
     const twin = meta && (POPULAR_TOKENS[toNet.chainId] || [])
@@ -553,6 +562,9 @@ export async function doBridge() {
     }
     tokenMeta = meta;
     toTokenAddress = twin.address;
+    toTokenSymbol = twin.symbol || toTokenSymbol;
+    toTokenDecimals = Number.isInteger(twin.decimals) ? twin.decimals
+      : (Number.isInteger(meta.decimals) ? meta.decimals : 18);
   }
   // The destination column is DERIVED display, not an independent choice:
   // repaint it from the pair being quoted here (it is painted from this same
@@ -614,6 +626,8 @@ export async function doBridge() {
     toTokenAddress: tokenMeta ? ethers.getAddress(toTokenAddress) : null,
     tokenDecimals: decimals,
     tokenSymbol: tokenMeta ? tokenMeta.symbol : (fromNet.symbol || 'native'),
+    toTokenSymbol,
+    toTokenDecimals,
     fromChainId: Number(fromNet.chainId),
     toChainId: Number(toNet.chainId),
     amount: amt,
@@ -689,6 +703,7 @@ export async function doBridge() {
       router: win.id,
       routerName: routerName(win.id),
       toAmount: bound.toAmount,
+      toAmountEst: bound.toAmountEst,
     });
     const fee = bound.fee;
     const dur = bound.dur;
@@ -788,13 +803,24 @@ async function doBridgeExecInner() {
     : get('tokens').find(x => !x.address);
   const bridgeSpendUsd = Number(bTok?.usd) > 0 ? parseFloat(context.amount) * Number(bTok.usd) : null;
 
-  // sign confirmation — show full bridge details before signing
+  // sign confirmation — show full bridge details before signing. Pay leads
+  // the card (headline), the quote's own destination estimate follows
+  // (subhead), and the guaranteed minimum keeps its own row ("ask tx swap
+  // bridge ga ada pay eth receive brp", report 2026-10-16).
+  const bridgeRecv = (q.toAmountEst ?? 0n) > 0n
+    ? `≈ ${fmtAmount(q.toAmountEst, context.toTokenDecimals ?? 18)} ${context.toTokenSymbol || ''}`.trim()
+    : null;
+  const bridgeMin = (q.toAmount ?? 0n) > 0n && q.toAmount < (q.toAmountEst ?? 0n)
+    ? `${fmtAmount(q.toAmount, context.toTokenDecimals ?? 18)} ${context.toTokenSymbol || ''}`.trim()
+    : null;
   const signOk = await confirmTx({
     title: t('cf.sign.bridge'),
+    headline: `${context.amount} ${context.tokenSymbol || ''}`.trim(),
+    subhead: bridgeRecv || `${fromNet.name} → ${toNet.name}`,
     rows: [
       { k: t('cf.from.chain'), v: `${fromNet.name} (${fromNet.chainId})` },
       { k: t('cf.to.chain'), v: `${toNet.name} (${toNet.chainId})` },
-      { k: t('cf.amount'), v: `${context.amount} ${context.tokenSymbol || ''}` },
+      ...(bridgeMin ? [{ k: t('cf.receive.min'), v: bridgeMin }] : []),
       { k: t('cf.router'), v: q.routerName || 'Auto' },
       { k: t('cf.est.time'), v: '~2-10 min' }
     ],

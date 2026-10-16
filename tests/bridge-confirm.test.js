@@ -37,3 +37,17 @@ test('both bridge dialogs confirm instead of repeating the verb', () => {
   assert.doesNotMatch(bridgeJs, /Execute Bridge|Confirm & Bridge/,
     'neither old label survives');
 });
+
+test('the sign dialog leads with pay and the receive estimate', () => {
+  // "ask tx swap bridge itu ga ada pay eth receive brp gitu" (report
+  // 2026-10-16): pay amount is the headline, the quote's destination
+  // estimate is the subhead, the guaranteed minimum keeps a row. The
+  // estimate rides the bound snapshot (display only); ranking still uses
+  // toAmount.
+  assert.match(bridgeJs, /toAmountEst: bigOrZero\(est\?\.toAmount\)/);
+  assert.match(bridgeJs, /toAmountEst: bound\.toAmountEst,/);
+  assert.match(bridgeJs, /headline: `\$\{context\.amount\} \$\{context\.tokenSymbol \|\| ''\}`\.trim\(\)/);
+  assert.match(bridgeJs, /subhead: bridgeRecv \|\| /);
+  assert.match(bridgeJs, /k: t\('cf\.receive\.min'\)/);
+  assert.match(bridgeJs, /toTokenSymbol,\s*\n\s*toTokenDecimals,/);
+});

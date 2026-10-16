@@ -360,6 +360,8 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
   display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
 }
 .dex-pool-card .btn { margin-top: auto; }
+.dex-pool-actions { display: flex; gap: 8px; width: 100%; margin-top: auto; padding-top: 8px; }
+.dex-pool-actions .btn { flex: 1; margin: 0; }
 .dex-pf-up { color: #1B7F4D; }
 .dex-pf-down { color: #B42318; }
 

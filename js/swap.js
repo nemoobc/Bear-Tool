@@ -509,6 +509,10 @@ export async function getSwapQuote() {
       ...result,
     };
     delete quoteData.outAmount;
+    // Display-only: the sign sheet's "receive ≈ …" line ("ask tx swap bridge
+    // ga ada pay eth receive brp", report 2026-10-16). A formatted string,
+    // not a second execution source — the binding guard stays amountInWei.
+    quoteData.outEstimate = fmtAmount(result.outAmount, toDecimals);
     set('swapQuote', quoteData);
     $('#swapToAmount').value = outFormatted;
     quoteBox.innerHTML =
@@ -638,15 +642,25 @@ export async function doSwap() {
   const fromTok = get('tokens').find(x => (x.address || 'native') === from);
   const swapSpendUsd = Number(fromTok?.usd) > 0 ? parseFloat(amt) * Number(fromTok.usd) : null;
 
-  // sign confirmation — show full swap details before signing
+  // sign confirmation — show full swap details before signing. The money
+  // leads the card now: the pay amount is the headline, the quote's own
+  // output estimate is the subhead ("ask tx swap bridge ga ada pay eth
+  // receive brp", report 2026-10-16); rows keep network/route/slippage
+  // plus the on-chain minimum the router will enforce.
+  const toDecimals = to === 'native' ? 18 : (tokenInfo(to)?.decimals ?? 18);
+  const swapRecvLine = quote.outEstimate
+    ? `≈ ${quote.outEstimate} ${dispSym(to)}`
+    : `→ ${dispSym(to)}`;
+  const swapMinOut = quote.uniswap?.amountOutMin;
   const signOk = await confirmTx({
     title: t('cf.sign.swap'),
+    headline: `${amt} ${dispSym(from)}`,
+    subhead: swapRecvLine,
     rows: [
       { k: t('cf.network'), v: net.name },
-      { k: t('cf.from'), v: `${amt} ${dispSym(from)}` },
-      { k: t('site.to'), v: `→ ${dispSym(to)}` },
       { k: t('cf.router'), v: quote.source || 'Auto' },
-      { k: t('cf.slippage'), v: `${slipPct}%` }
+      { k: t('cf.slippage'), v: `${slipPct}%` },
+      ...(swapMinOut != null ? [{ k: t('cf.receive.min'), v: `${fmtAmount(swapMinOut, toDecimals)} ${dispSym(to)}` }] : []),
     ],
     confirmText: t('cf.confirm'),
     cancelText: t('cf.cancel'),

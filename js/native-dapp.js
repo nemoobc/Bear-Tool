@@ -16,18 +16,30 @@
 import { confirmTx, toast, setModalVisibilityHook } from './ui.js';
 import { renderSignMessage, typedDataFields } from './sign-render.js';
 import { t } from './i18n.js';
-import { get, requireUnlock, on } from './state.js';
-import { getNetworkById, getNetwork, sanitizeChainRequest, installRequestedChain, rpcLabel } from './network.js';
+import { get, requireUnlock, on, waitForSigner } from './state.js';
+import { getNetworkById, getNetwork, getAllNetworks, sanitizeChainRequest, installRequestedChain, rpcLabel } from './network.js';
 import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
 // One source of truth for what a signature request MEANS: the injected path
 // (dapp-exec.js) already splits both param orders, validates typed data, runs
 // the security detectors, builds/validates a send transaction, and guards the
 // chain a broadcast goes out on. This path re-implemented each by hand and
 // got them wrong — see the personal_sign / typed-data / tx branches below.
-import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId } from './dapp-exec.js';
+import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId, decodeTokenCall, formatUnitsLean } from './dapp-exec.js';
 
 const USER_REJECTED = { code: 4001, message: 'User rejected the request.' };
 const LOCKED = { code: 5100, message: 'Wallet is locked.' };
+// How long a request the user can actually approve by unlocking waits for
+// them (see the locked gate in handleNativeRpc). Long enough to type the
+// password, short enough that a dead dApp does not pin a promise all day.
+const UNLOCK_WAIT_MS = 120000;
+// Requests that are HELD through the unlock sheet instead of being refused
+// with 5100 (MetaMask parity: prompt, never "no"). Reads and chain queries
+// refuse instantly as before — a page polling while locked must not pin
+// 120-second promises, nor re-open the sheet the user is typing into.
+const HELD_WHILE_LOCKED = new Set([
+  'eth_requestAccounts', 'wallet_requestPermissions',
+  'personal_sign', 'eth_signTypedData_v4', 'eth_sendTransaction',
+]);
 // Read-only methods answered WITHOUT a prompt, straight to the wallet's own
 // network provider — the same policy the WalletConnect path has for
 // WC_READ_METHODS (MetaMask forwards these to the active node too; a dApp
@@ -61,6 +73,90 @@ const connectedOrigins = new Set();
 // falling back to the raw value when URL parsing fails.
 function originOf(raw) {
   try { return new URL(raw).origin; } catch { return String(raw || 'this site'); }
+}
+
+// 4-byte selectors → plain action names. A raw "0x095ea7b3" forces the user to
+// look the call up; OKX names the action ("Approve") right on the sheet. The
+// map is deliberately small and conservative — an unknown selector falls back
+// to a neutral name, never to a guess.
+const ACTION_SELECTORS = new Map([
+  ['0x095ea7b3', 'Approve'],
+  ['0xa9059cbb', 'Transfer'],
+  ['0x23b872dd', 'Transfer From'],
+  ['0x38ed1739', 'Swap'],
+  ['0x7ff36ab5', 'Swap'],
+  ['0x18cbafe5', 'Swap'],
+  ['0xfb3bdb41', 'Swap'],
+  ['0x8803dbee', 'Swap'],
+  ['0x791ac947', 'Swap'],
+  ['0xac9650d8', 'Multicall'],
+  ['0xd0e30db0', 'Deposit'],
+  ['0x2e1a7d4d', 'Withdraw'],
+  ['0x42842e0e', 'NFT Transfer'],
+  ['0x6a761202', 'Execute'],
+  ['0xa22cb465', 'Set Approval'],
+]);
+
+function actionLabel(data) {
+  const d = String(data || '');
+  if (!d || d === '0x') return t('cf.none.a.plain.transfer');
+  return ACTION_SELECTORS.get(d.slice(0, 10).toLowerCase()) || t('tx.sheet.contractCall');
+}
+
+function permissionRecord(site, address) {
+  // EIP-2255 shape, field-for-field the one the injected web path returns
+  // (dapp-bridge.js permissionsFor) — a site must meet ONE wallet, whichever
+  // path answers.
+  return {
+    id: `bear:eth_accounts:${site}`,
+    invoker: site,
+    parentCapability: 'eth_accounts',
+    caveats: [{ type: 'restrictReturnedAccounts', value: [address] }],
+    date: Date.now(),
+  };
+}
+
+// One consent flight per origin. eth_requestAccounts and
+// wallet_requestPermissions can arrive CONCURRENTLY (wagmi/AppKit fire the
+// pair; a double-tap doubles them) and each would open its own native sheet —
+// the second replaces the first, and Java auto-REFUSES the replaced request,
+// so a connect died while the user simply stared at a sheet (report
+// 2026-10-16). Concurrent asks share one sheet; both receive the same answer.
+const connectConsentInFlight = new Map();
+
+function connectConsent(site, address) {
+  let inflight = connectConsentInFlight.get(site);
+  if (!inflight) {
+    inflight = runConnectConsent(site, address);
+    connectConsentInFlight.set(site, inflight);
+    const drop = () => connectConsentInFlight.delete(site);
+    inflight.then(drop, drop);
+  }
+  return inflight;
+}
+
+async function runConnectConsent(site, address) {
+  const ok = await askConfirm({
+    title: t('site.connectTitle', { site }),
+    // One row per capability, each saying what it MEANS, instead of a single
+    // CSV line. The old line read "accounts, sign, send transactions" — three
+    // different consequences sharing one visual weight, with the irreversible
+    // one (moving money) last and unremarked. It was also static text: it
+    // described what the wallet can do in general, not anything this site
+    // asked for, so it could not inform a decision however it was worded.
+    // This says what the site may ask, and names the one that cannot be undone.
+    rows: [
+      { k: t('site.site'), v: site },
+      { k: t('site.account'), v: shortAddr(address) },
+      { k: t('site.canSee'), v: t('site.canSeeValue') },
+      { k: t('site.canSign'), v: t('site.canSignValue') },
+      { k: t('site.canSend'), v: t('site.canSendValue') },
+    ],
+    confirmText: t('site.connect'),
+  });
+  if (!ok) return null;
+  connectedOrigins.add(site);
+  return [address];
 }
 
 let plugin = null;
@@ -224,6 +320,11 @@ export function initNativeDappRpc() {
         applyBrowserVisibility();
       });
       p.addListener('rpcRequest', (ev) => {
+        // An RPC right now = the user is inside the browser right now. The
+        // wallet's idle timer only sees its OWN webview's clicks, so without
+        // this an actively browsing user got auto-locked mid-dApp ("keluar
+        // sendiri", report 2026-10-16) and the next request met a locked wallet.
+        pingWalletActivity();
         handleNativeRpc(ev).catch((e) => {
           console.warn('[native-dapp]', e);
           // Every request MUST end in an answer. respond()/respondError() are
@@ -256,9 +357,31 @@ export function initNativeDappRpc() {
     .catch(() => false);
 }
 
+// "The user is in the browser right now", told to the wallet's auto-lock
+// timer (app.js noteActivity). Throttled, best-effort: the wallet bundle may
+// still be booting during the first requests, and a lost ping only means the
+// timer falls back to counting the wallet webview's own clicks (the old
+// behaviour — an actively browsing user, auto-locked mid-dApp).
+let lastActivityPing = 0;
+function pingWalletActivity() {
+  const now = Date.now();
+  if (now - lastActivityPing < 5000) return;
+  lastActivityPing = now;
+  import('./app.js').then((m) => m.noteActivity?.()).catch(() => { /* boot in flight */ });
+}
+
 /** Native toolbar/menu → wallet commands. */
 async function handleWalletCommand(ev) {
   const cmd = ev && ev.command;
+  if (cmd === 'activity') {
+    // Throttled touch pings from the native browser (Java dispatchTouchEvent):
+    // the user is physically in the dApp view, so the wallet's idle timer must
+    // count it — it only saw the wallet webview's clicks otherwise, and locked
+    // an actively browsing user mid-dApp. The ping only resets the timer; it
+    // cannot unlock, sign, or change state.
+    pingWalletActivity();
+    return;
+  }
   if (cmd === 'toggleBookmark') {
     // The ⋯ menu's star. The bookmark LIST is the wallet's, so a command with
     // no handler here would leave a button that silently does nothing.
@@ -278,6 +401,29 @@ async function handleWalletCommand(ev) {
     return;
   }
   if (cmd !== 'openNetworkPicker') return;
+  // A NATIVE pick sheet draws ABOVE the dApp (OKX-style): the wallet's
+  // Networks modal lives in the WALLET webview, which the dApp overlay covers
+  // — opening it meant the browser vanished and flashed back after ("ganti
+  // jaringan langsung keluar dari daaps setelah ganti langsung balik lagi di
+  // dalam daaps", report 2026-10-16). Native sheet first, wherever the plugin
+  // has pickNetwork(); the modal below stays for older builds and web.
+  if (plugin && typeof plugin.pickNetwork === 'function') {
+    try {
+      const activeId = get('networkId');
+      const rows = getAllNetworks().map((n) => ({
+        id: String(n.id),
+        label: String(n.name || n.symbol || n.id),
+        sub: String(n.symbol || n.type || ''),
+        active: String(n.id) === String(activeId) ? '1' : '',
+      }));
+      const picked = await plugin.pickNetwork({ title: t('net.sheet.title'), rows, cancelText: t('common.cancel') });
+      if (picked && picked.id) {
+        const { activateNetwork } = await import('./app.js');
+        activateNetwork(String(picked.id));
+      }
+      return;
+    } catch { /* no pick sheet on this build — fall through to the wallet modal */ }
+  }
   // The wallet's modal renders in the WALLET's webview, which the full-screen
   // dApp overlay covers — so hide the dapp around it (askUser here, plus the
   // ui.js modal hook) and restore it once the modal is dismissed.
@@ -352,14 +498,16 @@ async function askUser(fn) {
  * predates confirm(). Same rows contract as confirmTx.
  */
 
-async function askConfirm({ title, rows, confirmText, danger, tx }) {
+async function askConfirm({ title, rows, confirmText, danger, tx, headline, subhead }) {
   const p = plugin;
   if (p) {
     try {
       const safe = (rows || []).map((r) => ({ k: String(r.k), v: String(r.v) }));
       // `danger` rides along for builds whose native sheet understands it —
-      // older builds simply ignore the extra key.
-      const r = await p.confirm({ title, rows: safe, confirmText: confirmText || 'Confirm', danger: !!danger });
+      // older builds simply ignore the extra key. Same for headline/subhead:
+      // the big money line some sheets lead with (OKX parity), optional, and
+      // the rows below always carry the full record either way.
+      const r = await p.confirm({ title, rows: safe, confirmText: confirmText || 'Confirm', danger: !!danger, headline: headline || undefined, subhead: subhead || undefined });
       if (r && typeof r.ok === 'boolean') return r.ok;
     } catch { /* no native sheet on this build — fall through to the wallet modal */ }
   }
@@ -368,6 +516,8 @@ async function askConfirm({ title, rows, confirmText, danger, tx }) {
     rows,
     confirmText,
     ...(danger ? { danger: true } : {}),
+    ...(headline ? { headline } : {}),
+    ...(subhead ? { subhead } : {}),
     ...(tx ? { tx } : {}),
   }));
 }
@@ -414,37 +564,65 @@ async function handleNativeRpc({ id, origin, payload }) {
       : String(activeNet.chainId));
   }
 
-  const signer = get('signer');
+  const signer0 = get('signer');
   if (method === 'eth_accounts') {
-    return respond(connectedOrigins.has(site) && signer ? [signer.address] : []);
+    return respond(connectedOrigins.has(site) && signer0 ? [signer0.address] : []);
   }
+  // EIP-2255 permissions are the WALLET's own bookkeeping, answered from the
+  // same records the injected web path returns (dapp-bridge.js). They sit
+  // BEFORE the locked gate on purpose: asking what is granted must return []
+  // while nothing is, not an error — and revoking nothing is still a success.
+  if (method === 'wallet_getPermissions') {
+    return respond(connectedOrigins.has(site) && signer0 ? [permissionRecord(site, signer0.address)] : []);
+  }
+  if (method === 'wallet_revokePermissions') {
+    connectedOrigins.delete(site);
+    return respond(null);
+  }
+  // A LOCKED wallet HOLDS every request its unlock sheet can actually
+  // satisfy — the user is asked to unlock, and the request continues by
+  // itself (MetaMask parity). Refusing with 5100 trained people to tap,
+  // unlock, tap again ("pas mau konek gabisa", report 2026-10-16 — and the
+  // auto-lock used to fire mid-dApp because browser touches never reset its
+  // idle timer). Reads and chain queries still refuse instantly: a page
+  // polling while locked must not pin long promises — nor re-open the sheet
+  // the user is typing a password into.
+  let signer = signer0;
   if (!signer) {
-    requireUnlock();
-    return respondError(LOCKED);
+    if (!modalOpen) requireUnlock();
+    if (!HELD_WHILE_LOCKED.has(method)) return respondError(LOCKED);
+    signer = await waitForSigner(UNLOCK_WAIT_MS);
+    if (!signer) return respondError(LOCKED);
   }
 
   if (method === 'eth_requestAccounts') {
-    const ok = await askConfirm({
-      title: t('site.connectTitle', { site }),
-      // One row per capability, each saying what it MEANS, instead of a single
-      // CSV line. The old line read "accounts, sign, send transactions" — three
-      // different consequences sharing one visual weight, with the irreversible
-      // one (moving money) last and unremarked. It was also static text: it
-      // described what the wallet can do in general, not anything this site
-      // asked for, so it could not inform a decision however it was worded.
-      // This says what the site may ask, and names the one that cannot be undone.
-      rows: [
-        { k: t('site.site'), v: site },
-        { k: t('site.account'), v: shortAddr(signer.address) },
-        { k: t('site.canSee'), v: t('site.canSeeValue') },
-        { k: t('site.canSign'), v: t('site.canSignValue') },
-        { k: t('site.canSend'), v: t('site.canSendValue') },
-      ],
-      confirmText: t('site.connect'),
-    });
-    if (!ok) return respondError(USER_REJECTED);
-    connectedOrigins.add(site);
-    return respond([signer.address]);
+    // Already granted: MetaMask/OKX answer without a sheet — the consent is
+    // for the FIRST connect, not a toll booth on every reconnect. dApps
+    // re-ask on every load (and the E2E fixture does too, on purpose): a
+    // sheet nobody expects here read as "connect is broken" (report
+    // 2026-10-16 "pertama bisa konek pas mau konek gabisa").
+    if (connectedOrigins.has(site)) return respond([signer.address]);
+    const accounts = await connectConsent(site, signer.address);
+    if (!accounts) return respondError(USER_REJECTED);
+    return respond(accounts);
+  }
+
+  if (method === 'wallet_requestPermissions') {
+    // The MetaMask-flavored connector in wagmi/AppKit connects through THIS
+    // method, not eth_requestAccounts. The native path answered 4200 while
+    // the wallet sat right there — and the wallet's own web path has answered
+    // it since day one, so one site met two different Bear Tools. Only
+    // eth_accounts may be asked for; anything else is refused loudly.
+    const asked = (msg.params || [])[0];
+    const keys = asked && typeof asked === 'object' ? Object.keys(asked) : [];
+    if (!keys.length || keys.some((k) => k !== 'eth_accounts')) {
+      return respondError({ code: 4201, message: 'Bear Tool only supports the eth_accounts permission.' });
+    }
+    if (!connectedOrigins.has(site)) {
+      const accounts = await connectConsent(site, signer.address);
+      if (!accounts) return respondError(USER_REJECTED);
+    }
+    return respond([permissionRecord(site, signer.address)]);
   }
 
   // The consent this file's header advertises was enforced in exactly one place:
@@ -588,16 +766,42 @@ async function handleNativeRpc({ id, origin, payload }) {
     // describeSignCall: value in native units (not raw hex) and the calldata
     // itself (truncated, not just a byte count) — a user signing a swap must
     // see what the dApp is spending, not "0x2386f26fc10000" and "244 bytes".
+    // The money can also hide INSIDE the calldata: transfer/approve carry the
+    // amount as their second word while the value field stays empty, so the
+    // sheet used to lead with "0" for every ERC-20 move ("interaksi tx juga
+    // gitu ga lengkap", report 2026-10-16). The wallet's own token list turns
+    // raw units into "1.5 USDC"; an unknown token keeps its raw amount next
+    // to the contract it is calling. Display only — the signer signs bytes.
+    const tokenCall = decodeTokenCall(tx.data);
+    const tokenMeta = tokenCall && tx.to
+      ? (get('tokens') || []).find((x) => x && x.address && String(x.address).toLowerCase() === String(tx.to).toLowerCase())
+      : null;
+    const nativeValue = tx.value ? BigInt(tx.value) : 0n;
+    const tokenAmount = tokenCall
+      ? (tokenMeta && Number.isInteger(tokenMeta.decimals)
+          ? `${formatUnitsLean(tokenCall.amount, tokenMeta.decimals)}${tokenMeta.symbol ? ` ${tokenMeta.symbol}` : ''}`
+          : `${tokenCall.amount} · ${tx.to ? shortAddr(tx.to) : ''}`)
+      : null;
     const ok = await askConfirm({
       title: (worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') : '') + t('sign.txTitle'),
       danger: !!(worst && worst.level === 'fail'),
+      // The money line ON TOP and BIG — OKX draws the amount as the sheet's
+      // headline; ours used to be one 13sp row among seven ("ask tx dalam
+      // daaps masih ambigu", report 2026-10-16). An ERC-20 call leads with
+      // its decoded amount; everything else with the native value or the
+      // action. headline/subhead ride the native sheet AND the wallet-modal
+      // fallback; the rows below stay complete either way.
+      headline: nativeValue > 0n ? formatWeiNative(tx.value) : (tokenCall && tokenMeta ? tokenAmount : actionLabel(tx.data)),
+      subhead: `${actionLabel(tx.data)} → ${tokenCall?.to ? shortAddr(tokenCall.to) : (tx.to ? shortAddr(tx.to) : t('sign.contractCreation'))}`,
       rows: [
         { k: t('site.chain'), v: chainId },
         { k: t('site.site'), v: site },
         { k: t('site.to'), v: tx.to ? shortAddr(tx.to) : t('sign.contractCreation') },
         { k: t('site.value'), v: formatWeiNative(tx.value) },
+        ...(tokenCall ? [{ k: t('cf.amount'), v: tokenAmount }] : []),
         { k: t('site.data'), v: tx.data && tx.data !== '0x'
             ? String(tx.data).slice(0, 74) + (String(tx.data).length > 74 ? '…' : '')
+              + ` · ${Math.max(0, Math.round((String(tx.data).length - 2) / 2))} bytes`
             : t('cf.none.a.plain.transfer') },
         ...(findings.length ? [{ k: t('cf.flags'), v: findings.map((f) => `${f.level.toUpperCase()}: ${f.title}`).join(' · ') }] : []),
         ...(worst ? [{ k: t('cf.why'), v: worst.detail }] : []),

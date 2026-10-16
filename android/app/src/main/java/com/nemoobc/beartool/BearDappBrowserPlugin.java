@@ -135,6 +135,14 @@ public class BearDappBrowserPlugin extends Plugin {
     private android.widget.TextView confirmTitleView = null;
     private android.widget.LinearLayout confirmRowsBox = null;
     private PluginCall pendingConfirm = null;
+    // Native network pick sheet (toolbar network chip): the wallet's Networks
+    // modal lives in the wallet webview UNDER this overlay, so opening it
+    // meant hiding the browser ("ganti jaringan langsung keluar dari daaps",
+    // report 2026-10-16). This sheet draws over the dApp, like confirm does.
+    private android.view.View pickRoot = null;
+    private PluginCall pendingPick = null;
+    // Throttled "user is here" ping (see createView's dispatchTouchEvent).
+    private long lastActivityPingAt = 0;
     // The loaded URL, written on the MAIN thread (onPageStarted) and read by
     // Bridge.postMessage on the JavaBridge thread. WebView.getUrl() THROWS
     // off-thread — checkThread() — and postMessage's silent catch ate it:
@@ -293,6 +301,13 @@ public class BearDappBrowserPlugin extends Plugin {
 
     private void showNativeConfirm(PluginCall call, String title, JSArray rows, String confirmText, String cancelText) {
         final float density = getActivity().getResources().getDisplayMetrics().density;
+        // danger: fail-level findings make the OK button itself berry-red (JS
+        // has sent the flag since 2026-10-15; older semantics simply ignored).
+        final boolean danger = Boolean.TRUE.equals(call.getBoolean("danger", false));
+        // The money line (optional): OKX draws the amount as the sheet's
+        // headline; a 13sp row among seven was "ambigu" (report 2026-10-16).
+        final String headline = call.getString("headline", null);
+        final String subhead = call.getString("subhead", null);
         // A second prompt can only replace the first: resolve the old one as a
         // refusal, or the wallet JS would wait forever on a sheet that is gone.
         finishConfirm(false);
@@ -313,12 +328,49 @@ public class BearDappBrowserPlugin extends Plugin {
         int pad = (int) (18 * density);
         sheet.setPadding(pad, pad, pad, pad);
 
+        // Grab handle: this IS a bottom sheet, and it should look like one
+        // (every OKX sheet wears this bar). Drawn — never a glyph.
+        android.view.View grab = new android.view.View(getContext());
+        android.graphics.drawable.GradientDrawable gbg = new android.graphics.drawable.GradientDrawable();
+        gbg.setColor(0xFFDCD4C4);
+        gbg.setCornerRadius(2 * density);
+        grab.setBackground(gbg);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams((int) (40 * density), (int) (4 * density));
+        glp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+        glp.bottomMargin = (int) (12 * density);
+        sheet.addView(grab, glp);
+
         confirmTitleView = new android.widget.TextView(getContext());
         confirmTitleView.setText(title == null ? "" : title);
         confirmTitleView.setTextColor(INK);
         confirmTitleView.setTextSize(17);
         confirmTitleView.setPadding(0, 0, 0, (int) (12 * density));
         sheet.addView(confirmTitleView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // The headline: big, centered, above every row — the single number the
+        // sheet is about (OKX parity). Optional: connect/sign sheets have no
+        // single number and send none, so they render exactly as before.
+        if (headline != null && !headline.isEmpty()) {
+            android.widget.TextView head = new android.widget.TextView(getContext());
+            head.setText(headline);
+            head.setTextColor(INK);
+            head.setTextSize(26);
+            head.setGravity(android.view.Gravity.CENTER);
+            head.setTypeface(head.getTypeface(), android.graphics.Typeface.BOLD);
+            head.setPadding(0, 0, 0, (int) (2 * density));
+            head.setContentDescription("dapp-confirm-headline");
+            sheet.addView(head, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        if (subhead != null && !subhead.isEmpty()) {
+            android.widget.TextView sub = new android.widget.TextView(getContext());
+            sub.setText(subhead);
+            sub.setTextColor(SHEET_KEY);
+            sub.setTextSize(13);
+            sub.setGravity(android.view.Gravity.CENTER);
+            sub.setPadding(0, 0, 0, (int) (10 * density));
+            sub.setContentDescription("dapp-confirm-subhead");
+            sheet.addView(sub, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
 
         confirmRowsBox = new LinearLayout(getContext());
         confirmRowsBox.setOrientation(LinearLayout.VERTICAL);
@@ -359,6 +411,7 @@ public class BearDappBrowserPlugin extends Plugin {
         ok.setContentDescription("dapp-confirm-ok");
         android.graphics.drawable.GradientDrawable okBg = new android.graphics.drawable.GradientDrawable();
         okBg.setColor(ACCENT);
+        if (danger) okBg.setColor(BERRY);   // fail-level findings: the button itself says STOP
         okBg.setCornerRadius(12 * density);
         ok.setBackground(okBg);
         ok.setOnClickListener(v -> finishConfirm(true));
@@ -412,9 +465,21 @@ public class BearDappBrowserPlugin extends Plugin {
         vv.setText(v);
         vv.setTextColor(SHEET_VAL);
         vv.setTextSize(13);
-        vv.setGravity(android.view.Gravity.END);
-        vv.setSingleLine(true);
-        vv.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        // Long values WRAP (up to 3 lines, left-aligned). They used to be
+        // middle-truncated to one line — a permission row read
+        // "Transactions...not be undone", and the sheet was ambiguous about
+        // the one consequence that cannot be undone (report 2026-10-16 "ask
+        // ... masih ambigu"). Short values keep the tidy right-aligned line.
+        if (vv.length() > 28) {
+            vv.setGravity(android.view.Gravity.START);
+            vv.setSingleLine(false);
+            vv.setMaxLines(3);
+            vv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        } else {
+            vv.setGravity(android.view.Gravity.END);
+            vv.setSingleLine(true);
+            vv.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        }
 
         row.addView(kv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         row.addView(vv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -432,12 +497,192 @@ public class BearDappBrowserPlugin extends Plugin {
         }
         confirmTitleView = null;
         confirmRowsBox = null;
-        setBackgroundA11yInert(false);   // the modal is gone — the page is reachable again
+        if (pickRoot == null) setBackgroundA11yInert(false);   // the pick sheet may still be up
         if (c != null) {
             JSObject r = new JSObject();
             r.put("ok", ok);
             c.resolve(r);
         }
+    }
+
+    /**
+     * Toolbar network chip -> wallet: the NATIVE network picker. The wallet's
+     * Networks modal renders in the wallet WebView, which this full-screen
+     * overlay covers — opening it meant the browser vanished and flashed back
+     * after (user report 2026-10-16: "ganti jaringan langsung keluar dari
+     * daaps setelah ganti langsung balik lagi di dalam daaps"). This sheet
+     * draws ABOVE the dApp, OKX-style. Resolves {id}, or {cancelled:true}.
+     * Rows come from the wallet: [{id,label,sub,active}]; each row carries
+     * contentDescription "dapp-net-<id>" for a11y + the E2E driver.
+     */
+    @PluginMethod
+    public void pickNetwork(PluginCall call) {
+        final String title = call.getString("title", "Networks");
+        final String cancelText = call.getString("cancelText", "Cancel");
+        final JSArray rows = call.getArray("rows");
+        getActivity().runOnUiThread(() -> {
+            if (dappView == null) {   // no browser open: the wallet modal owns this choice
+                call.reject("no dapp view");
+                return;
+            }
+            showNativePicker(call, title, rows, cancelText);
+        });
+    }
+
+    private void showNativePicker(PluginCall call, String title, JSArray rows, String cancelText) {
+        final float density = getActivity().getResources().getDisplayMetrics().density;
+        finishPick(null);   // a second picker can only replace the first
+        android.widget.FrameLayout root = new android.widget.FrameLayout(getContext());
+        root.setBackgroundColor(0x99000000); // dim scrim — the dapp shows through
+        root.setOnClickListener(v -> finishPick(null)); // tap outside = cancel
+
+        LinearLayout sheet = new LinearLayout(getContext());
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setClickable(true);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(SHEET_BG);
+        float r = 18 * density;
+        bg.setCornerRadii(new float[]{ r, r, r, r, 0f, 0f, 0f, 0f });
+        bg.setStroke((int) (2 * density), INK);
+        sheet.setBackground(bg);
+        int pad = (int) (18 * density);
+        sheet.setPadding(pad, pad, pad, pad);
+
+        // Same grab handle the confirm sheet wears — one visual language.
+        android.view.View grab = new android.view.View(getContext());
+        android.graphics.drawable.GradientDrawable gbg = new android.graphics.drawable.GradientDrawable();
+        gbg.setColor(0xFFDCD4C4);
+        gbg.setCornerRadius(2 * density);
+        grab.setBackground(gbg);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams((int) (40 * density), (int) (4 * density));
+        glp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+        glp.bottomMargin = (int) (12 * density);
+        sheet.addView(grab, glp);
+
+        android.widget.TextView titleView = new android.widget.TextView(getContext());
+        titleView.setText(title == null ? "" : title);
+        titleView.setTextColor(INK);
+        titleView.setTextSize(17);
+        titleView.setPadding(0, 0, 0, (int) (10 * density));
+        sheet.addView(titleView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout list = new LinearLayout(getContext());
+        list.setOrientation(LinearLayout.VERTICAL);
+        int count = rows == null ? 0 : rows.length();
+        for (int i = 0; i < count; i++) {
+            org.json.JSONObject o = rows.optJSONObject(i);
+            if (o == null) continue;
+            addPickRow(list, o.optString("id", ""), o.optString("label", ""), o.optString("sub", ""), o.optString("active", ""), density);
+        }
+        android.widget.ScrollView scroller = new android.widget.ScrollView(getContext());
+        scroller.addView(list, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        int rowH = (int) (52 * density);
+        int maxH = (int) (getActivity().getResources().getDisplayMetrics().heightPixels * 0.55f);
+        int listH = Math.min(maxH, Math.max(rowH, count * rowH));
+        sheet.addView(scroller, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, listH));
+
+        android.widget.TextView cancel = new android.widget.TextView(getContext());
+        cancel.setText(cancelText == null ? "Cancel" : cancelText);
+        cancel.setTextColor(SHEET_VAL);
+        cancel.setTextSize(15);
+        cancel.setGravity(android.view.Gravity.CENTER);
+        cancel.setPadding(0, (int) (12 * density), 0, (int) (12 * density));
+        cancel.setContentDescription("dapp-pick-cancel");
+        cancel.setOnClickListener(v -> finishPick(null));
+        sheet.addView(cancel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        root.addView(sheet, new android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM));
+
+        pickRoot = root;
+        pendingPick = call;
+        if (parent != null) {
+            parent.addView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            root.bringToFront();
+            setBackgroundA11yInert(true);
+        } else {
+            finishPick(null);   // nowhere to draw: refuse rather than hang
+        }
+    }
+
+    private void addPickRow(LinearLayout box, String id, String label, String sub, String active, float density) {
+        LinearLayout row = new LinearLayout(getContext());
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(0, (int) (10 * density), 0, (int) (10 * density));
+        row.setContentDescription("dapp-net-" + id);
+        row.setClickable(true);
+        row.setOnClickListener(v -> finishPick(id));
+
+        android.widget.TextView name = new android.widget.TextView(getContext());
+        name.setText(label == null ? "" : label);
+        name.setTextColor(INK);
+        name.setTextSize(15);
+
+        android.widget.TextView symbol = new android.widget.TextView(getContext());
+        symbol.setText(sub == null ? "" : sub);
+        symbol.setTextColor(SHEET_KEY);
+        symbol.setTextSize(12);
+        symbol.setPadding((int) (10 * density), 0, (int) (10 * density), 0);
+
+        // The active row wears a drawn dot (honey fill, ink ring), never a
+        // glyph — the chrome never borrows a device font.
+        android.view.View mark = new android.view.View(getContext());
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams((int) (12 * density), (int) (12 * density));
+        mlp.gravity = android.view.Gravity.CENTER_VERTICAL;
+        if (active != null && !active.isEmpty()) {
+            android.graphics.drawable.GradientDrawable dot = new android.graphics.drawable.GradientDrawable();
+            dot.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            dot.setColor(ACCENT);
+            dot.setStroke((int) (2 * density), INK);
+            mark.setBackground(dot);
+        }
+
+        row.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(symbol, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.addView(mark, mlp);
+        box.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // E2E rect fallback: report where the app drew this row — the platform
+        // dumper can die mid-walk on WebView-heavy trees, and this sheet is
+        // small enough that the driver may have to press what it verified.
+        row.post(() -> {
+            try {
+                int[] loc = new int[2];
+                row.getLocationOnScreen(loc);
+                android.util.Log.i("BearToolE2E", "dapp-net-rect-" + id + " "
+                    + loc[0] + "," + loc[1] + "," + row.getWidth() + "," + row.getHeight());
+            } catch (Exception ignored) { /* never break the sheet for a log */ }
+        });
+    }
+
+    /** Resolve + tear down the picker. Safe to call when nothing is pending. */
+    private void finishPick(String id) {
+        PluginCall c = pendingPick;
+        pendingPick = null;
+        if (pickRoot != null) {
+            ViewGroup pp = (ViewGroup) pickRoot.getParent();
+            if (pp != null) pp.removeView(pickRoot);
+            pickRoot = null;
+        }
+        if (confirmRoot == null) setBackgroundA11yInert(false);   // the confirm sheet may still be up
+        if (c != null) {
+            JSObject r = new JSObject();
+            if (id != null) r.put("id", id);
+            else r.put("cancelled", true);
+            c.resolve(r);
+        }
+    }
+
+    /** Throttled "the user is here" ping (wallet JS resets its auto-lock timer). */
+    private void notifyBrowserActivity() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastActivityPingAt < 15000) return;
+        lastActivityPingAt = now;
+        try {
+            JSObject ev = new JSObject();
+            ev.put("command", "activity");
+            notifyListeners("walletCommand", ev);
+        } catch (Exception e) { /* the wallet side is gone — nothing to reset */ }
     }
 
     // A consent sheet is a MODAL: the page behind it stops being touchable
@@ -472,7 +717,20 @@ public class BearDappBrowserPlugin extends Plugin {
     private void createView() {
         final float density = getActivity().getResources().getDisplayMetrics().density;
         parent = (ViewGroup) getBridge().getWebView().getParent();
-        stack = new android.widget.FrameLayout(getContext());
+        stack = new android.widget.FrameLayout(getContext()) {
+            // Every touch inside the browser (page, toolbar, tab panel) is the
+            // user actively USING the wallet — and the wallet webview's idle
+            // timer cannot see any of it, because the dApp is a SEPARATE
+            // native view. It auto-locked mid-browsing, and the next connect
+            // or sign met a locked wallet ("keluar sendiri", report
+            // 2026-10-16). Forward a throttled ping; the wallet resets its
+            // auto-lock timer on it.
+            @Override
+            public boolean dispatchTouchEvent(android.view.MotionEvent ev) {
+                if (ev != null && ev.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) notifyBrowserActivity();
+                return super.dispatchTouchEvent(ev);
+            }
+        };
         stack.setBackgroundColor(PAGE_BG); // opaque: the wallet never shows through the page band
         if (parent != null) {
             parent.addView(stack, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -1231,6 +1489,7 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
 
     private void hideDappView() {
         finishConfirm(false);   // a pending consent dies with the browser — never hang the wallet JS
+        finishPick(null);       // and so does a pending network pick
         closeDappMenu();
         closeTabPanel();
         if (stack != null) stack.setVisibility(View.GONE);
@@ -1440,6 +1699,7 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
     protected void handleOnDestroy() {
         getActivity().runOnUiThread(() -> {
             finishConfirm(false);   // destroy must not leave a wallet-side promise hanging
+            finishPick(null);       // and neither does a pending network pick
             for (Tab t : tabs) {
                 if (t.view != null) {
                     t.view.destroy();

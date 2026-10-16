@@ -817,7 +817,7 @@ async function main() {
     const log = String(text);
     const providerSeen = /hasProvider=true/.test(log) || /providerLate=\d+/.test(log);
     if (!providerSeen) throw new Error(`fixture never saw a provider at all:\n${log}`);
-    for (const key of ['chainId=0x', 'account0=0x', 'accountsAgain=0x', 'done=ok']) {
+    for (const key of ['chainId=0x', 'account0=0x', 'accountsAgain=0x', 'reconnect=0x', 'perms=eth_accounts', 'reqPerms=eth_accounts', 'done=ok']) {
       if (!log.includes(key)) throw new Error(`fixture log missing ${key}:\n${log}`);
     }
     // The account the fixture received must be the account the native sheet
@@ -995,9 +995,11 @@ async function main() {
     await shotScreen('13-back-to-wallet');
 
     // ── tabs: open / switch / close on a multi-WebView toolbar ─────────────
-    // The back loop hid the browser; reopen and approve the fresh connect
-    // prompt (eth_requestAccounts always asks) so the tab + network checks run
-    // against an open, connected dApp.
+    // The back loop hid the browser; reopen and let the fixture chain run.
+    // eth_requestAccounts on an ALREADY granted origin answers WITHOUT a
+    // sheet (consent-once, MetaMask/OKX parity) — the driver taps NOTHING
+    // here on purpose: if a sheet appeared, the chain would stall and this
+    // step would fail, which is exactly the proof the fast-path works.
     step('dapp browser: reopen for the tabs + network matrix');
     await page.evaluate(`window.__bearE2EOpenDapp('http://10.0.2.2:8080/dapp-rpc-fixture.html')`)
       .catch((e) => { throw new Error('reopen fixture for tabs failed: ' + e.message); });
@@ -1016,10 +1018,14 @@ async function main() {
     if (!String(report.dapp.tabsReopen).includes('dapp-rpc-fixture')) {
       throw new Error('fixture never reopened for the tabs test: ' + String(report.dapp.tabsReopen));
     }
-    if (!(await waitNativeButton('dapp-confirm-ok', 25))) throw new Error('reopen connect sheet never appeared');
-    if (!(await tapNativeButton('dapp-confirm-ok')) && !tapReportedRect('confirm-ok-rect')) throw new Error('reopen connect confirm did not tap');
     text = await pollOut(/done=/, 60000);
     if (!String(text).includes('done=ok')) throw new Error('reopened fixture never finished:\n' + text);
+    // Consent-once, on the SECOND visit to the same origin: it asked again
+    // and was answered with zero taps — reconnect/perms/reqPerms recorded by
+    // the fixture itself.
+    for (const key of ['reconnect=0x', 'perms=eth_accounts', 'reqPerms=eth_accounts']) {
+      if (!String(text).includes(key)) throw new Error(`reopen fixture missing ${key} (consent-once broken?):\n` + text);
+    }
 
     step('dapp browser: tabs — a new tab owns its own WebView');
     if (!(await tapNativeButton('dapp-tabs'))) throw new Error('dapp-tabs chip did not tap');
@@ -1054,19 +1060,23 @@ async function main() {
     report.dapp.tabsAfterClose = urls;
     if (!gone) throw new Error('closing the tab did not release its WebView: ' + JSON.stringify(urls));
 
-    // ── change network: ◆ → wallet picker → chainChanged into the dApp ─────
-    step('dapp browser: ◆ opens the wallet network picker and pushes chainChanged to the dApp');
+    // ── change network: toolbar chip → NATIVE pick sheet → chainChanged ────
+    step('dapp browser: the network chip opens the NATIVE pick sheet and pushes chainChanged to the dApp');
     if (!(await tapNativeButton('dapp-network'))) throw new Error('dapp-network chip did not tap');
-    // The wallet's Networks modal renders in the WALLET webview (the dApp is
-    // flashed away while it is open) — its search field is the marker.
-    await page.wait('#netSearchInput', 15000);
-    report.dapp.netModal = true;
+    // The pick sheet is drawn by the PLUGIN, above the dApp (OKX parity) —
+    // the wallet never flashes and the page never leaves the screen (user
+    // report 2026-10-16: "ganti jaringan langsung keluar dari daaps"). Each
+    // row carries contentDescription "dapp-net-<id>"; the reported rect is
+    // the driver's fallback when the platform dumper dies on WebView trees.
+    if (!(await waitNativeButton('dapp-net-polygon', 25))) {
+      throw new Error('native network picker never showed the polygon row');
+    }
+    report.dapp.netPicker = 'native';
     await shotScreen('15-network-picker');
     // A DIFFERENT known mainnet (Polygon) — a real switch, never a no-op.
-    const clicked = await page.evaluate(
-      `(function () { var el = document.querySelector('[data-net="polygon"]'); if (el) el.click(); return !!el; })()`
-    ).catch(() => false);
-    if (!clicked) throw new Error('polygon row not found in the network modal');
+    if (!(await tapNativeButton('dapp-net-polygon')) && !tapReportedRect('dapp-net-rect-polygon')) {
+      throw new Error('polygon row in the native pick sheet did not tap');
+    }
     await sleep(3000);
     report.dapp.netAfter = await page.evaluate(`window.localStorage.getItem('bear.networkId')`).catch(() => '');
     if (String(report.dapp.netAfter) !== 'polygon') {

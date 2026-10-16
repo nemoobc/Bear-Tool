@@ -14,7 +14,7 @@
 import { t } from '../i18n.js';
 import { get, set, on, off } from '../state.js';
 import { getNetworkById } from '../network.js';
-import { $, toast, escapeHtml, confirmTx, setBtnDots, openModal } from '../ui.js';
+import { $, toast, escapeHtml, confirmTx, setBtnDots, openModal, closeModal } from '../ui.js';
 import { withTimeout, waitForReceipt, receiptVerdict } from '../safetx.js';
 
 export const DEX_NETWORK_ID = 'sepolia';
@@ -199,4 +199,4 @@ export function openEdu(topic) {
 
 // Re-exported so a feature module imports one place for the helpers it shares
 // with the view, rather than reaching into state.js / ui.js on its own.
-export { t, get, set, on, off, $, toast, escapeHtml, confirmTx, setBtnDots };
+export { t, get, set, on, off, $, toast, escapeHtml, confirmTx, setBtnDots, openModal, closeModal };

@@ -494,7 +494,7 @@ export async function totalPriceRow({ tx, valueWei, gasWei, spendUsd, totalNote 
 //
 // Danger is still expressed - the bear's question is prefixed, the button turns
 // red, and the rows say what is about to happen. What is gone is the puzzle.
-export async function confirmTx({ title, rows, confirmText = 'Confirm', cancelText = 'Cancel', danger = false, ...money }) {
+export async function confirmTx({ title, rows, confirmText = 'Confirm', cancelText = 'Cancel', danger = false, headline = null, subhead = null, ...money }) {
   // The money row is built BEFORE the modal opens — a row appearing later
   // would push the buttons out from under the cursor. Extra keys (tx,
   // valueWei, gasWei, spendUsd, totalNote) go to totalPriceRow; a confirm
@@ -509,7 +509,7 @@ export async function confirmTx({ title, rows, confirmText = 'Confirm', cancelTe
     // caller's answer survives even if the UI is torn down underneath it.
     let done = false;
     const resolveOnce = (v) => { if (!done) { done = true; resolve(v); } };
-    modalQueue.push(() => openConfirmNow({ title, list, confirmText, cancelText, danger, resolve: resolveOnce }));
+    modalQueue.push(() => openConfirmNow({ title, list, confirmText, cancelText, danger, headline, subhead, resolve: resolveOnce }));
     drainModalQueue();
   });
 }
@@ -523,7 +523,7 @@ function drainModalQueue() {
   next();
 }
 
-function openConfirmNow({ title, list, confirmText, cancelText, danger, resolve }) {
+function openConfirmNow({ title, list, confirmText, cancelText, danger, headline, subhead, resolve }) {
   {
     const rowsHtml = list.map(r =>
       `<div class="row"><span class="k">${escapeHtml(r.k)}</span><span class="v">${escapeHtml(r.v)}</span></div>`
@@ -533,6 +533,8 @@ function openConfirmNow({ title, list, confirmText, cancelText, danger, resolve 
       <div class="tx-confirm">
         <img src="assets/bear.svg" alt="Bear asks">
         <div class="question">${danger ? '⚠️ ' : ''}${escapeHtml(title)}</div>
+        ${headline ? `<div class="tx-headline">${escapeHtml(headline)}</div>` : ''}
+        ${subhead ? `<div class="tx-subhead">${escapeHtml(subhead)}</div>` : ''}
         <div class="tx-detail">${rowsHtml}</div>
         <div>
           <button class="btn btn-ghost btn-block" id="confirmNo">${escapeHtml(cancelText)}</button>

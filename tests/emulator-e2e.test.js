@@ -244,9 +244,17 @@ test('the confirm button has a tap fallback when the platform dumper is dead', (
   const fn = driverSrc.slice(driverSrc.indexOf('function tapReportedRect'), driverSrc.indexOf('function tapReportedRect') + 700);
   assert.match(fn, /input', 'tap'/, 'fallback menekan lewat `input tap` asli, bukan evaluate JS');
   // The fallback must sit BEHIND the label attempt at every confirm tap.
+  // Three confirm sheets are tapped (connect / sign / typed-data): the reopen
+  // step is deliberately tap-free — consent-once means a connected origin
+  // reopens with no sheet to press (F3 fast-path), so there is no fourth
+  // confirm tap to fall back for.
   const confirmTaps = driverSrc.match(/!tapReportedRect\('confirm-ok-rect'\)/g) || [];
-  assert.ok(confirmTaps.length >= 4,
-    'tiap tap confirm (connect / sign / typed-data / reopen) punya fallback rect');
+  assert.ok(confirmTaps.length >= 3,
+    'tiap tap confirm (connect / sign / typed-data) punya fallback rect — reopen sengaja tanpa tap');
+  // The native network-picker row is the fourth real native tap and carries
+  // the same fallback: the app reports the row's real rect, driver presses it.
+  assert.match(driverSrc, /!tapReportedRect\('dapp-net-rect-polygon'\)/,
+    'tap baris picker native (polygon) juga punya fallback rect');
 });
 
 test('the wallet can walk back into a hidden browser through its own Tabs door', () => {

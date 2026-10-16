@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { tradesToCandles, PRICE_SCALE, LWC_SRI, LWC_VERSION, LWC_URL, chartEngine, barsSvg, paintBars } from '../js/dex/chart.js';
+import { tradesToCandles, PRICE_SCALE, LWC_SRI, LWC_VERSION, LWC_URL, chartEngine, barsSvg, paintBars, renderableCandles } from '../js/dex/chart.js';
 
 const S = (n) => n * PRICE_SCALE; // helper: human price -> scaled
 const trade = (price, vol = 1n, block = 1) => ({ price: S(price), volQuote: vol, block });
@@ -132,7 +132,27 @@ test('paintBars fills the host, respects its width, and returns a teardown', () 
 
 test('drawCandles falls back to the bars — the old null path is gone', () => {
   const src = readFileSync(new URL('../js/dex/chart.js', import.meta.url), 'utf8');
-  assert.match(src, /if \(!LWC\) return paintBars\(host, candles, opts\)/,
+  assert.match(src, /if \(!LWC\) return paintBars\(host, series, opts\)/,
     'a missing library must paint bars, not return null — null left an empty box');
   assert.ok(!/if \(!LWC\) return null/.test(src), 'the dead null fallback must stay dead');
+});
+
+test('a flat candle is lifted so the library can draw it — the data is not', () => {
+  // "chard candle yang lilin ga kelihatan" (report 2026-10-16): a sparse pool
+  // buckets one trade per candle, so every candle is flat (open = high = low =
+  // close) — and the library paints NOTHING for a flat candle. The renderer
+  // gets a sub-pixel lift; the trades stay exactly as read.
+  const candles = [
+    { time: 1, open: 5, high: 5, low: 5, close: 5, volume: 1 },
+    { time: 2, open: 4, high: 6, low: 3, close: 5, volume: 1 },
+  ];
+  const out = renderableCandles(candles);
+  assert.ok(out[0].high > out[0].low, 'flat candle gets a drawable range');
+  assert.equal((out[0].high + out[0].low) / 2, 5, 'the lift keeps the price midpoint');
+  assert.ok(out[0].high - out[0].low < 1, 'lift stays sub-pixel: a fraction of the visible range');
+  assert.equal(out[0].open, 5, 'open/close untouched');
+  assert.deepEqual(out[1], candles[1], 'non-flat candles pass through untouched');
+  assert.deepEqual(renderableCandles([]), [], 'no candles, no lift');
+  const all = renderableCandles([{ time: 1, open: 7, high: 7, low: 7, close: 7, volume: 1 }]);
+  assert.ok(all[0].high > all[0].low, 'an all-flat series still gets a range to scale');
 });

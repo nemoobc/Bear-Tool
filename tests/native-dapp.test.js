@@ -80,7 +80,11 @@ test('provider announces itself via EIP-6963 and answers requestProvider', () =>
   assert.equal(detail.info.name, 'Bear Tool');
   assert.equal(detail.info.rdns, 'com.nemoobc.beartool', 'rdns must be a valid reverse-DNS id');
   assert.match(detail.info.uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, 'uuid v4 shape');
-  assert.match(detail.info.icon, /^data:image\//, 'icon must be a data URI');
+  assert.match(detail.info.icon, /^data:image\/svg\+xml;base64,/, 'icon must be a base64 data URI — a raw <svg> URI carries quotes/brackets and renders as a broken image wherever the string meets HTML attribute quoting (Etherscan wallet list, 2026-10-16)');
+  const svg = Buffer.from(detail.info.icon.split(',')[1], 'base64').toString('utf8');
+  assert.match(svg, /^<svg[^>]*width="64"[^>]*height="64"/, 'decoded icon declares its size — renderers get a definite box, never a 0x0 auto-size');
+  assert.match(svg, /<circle/, 'decoded icon carries the bear mark, not an empty blob');
+  assert.doesNotMatch(detail.info.icon.slice('data:image/svg+xml;base64,'.length), /[<>"]/, 'URI body is base64 alphabet only — no markup characters can leak into any renderer');
   sandbox.fire('eip6963:requestProvider');
   assert.equal(dispatched.filter((e) => e.type === 'eip6963:announceProvider').length, 2, 're-announce on requestProvider');
 });

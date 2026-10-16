@@ -695,3 +695,21 @@ test('a chart that cannot draw says so in words, not in node errors (R17)', () =
   const i18n = read('../js/i18n.js');
   assert.equal((i18n.match(/'dex\.chart\.fail':/g) || []).length, 2, 'the key must exist in both languages');
 });
+
+test('the Pools tab can add a pair and delete a row — honestly', () => {
+  const poolsSrc = read('../js/dex/pool-list.js');
+  // "harunya list pool, add pool (bisa pilih pair), delete pool" (report
+  // 2026-10-16): createPool rides the same approve→tx spine as every trade.
+  assert.match(poolsSrc, /export async function createPoolTx/);
+  assert.match(poolsSrc, /c\.createPool\(token, quote, tSeed, qSeed\)/);
+  assert.match(poolsSrc, /ensureAllowanceTx\(\{ token, spender: f, amount: tSeed, owner: s\.address, signer: s \}\)/);
+  assert.match(poolsSrc, /ensureAllowanceTx\(\{ token: quote, spender: f, amount: qSeed, owner: s\.address, signer: s \}\)/);
+  assert.match(poolsSrc, /parsed\.name === 'PoolCreated'/);
+  // delete = a local tombstone, re-applied on every render (the pool still
+  // lives on chain — discovery finds it again).
+  assert.match(poolsSrc, /bear\.dex\.deletedPools/);
+  assert.match(poolsSrc, /export function isPoolDeleted\(pair\)/);
+  assert.match(poolsSrc, /filter\(\(r\) => !isPoolDeleted\(r\.pair\)\)/);
+  assert.match(poolsSrc, /data-dex-pool-del/);
+  assert.match(poolsSrc, /dex\.addpool\.cta/);
+});

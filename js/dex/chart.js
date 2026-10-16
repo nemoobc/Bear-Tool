@@ -271,6 +271,31 @@ export function paintBars(host, candles, opts = {}) {
 }
 
 /**
+ * Candles as the RENDERER needs them, not as the data is: a flat bucket
+ * (open = high = low = close — every bucket of a sparse pool, one trade each)
+ * has no body and no wick to draw, and the library paints NOTHING for it, so
+ * a young pool's chart looked empty ("chard candle yang lilin ga kelihatan",
+ * report 2026-10-16). Each flat candle gets a sub-pixel lift sized from the
+ * visible range, so it renders as the same 1px line the SVG fallback already
+ * draws (Math.max(1, …)) — the trades themselves are untouched and every
+ * axis label still formats the pool's own numbers.
+ */
+export function renderableCandles(candles) {
+  if (!Array.isArray(candles) || !candles.length) return Array.isArray(candles) ? candles : [];
+  let hi = -Infinity;
+  let lo = Infinity;
+  for (const c of candles) {
+    if (Number.isFinite(c.high)) hi = Math.max(hi, c.high);
+    if (Number.isFinite(c.low)) lo = Math.min(lo, c.low);
+  }
+  const span = hi - lo;
+  const eps = span > 0 ? span * 0.005 : (Math.abs(hi) * 0.01 || 1);
+  return candles.map((c) => (c.high === c.low
+    ? { ...c, high: c.high + eps / 2, low: c.low - eps / 2 }
+    : c));
+}
+
+/**
  * Draw candles into `host`. Returns a teardown function.
  *
  * Falls back to the hand-rolled SVG bars (barsSvg) when the library is
@@ -280,12 +305,15 @@ export function paintBars(host, candles, opts = {}) {
 export async function drawCandles(host, candles, opts = {}) {
   const win = opts.win || globalThis;
   const LWC = await loadChartEngine(opts.document || globalThis.document, win);
+  // Flat candles are lifted once here so BOTH renderers draw the same series
+  // (see renderableCandles) — the library otherwise paints nothing for them.
+  const series = renderableCandles(candles);
   // Only a missing library falls back to bars, and the fallback keeps the same
   // promise: an EMPTY data set still gets a real chart — a framed grid that
   // says "no trades yet" — because a blank box read as "the chart is broken"
   // (user: "chart ga keliatan"), whereas an empty chart clearly says "no
   // trades yet" while still being a chart.
-  if (!LWC) return paintBars(host, candles, opts);
+  if (!LWC) return paintBars(host, series, opts);
 
   // Two themes, one palette per theme in ONE place — the PALETTES map above,
   // shared with the bars fallback so a colour can never be fixed in one
@@ -322,7 +350,7 @@ export async function drawCandles(host, candles, opts = {}) {
     wickUpColor: theme.up,
     wickDownColor: theme.down,
   });
-  candleSeries.setData(candles.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
+  candleSeries.setData(series.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
 
   if (opts.volume !== false) {
     const volSeries = chart.addSeries(LWC.HistogramSeries, {

@@ -234,11 +234,14 @@ async function ensureKit() {
         });
       });
       w.on('session_delete', (args) => {
+        const topicId = args && args.topic;
+        // History first: the entry stays visible after the session is gone —
+        // that record IS the history ("harusnya ada historynya", 2026-10-16).
+        wcHistoryEnd(topicId);
         // Topics WE disconnected during re-approve cleanup are not the dApp
         // closing anything — no toast for those.
-        const topicId = args && args.topic;
         if (topicId && silentDeleteTopics.delete(topicId)) return;
-        toast('WalletConnect session closed by the dApp.', 'info');
+        toast(t('wc.sessionClosed'), 'info');
       });
       kit = w;
       if (wcDebugEnabled()) {
@@ -328,7 +331,7 @@ async function handleProposal({ id, params }) {
         .filter((s) => String(s?.peer?.metadata?.url || '').toLowerCase().replace(/\/+$/, '') === dappUrlNorm)
         .map((s) => s.topic)
     : [];
-  await kit.approveSession({
+  const session = await kit.approveSession({
     id,
     namespaces: {
       eip155: {
@@ -346,7 +349,8 @@ async function handleProposal({ id, params }) {
       reason: { code: 6000, message: 'Replaced by a new session for this dApp.' },
     }).catch(() => { silentDeleteTopics.delete(topic); });
   }
-  toast('Connected to ' + dappName + '.', 'info');
+  if (session && session.topic) wcHistoryAdd({ topic: session.topic, name: dappName, url: dappUrl });
+  toast(t('wc.connected', { name: dappName }), 'info');
 }
 
 async function handleRequest({ id, topic, params }) {
@@ -689,30 +693,88 @@ export async function disconnectWcOrigin(origin) {
   if (!s) return false;
   try {
     await kit.disconnectSession({ topic: s.topic, reason: { code: 6000, message: 'User disconnected.' } });
+    wcHistoryEnd(s.topic);
     return true;
   } catch { return false; }
+}
+
+// ── connection history ───────────────────────────────────────────
+// The sheet lists ACTIVE sessions from the kit; a session that is closed
+// leaves nothing behind, so the user could not see what had ever been
+// connected ("harusnya ada historynya nanti bisa disconnect", report
+// 2026-10-16). This store is local-only, capped, and display-only —
+// disconnecting is still driven by the live session list above it. Entries
+// are recorded at approve time and stamped ended whenever a session closes,
+// from any path (sheet button, dApp-side close, origin disconnect).
+const WC_HISTORY_KEY = 'bear.wc.history';
+const WC_HISTORY_MAX = 20;
+
+function wcHistory() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(WC_HISTORY_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter((x) => x && typeof x === 'object') : [];
+  } catch { return []; }
+}
+
+function wcHistorySave(list) {
+  try { localStorage.setItem(WC_HISTORY_KEY, JSON.stringify(list.slice(0, WC_HISTORY_MAX))); } catch { /* private mode */ }
+}
+
+function wcHistoryAdd({ topic, name, url }) {
+  if (!topic) return;
+  const list = wcHistory().filter((x) => x.topic !== topic);
+  list.unshift({ topic: String(topic), name: String(name || ''), url: String(url || ''), at: Date.now() });
+  wcHistorySave(list);
+}
+
+function wcHistoryEnd(topic) {
+  const key = String(topic || '');
+  if (!key) return;
+  const list = wcHistory();
+  const hit = list.find((x) => x.topic === key);
+  if (!hit || hit.endedAt) return;
+  hit.endedAt = Date.now();
+  wcHistorySave(list);
 }
 
 function renderSessions(root) {
   if (!kit) return;
   const sessions = Object.values((kit.getActiveSessions && kit.getActiveSessions()) || {});
-  if (!sessions.length) {
-    root.innerHTML = `<p class="small dim">${escapeHtml(t('wc.noSessions'))}</p>`;
-    return;
-  }
-  root.innerHTML = sessions.map((s) => `
-    <div class="row wc-session" data-topic="${escapeHtml(s.topic)}">
-      <span class="k">${escapeHtml((s.peer && s.peer.metadata && s.peer.metadata.name) || 'dApp')}</span>
-      <button class="btn btn-sm btn-ghost" type="button" data-wc-disconnect="${escapeHtml(s.topic)}">Disconnect</button>
+  const activeTopics = new Set(sessions.map((s) => s.topic));
+  // Live sessions come from the kit; everything already closed comes from the
+  // local history — a stored entry that is somehow still active stays in the
+  // live list only, so no row ever appears twice.
+  const past = wcHistory().filter((x) => x.topic && !activeTopics.has(x.topic));
+  const shortUrl = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/+$/, '').slice(0, 48);
+  const when = (ms) => { try { return new Date(Number(ms) || 0).toLocaleString(); } catch { return ''; } };
+  const liveRows = sessions.map((s) => `
+    <div class="wc-session" data-topic="${escapeHtml(s.topic)}">
+      <div class="wc-session-main">
+        <div class="wc-session-name">${escapeHtml((s.peer && s.peer.metadata && s.peer.metadata.name) || t('wc.dapp'))}</div>
+        <div class="wc-session-meta">${escapeHtml(shortUrl(s.peer && s.peer.metadata && s.peer.metadata.url))}</div>
+      </div>
+      <button class="btn btn-sm btn-ghost" type="button" data-wc-disconnect="${escapeHtml(s.topic)}">${escapeHtml(t('wc.disconnect'))}</button>
     </div>`).join('');
+  const pastRows = past.map((x) => `
+    <div class="wc-session wc-session-past">
+      <div class="wc-session-main">
+        <div class="wc-session-name">${escapeHtml(x.name || t('wc.dapp'))}</div>
+        <div class="wc-session-meta">${escapeHtml(shortUrl(x.url))} · ${escapeHtml(when(x.endedAt || x.at))}</div>
+      </div>
+    </div>`).join('');
+  root.innerHTML = `
+    <div class="wc-sessions-head">${escapeHtml(t('wc.active'))}${sessions.length ? ` · ${sessions.length}` : ''}</div>
+    ${sessions.length ? liveRows : `<p class="small dim">${escapeHtml(t('wc.noSessions'))}</p>`}
+    ${past.length ? `<div class="wc-sessions-head">${escapeHtml(t('wc.history'))}</div>${pastRows}` : ''}`;
   root.querySelectorAll('[data-wc-disconnect]').forEach((b) => {
     b.onclick = async () => {
       try {
         await kit.disconnectSession({ topic: b.dataset.wcDisconnect, reason: { code: 6000, message: 'User disconnected.' } });
-        toast('Disconnected.', 'info');
+        wcHistoryEnd(b.dataset.wcDisconnect);
+        toast(t('wc.disconnected'), 'info');
         renderSessions(root);
       } catch (e) {
-        toast('Disconnect failed: ' + e.message, 'error');
+        toast(t('wc.disconnectFailed') + ' ' + ((e && e.message) || e), 'error');
       }
     };
   });

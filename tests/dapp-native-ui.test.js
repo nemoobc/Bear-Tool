@@ -34,8 +34,8 @@ test('the five consent prompts prefer the NATIVE sheet and keep the wallet-modal
     'kelima konfirmasi native (connect/sign/typed/send/add-chain) wajib lewat askConfirm — sheet native di ATAS dApp, dApp tidak boleh hilang');
   assert.equal((code.match(/await confirmTx\(\{/g) || []).length, 0,
     'confirmTx telanjang = prompt digambar di bawah dapp view: tak terlihat, tak bisa diklik, RPC hang selamanya');
-  assert.match(code, /async function askConfirm\(\{ title, rows, confirmText, danger, tx \}\)/,
-    'helper ada: sheet native dulu, modal wallet tinggal fallback (S1: danger + tx ikut lewat helper)');
+  assert.match(code, /async function askConfirm\(\{ title, rows, confirmText, danger, tx, headline, subhead \}\)/,
+    'helper ada: sheet native dulu, modal wallet tinggal fallback (S1: danger + tx + headline/subhead ikut lewat helper)');
   assert.match(code, /await p\.confirm\(\{ title, rows: safe, confirmText/,
     'sheet native dipanggil lewat plugin.confirm (Java menggambar di atas overlay)');
   assert.match(code, /danger: !!danger/,
@@ -743,10 +743,10 @@ test('the E2E driver really exercises tabs and the network picker', () => {
   assert.match(driver, /tapNativeButton\('dapp-tab-close-1'\)/, 'menutup tab lewat tombol native asli');
   assert.match(driver, /report\.dapp\.tabs\.hasFixture && report\.dapp\.tabs\.hasExample/,
     'dua target (fixture + example) = bukti multi-WebView, bukan cuma klaim');
-  // Network: chip → wallet picker → a real switch → chainChanged in the page.
+  // Network: chip → NATIVE pick sheet → a real switch → chainChanged in the page.
   assert.match(driver, /tapNativeButton\('dapp-network'\)/, 'chip network di-tap sungguhan');
-  assert.match(driver, /await page\.wait\('#netSearchInput', 15000\)/, 'modal Networks wallet wajib terbuka');
-  assert.match(driver, /document\.querySelector\('\[data-net="polygon"\]'\)/, 'pilih chain LAIN (switch nyata)');
+  assert.match(driver, /waitNativeButton\('dapp-net-polygon', 25\)/, 'sheet picker NATIVE wajib menampilkan baris polygon');
+  assert.match(driver, /!\(await tapNativeButton\('dapp-net-polygon'\)\) && !tapReportedRect\('dapp-net-rect-polygon'\)/, 'pilih chain LAIN (switch nyata) lewat baris native');
   assert.match(driver, /chainChanged never reached the dApp \(want 0x89\)/, 'chainChanged wajib sampai ke halaman dApp (0x89)');
 });
 
@@ -765,7 +765,9 @@ test('BrowserClient overrides only real WebViewClient methods (no WebChromeClien
   // Guard against the exact CI failure class: every @Override in this file must
   // name a method that actually exists as an override target.
   const overrides = [...java.matchAll(/@Override\s+[^\n]*?(?:public|protected)\s+[^\n]*?\b(\w+)\s*\(/g)].map((m) => m[1]);
-  const allowed = new Set(['onPageStarted', 'onPageCommitVisible', 'onPageFinished', 'onReceivedError', 'handleOnDestroy', 'onCreate', 'onDestroy', 'onStart', 'onStop']);
+  // dispatchTouchEvent: a View method on the stack subclass (the activity
+  // ping) — real override, unlike a WebChromeClient callback.
+  const allowed = new Set(['onPageStarted', 'onPageCommitVisible', 'onPageFinished', 'onReceivedError', 'handleOnDestroy', 'onCreate', 'onDestroy', 'onStart', 'onStop', 'dispatchTouchEvent']);
   for (const name of overrides) {
     assert.ok(allowed.has(name), `@Override tak dikenal bisa gagal compile: ${name}`);
   }
@@ -843,5 +845,167 @@ test('the E2E proves the wc: deep link the way a listing uses it: OS resolves, s
     'visible dibaca dari getVisibility() — bukan flag yang ditulis app');
   assert.match(java, /out\.put\("open", dappView != null\)/,
     'open = ada sesi browser (sesi bertahan walau overlay tersembunyi)');
+});
+
+test('a locked wallet HOLDS signing requests through the unlock — reads refuse instantly', () => {
+  // Report 2026-10-16 "pertama bisa konek pas mau konek gabisa": 5100 was the
+  // instant answer to everything while locked, so the user tapped, unlocked,
+  // tapped again — and the auto-lock had fired mid-dApp because browser
+  // touches never reset its idle timer. Signing/spending requests now WAIT
+  // for the unlock (MetaMask parity); reads keep the instant refusal so a
+  // polling page cannot pin 120-second promises.
+  const noComments = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.match(noComments, /const HELD_WHILE_LOCKED = new Set\(\[/);
+  for (const m of ['eth_requestAccounts', 'wallet_requestPermissions', 'personal_sign', 'eth_signTypedData_v4', 'eth_sendTransaction']) {
+    assert.ok(noComments.includes(`'${m}'`), `HELD_WHILE_LOCKED wajib memuat ${m}`);
+  }
+  assert.match(noComments, /const UNLOCK_WAIT_MS = 120000;/);
+  assert.match(noComments, /signer = await waitForSigner\(UNLOCK_WAIT_MS\);/);
+  assert.match(noComments, /if \(!modalOpen\) requireUnlock\(\);/,
+    'unlock HANYA saat tidak ada modal lain — re-render modal menghapus password yang sudah diketik');
+  assert.match(noComments, /if \(!HELD_WHILE_LOCKED\.has\(method\)\) return respondError\(LOCKED\);/,
+    'read tetap ditolak instan — halaman polling tidak boleh menggantungkan promise 120 detik');
+  const state = readFileSync(path.join(here, '..', 'js', 'state.js'), 'utf8');
+  assert.match(state, /export function waitForSigner\(timeoutMs = 120000\)/,
+    'waitForSigner hidup di state.js (leaf, unit-testable)');
+  assert.match(state, /const again = get\('signer'\);\s*\n\s*if \(again\) finish\(again\);/,
+    're-check setelah subscribe: sinyal yang datang di antara get() dan on() tidak boleh hilang');
+  const app = readFileSync(path.join(here, '..', 'js', 'app.js'), 'utf8');
+  assert.match(app, /export function noteActivity\(\) \{ resetLock\(\); \}/,
+    'noteActivity = satu-satunya cara reset timer auto-lock dari luar');
+});
+
+test('connect consent: one sheet per origin — already granted answers silently', () => {
+  // "pertama bisa konek pas mau konek gabisa": dApps re-ask eth_requestAccounts
+  // on every load, and two concurrent asks (wagmi pairs accounts +
+  // permissions) each opened a sheet — the second replacing the first, which
+  // Java refuses. Consent is now per-origin, once, shared in flight.
+  assert.match(code, /const connectConsentInFlight = new Map\(\);/);
+  assert.match(code, /function connectConsent\(site, address\) \{/);
+  assert.match(code, /if \(connectedOrigins\.has\(site\)\) return respond\(\[signer\.address\]\);/,
+    'grant sudah ada = jawab langsung tanpa sheet (paritas MetaMask/OKX)');
+  assert.match(code, /const accounts = await connectConsent\(site, signer\.address\);/);
+  assert.match(code, /inflight\.then\(drop, drop\);/,
+    'flight dibersihkan setelah selesai — ask panjang berikutnya dapat sheet baru');
+  assert.match(code, /async function runConnectConsent\(site, address\) \{/,
+    'satu tempat consent connect (rows "Can see/sign/send" dipertahankan)');
+});
+
+test('EIP-2255 permissions exist on BOTH paths with one recorded shape', () => {
+  // The native path answered 4200 for all three while the wallet's web path
+  // had answered them since day one — one site met two different Bear Tools.
+  const bridge = readFileSync(path.join(here, '..', 'js', 'dapp-bridge.js'), 'utf8');
+  for (const m of ['wallet_getPermissions', 'wallet_requestPermissions', 'wallet_revokePermissions']) {
+    assert.ok(code.includes(`'${m}'`), `native path wajib menangani ${m}`);
+    assert.ok(bridge.includes(`'${m}'`), `web path wajib menangani ${m}`);
+  }
+  assert.match(code, /function permissionRecord\(site, address\)/);
+  assert.match(code, /parentCapability: 'eth_accounts'/);
+  assert.match(code, /restrictReturnedAccounts/,
+    'caveat restrictReturnedAccounts — bentuk yang dibaca wagmi/MetaMask connectors');
+  assert.match(code, /code: 4201, message: 'Bear Tool only supports the eth_accounts permission\.'/,
+    'permintaan selain eth_accounts ditolak berisik (4201), sama dengan jalur web');
+  assert.match(code, /connectedOrigins\.delete\(site\);[\s\S]{0,80}respond\(null\)/,
+    'revoke = hapus grant dan sukses');
+});
+
+test('the native network picker draws above the dApp — the wallet never flashes', () => {
+  // Report 2026-10-16: "ganti jaringan langsung keluar dari daaps setelah
+  // ganti langsung balik lagi di dalam daaps" — the wallet's Networks modal
+  // lives in the wallet webview UNDER the overlay, so the browser vanished.
+  // The plugin's pick sheet is the OKX shape: above the page, no vanish.
+  assert.match(java, /public void pickNetwork\(PluginCall call\)/);
+  assert.match(java, /showNativePicker\(call, title, rows, cancelText\)/);
+  assert.match(java, /\.setContentDescription\("dapp-net-" \+ id\)/,
+    'baris picker berlabel dapp-net-<id> — a11y + pilihan driver E2E');
+  assert.match(java, /\.setContentDescription\("dapp-pick-cancel"\)/);
+  assert.match(java, /"dapp-net-rect-" \+ id/, 'rect fallback di-log untuk driver (dumper platform bisa mati)');
+  assert.match(java, /private void finishPick\(String id\)/);
+  assert.match(java, /finishConfirm\(false\);[\s\S]*finishPick\(null\);[\s\S]*closeTabPanel\(\)/,
+    'menutup browser membatalkan confirm DAN picker — promise wallet tidak menggantung');
+  // JS: native first, the wallet modal stays the fallback for older builds.
+  assert.match(code, /typeof plugin\.pickNetwork === 'function'/);
+  assert.match(code, /await plugin\.pickNetwork\(\{ title: t\('net\.sheet\.title'\), rows, cancelText: t\('common\.cancel'\) \}\)/);
+  const at = code.indexOf("typeof plugin.pickNetwork === 'function'");
+  const modalAt = code.indexOf("const { showNetworkModal } = await import('./app.js')");
+  assert.ok(at > 0 && modalAt > at, 'modal wallet tetap SETELAH jalur native (fallback, bukan primer)');
+  assert.match(code, /activateNetwork\(String\(picked\.id\)\)/, 'pilihan dijalankan lewat chokepoint activateNetwork');
+  assert.equal(t('net.sheet.title'), 'Networks', 'judul sheet ter-i18n');
+  assert.equal(t('common.cancel'), 'Cancel');
+});
+
+test('the tx sheet leads with the amount and names the action (OKX shape)', () => {
+  // "ask tx dalam daaps masih ambigu dan tidak full hanya setengah kotak aja"
+  // (report 2026-10-16). The money line becomes the headline, the action is
+  // NAMED (approve/transfer/swap from the 4-byte selector), the data row
+  // gains a byte count, and long row values wrap instead of truncating.
+  // ERC-20 amounts decode from the calldata now ("interaksi tx juga gitu ga
+  // lengkap", report 2026-10-16b): a transfer/approve leads with its amount,
+  // and the subhead points at the recipient/spender — not the token contract.
+  assert.match(code, /headline: nativeValue > 0n \? formatWeiNative\(tx\.value\) : \(tokenCall && tokenMeta \? tokenAmount : actionLabel\(tx\.data\)\)/,
+    'ERC-20 transfer leads with its decoded amount, not a bare "0"');
+  assert.match(code, /const tokenCall = decodeTokenCall\(tx\.data\)/);
+  assert.match(code, /tokenCall \? \[\{ k: t\('cf\.amount'\), v: tokenAmount \}\] : \[\]/,
+    'the sheet carries the decoded amount as its own row');
+  assert.match(code, /subhead: `\$\{actionLabel\(tx\.data\)\} → \$\{tokenCall\?\.to \? shortAddr\(tokenCall\.to\) : /,
+    'a token call points at the recipient/spender, not the token contract');
+  assert.match(code, /\.\.\.\(headline \? \{ headline \} : \{\}\)/,
+    'the wallet-modal fallback carries the same money line as the native sheet');
+  assert.match(code, /\.\.\.\(subhead \? \{ subhead \} : \{\}\)/);
+  const exec = readFileSync(path.join(here, '..', 'js', 'dapp-exec.js'), 'utf8');
+  assert.match(exec, /export function decodeTokenCall\(data\)/,
+    'the decode helper is shared with the iframe path (dapp-exec.js)');
+  assert.match(exec, /export function formatUnitsLean\(v, decimals\)/);
+  assert.match(code, /const ACTION_SELECTORS = new Map\(\[/);
+  assert.match(code, /\['0x095ea7b3', 'Approve'\]/, 'approve dikenali');
+  assert.match(code, /\['0xa9059cbb', 'Transfer'\]/, 'transfer dikenali');
+  assert.match(code, /bytes`/, 'data row membawa jumlah byte');
+  assert.equal(t('tx.sheet.contractCall'), 'Contract call', 'fallback action ter-i18n');
+  // Java renders it: headline big (26sp, centered, bold) + subhead below.
+  assert.match(java, /final String headline = call\.getString\("headline", null\);/);
+  assert.match(java, /head\.setTextSize\(26\)/);
+  assert.match(java, /head\.setTypeface\(head\.getTypeface\(\), android\.graphics\.Typeface\.BOLD\)/);
+  assert.match(java, /\.setContentDescription\("dapp-confirm-headline"\)/);
+  assert.match(java, /final String subhead = call\.getString\("subhead", null\);/);
+  // danger: fail findings paint the OK button berry — not honey.
+  assert.match(java, /if \(danger\) okBg\.setColor\(BERRY\);/);
+  // Long values wrap: "Transactions...not be undone" ambiguity is dead.
+  assert.match(java, /if \(vv\.length\(\) > 28\) \{[\s\S]{0,260}vv\.setSingleLine\(false\)/,
+    'nilai panjang wrap — bukan dipotong tengah jadi ambigu');
+  assert.match(java, /vv\.setMaxLines\(3\)/);
+  // Both sheets are bottom sheets that LOOK like bottom sheets (grab handle).
+  assert.equal((java.match(/gbg\.setColor\(0xFFDCD4C4\)/g) || []).length, 2,
+    'grab handle di sheet confirm DAN picker — satu bahasa visual');
+});
+
+test('dApp-browser touches count as wallet activity (auto-lock parity)', () => {
+  // The idle timer only saw the WALLET webview's clicks; the dApp is a
+  // separate native view, so an actively browsing user was locked mid-dApp
+  // and the next request met a locked wallet.
+  assert.match(java, /notifyBrowserActivity\(\)/, 'ping terkirim dari sisi Java');
+  assert.match(java, /ev\.getActionMasked\(\) == android\.view\.MotionEvent\.ACTION_DOWN/,
+    'hanya ACTION_DOWN — gerakan jari tidak mengirim ping banjir');
+  assert.match(java, /now - lastActivityPingAt < 15000/, 'throttle 15s di sisi native');
+  assert.match(java, /ev\.put\("command", "activity"\)/, 'perintah wallet = activity');
+  assert.match(java, /lastActivityPingAt = now;[\s\S]{0,200}notifyListeners\("walletCommand", ev\)/,
+    'ping lewat satu kanal: walletCommand (bukan evaluateJavascript halaman)');
+  assert.match(code, /if \(cmd === 'activity'\)/);
+  assert.match(code, /pingWalletActivity\(\);\s*\n\s*handleNativeRpc\(ev\)/,
+    'setiap RPC dApp juga = aktivitas (throttled, murah)');
+  assert.match(code, /if \(now - lastActivityPing < 5000\) return;/, 'throttle 5s di sisi JS');
+});
+
+test('the fixture proves consent-once and permissions with zero extra taps', () => {
+  assert.match(fixture, /method: 'wallet_getPermissions'/);
+  assert.match(fixture, /method: 'wallet_requestPermissions', params: \[\{ eth_accounts: \{\} \}\]/);
+  assert.match(fixture, /rec\('reconnect'/);
+  assert.match(fixture, /rec\('perms'/);
+  assert.match(fixture, /rec\('reqPerms'/);
+  assert.match(fixture, /deadline\(15000, 'wallet_getPermissions'\)/, 'setiap request tetap berdeadline — tak bisa menggantung');
+  // The driver demands all three keys in the FIRST pass, no taps in between —
+  // a sheet appearing there stalls the chain and fails the run.
+  const driverSrc = readFileSync(path.join(here, '..', 'tools', 'emulator-e2e.mjs'), 'utf8');
+  assert.match(driverSrc, /'reconnect=0x', 'perms=eth_accounts', 'reqPerms=eth_accounts'/,
+    'driver menuntut bukti consent-once dari #out fixture');
 });
 

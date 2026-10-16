@@ -68,6 +68,34 @@ export function requireUnlock() {
   return false;
 }
 
+// The native dApp RPC path HOLDS a signing request while the wallet is locked
+// and lets the user unlock, instead of refusing it (5100) and training them to
+// tap-unlock-tap-again. Resolves with the signer, or null when the wait runs
+// out. Lives here because it is pure state logic — no DOM, no wallet imports,
+// unit-testable on its own.
+export function waitForSigner(timeoutMs = 120000) {
+  const cur = get('signer');
+  if (cur) return Promise.resolve(cur);
+  return new Promise((resolve) => {
+    let done = false;
+    let timer = null;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      off('signer', handler);
+      if (timer) clearTimeout(timer);
+      resolve(v);
+    };
+    const handler = (v) => { if (v) finish(v); };
+    on('signer', handler);
+    // Re-check after subscribing: the signer may have landed between the
+    // first read and on() — a wait that resolves normally must never time out.
+    const again = get('signer');
+    if (again) finish(again);
+    else timer = setTimeout(() => finish(null), Math.max(0, Number(timeoutMs) || 0));
+  });
+}
+
 // ── activity persistence (localStorage, capped at 100) ──
 // A transaction is recorded twice by design: once as pending when it is sent,
 // once with its final status when the receipt lands. Eight modules do this, and

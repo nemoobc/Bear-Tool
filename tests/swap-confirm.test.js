@@ -20,3 +20,25 @@ test('the sign dialog button reads Confirm, not Confirm & Swap', () => {
   assert.doesNotMatch(swapSrc, /Confirm & Swap/,
     'the extra verb is gone (user request 2026-10-06)');
 });
+
+const uiSrc = fs.readFileSync(new URL('../js/ui.js', import.meta.url), 'utf8');
+
+test('the sign dialog leads with pay and the quote receive estimate', () => {
+  // "ask tx swap bridge itu ga ada pay eth receive brp gitu" (report
+  // 2026-10-16): the pay amount becomes the headline, the quote's own
+  // output estimate becomes the subhead, and the on-chain minimum gets a
+  // row. The estimate is a display string; execution still binds on
+  // amountInWei (swap-freshness).
+  assert.match(swapSrc, /quoteData\.outEstimate = fmtAmount\(result\.outAmount, toDecimals\)/);
+  assert.match(swapSrc, /headline: `\$\{amt\} \$\{dispSym\(from\)\}`/);
+  assert.match(swapSrc, /subhead: swapRecvLine/);
+  assert.match(swapSrc, /k: t\('cf\.receive\.min'\)/);
+});
+
+test('the wallet modal renders the money line like the native sheet', () => {
+  assert.match(uiSrc, /headline = null, subhead = null, \.\.\.money/,
+    'confirmTx accepts the money line without leaking it into totalPriceRow');
+  assert.match(uiSrc, /headline, subhead, resolve: resolveOnce/);
+  assert.match(uiSrc, /class="tx-headline"/);
+  assert.match(uiSrc, /class="tx-subhead"/);
+});
