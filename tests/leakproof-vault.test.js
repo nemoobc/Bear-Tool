@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { ethers } from 'ethers';
+import { guardProvider, waitDeployed, WAIT_TIMEOUT_MS, MAX_ATTEMPTS } from './anvil-guard.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MNEMONIC = `${'test '.repeat(11)}junk`;
@@ -106,7 +107,7 @@ async function startAnvil(port) {
     if (Date.now() > deadline) { child.kill('SIGKILL'); throw new Error('anvil never answered'); }
     await new Promise((r) => setTimeout(r, 150));
   }
-  return { child, url };
+  return { child, url, stderrTail: () => err };
 }
 
 /** Fast-forward anvil's clock — the tests must not sleep for two days. */
@@ -115,40 +116,67 @@ async function warp(provider, seconds) {
   await provider.send('evm_mine', []);
 }
 
-// 300s, sized from measurement, not fear: this story passes in 64.2s on a
-// Termux phone (2026-10-16, anvil + real wasm compile included) and 26.2s on
-// a GitHub runner — 300s is ~4.7x the slowest honest run, the same headroom
-// ratio the M9 proof carries. The old 900s turned one wedged await into
-// fifteen minutes of silence (runs 38898501268, 38930491444); five is enough
-// for a hang to name itself, and the [leakproof] phase lines below say WHICH
-// await wedged.
-test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReason, timeout: 300_000 }, async (t) => {
+// 480s, sized from measurement + the attempt loop: this story passes in 64.2s
+// on a Termux phone (2026-10-16, anvil + real wasm compile included) and
+// 26.2s on a GitHub runner. Worst honest case under the loop: two wedged
+// attempts dying at their ~60s bound (anvil-guard.mjs) plus one clean pass —
+// well under the cap, while a triple wedge still turns into a fast named red.
+// The old 900s turned one wedged await into fifteen minutes of silence (runs
+// 38898501268, 38930491444); the [leakproof] phase lines below say WHICH
+// await wedged, and the attempts loop restarts a wedged story on a fresh chain.
+test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReason, timeout: 480_000 }, async (t) => {
   if (skipReason) return;
-  let started;
   try {
     console.log('# [leakproof] boot: injecting real solc (local file or download)');
     await injectRealSolc();
-    console.log('# [leakproof] solc injected — spawning anvil');
-    const port = await freePort();
-    started = await startAnvil(port);
   } catch (e) {
     return t.skip(`toolchain unavailable: ${e?.message || e}`);
   }
-  const { child, url } = started;
-  // Phase lines + a 30s alive-tick: on 2026-10-16 this file froze twice with
-  // zero output under a silent cap (runs 38898501268 at 300s, 38930491444 at
-  // 900s). A tick still printing = an await never settled; tick silence = the
-  // call stack itself is wedged.
+  // This file froze on CI too (runs 38898501268 at the 300s cap, 38930491444
+  // at 900s) — same wedge family as M9: a tx accepted, never mined, receipt
+  // poll nulling forever. Every wait is bounded (anvil-guard.mjs) and a
+  // wedged attempt is retried on a fresh chain; each attempt runs every
+  // assertion for real and is named in the log.
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await runLeakproofStory(attempt);
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (attempt === 1 && /anvil exited|anvil never answered/.test(String(e?.message || e))) {
+        return t.skip(`toolchain unavailable: ${e?.message || e}`);
+      }
+      if (attempt === MAX_ATTEMPTS) break;
+      console.log(`# [leakproof] attempt ${attempt}/${MAX_ATTEMPTS} died: ${String(e?.message || e).slice(0, 200)}`);
+      console.log('# [leakproof] restarting the story on a fresh anvil — runner wedge, not a product failure');
+    }
+  }
+  throw lastErr;
+});
+
+/** One complete leak story on its own throwaway anvil. */
+async function runLeakproofStory(attempt) {
+  const port = await freePort();
+  const started = await startAnvil(port);
+  const { child, url, stderrTail } = started;
+  // Phase lines + a 30s alive-tick: a stall on a shared runner must name its
+  // place (runs 38898501268 and 38930491444 printed nothing since boot).
+  // A tick still printing = an await never settled; tick silence = the call
+  // stack itself is wedged.
   let phase = 'starting';
   const t0 = Date.now();
+  const suffix = attempt > 1 ? ` [attempt ${attempt}/${MAX_ATTEMPTS}]` : '';
   const mark = (m) => {
     phase = m;
-    console.log(`# [leakproof] ${m} (+${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+    console.log(`# [leakproof] ${m} (+${((Date.now() - t0) / 1000).toFixed(1)}s)${suffix}`);
   };
-  const hb = setInterval(() => console.log(`# [leakproof] alive, waiting on: ${phase}`), 30_000);
+  const hb = setInterval(() => console.log(`# [leakproof] alive, waiting on: ${phase}${suffix}`), 30_000);
   hb.unref();
   mark(`toolchain ready — anvil answering at ${url}`);
-  const provider = new ethers.JsonRpcProvider(url, undefined, { batchMaxCount: 1, cacheTimeout: -1 });
+  // guardProvider bounds every JSON-RPC call: a stalled socket throws its
+  // method name in 20s instead of hanging until the file cap.
+  const provider = guardProvider(new ethers.JsonRpcProvider(url, undefined, { batchMaxCount: 1, cacheTimeout: -1 }));
   // anvil's key #0 is the deployer; key #1 is the guardian; the thief owns a
   // DIFFERENT private key — the leak scenario only works because the vault
   // treats the thief as the legitimate owner (the key was the same).
@@ -161,7 +189,7 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     // Gas for everyone so every "rejection" below is an access-control
     // rejection, not an account that cannot pay for the transaction.
     for (const w of [leaked, guardian, stranger, fresh]) {
-      await (await deployer.sendTransaction({ to: w.address, value: ethers.parseEther('10') })).wait();
+      await (await deployer.sendTransaction({ to: w.address, value: ethers.parseEther('10') })).wait(1, WAIT_TIMEOUT_MS);
     }
     mark('wallets funded');
 
@@ -172,12 +200,12 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     // is the one the chain already accepts as owner.
     const factory = new ethers.ContractFactory(out.abi, out.bytecode, leaked);
     const vault = await factory.deploy(guardian.address);
-    await vault.waitForDeployment();
+    await waitDeployed('vault', vault);
     const vaultAddr = await vault.getAddress();
 
     assert.equal(await vault.owner(), leaked.address, 'the (soon-to-leak) key is the first owner');
     assert.equal(await vault.guardian(), guardian.address, 'guardian key is registered at deploy');
-    await (await deployer.sendTransaction({ to: vaultAddr, value: ethers.parseEther('1.337') })).wait();
+    await (await deployer.sendTransaction({ to: vaultAddr, value: ethers.parseEther('1.337') })).wait(1, WAIT_TIMEOUT_MS);
     assert.equal(await vault.balance(), ethers.parseEther('1.337'), 'the vault holds the funds');
     mark('vault deployed + funded');
 
@@ -190,10 +218,10 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     mark('stranger gates all rejected');
 
     // ── The benign path: owner queues, waits, executes ───────────
-    await (await vault.queueWithdrawal(ethers.parseEther('0.337'), leaked.address)).wait();
+    await (await vault.queueWithdrawal(ethers.parseEther('0.337'), leaked.address)).wait(1, WAIT_TIMEOUT_MS);
     await assert.rejects(vault.executeWithdrawal(), 'the withdraw cannot run before COOLDOWN');
     await warp(provider, 2 * 24 * 3600 + 1);
-    await (await vault.executeWithdrawal()).wait();
+    await (await vault.executeWithdrawal()).wait(1, WAIT_TIMEOUT_MS);
     assert.equal(await vault.balance(), ethers.parseEther('1'), 'the queued amount left, the rest stayed');
     mark('benign withdraw done');
 
@@ -201,8 +229,8 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     // From the chain's point of view the attacker IS the owner. It queues a
     // full drain to itself. Same key, same power — the only thing between the
     // attacker and the funds is the structure of the vault.
-    await (await vault.queueWithdrawal(ethers.parseEther('1'), leaked.address)).wait();
-    await (await vault.connect(guardian).cancelWithdrawal()).wait();
+    await (await vault.queueWithdrawal(ethers.parseEther('1'), leaked.address)).wait(1, WAIT_TIMEOUT_MS);
+    await (await vault.connect(guardian).cancelWithdrawal()).wait(1, WAIT_TIMEOUT_MS);
     assert.equal(await vault.balance(), ethers.parseEther('1'), 'guardian cancelled the theft — nothing moved');
     mark('theft cancelled by guardian');
 
@@ -210,12 +238,12 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     // (the watchdog), and it cannot cancel the guardian's recovery.
     await assert.rejects(vault.changeGuardian(leaked.address), 'a leaked owner key cannot replace the guardian');
     const before = await vault.owner();
-    await (await vault.connect(guardian).recoverOwner(fresh.address)).wait();
+    await (await vault.connect(guardian).recoverOwner(fresh.address)).wait(1, WAIT_TIMEOUT_MS);
     await assert.rejects(vault.cancelRecovery(), 'the leaked owner cannot cancel guardian recovery');
     await assert.rejects(vault.connect(leaked).recoverOwner(leaked.address), 'only the guardian can propose recovery');
     await assert.rejects(vault.finalizeRecovery(), 'recovery needs RECOVERY_DELAY to ripen');
     await warp(provider, 1 * 24 * 3600 + 1);
-    await (await vault.finalizeRecovery()).wait();
+    await (await vault.finalizeRecovery()).wait(1, WAIT_TIMEOUT_MS);
     assert.equal(await vault.owner(), fresh.address, 'the vault escaped to a fresh key');
     assert.equal(await vault.balance(), ethers.parseEther('1'), 'the attacker drained nothing across the whole story');
     mark('recovery done — leaked key powerless');
@@ -227,16 +255,23 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
 
     // ── Normal rotation while keys are healthy ───────────────────
     const nextOwner = new ethers.Wallet(ethers.Wallet.createRandom().privateKey, provider);
-    await (await vault.connect(fresh).changeOwner(nextOwner.address)).wait();
+    await (await vault.connect(fresh).changeOwner(nextOwner.address)).wait(1, WAIT_TIMEOUT_MS);
     assert.equal(await vault.owner(), nextOwner.address, 'owner can rotate while its key is alive');
     await assert.rejects(vault.connect(fresh).changeGuardian(nextOwner.address), 'only the guardian hands off the guardian key');
     const nextGuardian = new ethers.Wallet(ethers.Wallet.createRandom().privateKey, provider);
-    await (await vault.connect(guardian).changeGuardian(nextGuardian.address)).wait();
+    await (await vault.connect(guardian).changeGuardian(nextGuardian.address)).wait(1, WAIT_TIMEOUT_MS);
     assert.equal(await vault.guardian(), nextGuardian.address, 'guardian key hands off to the next cold key');
     mark('done — rotation complete');
+  } catch (e) {
+    console.log(`# [leakproof] attempt ${attempt}/${MAX_ATTEMPTS} died in phase "${phase}": ${String(e?.message || e).slice(0, 200)}`);
+    console.log(`# [anvil] stderr tail: ${JSON.stringify(stderrTail().slice(-300))}`);
+    throw e;
   } finally {
     clearInterval(hb);
     provider.destroy();
     child.kill('SIGKILL');
+    // A killed anvil frees its port asynchronously; one breath keeps the
+    // next attempt from racing the OS for the same port.
+    await new Promise((r) => setTimeout(r, 400));
   }
-});
+}

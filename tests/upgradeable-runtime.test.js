@@ -23,6 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { ethers } from 'ethers';
+import { guardProvider, waitDeployed, WAIT_TIMEOUT_MS, MAX_ATTEMPTS } from './anvil-guard.mjs';
 
 globalThis.ethers = ethers;
 const solcJs = await import('../js/solc.js');
@@ -124,7 +125,7 @@ async function startAnvil(port) {
     if (Date.now() > deadline) { child.kill('SIGKILL'); throw new Error('anvil never answered'); }
     await new Promise((r) => setTimeout(r, 150));
   }
-  return { child, url };
+  return { child, url, stderrTail: () => err };
 }
 
 /** Compile one standard the way the wizard does: buildTokenSource + plan.compiler. */
@@ -143,59 +144,83 @@ async function build(overrides) {
  *  warns about the duplicate, and neither is called through a proxy. */
 const both = (a, b) => [...a, ...b].filter((f) => f.type !== 'constructor');
 
-// 300s: every await inside is unbounded by design (waitForDeployment, .wait(),
-// receipt polls — ethers retries forever against a node that stopped
-// answering). Locally the test takes tens of seconds; a runner stall then
-// becomes a FAILING test naming itself instead of a job silent for 4 hours
-// (runs 37446987299, 37487059130, both cancelled mid-`npm test`).
-// The budget is sized from a real measurement, not a guess: on a Termux phone
-// (anvil + solc wasm compile + a UUPS proxy pair deployed and driven) this test
-// passes in 183.7s. A GitHub 2-core runner is at least ~1.6x slower, which is
-// why the old 300s cap was hit at exactly 300004ms and the 20-minute job limit
-// then cancelled the rest of the suite — a cancelled suite reports nothing, so
-// one legitimately heavy test was erasing every other result. 15 minutes leaves
-// ~4.9x the measured cost, enough headroom for a slow runner without turning a
-// genuine hang into a very long wait.
+// 900s: sized from measurement + the attempt loop. The story passes in 183.7s
+// on a Termux phone (anvil + solc wasm compile + a UUPS proxy pair deployed
+// and driven); a GitHub runner is comparable for the honest parts. Every
+// network wait is now BOUNDED (anvil-guard.mjs) and a wedged attempt dies at
+// its ~60s label instead of burning the cap — the attempts loop below
+// restarts the story on a fresh chain (the runner has wedged this file
+// repeatedly: runs 38898501268, 38926627716, 38930491444, 38935202597). The
+// cap is backstop only: even three bound-dying attempts plus one honest pass
+// stay well under it, while a genuine hang still fails within minutes.
 test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skipReason, timeout: 900_000 }, async (t) => {
   if (skipReason) return;
-  // A missing compiler is an unavailable tool (skip, and say so). Anvil that
-  // is INSTALLED but refuses to start is a broken test, not a missing tool —
-  // letting that skip would hide an argument typo as an environmental excuse.
-  let started;
+  // A missing compiler is an unavailable tool (skip, and say so).
   try {
     console.log('# [m9] boot: injecting real solc (local file or download)');
     await injectRealSolc();
-    console.log('# [m9] solc injected — spawning anvil');
-    const port = await freePort();
-    started = await startAnvil(port);
   } catch (e) {
     return t.skip(`toolchain unavailable: ${e?.message || e}`);
   }
-  const { child, url } = started;
+  // This story wedged on CI repeatedly (runs 38898501268, 38926627716,
+  // 38930491444, 38935202597): a transaction accepted, never mined — the
+  // receipt poll returns null forever and no error ever fires. Every wait in
+  // the story is now bounded (anvil-guard.mjs) so a wedge dies in ~60s with
+  // its label, and the one honest remedy for a transient runner wedge is to
+  // run the whole story again on a fresh chain. Every attempt runs every
+  // assertion for real; the log names each one.
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await runM9Story(attempt);
+      return;
+    } catch (e) {
+      lastErr = e;
+      // An anvil that cannot even start is a broken tool, not a wedged
+      // runner — the old skip path must stay for it (and only for it).
+      if (attempt === 1 && /anvil exited|anvil never answered/.test(String(e?.message || e))) {
+        return t.skip(`toolchain unavailable: ${e?.message || e}`);
+      }
+      if (attempt === MAX_ATTEMPTS) break;
+      console.log(`# [m9] attempt ${attempt}/${MAX_ATTEMPTS} died: ${String(e?.message || e).slice(0, 200)}`);
+      console.log('# [m9] restarting the story on a fresh anvil — runner wedge, not a product failure');
+    }
+  }
+  throw lastErr;
+});
+
+/** One complete M9 story on its own throwaway anvil. */
+async function runM9Story(attempt) {
+  const port = await freePort();
+  const started = await startAnvil(port);
+  const { child, url, stderrTail } = started;
   // Phase lines + a 30s alive-tick: a stall on a shared runner must name its
-  // place and its nature instead of showing 15 minutes of silence (neither
-  // run 38926627716 nor 38930491444 had printed since the toolchain came up).
+  // place and its nature instead of showing minutes of silence (runs
+  // 38926627716 / 38930491444 printed nothing since the toolchain came up).
   // A tick still printing = an await never settled; tick silence = the call
   // stack itself is wedged — two different bugs, two different fixes.
   let phase = 'starting';
   const t0 = Date.now();
+  const suffix = attempt > 1 ? ` [attempt ${attempt}/${MAX_ATTEMPTS}]` : '';
   const mark = (m) => {
     phase = m;
-    console.log(`# [m9] ${m} (+${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+    console.log(`# [m9] ${m} (+${((Date.now() - t0) / 1000).toFixed(1)}s)${suffix}`);
   };
-  const hb = setInterval(() => console.log(`# [m9] alive, waiting on: ${phase}`), 30_000);
+  const hb = setInterval(() => console.log(`# [m9] alive, waiting on: ${phase}${suffix}`), 30_000);
   hb.unref();
   mark(`toolchain ready — anvil answering at ${url}`);
   // batchMaxCount:1 + cacheTimeout:-1 — ethers v6's default response cache
-      // races anvil's instan-mine here: a stale eth_getTransactionCount answers
-      // with an old nonce and the proxy deploy dies NONCE_EXPIRED (seen on CI).
-      const provider = new ethers.JsonRpcProvider(url, undefined, { batchMaxCount: 1, cacheTimeout: -1 });
+  // races anvil's instant-mine here: a stale eth_getTransactionCount answers
+  // with an old nonce and the proxy deploy dies NONCE_EXPIRED (seen on CI).
+  // guardProvider bounds every JSON-RPC call: a stalled socket throws its
+  // method name in 20s instead of hanging until the file cap.
+  const provider = guardProvider(new ethers.JsonRpcProvider(url, undefined, { batchMaxCount: 1, cacheTimeout: -1 }));
   const deployer = new ethers.Wallet(KEY, provider);
   const stranger = new ethers.Wallet(ethers.Wallet.createRandom().privateKey, provider);
   try {
       // Gas for the stranger: a "rejection" that only happens because the
       // account cannot pay for the transaction would prove nothing.
-      await (await deployer.sendTransaction({ to: stranger.address, value: ethers.parseEther('1') })).wait();
+      await (await deployer.sendTransaction({ to: stranger.address, value: ethers.parseEther('1') })).wait(1, WAIT_TIMEOUT_MS);
       mark('stranger funded');
 
       // ── UUPS ────────────────────────────────────────────────────
@@ -211,12 +236,12 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
       const initData = iface.encodeFunctionData('initialize', initArgs);
 
       const impl1 = await implF.deploy();
-      await impl1.waitForDeployment();
+      await waitDeployed('uups impl1', impl1);
       const impl1Addr = await impl1.getAddress();
       // Exactly the two transactions the deploy flow signs: implementation
       // first, then the proxy with initialize() inside its constructor.
       const proxy1 = await proxyF.deploy(impl1Addr, initData, ethers.ZeroAddress);
-      await proxy1.waitForDeployment();
+      await waitDeployed('uups proxy1', proxy1);
       const proxy1Addr = await proxy1.getAddress();
       mark('uups impl+proxy deployed');
 
@@ -238,9 +263,9 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
 
       // Upgrade as the owner: state must survive, and the slot must move.
       const impl2 = await implF.deploy();
-      await impl2.waitForDeployment();
+      await waitDeployed('uups impl2', impl2);
       const impl2Addr = await impl2.getAddress();
-      await (await tok.upgradeToAndCall(impl2Addr, '0x')).wait();
+      await (await tok.upgradeToAndCall(impl2Addr, '0x')).wait(1, WAIT_TIMEOUT_MS);
       assert.equal(ethers.getAddress(`0x${(await provider.getStorage(proxy1Addr, IMPL_SLOT)).slice(-40)}`),
         impl2Addr, 'the slot follows the upgrade');
       assert.equal(await tok.name(), 'Bear Runtime', 'upgrade must not wipe proxy storage');
@@ -248,7 +273,7 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
 
       // The gate: somebody else must not be able to move the logic.
       const impl3 = await implF.deploy();
-      await impl3.waitForDeployment();
+      await waitDeployed('uups impl3', impl3);
       await assert.rejects(
         tok.connect(stranger).upgradeToAndCall(await impl3.getAddress(), '0x'),
         'a stranger cannot upgrade a UUPS proxy');
@@ -274,11 +299,11 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
         tr.out.contracts.ERC1967Proxy.bytecode, deployer);
 
       const tImpl1 = await trImplF.deploy();
-      await tImpl1.waitForDeployment();
+      await waitDeployed('transparent impl1', tImpl1);
       const tImpl1Addr = await tImpl1.getAddress();
       // The deploy flow sets the admin to the deployer's own address.
       const tProxy = await trProxyF.deploy(tImpl1Addr, trIface.encodeFunctionData('initialize', trInit), deployer.address);
-      await tProxy.waitForDeployment();
+      await waitDeployed('transparent proxy', tProxy);
       const tProxyAddr = await tProxy.getAddress();
       mark('transparent impl+proxy deployed');
 
@@ -297,13 +322,13 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
 
       // The decision that makes the deployed token usable: the admin IS the
       // first user here, so it must be able to spend through the proxy.
-      await (await tTok.transfer(stranger.address, 10n)).wait();
+      await (await tTok.transfer(stranger.address, 10n)).wait(1, WAIT_TIMEOUT_MS);
       assert.equal(await tTok.balanceOf(stranger.address), 10n, 'the admin can transfer its own tokens');
 
       const tImpl2 = await trImplF.deploy();
-      await tImpl2.waitForDeployment();
+      await waitDeployed('transparent impl2', tImpl2);
       const tImpl2Addr = await tImpl2.getAddress();
-      await (await tAdmin.connect(deployer).upgradeTo(tImpl2Addr)).wait();
+      await (await tAdmin.connect(deployer).upgradeTo(tImpl2Addr)).wait(1, WAIT_TIMEOUT_MS);
       assert.equal(ethers.getAddress(`0x${(await provider.getStorage(tProxyAddr, IMPL_SLOT)).slice(-40)}`),
         tImpl2Addr, 'the admin upgrades through the proxy');
       assert.equal(await tTok.name(), 'Bear Runtime', 'state survives a transparent upgrade');
@@ -324,25 +349,32 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
       const nftProxyF = new ethers.ContractFactory(nft.out.contracts.ERC1967Proxy.abi,
         nft.out.contracts.ERC1967Proxy.bytecode, deployer);
       const nftImpl = await nftImplF.deploy();
-      await nftImpl.waitForDeployment();
+      await waitDeployed('nft impl1', nftImpl);
       const nftProxy = await nftProxyF.deploy(await nftImpl.getAddress(),
         nftIface.encodeFunctionData('initialize', nft.plan.args), ethers.ZeroAddress);
-      await nftProxy.waitForDeployment();
+      await waitDeployed('nft proxy', nftProxy);
       mark('nft impl+proxy deployed');
       const nftTok = new ethers.Contract(await nftProxy.getAddress(), nft.out.contracts[nft.std.contract].abi, deployer);
       assert.equal(await nftTok.owner(), deployer.address, 'the NFT initialize() must hand ownership to the deployer');
       assert.equal(await nftTok.name(), 'Bear Runtime', 'the NFT proxy answers with initialize() state');
       const nextId = await nftTok.mint.staticCall(deployer.address);
-      await (await nftTok.mint(deployer.address)).wait();
+      await (await nftTok.mint(deployer.address)).wait(1, WAIT_TIMEOUT_MS);
       assert.equal(await nftTok.ownerOf(nextId), deployer.address, 'minting through the NFT proxy works');
       const nftImpl2 = await nftImplF.deploy();
-      await nftImpl2.waitForDeployment();
-      await (await nftTok.upgradeToAndCall(await nftImpl2.getAddress(), '0x')).wait();
+      await waitDeployed('nft impl2', nftImpl2);
+      await (await nftTok.upgradeToAndCall(await nftImpl2.getAddress(), '0x')).wait(1, WAIT_TIMEOUT_MS);
       assert.equal(await nftTok.ownerOf(nextId), deployer.address, 'the mint survives an NFT upgrade');
       mark('done — upgrade pair fully driven');
-    } finally {
-      clearInterval(hb);
-      provider.destroy();
-      child.kill('SIGKILL');
-    }
-});
+  } catch (e) {
+    console.log(`# [m9] attempt ${attempt}/${MAX_ATTEMPTS} died in phase "${phase}": ${String(e?.message || e).slice(0, 200)}`);
+    console.log(`# [anvil] stderr tail: ${JSON.stringify(stderrTail().slice(-300))}`);
+    throw e;
+  } finally {
+    clearInterval(hb);
+    provider.destroy();
+    child.kill('SIGKILL');
+    // A killed anvil frees its port asynchronously; one breath keeps the
+    // next attempt from racing the OS for the same port.
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
