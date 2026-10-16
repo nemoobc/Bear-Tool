@@ -7,7 +7,7 @@
 //
 // The previews (addPreview / removePreview) mirror the contract's mint/burn
 // rules to the wei — the anvil e2e pins them against the real pair.
-import { provider, ethersLib, get, set, sendDexTx, needSigner, t, escapeHtml, fmtTok, fmtPrice, confirmTx, withTxButton, $, dexChainOk, quoteBy } from './core.js';
+import { provider, ethersLib, get, set, sendDexTx, needSigner, t, escapeHtml, fmtTok, fmtPrice, confirmTx, withTxButton, $, dexChainOk, quoteBy, openEdu } from './core.js';
 import { addShares, removeAmounts, minOutWithSlippage } from './pool-math.js';
 import { parseAmount, ensureAllowanceTx, DEFAULT_SLIPPAGE_BPS } from './swap.js';
 import { discoverPools, fillMeta } from './pools.js';
@@ -181,6 +181,7 @@ export function lpHtml() {
         <div class="dex-launchbar-title">${escapeHtml(t('dex.lp.title'))}</div>
         <div class="dex-launchbar-sub">${escapeHtml(t('dex.lp.hint'))}</div>
       </div>
+      <button type="button" class="dex-edu" id="dexLpEdu" aria-label="${escapeHtml(t('dex.edu.lp.title'))}">?</button>
     </div>
     <div class="card mb-8">
       <label class="field-label" for="dexLpPool">${escapeHtml(t('dex.lp.pool'))}</label>
@@ -233,6 +234,8 @@ export async function bindLp(host) {
   const addPrevEl = $('#dexLpAddPreview', host);
   const addReasonEl = $('#dexLpAddReason', host);
   const addBtn = $('#dexLpAddGo', host);
+
+  $('#dexLpEdu', host)?.addEventListener('click', () => openEdu('lp'));
   const sharesIn = $('#dexLpShares', host);
   const maxBtn = $('#dexLpMax', host);
   const remPrevEl = $('#dexLpRemovePreview', host);

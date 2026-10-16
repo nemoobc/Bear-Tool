@@ -23,7 +23,7 @@
 // engine (parseAmount/swapQuote/swapTx), this file owns the sheet UI, and the
 // swap PANEL mounts the sheet. Both directions are used only at call time,
 // never at module top level, so the cycle is inert (ESM live bindings).
-import { t, get, toast, escapeHtml, isAddr, provider, ethersLib, fmtTok, quoteBy, confirmTx, withTxButton, needSigner } from './core.js';
+import { t, get, toast, escapeHtml, isAddr, provider, ethersLib, fmtTok, quoteBy, confirmTx, withTxButton, needSigner, openEdu } from './core.js';
 import { parseAmount, swapQuote, swapTx, ensureAllowanceTx, DEFAULT_SLIPPAGE_BPS } from './swap.js';
 import { priceImpact, SWAP_FEE_BPS } from './pool-math.js';
 import { poolState, tokenInfo } from './pool-data.js';
@@ -102,7 +102,10 @@ export function tradeSheetHtml() {
       <div class="dex-ts-presets mt-8" data-ts-presets></div>
       <div class="small mt-8" data-ts-bal></div>
       <div class="small mt-8" data-ts-quote aria-live="polite"></div>
-      <div class="small mt-8" data-ts-info></div>
+      <div class="dex-ts-inforow small mt-8">
+        <div data-ts-info></div>
+        <button type="button" class="dex-edu" data-ts-edu aria-label="${escapeHtml(t('dex.edu.impact.title'))}">?</button>
+      </div>
       <button type="button" class="btn btn-primary btn-block dex-ts-go mt-8" data-ts-go disabled>${escapeHtml(t('dex.swap.pickAmount'))}</button>
       <div class="small mt-8 dex-ts-reason" data-ts-reason></div>
       <div class="small mt-8" data-ts-note role="status"></div>
@@ -130,8 +133,9 @@ export async function mountTradeSheet(container, row = {}) {
   const reasonEl = q('[data-ts-reason]');
   const noteEl = q('[data-ts-note]');
   const retryBtn = q('[data-ts-retry]');
+  const eduBtn = q('[data-ts-edu]');
   if (!amountEl || !maxBtn || !presetsEl || !balEl || !quoteEl || !infoEl
-    || !goBtn || !reasonEl || !noteEl || !retryBtn) return;
+    || !goBtn || !reasonEl || !noteEl || !retryBtn || !eduBtn) return;
 
   let dir = 'buy';
   let cur = null; // everything a quote needs, or null while the read is dead
@@ -274,6 +278,8 @@ export async function mountTradeSheet(container, row = {}) {
     amountEl.value = E.formatUnits((cur.tBal * BigInt(pc)) / 100n, cur.td);
     refresh();
   });
+
+  eduBtn.addEventListener('click', () => openEdu('impact'));
 
   retryBtn.addEventListener('click', () => { load(); });
 

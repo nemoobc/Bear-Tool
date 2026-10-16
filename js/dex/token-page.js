@@ -9,7 +9,7 @@
 // The router keeps last say: only tokens the factory actually knows get this
 // page. Anything else falls back to the legacy coin view — never a half-made
 // v2 page over a token that has no pool.
-import { t, escapeHtml, fmtTok, fmtPrice, $, get, provider, ethersLib, isAddr, dexChainOk, quoteBy, confirmTx, toast } from './core.js';
+import { t, escapeHtml, fmtTok, fmtPrice, $, get, provider, ethersLib, isAddr, dexChainOk, quoteBy, confirmTx, toast, openEdu } from './core.js';
 import { poolState, tokenInfo, lpPosition } from './pool-data.js';
 import { quotePerToken } from './pool-list.js';
 import { BEAR_TOKEN_ABI, BEAR_FACTORY_ABI, BEAR_PAIR_ABI } from './bear-source.js';
@@ -373,7 +373,9 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
     if (!gone() && secEl) {
       secEl.innerHTML = securityChips({ hasLaunch, untilSec, ageSec, nowSec: Math.floor(Date.now() / 1000) })
         .map((c) => `<span class="dex-badge ${c.tone}">${escapeHtml(t(c.key, c.params))}</span>`)
-        .join(' ');
+        .join(' ')
+        + ` <button type="button" class="dex-edu" data-edu-lock aria-label="${escapeHtml(t('dex.edu.lock.title'))}">?</button>`;
+      secEl.querySelector('[data-edu-lock]')?.addEventListener('click', () => openEdu('lock'));
     }
     if (!gone() && holdLock && untilSec > 0) {
       const date = new Date(untilSec * 1000).toISOString().slice(0, 10);

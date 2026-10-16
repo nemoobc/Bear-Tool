@@ -14,7 +14,7 @@
 import { t } from '../i18n.js';
 import { get, set, on, off } from '../state.js';
 import { getNetworkById } from '../network.js';
-import { $, toast, escapeHtml, confirmTx, setBtnDots } from '../ui.js';
+import { $, toast, escapeHtml, confirmTx, setBtnDots, openModal } from '../ui.js';
 import { withTimeout, waitForReceipt, receiptVerdict } from '../safetx.js';
 
 export const DEX_NETWORK_ID = 'sepolia';
@@ -155,6 +155,37 @@ export async function withTxButton(btn, label, fn) {
   } finally {
     setBtnDots(btn, false);
   }
+}
+
+// ── the three explainers + the glossary (R16) ──────────────────
+// One open path for every "?" the trade surfaces show. The copy lives in
+// i18n (both languages); the sheet closes through the app's one modal path
+// (data-close-modal), and the glossary is reachable from every explainer.
+// Buttons are wired HERE because openModal() rewrites the box's innerHTML —
+// any listener attached before the rewrite is gone.
+const EDU_GLOSSARY = [
+  ['dex.edu.g.lp.n', 'dex.edu.g.lp.d'],
+  ['dex.edu.g.impact.n', 'dex.edu.g.impact.d'],
+  ['dex.edu.g.slip.n', 'dex.edu.g.slip.d'],
+  ['dex.edu.g.lock.n', 'dex.edu.g.lock.d'],
+  ['dex.edu.g.min.n', 'dex.edu.g.min.d'],
+  ['dex.edu.g.fee.n', 'dex.edu.g.fee.d'],
+];
+
+export function openEdu(topic) {
+  const key = ['lp', 'impact', 'lock', 'glossary'].includes(String(topic)) ? String(topic) : 'glossary';
+  if (typeof document === 'undefined') return null; // no DOM (tests): nothing to open
+  const terms = key === 'glossary'
+    ? EDU_GLOSSARY.map(([n, d]) => `<p class="small"><strong>${escapeHtml(t(n))}</strong> — ${escapeHtml(t(d))}</p>`).join('')
+    : '';
+  const box = openModal(`
+    <h2>${escapeHtml(t(`dex.edu.${key}.title`))}</h2>
+    <p class="small">${escapeHtml(t(`dex.edu.${key}.body`))}</p>
+    ${terms}
+    ${key === 'glossary' ? '' : `<button type="button" class="btn btn-secondary btn-block mt-8" data-edu-glossary>${escapeHtml(t('dex.edu.glossaryLink'))}</button>`}
+    <button type="button" class="btn btn-primary btn-block mt-8" data-close-modal>${escapeHtml(t('dex.edu.close'))}</button>`);
+  box?.querySelector('[data-edu-glossary]')?.addEventListener('click', () => openEdu('glossary'));
+  return box;
 }
 
 // Re-exported so a feature module imports one place for the helpers it shares
