@@ -193,7 +193,13 @@ test('deploy: form validation rejects junk and builds constructor args', () => {
 });
 
 // ── part 2: real compilation (network, opt-in) ──
-test('deploy: real solc compiles every template to real bytecode', { skip: process.env.BEAR_SOLC !== '1' && 'set BEAR_SOLC=1 (downloads ~9 MB compiler)' }, async () => {
+// 600s like its sibling runtime proofs: the download, the wasm compile of
+// every template and the poll for the compiler runtime are all wall-clock,
+// and a shared CI runner measured 81s here while sharing the box with two
+// other compiles. The download also gets the same 60s abort the other two
+// files already carry (a stalled connection once held this job for four
+// hours with nothing on screen).
+test('deploy: real solc compiles every template to real bytecode', { skip: process.env.BEAR_SOLC !== '1' && 'set BEAR_SOLC=1 (downloads ~9 MB compiler)', timeout: 600_000 }, async () => {
   // Same rule as tests/fork/fork-helper.mjs: a list of plausible local copies,
   // not one Termux-only absolute path that exists on exactly one machine.
   const candidates = [
@@ -206,7 +212,7 @@ test('deploy: real solc compiles every template to real bytecode', { skip: proce
   if (file) {
     code = fs.readFileSync(file, 'utf8');
   } else {
-    const res = await fetch(solcJs.SOLC_URL);
+    const res = await fetch(solcJs.SOLC_URL, { signal: AbortSignal.timeout(60_000) });
     assert.equal(res.status, 200, 'compiler download must succeed');
     code = await res.text();
   }

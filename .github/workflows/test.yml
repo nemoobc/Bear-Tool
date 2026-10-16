@@ -16,13 +16,22 @@ jobs:
     # cancelled). The in-test timeout fires first and names the test; this is
     # the backstop for anything else that stops answering.
     #
+    # 38898501268 taught a third shape of the same lesson: a 300s-capped
+    # runtime test timed out, its still-pending body kept the file process
+    # (and its anvil) alive, `npm test` never exited, and the backstop then
+    # killed the job after 39 minutes of silence. Two fixes: the suite
+    # scripts now carry `--test-force-exit` (once every test has reported,
+    # the runner leaves — a pending body can no longer hold the job), and
+    # the three compiler+anvil runtime proofs moved to their own serialized
+    # step where their wasm compiles stop starving each other.
+    #
     # Was 20. The M9 proxy-runtime test legitimately needs ~184s of wasm solc
     # compile plus real anvil deploys (measured on a phone), and a GitHub runner
     # is slower than that — so at 20 minutes the job hit its own backstop while
     # the suite was still working, and GitHub cancelled it. A cancelled suite
     # says nothing about the code, it just hides every other result. The in-test
     # timeouts are what make a hang loud; this number only has to leave room for
-    # the slowest legitimate test plus the rest of the suite.
+    # the fast suite plus the serialized proofs.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -39,9 +48,10 @@ jobs:
       # one-shot initialize, the upgrade gate. Without foundry that test skips
       # (honest, and says why), which would mean no CI job ever executes the
       # proxy pair: a regression in the generated Solidity would sail through a
-      # green suite. The suite below already runs with BEAR_SOLC=1, so the
-      # compiler half of the proof is in place — this is the chain half.
-      - name: Install foundry (anvil — M9 proxy runtime proof)
+      # green suite. The runtime-proofs step below runs it — and the other two
+      # compiler tests — with BEAR_SOLC=1, one file at a time; this is the
+      # chain half of the proof.
+      - name: Install foundry (anvil — runtime proofs)
         uses: foundry-rs/foundry-toolchain@v1
 
       - name: Install dependencies
@@ -54,8 +64,12 @@ jobs:
 
       - name: Run npm test (tests/*.test.js)
         shell: bash
-        env:
-          BEAR_SOLC: '1'
+        # No BEAR_SOLC here on purpose: the three files that download the real
+        # compiler and boot anvil are the separate serialized step below. In
+        # this suite they skip fast and honestly (their reason line says so) —
+        # inside 160 parallel test files their wasm compiles starved each
+        # other, and when one timed out its pending body held `npm test` open
+        # until the job backstop killed everything (run 38898501268).
         run: |
           set -o pipefail
           echo "=== Unit + regression suite ==="
@@ -64,19 +78,44 @@ jobs:
           grep -q "fail 0" /tmp/npm-test.log || {
             echo "::error::npm test reported failures"; exit 1; }
           # A timed-out test lands in `cancelled`, not `fail` — the summary
-          # still says "fail 0", so without this the M9 stall below would be
-          # the ONLY thing that could ever catch a hang. The summary marker is
-          # `ℹ` on a TTY and `#` in CI's TAP output — match both (the first
-          # version matched only `ℹ` and failed a fully green run).
+          # still says "fail 0", so without this a stall would only surface as
+          # silence. The summary marker is `ℹ` on a TTY and `#` in CI's TAP
+          # output — match both (the first version matched only `ℹ` and failed
+          # a fully green run).
           grep -qE "^(ℹ|#) cancelled 0" /tmp/npm-test.log || {
             echo "::error::npm test reported cancelled tests (timeout or interrupt)"; exit 1; }
-          # And fail loudly if the M9 proxy runtime proof was SKIPPED — "fail 0"
-          # is unchanged by a skipped test, so a runner without anvil on PATH
-          # would stay green while proving nothing about the deployed proxy pair.
-          if grep -qE "foundry anvil is not installed|toolchain unavailable:" /tmp/npm-test.log; then
-            echo "::error::M9 proxy runtime proof did not run in CI"
-            exit 1
+
+      # The three files below are the whole reason foundry and BEAR_SOLC exist
+      # in this job. They run here, serially (`test:runtime` pins
+      # --test-concurrency=1) because side by side with the 160-file suite
+      # their wasm compiles starved each other on a shared runner — and one of
+      # them (run 38898501268) crossed its 300s cap while still doing real
+      # work. The gates are the shape the suite above used to carry, plus:
+      # every proof must actually REPORT here. A skip is a failure — "fail 0"
+      # is unchanged by a skipped test, so a runner without anvil would
+      # otherwise stay green while proving nothing about the deployed pair.
+      - name: Runtime proofs — real solc + anvil, serial (templates, LeakProofVault, M9 proxy)
+        shell: bash
+        env:
+          BEAR_SOLC: '1'
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          echo "=== Runtime proofs (serial) ==="
+          npm run test:runtime 2>&1 | tee /tmp/runtime-proofs.log
+          grep -q "fail 0" /tmp/runtime-proofs.log || {
+            echo "::error::runtime proofs reported failures"; exit 1; }
+          grep -qE "^(ℹ|#) cancelled 0" /tmp/runtime-proofs.log || {
+            echo "::error::a runtime proof timed out or was interrupted"; exit 1; }
+          if grep -qE "toolchain unavailable:|foundry anvil is not installed|set BEAR_SOLC=1" /tmp/runtime-proofs.log; then
+            echo "::error::a runtime proof skipped instead of running"; exit 1
           fi
+          grep -qP '(?<!not )ok [0-9]+ - deploy: real solc compiles every template to real bytecode$' /tmp/runtime-proofs.log || {
+            echo "::error::the real-template compile proof never passed"; exit 1; }
+          grep -qP '(?<!not )ok [0-9]+ - LeakProofVault: a leaked key can never drain the vault$' /tmp/runtime-proofs.log || {
+            echo "::error::the LeakProofVault proof never passed"; exit 1; }
+          grep -qP '(?<!not )ok [0-9]+ - M9 runtime: a deployed proxy pair behaves like a proxy pair$' /tmp/runtime-proofs.log || {
+            echo "::error::the M9 proxy proof never passed"; exit 1; }
 
   static-analysis:
     name: Static Analysis

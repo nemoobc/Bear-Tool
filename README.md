@@ -172,6 +172,10 @@ verdict OK, Galaxy S23 / Android 13.
 `npm test` on its own is still the fast loop. The fork suite needs anvil and
 takes minutes: it compiles real Solidity with solc 0.8.37 and runs against a
 forked chain. `npm run test:fork` runs one network (`FORK_NETWORK`).
+The compiler+anvil runtime proofs — every template via real solc, the
+LeakProofVault story, the M9 proxy pair — are their own serialized run:
+`BEAR_SOLC=1 npm run test:runtime` (CI runs exactly this as a step of its own,
+so their wasm compiles never starve the 160-file suite).
 
 Coverage includes wallet create/import/encrypt/decrypt, network presets,
 EIP-7702, session persistence, address poisoning, nav invariants, the dApp

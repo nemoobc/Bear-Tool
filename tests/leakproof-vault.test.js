@@ -108,8 +108,16 @@ async function warp(provider, seconds) {
   await provider.send('evm_mine', []);
 }
 
-// 300s: compile download + anvil boot + every unbounded ethers await inside.
-test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReason, timeout: 300_000 }, async (t) => {
+// 900s, the same budget the M9 proof carries, for the same reason: the
+// download, the wasm compile, anvil's boot and every await after them are
+// wall-clock (ethers retries forever against a node that stopped answering),
+// and a shared CI runner stretches all of it. This test passes in 64.2s on a
+// Termux phone — yet run 38898501268 cancelled it at exactly 300001ms, and
+// with its body still pending the file process never exited: `npm test` could
+// not end and the job backstop eventually killed everything else unread. A
+// longer cap still ends in a loud cancelled test naming itself; it just stops
+// firing on work that was still legitimately moving.
+test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReason, timeout: 900_000 }, async (t) => {
   if (skipReason) return;
   let started;
   try {
