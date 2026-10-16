@@ -206,6 +206,7 @@ Alasan: pola "Creator rewards → Claim all" pump.fun (S16, U8); keluhan kreator
 **R7. Audit konsistensi CTA & status transaksi (satu bahasa tombol).** Effort **S**.
 Isi: semua layar (swap, add/remove liquidity, launch, claim) memakai komponen tombol sama; status transaksi tunggal (submitted/confirmed/failed dengan alasan), toast & banner dengan format sama; retry di UI saat RPC gagal.
 Alasan: brief "konsistensi tombol"; pelajaran withdrawal/support Moonshot (A2, A3) — kepercayaan dibangun dari status yang jujur.
+**Status (trio polish, 2026-10-16): dieksekusi `2485bd2`.** Audit: semua send path sudah satu spine (`sendDexTx` + `confirmTx` + `withTxButton`); lubangnya panel LP (3 CTA tanpa busy state) → kini `withTxButton` + gate re-apply pola trade-sheet; 4 status line bisu → `role="status"`; bot start (funding multi-tx) → label stage. Tes +3: scan live-region, pin LP ×3, pin bot.
 
 ### P1 — PEMBEDA / EKSPEKTASI LANJUTAN
 
@@ -213,8 +214,10 @@ Alasan: brief "konsistensi tombol"; pelajaran withdrawal/support Moonshot (A2, A
 **R9. Wizard launch 2.0: socials + preview + dev-buy 1-tx + edukasi anti-sniper.** Effort **M**. Alasan: socials=kredibilitas (S18, A9); dev buy satu tx four.meme (S3); anti-sniper Virtuals (S5, U13).
 **R10. Add/Remove Liquidity yang jelas (brief: "UX add-liquidity yang jelas").** Effort **M**. Isi: dua input rasio 50:50 terkunci + tombol "auto isi sisi lain"; estimasi share pool & APR fee; langkah approve TERPISAH dan terjelaskan; preview "Anda menambah X ETH + Y TOKEN → share pool dari a→b%". Alasan: keluhan umum DeFi = IL & approve tak jelas; prinsip price impact/slippage Uniswap (S12/S13); pola popup konfirmasi four.meme (S11).
 **R11. Badge keamanan pool di halaman token.** Effort **S–M**. Isi: "LP terkunci", umur pool, sumber fee, catatan "tanpa owner privileges" (jika kontrak memungkinkan). Alasan: U7, A6; posisi anti-rug sebagai market fit Ethervista/pump.fun LP burn (S9, S18).
+**Status (trio polish, 2026-10-16): dieksekusi `2397c5b`.** `securityChips()` di halaman token: chip LP terkunci/umur HANYA saat event launch terbaca (gagal baca = chip diam, bukan hijau); expired/never-locked = tone warn; satu baca factory melayani lock + chips. Tes +5.
 **R12. Portfolio: harga rata-rata & P&L sederhana (dari event).** Effort **L**. Alasan: Moonshot menampilkan P&L per holding (S24); brief "portfolio".
 **R13. Empty state / skeleton / copy error ID+EN manusiawi.** Effort **S**. Alasan: A3; WebView lambat RPC = kondisi normal, bukan edge case.
+**Status (trio polish, 2026-10-16): dieksekusi `68a236b`.** Feed pass pertama menyembunyikan kotak kosong pre-render + status "membaca" (hasil chain menimpa); loader halaman trade (markup mati) dihidupkan; tape curve gagal-baca menampilkan alasan (bukan klaim "belum pernah dibeli"); LP curve menyapa "membaca" sebelum angka. Tes +4.
 
 ### P2 — RETENSI / POLISH
 
@@ -222,6 +225,7 @@ Alasan: brief "konsistensi tombol"; pelajaran withdrawal/support Moonshot (A2, A
 **R15. "Trending" scoring lokal sederhana (volume 1 jam, umur, lompatan holder) dihitung di device.** Effort **M**. Alasan: U9; feed sudah ada → tinggal scoring + cache.
 **R16. Onboarding 3 tooltip edukasi (LP, price impact, LP lock) + glossary ID/EN.** Effort **S**. Alasan: GMGN mengedukasi sebelum user kena (S10); Uniswap FAQ (S12/S13); prompt pertama pump.fun = edukasi (S1).
 **R17. Audit i18n + format angka mata uang lokal.** Effort **S**. Alasan: switch bahasa four.meme (S11, U15); produk kita ID+EN sejak awal — pastikan tidak ada string keras.
+**Status (trio polish, 2026-10-16): dieksekusi `4800009`.** Timeout broadcast → `dex.tx.timeout` (label Inggris mentah tak pernah tampil); chart gagal → `dex.chart.fail`; audit angka: semua formatter satu lokale `en-US` (dipin tes scan). Sisa teks teknis = reason node di tape/holders (data relayed, bukan copy). Tes +3.
 
 ---
 
@@ -254,7 +258,7 @@ Catatan daftar ini: (a) bintang/komit = kondisi 2026-10-15, bukan jaminan kualit
 
 **RISIKO (asumsi belum terverifikasi — DEV wajib cek manual):**
 1. Label UI literal panel beli/jual pump.fun dibaca dari panduan pihak ke-3 (S27), bukan tangkapan layar app langsung → cek dengan app/frontend asli sebelum menyalin istilah.
-2. **Terjawab benchmark M8 (2026-10-16)**: node publik Sepolia (publicnode) hanya menyimpan ±10.000 blok terakhir — `getLogs` rentang 9.000–10.001 blok OK (~1.200 log, ~2 dtk), 11.000+ gagal `pruned history unavailable` (kode 4444); drpc.org / rpc.sepolia.org tidak melayani. Keputusan R4/R5: chunk 9.000 + scan mundur + cache + status jujur (lengkap HANYA bila mint terlihat + jumlah saldo == supply). **Follow-up**: R8 (chart/tape) masih memakai satu query 40.000 blok di `history.js` — di node terpangkas akan gagal; retrofit chunking masuk backlog.
+2. **Terjawab benchmark M8 (2026-10-16)**: node publik Sepolia (publicnode) hanya menyimpan ±10.000 blok terakhir — `getLogs` rentang 9.000–10.001 blok OK (~1.200 log, ~2 dtk), 11.000+ gagal `pruned history unavailable` (kode 4444); drpc.org / rpc.sepolia.org tidak melayani. Keputusan R4/R5: chunk 9.000 + scan mundur + cache + status jujur (lengkap HANYA bila mint terlihat + jumlah saldo == supply). **Follow-up — selesai (`b0c6a2e`, 2026-10-16)**: `history.js` sudah retrofit chunk 9.000 blok + tape partial (alasan tertulis, bukan "belum ada trade"); label backlog dicabut.
 3. Fungsi claim fee kreator di kontrak DEX kita belum dikonfirmasi ada (brief menyebut "claim creator fee" masuk daftar "belum ada") → R6 butuh keputusan kontrak.
 4. Angka share/volume launchpad berasal dari periode berbeda-beda 2025–2026; gunakan hanya sebagai konteks, tidak untuk klaim posisi kompetitif.
 
