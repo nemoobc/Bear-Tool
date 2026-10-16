@@ -346,7 +346,7 @@ test('Dex labels are translated in both languages', () => {
                      'dex.welcome.title', 'dex.welcome.sub', 'dex.welcome.start',
                      'dex.tab.create',
                      'dex.tokens.title', 'dex.tokens.none', 'dex.tokens.unknown',
-                     'dex.trades.title', 'dex.trades.none', 'dex.trades.buy', 'dex.trades.sell',
+                     'dex.trades.title', 'dex.trades.none', 'dex.trades.buy', 'dex.trades.sell', 'dex.trades.partial',
                      'dex.tp.chart', 'dex.tp.noTrades',
                      'dex.feed.search', 'dex.feed.sortAria', 'dex.feed.sortNew', 'dex.feed.sortLiq', 'dex.feed.sortName',
                      'dex.feed.badgeNew', 'dex.feed.badgeLock', 'dex.feed.lockUntil', 'dex.feed.noMatch', 'dex.feed.openAddr',

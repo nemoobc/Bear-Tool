@@ -16,6 +16,10 @@ import { escapeHtml } from '../ui.js';
 import { tradesToCandles, PRICE_SCALE } from './chart.js';
 import { PUMP_ABI } from './pump-source.js';
 import { fmtEth, fmtTokens, fmtPrice } from './curve.js';
+// The chunk walker the holder scan already uses: a node that refuses a wide
+// window (range cap) or has pruned it (old blocks gone) is a fact of RPC life,
+// and this is the one place that turns it into per-chunk asks.
+import { chunkedGetLogs } from './holders.js';
 
 // The three events the tape reads, taken from the ABI that ships with the
 // bytecode they belong to — a second copy of an event name would be a second
@@ -101,12 +105,36 @@ const MAX_STAMP_READS = 40;
 // Test seam: drops the memo so a test never inherits another test's stamps.
 export function _clearStampCache() { stampCache.clear(); }
 
+// One log read over a window that may be wider than the node will hand over.
+//
+// The single wide call goes FIRST: a node that serves the whole 40k window in
+// one answer costs one round trip, and that is the common case. Only when the
+// node refuses does the same window get walked in chunks — a range cap is
+// cured by smaller asks, and a pruned window yields whatever the newest
+// chunks still hold, flagged instead of thrown.
+async function readLogs(contract, filter, fromBlock, toBlock) {
+  try {
+    return { logs: await contract.queryFilter(filter, fromBlock, toBlock), partial: false };
+  } catch {
+    return chunkedGetLogs({
+      getLogs: (lo, hi) => contract.queryFilter(filter, lo, hi),
+      fromBlock,
+      toBlock,
+      lenient: true,
+    });
+  }
+}
+
 // Reads the contract's trade logs and returns them newest-first.
 //
 // Returns { trades, graduated } where each trade is
 //   { kind:'buy'|'sell', who, eth, tokens, block, time, price }
 // `price` is ETH per token at that moment, derived from the pool reserves at
 // that block — so a sell shows the price it got, not today's price.
+//
+// `partial:true` (plus the node's own words in `reason`) when some event's
+// window could only be read from its newest edge — the rows are real, but the
+// page must say the window was cut instead of presenting them as complete.
 export async function loadHistory(contract, provider, { limit = 60 } = {}) {
   const empty = { trades: [], graduated: false, ok: false };
   if (!contract || !provider) return empty;
@@ -115,11 +143,23 @@ export async function loadHistory(contract, provider, { limit = 60 } = {}) {
     const latest = await provider.getBlockNumber();
     const fromBlock = latest > LOOKBACK_BLOCKS ? latest - LOOKBACK_BLOCKS : 0;
 
-    const [buyLogs, sellLogs, gradLogs] = await Promise.all([
-      contract.queryFilter(contract.filters.Bought(), fromBlock, latest),
-      contract.queryFilter(contract.filters.Sold(), fromBlock, latest),
-      contract.queryFilter(contract.filters.Graduated(), fromBlock, latest),
+    const [buyRead, sellRead, gradRead] = await Promise.all([
+      readLogs(contract, contract.filters.Bought(), fromBlock, latest),
+      readLogs(contract, contract.filters.Sold(), fromBlock, latest),
+      readLogs(contract, contract.filters.Graduated(), fromBlock, latest),
     ]);
+
+    // A walk that read nothing AND carries a reason failed outright. All three
+    // failing is the old honest answer: say why, show nothing. One event cut
+    // among readable ones is a PARTIAL window — the trades in hand are real,
+    // and the flag makes the page say the window was cut.
+    const refused = [buyRead, sellRead, gradRead].filter((r) => !r.partial && r.reason);
+    if (refused.length === 3) return { ...empty, reason: refused[0].reason };
+    const partial = refused.length > 0 || buyRead.partial || sellRead.partial || gradRead.partial;
+    const cut = [buyRead, sellRead, gradRead].find((r) => r.reason);
+    const buyLogs = buyRead.logs;
+    const sellLogs = sellRead.logs;
+    const gradLogs = gradRead.logs;
 
     // Blocks are only needed for rows that survive the limit. getBlock takes
     // ONE BlockTag, not a list (passing an array is what silently broke this
@@ -169,6 +209,7 @@ export async function loadHistory(contract, provider, { limit = 60 } = {}) {
       trades: trades.filter(Boolean),
       graduated: gradLogs.length > 0,
       ok: true,
+      ...(partial ? { partial: true, ...(cut ? { reason: cut.reason } : {}) } : {}),
     };
   } catch (e) {
     // A node that cannot serve old logs must not take the coin page down with
@@ -231,6 +272,9 @@ export const poolCandles = historyCandles;
 //
 // Returns { trades, ok } — `ok:false` (with `reason`) when the node cannot
 // serve the logs, so the page can say WHY instead of pretending "no trades".
+// `partial:true` when only the newest edge of the window could be read: the
+// rows are real, and the page says the window was cut rather than passing
+// them off as the whole tape.
 export async function loadPoolHistory(contract, provider, { limit = 60 } = {}) {
   const empty = { trades: [], ok: false };
   if (!contract || !provider) return empty;
@@ -239,8 +283,12 @@ export async function loadPoolHistory(contract, provider, { limit = 60 } = {}) {
     const latest = await provider.getBlockNumber();
     const fromBlock = latest > LOOKBACK_BLOCKS ? latest - LOOKBACK_BLOCKS : 0;
 
-    const logs = await contract.queryFilter(contract.filters.Swap(), fromBlock, latest);
-    const raw = [...logs].sort((a, b) => Number(b.blockNumber) - Number(a.blockNumber));
+    const read = await readLogs(contract, contract.filters.Swap(), fromBlock, latest);
+    // Read nothing and got a reason: the old honest failure. Read some and hit
+    // the prune line: partial — flag it, keep the reason, and let the caller
+    // show the newest rows with the cut stated.
+    if (!read.partial && read.reason) return { ...empty, reason: read.reason };
+    const raw = [...read.logs].sort((a, b) => Number(b.blockNumber) - Number(a.blockNumber));
 
     const rows = raw.slice(0, limit);
 
@@ -269,7 +317,7 @@ export async function loadPoolHistory(contract, provider, { limit = 60 } = {}) {
     const stamps = await blockStamps(provider, decoded.map((t) => t.block));
     const trades = decoded.map((t) => ({ ...t, time: stamps.get(t.block) || 0 }));
 
-    return { trades, ok: true };
+    return { trades, ok: true, ...(read.partial ? { partial: true, reason: read.reason } : {}) };
   } catch (e) {
     // Same discipline as loadHistory: a node that cannot serve logs reports
     // why, and the page keeps its header instead of going down with the tape.

@@ -542,3 +542,115 @@ test('poolCandles is the same candle maths — one shape, one chart', async () =
   const times = candles.map((c) => c.time);
   assert.deepEqual([...times].sort((a, b) => a - b), times, 'pool candles ascend like curve candles');
 });
+
+// ── nodes that refuse the wide window ───────────────────────────────
+// A range cap and a prune look alike from here and need opposite answers: the
+// cap is cured by asking smaller (the WHOLE window must come back), the prune
+// is not cured by anything (the newest rows come back, flagged, or the node's
+// reason does). The single wide call is tried first on every node — these
+// stubs refuse it on purpose.
+
+function rangeCappedChain({ swaps = [], cap = 5_000 }) {
+  const asked = [];
+  const contract = {
+    filters: { Swap: () => 'Swap' },
+    queryFilter: async (f, from, to) => {
+      const fits = to - from <= cap;
+      asked.push({ from, to, ok: fits });
+      if (!fits) throw new Error('block range is too wide');
+      return swaps.filter((s) => s.blockNumber >= from && s.blockNumber <= to);
+    },
+  };
+  const provider = {
+    getBlockNumber: async () => 10_000_000,
+    getBlock: async () => ({ timestamp: 1_700_000_000 }),
+  };
+  return { contract, provider, asked };
+}
+
+const prunedError = () => {
+  const e = new Error('pruned history unavailable');
+  e.info = { error: { code: 4444 } };
+  return e;
+};
+
+test('a range-capped node still gets the WHOLE window — the walk shrinks until it fits', async () => {
+  const { loadPoolHistory, _clearStampCache } = await import('../js/dex/history.js');
+  _clearStampCache();
+  const newest = 9_999_000;
+  const oldest = 9_960_500; // outside one small ask, inside the 40k window
+  const { contract, provider, asked } = rangeCappedChain({
+    swaps: [
+      swapLog(newest, '0xBuyer', true, 10n ** 16n, 10n ** 18n),
+      swapLog(oldest, '0xBuyer', true, 2n * 10n ** 16n, 10n ** 18n),
+    ],
+  });
+  const out = await loadPoolHistory(contract, provider);
+  assert.equal(out.ok, true, 'a range cap is not a failure — it is a smaller ask');
+  assert.equal(out.partial, undefined, 'the whole window was read; nothing was cut');
+  assert.deepEqual(out.trades.map((t) => t.block), [newest, oldest], 'both fills, newest first');
+  assert.ok(asked.some((a) => !a.ok), 'the wide ask was refused at least once');
+  const firstOk = asked.findIndex((a) => a.ok);
+  assert.ok(firstOk > 0, 'a chunk size that fits was found only by shrinking');
+  assert.ok(asked.slice(firstOk).every((a) => a.ok), 'once a size fits, every following ask uses it');
+});
+
+test('a pruned node yields the newest trades — flagged partial, never silent', async () => {
+  const { loadPoolHistory, _clearStampCache } = await import('../js/dex/history.js');
+  _clearStampCache();
+  const floor = 10_000_000 - 9_000; // the newest chunk is all the node still serves
+  const kept = swapLog(9_999_500, '0xBuyer', true, 10n ** 16n, 10n ** 18n);
+  const contract = {
+    filters: { Swap: () => 'Swap' },
+    queryFilter: async (f, from, to) => {
+      if (from < floor) throw prunedError();
+      return [kept].filter((s) => s.blockNumber >= from && s.blockNumber <= to);
+    },
+  };
+  const provider = { getBlockNumber: async () => 10_000_000, getBlock: async () => ({ timestamp: 1_700_000_000 }) };
+  const out = await loadPoolHistory(contract, provider);
+  assert.equal(out.ok, true, 'the rows the node still serves are real and shown');
+  assert.equal(out.partial, true, 'but the window was cut — the page must say so');
+  assert.deepEqual(out.trades.map((t) => t.block), [9_999_500]);
+  assert.match(out.reason, /pruned/i, 'the cut carries the node\'s own words');
+});
+
+test('a pruned node with nothing readable is still an honest failure', async () => {
+  const { loadPoolHistory, _clearStampCache } = await import('../js/dex/history.js');
+  _clearStampCache();
+  const contract = {
+    filters: { Swap: () => 'Swap' },
+    queryFilter: async (f, from) => {
+      if (from < 10_000_000 - 9_000) throw prunedError();
+      return [];
+    },
+  };
+  const out = await loadPoolHistory(contract, { getBlockNumber: async () => 10_000_000 });
+  assert.equal(out.ok, false, 'no readable rows is not "no trades" — it is "cannot read"');
+  assert.deepEqual(out.trades, []);
+  assert.match(out.reason, /pruned/i);
+});
+
+test('the curve tape survives a prune too: partial rows, flag, and the reason kept', async () => {
+  const { loadHistory, _clearStampCache } = await import('../js/dex/history.js');
+  _clearStampCache();
+  const floor = 5_000_000 - 9_000;
+  const buyAt = 4_999_600;
+  const logs = [bought(buyAt, '0x' + '1'.repeat(40), 10n ** 16n, 10n ** 18n)];
+  const contract = {
+    filters: { Bought: () => 'Bought', Sold: () => 'Sold', Graduated: () => 'Graduated' },
+    queryFilter: async (f, from, to) => {
+      if (from < floor) throw prunedError();
+      return f === 'Bought' ? logs.filter((l) => l.blockNumber >= from && l.blockNumber <= to) : [];
+    },
+  };
+  const provider = {
+    getBlockNumber: async () => 5_000_000,
+    getBlock: async () => ({ timestamp: 1_700_000_000 }),
+  };
+  const out = await loadHistory(contract, provider);
+  assert.equal(out.ok, true);
+  assert.equal(out.partial, true, 'the cut is stated, not hidden');
+  assert.equal(out.trades.length, 1, 'the buy the node still serves is shown');
+  assert.match(out.reason, /pruned/i);
+});

@@ -140,9 +140,17 @@ export function isPrunedError(e) {
  * ranges tighter than the default (a range cap is not a prune — asking for
  * less is the fix). `stopAfter` lets sparse lookups (one factory event) quit
  * as soon as they have what they came for.
+ *
+ * `lenient` is for callers that would rather show the newest rows they COULD
+ * read than an empty page: on a prune (or a cap it cannot shrink below) it
+ * stops and hands back `{ logs, partial, reason }` — `partial:true` only when
+ * rows were actually read, because "we read some" and "we read none" must not
+ * look alike. The default (strict) behaviour is unchanged: throw.
  */
-export async function chunkedGetLogs({ getLogs, fromBlock, toBlock, chunk = HOLDER_CHUNK, stopAfter = 0 } = {}) {
-  if (typeof getLogs !== 'function' || !(toBlock >= fromBlock)) return [];
+export async function chunkedGetLogs({ getLogs, fromBlock, toBlock, chunk = HOLDER_CHUNK, stopAfter = 0, lenient = false } = {}) {
+  if (typeof getLogs !== 'function' || !(toBlock >= fromBlock)) {
+    return lenient ? { logs: [], partial: false } : [];
+  }
   const out = [];
   let to = toBlock;
   let c = Math.max(1, chunk);
@@ -153,6 +161,9 @@ export async function chunkedGetLogs({ getLogs, fromBlock, toBlock, chunk = HOLD
       logs = await getLogs(lo, to);
     } catch (e) {
       if (c > 1000 && !isPrunedError(e)) { c = Math.max(1000, Math.floor(c / 2)); continue; }
+      if (lenient) {
+        return { logs: out, partial: out.length > 0, reason: String((e && (e.shortMessage || e.message)) || e) };
+      }
       throw e;
     }
     if (logs && logs.length) out.push(...logs);
@@ -163,7 +174,7 @@ export async function chunkedGetLogs({ getLogs, fromBlock, toBlock, chunk = HOLD
     if (lo <= fromBlock) break;
     to = lo;
   }
-  return out;
+  return lenient ? { logs: out, partial: false } : out;
 }
 
 // ── per-token progress cache ─────────────────────────────────────────

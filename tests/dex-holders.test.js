@@ -282,3 +282,32 @@ test('the render gate is pinned: balances only exist inside the done branch', ()
     assert.ok(src.includes(branch), `the honest state ${branch} must stay wired`);
   }
 });
+
+test('a lenient walk hands back the newest chunks it managed to read, flagged', async () => {
+  // history.js reads the tape through this mode: a node that cut the window
+  // must still show the rows it HAS — with partial:true saying the cut — and
+  // never confuse "read nothing" with "read some".
+  const prune = () => {
+    const e = new Error('pruned history unavailable');
+    e.info = { error: { code: 4444 } };
+    return e;
+  };
+  const got = await H.chunkedGetLogs({
+    getLogs: async (lo) => {
+      if (lo < 100) throw prune();
+      return [{ blockNumber: lo + 1 }];
+    },
+    fromBlock: 0, toBlock: 1000, chunk: 300, lenient: true,
+  });
+  assert.equal(got.partial, true, 'rows read + a cut = partial, not success, not failure');
+  assert.match(got.reason, /pruned/i, 'the node\'s own words ride along');
+  assert.equal(got.logs.length, 3, 'the three newest chunks are kept');
+
+  const none = await H.chunkedGetLogs({
+    getLogs: async () => { throw prune(); },
+    fromBlock: 0, toBlock: 1000, lenient: true,
+  });
+  assert.equal(none.partial, false, 'no rows read is NOT partial — it is a plain failure');
+  assert.deepEqual(none.logs, []);
+  assert.match(none.reason, /pruned/i);
+});

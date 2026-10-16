@@ -212,12 +212,14 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
     if (get('dex.tokenView') !== token) return;
     if (tapeEl) {
       tapeEl.innerHTML = hist.ok
-        ? tradesHtml(hist.trades, sym, qSym)
+        ? tradesHtml(hist.trades, sym, qSym) + (hist.partial ? `<div class="small">${escapeHtml(t('dex.trades.partial'))}</div>` : '')
         : `<div class="small">${escapeHtml(hist.reason || t('dex.swap.unreadable'))}</div>`;
     }
     let candles = [];
     if (hist.ok) {
-      if (chartNote) chartNote.textContent = '';
+      // A cut window is stated on the chart too: fewer candles than the window
+      // claims is exactly the kind of silent half-truth this page must not do.
+      if (chartNote) chartNote.textContent = hist.partial ? t('dex.trades.partial') : '';
       candles = await poolCandles(hist.trades);
     } else if (chartNote) {
       // A node that cannot serve logs must not blank the page: the header is

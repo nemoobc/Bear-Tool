@@ -193,7 +193,10 @@ export function bindTokenTrade(host, token, onBack) {
     if (chartLoading) chartLoading.hidden = false;
     const hist = await loadHistory(c, p);
     if (chartLoading) chartLoading.hidden = true;
-    if (tapeHost) tapeHost.innerHTML = tradesHtml(hist.trades, state.sym || token.symbol || '', state.quoteSym);
+    if (tapeHost) {
+      tapeHost.innerHTML = tradesHtml(hist.trades, state.sym || token.symbol || '', state.quoteSym)
+        + (hist.partial ? `<div class="small">${escapeHtml(t('dex.trades.partial'))}</div>` : '');
+    }
     const candles = await historyCandles(hist.trades);
     await paintChart(candles);
   };
