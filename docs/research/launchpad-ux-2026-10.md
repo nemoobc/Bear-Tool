@@ -192,10 +192,12 @@ Alasan: tiga kolom status GMGN (S10), sort & filter four.meme (S11), search by c
 **R4. Statistik token + tape on-chain yang jujur.** Effort **L**.
 Isi: harga, market cap (supply × harga pool), likuiditas (reserve), jumlah holder (estimasi), volume 24 jam; tape transaksi (waktu, arah beli/jual, ukuran ETH & USD) dari `queryFilter` event Swap/Burn/Mint + cache lokal (IndexedDB/localStorage) + backfill bertahap per blok; label "data dihitung langsung dari event on-chain".
 Alasan: chart+tape adalah ekspektasi minimum (U14; tab Chart four.meme S11; realtime DEX Screener S24); brief meminta "chart+tape bagus, statistik volume/marketcap/24h". Tanpa backend → satu-satunya jalan adalah queryFilter + cache; tandai bila data belum lengkap (kejujuran > angka palsu).
+**Status (M8, 2026-10-16): dieksekusi sebagian.** Sudah ada: harga (M5b), likuiditas/reserve (M5b), tape (M5b), market cap (supply × harga pool), volume 24 jam + jumlah trade (log Swap 7.200 blok terakhir = satu chunk). Sisa: jumlah holder (menyatu dengan R5). Aturan jujur: angka muncul HANYA bila bacaan sukses — gagal baca → barisnya disembunyikan, bukan ditulis nol.
 
 **R5. Holder list top-50 + konsentrasi top-10.** Effort **M**.
 Isi: daftar holder (alamat singkat + copy), % top-10, status "kontrak LP dikunci/burn" untuk pool kita.
 Alasan: GMGN menjadikan top-10 wallet & distribusi holder syarat anti-rug (S10); statistik scam industri (A6); brief meminta "holder list".
+**Status (M8, 2026-10-16): dieksekusi.** `js/dex/holders.js`: scan mundur Transfer log per chunk 9.000 blok + cache localStorage per token; daftar top-50 + konsentrasi top-10 dirender HANYA saat terverifikasi (mint terlihat + jumlah saldo == supply); status LP lock dibaca dari `lockedUntil(creator)`. Tiga status jujur: lengkap · masih memindai (tombol lanjut) · node memangkas riwayat (tanpa angka).
 
 **R6. Halaman "Fee Saya" (creator rewards) + tombol "Klaim Semua".** Effort **S–M** (butuh fungsi claim di kontrak; jika belum ada → tambah ke backlog kontrak).
 Isi: akumulasi fee kreator dari aktivitas pool (0,3% share bila diaktifkan), riwayat, satu CTA besar.
@@ -252,7 +254,7 @@ Catatan daftar ini: (a) bintang/komit = kondisi 2026-10-15, bukan jaminan kualit
 
 **RISIKO (asumsi belum terverifikasi — DEV wajib cek manual):**
 1. Label UI literal panel beli/jual pump.fun dibaca dari panduan pihak ke-3 (S27), bukan tangkapan layar app langsung → cek dengan app/frontend asli sebelum menyalin istilah.
-2. Kelayakan performa: replay `queryFilter` volume 24 jam + holder list di WebView HP kelas bawah belum diuji; butuh benchmark nyata (jumlah blok Sepolia vs RPC publik) sebelum menjanjikan R4/R5/R8.
+2. **Terjawab benchmark M8 (2026-10-16)**: node publik Sepolia (publicnode) hanya menyimpan ±10.000 blok terakhir — `getLogs` rentang 9.000–10.001 blok OK (~1.200 log, ~2 dtk), 11.000+ gagal `pruned history unavailable` (kode 4444); drpc.org / rpc.sepolia.org tidak melayani. Keputusan R4/R5: chunk 9.000 + scan mundur + cache + status jujur (lengkap HANYA bila mint terlihat + jumlah saldo == supply). **Follow-up**: R8 (chart/tape) masih memakai satu query 40.000 blok di `history.js` — di node terpangkas akan gagal; retrofit chunking masuk backlog.
 3. Fungsi claim fee kreator di kontrak DEX kita belum dikonfirmasi ada (brief menyebut "claim creator fee" masuk daftar "belum ada") → R6 butuh keputusan kontrak.
 4. Angka share/volume launchpad berasal dari periode berbeda-beda 2025–2026; gunakan hanya sebagai konteks, tidak untuk klaim posisi kompetitif.
 

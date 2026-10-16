@@ -488,6 +488,40 @@ try {
     `approved=${apprAgain.approved} reserves ${rBuyA} -> ${rBuyB}`);
   check('…and the second buy credited exactly the second quote',
     (await token.balanceOf(traderAddr)) - tokABefore === qBuyA.amountOut);
+
+  // --- M8: the holder scan against a chain it did not write --------------
+  // The unit tests drive the scanner over stubs; THIS is the proof over real
+  // history: every balance the scan derives from raw Transfer logs must equal
+  // the token's own balanceOf to the wei, and the sums must land exactly on
+  // supply — the only shape the holder card is allowed to render.
+  const holdersJs = await import('../js/dex/holders.js');
+  const cacheMem = { _s: new Map(), getItem(k) { return this._s.has(k) ? this._s.get(k) : null; }, setItem(k, v) { this._s.set(k, String(v)); } };
+  const scan = await holdersJs.scanHolders({ E: ethers, provider, token: tokenAddr, cache: cacheMem, supply: SUPPLY });
+  check('holder scan completes on real history (mint seen, sums on supply)',
+    scan.done === true && scan.mintSeen === true,
+    `done=${scan.done} mint=${scan.mintSeen} low=${scan.low} reason=${scan.reason || ''}`);
+  const balOf = async (a) => BigInt(await token.balanceOf(a));
+  const cBal = await balOf(creatorAddr);
+  const tBal = await balOf(traderAddr);
+  const pBal = await balOf(poolAddr);
+  check('scan balances equal balanceOf to the wei (creator, trader, pool)',
+    (scan.balances.get(creatorAddr.toLowerCase()) || 0n) === cBal
+    && (scan.balances.get(traderAddr.toLowerCase()) || 0n) === tBal
+    && (scan.balances.get(poolAddr.toLowerCase()) || 0n) === pBal,
+    `scan=${scan.balances.get(creatorAddr.toLowerCase())}/${scan.balances.get(traderAddr.toLowerCase())}/${scan.balances.get(poolAddr.toLowerCase())} chain=${cBal}/${tBal}/${pBal}`);
+  check('scan sums land exactly on the token supply',
+    holdersJs.sumOf(scan.balances) === BigInt(SUPPLY), `sum=${holdersJs.sumOf(scan.balances)} supply=${SUPPLY}`);
+  const scanRows = holdersJs.holderRows(scan.balances, BigInt(SUPPLY), { exclude: [poolAddr], limit: 50 });
+  const expectedHeads = (cBal > 0n ? 1 : 0) + (tBal > 0n ? 1 : 0);
+  check('holder rows exclude the pool, count the true wallets, lead with the biggest',
+    scanRows.count === expectedHeads
+    && scanRows.rows.every((r) => r.addr !== poolAddr.toLowerCase())
+    && (scanRows.rows.length === 0 || scanRows.rows[0].amount === (cBal > tBal ? cBal : tBal)),
+    `count=${scanRows.count} expected=${expectedHeads}`);
+  const dayStat = await holdersJs.pool24h({ E: ethers, provider, pair: poolAddr, blocks: 7200 });
+  check('24h volume folds the pair\'s own Swap logs (ok, volume and trades real)',
+    dayStat.ok === true && dayStat.volQuote > 0n && dayStat.trades > 0,
+    `ok=${dayStat.ok} vol=${dayStat.volQuote} trades=${dayStat.trades} reason=${dayStat.reason || ''}`);
 } catch (e) {
   failures++;
   console.error('  ERROR', e && (e.shortMessage || e.message) || String(e));

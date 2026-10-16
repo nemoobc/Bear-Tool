@@ -19,6 +19,7 @@ import { drawCandles } from './chart.js';
 import { deleteCoin } from './list.js';
 import { forgetLaunchedToken } from './tokens.js';
 import { mountTradeSheet } from './trade-sheet.js';
+import { scanHolders, holderRows, topShareBps, pool24h, chunkedGetLogs, ZERO_ADDR } from './holders.js';
 
 const shortOf = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 
@@ -61,10 +62,18 @@ export function tokenPageHtml() {
       <div class="small" id="dexTpPrice"></div>
       <div class="small" id="dexTpReserves"></div>
       <div class="small mt-8" id="dexTpMy"></div>
+      <div class="small mt-8" id="dexTpStats" role="status"></div>
       <div class="mt-8">
         <button type="button" class="btn btn-secondary" id="dexTpLp"></button>
       </div>
       <div class="small mt-8" id="dexTpNote" role="status"></div>
+    </div>
+    <div class="card mb-8">
+      <div class="field-label">${escapeHtml(t('dex.hold.title'))}</div>
+      <div class="small" id="dexTpHoldersLock"></div>
+      <div class="small mt-8" id="dexTpHoldersNote" role="status"></div>
+      <div class="dex-holds" id="dexTpHoldersList"></div>
+      <button type="button" class="btn btn-secondary btn-block mt-8" id="dexTpHoldersMore" hidden></button>
     </div>
     <div class="card mb-8" id="dexTpTrade"></div>
     <div class="card mb-8">
@@ -120,12 +129,13 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
 
   const me = get('address');
   const tc = new E.Contract(token, BEAR_TOKEN_ABI, provider());
-  const [ti, face, desc, ps, lp] = await Promise.all([
+  const [ti, face, desc, ps, lp, supplyRaw] = await Promise.all([
     tokenInfo(token, me),
     tc.image().catch(() => ''),
     tc.description().catch(() => ''),
     poolState(pair),
     lpPosition(pair, me),
+    tc.totalSupply().catch(() => null),
   ]);
 
   const sym = ti.ok && ti.symbol ? ti.symbol : shortOf(token);
@@ -229,5 +239,130 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
     // The header is already read and painted; a chart that cannot draw must
     // not take the page down with it — say so under the frame.
     if (chartNote) chartNote.textContent = (e && (e.shortMessage || e.message)) || String(e);
+  }
+
+  // ── statistics & holders (M8) ────────────────────────────────────
+  // Two honest reads after the page is already usable: the day's volume from
+  // the pair's own Swap logs, and the holder list from the token's whole
+  // Transfer history. Both fail into words, never into a number that was not
+  // actually seen; and both stop the moment the user leaves this page.
+  const gone = () => get('dex.tokenView') !== token;
+  const statsEl = el('dexTpStats');
+  const holdList = el('dexTpHoldersList');
+  const holdNote = el('dexTpHoldersNote');
+  const holdMore = el('dexTpHoldersMore');
+  const holdLock = el('dexTpHoldersLock');
+  const supply = supplyRaw != null ? BigInt(supplyRaw) : null;
+
+  const day = await pool24h({ E, provider: provider(), pair, shouldStop: gone });
+  if (gone()) return;
+  if (statsEl) {
+    const bits = [];
+    if (supply != null) {
+      const priced = quotePerToken(ps.quoteReserve, ps.tokenReserve, td);
+      if (priced > 0n) bits.push(t('dex.tp.mcap', { v: fmtTok((supply * priced) / 10n ** BigInt(td), qd, 4), sym: qSym }));
+    }
+    if (day.ok) bits.push(t('dex.tp.vol24', { v: fmtTok(day.volQuote, qd, 4), sym: qSym, n: String(day.trades) }));
+    statsEl.textContent = bits.join(' · ');
+  }
+
+  // The creator's own lock — read from the pair, the creator found in the
+  // factory's own event. No creator found = no claim made (an empty line,
+  // never a guessed "locked").
+  if (holdLock) {
+    try {
+      const f = factoryAddress();
+      const p = provider();
+      if (isAddr(f) && p) {
+        const latest = await p.getBlockNumber();
+        const sigs = [E.id('Launched(address,address,address,address)'), E.id('PoolCreated(address,address,address,address)')];
+        const found = await chunkedGetLogs({
+          getLogs: (lo, hi) => p.getLogs({ address: f, fromBlock: lo, toBlock: hi, topics: [sigs, null, E.zeroPadValue(token, 32)] }),
+          fromBlock: Math.max(0, latest - 54000),
+          toBlock: latest,
+          stopAfter: 1,
+        });
+        if (found.length && !gone()) {
+          const creator = E.getAddress('0x' + String(found[0].topics[1] || '').slice(-40));
+          const pc = new E.Contract(pair, BEAR_PAIR_ABI, provider());
+          const until = Number(await pc.lockedUntil(creator));
+          if (!gone() && until > 0) {
+            const date = new Date(until * 1000).toISOString().slice(0, 10);
+            const now = Math.floor(Date.now() / 1000);
+            holdLock.textContent = until > now ? t('dex.hold.lockUntil', { date }) : t('dex.hold.lockFree');
+          }
+        }
+      }
+    } catch { /* no creator read = no lock claim */ }
+  }
+
+  // The holder list: the whole Transfer history, or the honest reason why the
+  // list cannot be claimed. Balances render ONLY on `done` — anything less is
+  // a sentence, because a partial window's sums are wrong by construction.
+  const paintHolders = (scan) => {
+    if (!holdNote || gone()) return;
+    const skip = [pair, ZERO_ADDR];
+    if (scan.done) {
+      const { rows, count } = holderRows(scan.balances, supply, { exclude: skip, limit: 50 });
+      const top10 = topShareBps(scan.balances, supply, { top: 10, exclude: skip });
+      holdNote.textContent = `${t('dex.hold.summary', { n: String(count), pct: (top10 / 100).toFixed(1) })} · ${t('dex.hold.note')}`;
+      if (holdList) {
+        holdList.innerHTML = rows.map((r, i) => `
+          <button type="button" class="dex-hold" data-addr="${r.addr}">
+            <span class="dex-hold-rank">${i + 1}</span>
+            <span class="dex-hold-addr mono">${shortOf(r.addr)}</span>
+            <span class="dex-hold-amt mono">${fmtTok(r.amount, td, 4)}</span>
+            <span class="dex-hold-pct mono">${(r.pctBps / 100).toFixed(2)}%</span>
+          </button>`).join('');
+      }
+      if (holdMore) holdMore.hidden = true;
+    } else if (scan.pruned) {
+      holdNote.textContent = t('dex.hold.pruned');
+      if (holdMore) { holdMore.hidden = false; holdMore.textContent = t('dex.ts.retry'); }
+    } else if (scan.reason) {
+      holdNote.textContent = t('dex.hold.failed', { reason: escapeHtml(scan.reason) });
+      if (holdMore) { holdMore.hidden = false; holdMore.textContent = t('dex.ts.retry'); }
+    } else if (scan.mintSeen) {
+      holdNote.textContent = t('dex.hold.incomplete');
+      if (holdMore) holdMore.hidden = true;
+    } else {
+      holdNote.textContent = t('dex.hold.scanning', { block: String(scan.low) });
+      if (holdMore) { holdMore.hidden = false; holdMore.textContent = t('dex.hold.more'); }
+    }
+  };
+
+  if (holdList) {
+    holdList.addEventListener('click', (ev) => {
+      const row = ev.target && ev.target.closest ? ev.target.closest('.dex-hold') : null;
+      if (!row) return;
+      const addr = row.getAttribute('data-addr') || '';
+      if (!addr) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(addr);
+          toast(t('dex.hold.copied'), 'success');
+        } else {
+          toast(shortOf(addr));
+        }
+      } catch {
+        toast(shortOf(addr));
+      }
+    });
+  }
+
+  const runScan = async () => {
+    if (holdMore) holdMore.disabled = true;
+    const scan = await scanHolders({ E, provider: provider(), token, supply, shouldStop: gone });
+    if (holdMore) holdMore.disabled = false;
+    paintHolders(scan);
+  };
+  if (holdMore) holdMore.addEventListener('click', () => { runScan(); });
+  if (holdNote) {
+    if (supply == null) {
+      holdNote.textContent = t('dex.hold.nosupply');
+    } else {
+      holdNote.textContent = t('dex.pools.loading');
+      await runScan();
+    }
   }
 }

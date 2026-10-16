@@ -313,6 +313,7 @@ test('the launchpad lives in one folder, and only that folder', () => {
   assert.ok(files.includes('token-page.js'), 'js/dex/token-page.js — the v2 token page');
   assert.ok(files.includes('trade-sheet.js'), 'js/dex/trade-sheet.js — the ONE trade sheet (token page + Swap panel)');
   assert.ok(files.includes('history.js'), 'js/dex/history.js — the trade tape the feed is missing');
+  assert.ok(files.includes('holders.js'), 'js/dex/holders.js — the honest holder scan (M8)');
 
   const siblingLaunchpad = existsSync(fileURLToPath(new URL('../js/launchpad', import.meta.url)));
   assert.equal(siblingLaunchpad, false,
@@ -349,7 +350,7 @@ test('Dex labels are translated in both languages', () => {
                      'dex.tp.chart', 'dex.tp.noTrades',
                      'dex.feed.search', 'dex.feed.sortAria', 'dex.feed.sortNew', 'dex.feed.sortLiq', 'dex.feed.sortName',
                      'dex.feed.badgeNew', 'dex.feed.badgeLock', 'dex.feed.lockUntil', 'dex.feed.noMatch', 'dex.feed.openAddr',
-                     'dex.create.', 'dex.ts.', 'dex.lp.', 'dex.trade.graduatedWhy']) {
+                     'dex.create.', 'dex.ts.', 'dex.hold.', 'dex.lp.', 'dex.trade.graduatedWhy']) {
     const re = new RegExp(`'${key.replace(/\./g, '\\.').replace(/\\\.$/, '\\.')}`);
     for (const [lang, block] of [['en', en], ['id', id]]) {
       assert.ok(re.test(block), `${key} must be defined in the ${lang} block`);
