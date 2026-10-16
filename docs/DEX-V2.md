@@ -31,9 +31,9 @@ Sekarang dijawab dengan arah sebaliknya tapi tetap satu mesin: **pools = satu-sa
 |---|---------|-----|
 | 1 | **Swap** | Beli/jual token lewat pool; quote real dari reserve; minOut wajib (default slippage, cap); MAX; fee 0.3% tampil |
 | 2 | **Pools** | Daftar semua pool dari event factory (per chain); reserve, harga, fee, volume; bikin pool utk token existing (advanced) |
-| 3 | **Liquidity** | Add/remove LP per pool; LP = ERC-20 ("BLP"); posisi user (shares, nilai, % pool); lock dari launch tampil di sini |
+| 3 | **Liquidity** | Add/remove LP per pool; LP = ERC-20 ("BLP"); posisi user (shares, nilai, % pool); lock dari launch tampil di sini; auto-isi rasio reserve, peringatan miring dalam uang, estimasi APR fee dari volume 24 jam (label perkiraan), urutan approve dinamai di sheet konfirmasi |
 | 4 | **Launch** | Wizard: metadata (nama/ticker/gambar/deskripsi) + supply + harga & likuiditas awal (quote) + durasi lock → **SATU tx** `factory.launch` (token+pool+seed+lock atomik). Gunakan approve quote dulu; tanpa sheet ganda tiap tx tetap punya cancel+confirm |
-| 5 | **Token page** | Chart candle (dari event swap), tape trade, buy/sell, info pool + status lock + creator |
+| 5 | **Token page** | Chart candle rentang 1m/5m/1h/1d — bucket waktu dari event swap yang sudah dibaca (ganti rentang = 0 RPC; jam sepi tanpa candle, celah = fakta), tape trade, buy/sell, info pool + status lock + creator |
 | 6 | **Portfolio** | Token milikmu + posisi LP + nilai; aksi: remove LP, buka pool |
 | 7 | **Bot** | Market maker lama (address turunan seed) diadaptasi ke pool — beli/jual berkala sampai dihentikan/saldo habis |
 | 8 | **Feed & delete** | Feed = daftar pool/token (home); delete coin = tombstone permanen (fix user 2026-10-15) tetap berlaku |

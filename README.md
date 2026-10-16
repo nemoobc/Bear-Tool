@@ -275,7 +275,7 @@ Bear-Tool/
 │   │   ├── launch.js   # the launch wizard: image → data URI, socials + fee slice + one-tx dev buy, ONE factory.launch tx, token from receipt
 │   │   ├── token-page.js # v2 token page: face, on-chain socials, price, reserves, positions + safety chips — all read live
 │   │   ├── pump-source.js # the PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
-│   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over those same logs
+│   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over those same logs — 1m/5m/1h/1d time buckets cut client-side (a quiet bucket draws no candle)
 │   │   ├── list.js     # per-coin delisting: hide/restore a coin from your own feed, per chain, reversible
 │   │   ├── watch.js    # the watchlist: star a coin, a watch scope in the feed, and an in-app price watcher (≥10% moves, app open only)
 │   │   ├── liquidity.js # the pool panel: add/remove backing, your share, what it is worth — the contract functions made reachable
@@ -291,7 +291,7 @@ Bear-Tool/
 │   │   ├── swap.js     # v2 Swap: engine (exact parse, contract-floor quotes, approve→swap tx) + the panel
 │   │   ├── trade-sheet.js # the ONE trade sheet: direction, presets, quote line + confirm, approve→swap — mounted by the token page AND the Swap panel
 │   │   ├── pool-list.js # v2 Pools panel: live reserves + price per pool, opens the Swap tab
-│   │   ├── lp.js       # v2 Liquidity panel: add / remove / lock the pair's LP shares
+│   │   ├── lp.js       # v2 Liquidity panel: add / remove / lock the pair's LP shares — auto-fill, imbalance warning, fee-APR estimate
 │   │   ├── holders.js  # v2 holder scan: Transfer logs walked BACKWARD in chunks — complete, pruned or still reading; + the pair's 24h volume
 │   │   └── portfolio.js # v2 Portfolio panel: LP positions + token balances + your creator fees (claim / claim all), read live
 │   ├── sign-render.js  # how a signing payload is SHOWN: hex→text, binary labelled, bidi chars stripped (one copy, three sheets)
