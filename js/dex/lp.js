@@ -7,12 +7,13 @@
 //
 // The previews (addPreview / removePreview) mirror the contract's mint/burn
 // rules to the wei — the anvil e2e pins them against the real pair.
-import { provider, ethersLib, get, set, sendDexTx, needSigner, t, escapeHtml, fmtTok, $, dexChainOk, quoteBy } from './core.js';
+import { provider, ethersLib, get, set, sendDexTx, needSigner, t, escapeHtml, fmtTok, fmtPrice, confirmTx, $, dexChainOk, quoteBy } from './core.js';
 import { addShares, removeAmounts, minOutWithSlippage } from './pool-math.js';
 import { parseAmount, ensureAllowanceTx, DEFAULT_SLIPPAGE_BPS } from './swap.js';
 import { discoverPools, fillMeta } from './pools.js';
 import { poolState, tokenInfo, lpPosition } from './pool-data.js';
 import { BEAR_PAIR_ABI } from './bear-source.js';
+import { normalizeAmountInput } from './trade-sheet.js';
 
 const LOCK_CHOICES = [7, 30, 90, 365]; // days — a creator lock, not a yield farm
 
@@ -47,6 +48,91 @@ export function removePreview({ shares, quoteReserve, tokenReserve, supply, slip
     minQuote: minOutWithSlippage(quoteOut, slippageBps),
     minToken: minOutWithSlippage(tokenOut, slippageBps),
   };
+}
+
+// ── the clarity helpers (riset R10: "add liquidity bikin bingung") ────
+// The contract mints min(quote claim, token claim): a lopsided deposit does
+// not fail, it silently wastes the stronger side. These pure helpers are how
+// the panel teaches the ratio loop instead of letting users lose value to
+// discover it — Auto-fill follows the reserves, the preview says what the
+// share actually becomes, the imbalance is named in money.
+
+/** The other side of a balanced deposit: amountIn × reserveOut / reserveIn (floor). */
+export function otherSideFromRatio(amountIn, reserveIn, reserveOut) {
+  if (typeof amountIn !== 'bigint' || typeof reserveIn !== 'bigint' || typeof reserveOut !== 'bigint') return { ok: false };
+  if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) return { ok: false };
+  const value = (amountIn * reserveOut) / reserveIn;
+  if (value <= 0n) return { ok: false };
+  return { ok: true, value };
+}
+
+/**
+ * "Your share: a% → b%" in exact bigint basis points — the two numbers the
+ * user reads are the two numbers the chain will produce (no float drift).
+ * `delta` is the shares about to be minted (+) or burned (−); one formula,
+ * because minting and burning move shares and supply together.
+ */
+export function sharePctShift({ currentShares, delta, supply } = {}) {
+  if (typeof supply !== 'bigint' || typeof delta !== 'bigint' || typeof currentShares !== 'bigint') return null;
+  if (supply <= 0n || delta === 0n) return null;
+  const cur = currentShares > 0n ? currentShares : 0n;
+  const next = cur + delta;
+  const nextSupply = supply + delta;
+  if (next < 0n || nextSupply <= 0n) return null;
+  return { beforeBps: (cur * 10000n) / supply, afterBps: (next * 10000n) / nextSupply };
+}
+
+/**
+ * How lopsided an add is, in money: the weaker side sets the mint and the
+ * stronger side's excess buys nothing. Returns the amount that would have
+ * matched. The CTA still allows the tx (the chain accepts it — the user's
+ * money is their call), but the warning is never silent.
+ */
+export function imbalance({ quoteIn, tokenIn, quoteReserve, tokenReserve, supply } = {}) {
+  const all = [quoteIn, tokenIn, quoteReserve, tokenReserve, supply];
+  if (!all.every((v) => typeof v === 'bigint')) return null;
+  if (quoteIn <= 0n || tokenIn <= 0n || quoteReserve <= 0n || tokenReserve <= 0n || supply <= 0n) return null;
+  const qClaim = (quoteIn * supply) / quoteReserve;
+  const tClaim = (tokenIn * supply) / tokenReserve;
+  if (qClaim === tClaim) return { balanced: true, side: null, excess: 0n };
+  if (qClaim > tClaim) {
+    const needed = (tClaim * quoteReserve) / supply;
+    const excess = quoteIn - needed;
+    return excess > 0n ? { balanced: false, side: 'quote', excess } : { balanced: true, side: null, excess: 0n };
+  }
+  const needed = (qClaim * tokenReserve) / supply;
+  const excess = tokenIn - needed;
+  return excess > 0n ? { balanced: false, side: 'token', excess } : { balanced: true, side: null, excess: 0n };
+}
+
+/**
+ * The smallest excess worth showing: at 6 displayed decimals anything below
+ * 10^(dec−6) base units reads as "~0", and a "~0" warning on a balanced
+ * deposit (Auto's floor leaves ±1 wei) would be a scare line, not a fact.
+ */
+export function visibleExcess(excess, dec) {
+  if (typeof excess !== 'bigint' || excess <= 0n) return 0n;
+  const d = Number(dec);
+  const min = Number.isInteger(d) && d > 6 ? 10n ** BigInt(d - 6) : 1n;
+  return excess >= min ? excess : 0n;
+}
+
+/**
+ * Every way the add CTA can be disabled, each with its reason key — checked in
+ * order: wallet, amounts, validity, balance (quote then token), mint. The CTA
+ * is disabled ONLY with a reason on screen; "grey and silent" is the bug class
+ * this panel was rewritten to kill (riset R7, pelajaran M6).
+ */
+export function addGate({ unlocked, qRaw, tRaw, qParsed, tParsed, qBal, tBal, qSym, tSym, preview } = {}) {
+  if (!unlocked) return { disabled: true, reasonKey: 'dex.ts.reason.wallet' };
+  if (!String(qRaw ?? '').trim() || !String(tRaw ?? '').trim()) return { disabled: true, reasonKey: 'dex.swap.pickAmount' };
+  if (!qParsed?.ok || !tParsed?.ok) return { disabled: true, reasonKey: 'dex.ts.reason.invalid' };
+  if (qParsed.value > qBal) return { disabled: true, reasonKey: 'dex.trade.insufficient', reasonArgs: { sym: qSym } };
+  if (tParsed.value > tBal) return { disabled: true, reasonKey: 'dex.trade.insufficient', reasonArgs: { sym: tSym } };
+  if (!preview || !preview.ok) {
+    return { disabled: true, reasonKey: preview?.reason === 'too small' ? 'dex.ts.reason.small' : 'dex.ts.reason.empty' };
+  }
+  return { disabled: false, reasonKey: null };
 }
 
 // ── the three transactions, app path (approve-only-if-needed, then the call)
@@ -100,14 +186,20 @@ export function lpHtml() {
       <label class="field-label" for="dexLpPool">${escapeHtml(t('dex.lp.pool'))}</label>
       <select id="dexLpPool" class="input"></select>
       <div class="small mt-8" id="dexLpPosition"></div>
+      <div class="small mt-8" id="dexLpRate"></div>
     </div>
     <div class="card mb-8">
       <label class="field-label" for="dexLpQuoteIn" id="dexLpQuoteLabel"></label>
       <input id="dexLpQuoteIn" class="input" inputmode="decimal" autocomplete="off" placeholder="0.0">
       <label class="field-label mt-8" for="dexLpTokenIn" id="dexLpTokenLabel"></label>
       <input id="dexLpTokenIn" class="input" inputmode="decimal" autocomplete="off" placeholder="0.0">
+      <div class="mt-8">
+        <button type="button" class="btn btn-secondary" id="dexLpAuto">${escapeHtml(t('dex.lp.auto'))}</button>
+      </div>
       <div class="small mt-8" id="dexLpAddPreview"></div>
+      <div class="small mt-8" id="dexLpAddReason" role="status"></div>
       <button type="button" class="btn btn-primary btn-block mt-8" id="dexLpAddGo" disabled>${escapeHtml(t('dex.lp.goAdd'))}</button>
+      <div class="small mt-8" id="dexLpApproveNote">${escapeHtml(t('dex.lp.approveNote'))}</div>
     </div>
     <div class="card mb-8">
       <label class="field-label" for="dexLpShares">${escapeHtml(t('dex.lp.sharesIn'))}</label>
@@ -116,69 +208,73 @@ export function lpHtml() {
         <button type="button" class="btn btn-secondary" id="dexLpMax">${escapeHtml(t('dex.swap.max'))}</button>
       </div>
       <div class="small mt-8" id="dexLpRemovePreview"></div>
+      <div class="small mt-8" id="dexLpRemoveReason" role="status"></div>
       <button type="button" class="btn btn-primary btn-block mt-8" id="dexLpRemoveGo" disabled>${escapeHtml(t('dex.lp.remove'))}</button>
     </div>
     <div class="card mb-8">
       <label class="field-label" for="dexLpLockDur">${escapeHtml(t('dex.lp.lockDur'))}</label>
       <select id="dexLpLockDur" class="input">${lockOpts}</select>
+      <div class="small mt-8" id="dexLpLockReason"></div>
       <button type="button" class="btn btn-secondary btn-block mt-8" id="dexLpLockGo" disabled>${escapeHtml(t('dex.lp.lockGo'))}</button>
       <div class="small mt-8" id="dexLpNote" role="status"></div>
+      <button type="button" class="btn btn-secondary btn-block mt-8" id="dexLpRetry" hidden>${escapeHtml(t('dex.ts.retry'))}</button>
     </div>`;
 }
 
 export async function bindLp(host) {
   const sel = $('#dexLpPool', host);
   const posEl = $('#dexLpPosition', host);
+  const rateEl = $('#dexLpRate', host);
   const quoteIn = $('#dexLpQuoteIn', host);
   const tokenIn = $('#dexLpTokenIn', host);
   const quoteLabel = $('#dexLpQuoteLabel', host);
   const tokenLabel = $('#dexLpTokenLabel', host);
+  const autoBtn = $('#dexLpAuto', host);
   const addPrevEl = $('#dexLpAddPreview', host);
+  const addReasonEl = $('#dexLpAddReason', host);
   const addBtn = $('#dexLpAddGo', host);
   const sharesIn = $('#dexLpShares', host);
   const maxBtn = $('#dexLpMax', host);
   const remPrevEl = $('#dexLpRemovePreview', host);
+  const remReasonEl = $('#dexLpRemoveReason', host);
   const remBtn = $('#dexLpRemoveGo', host);
   const lockDur = $('#dexLpLockDur', host);
+  const lockReasonEl = $('#dexLpLockReason', host);
   const lockBtn = $('#dexLpLockGo', host);
   const noteEl = $('#dexLpNote', host);
-  if (!sel || !posEl || !quoteIn || !tokenIn || !quoteLabel || !tokenLabel || !addPrevEl || !addBtn
-    || !sharesIn || !maxBtn || !remPrevEl || !remBtn || !lockDur || !lockBtn || !noteEl) return;
+  const retryBtn = $('#dexLpRetry', host);
+  if (!sel || !posEl || !rateEl || !quoteIn || !tokenIn || !quoteLabel || !tokenLabel || !autoBtn
+    || !addPrevEl || !addReasonEl || !addBtn || !sharesIn || !maxBtn || !remPrevEl || !remReasonEl
+    || !remBtn || !lockDur || !lockReasonEl || !lockBtn || !noteEl || !retryBtn) return;
 
   let pools = [];
   let cur = null;
+  let lastSide = 'quote'; // which field the user touched last — the Auto anchor
   const note = (msg) => { noteEl.textContent = msg || ''; };
+  const shortOf = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+  // Every dead end leads BACK: a reason on screen and a retry that re-asks.
+  // (The old panel could disable everything after one failed read — forever.)
   const dead = (msg) => {
     cur = null;
     note(msg);
+    retryBtn.hidden = false;
     addBtn.disabled = true;
     remBtn.disabled = true;
     lockBtn.disabled = true;
     addPrevEl.textContent = '';
     remPrevEl.textContent = '';
+    addReasonEl.textContent = '';
+    remReasonEl.textContent = '';
+    lockReasonEl.textContent = '';
     posEl.textContent = '';
+    rateEl.textContent = '';
     sel.disabled = true;
   };
-
-  if (!dexChainOk()) { dead(t('dex.gate.needSepolia')); return; }
-  if (!provider()) { dead(t('dex.swap.unreadable')); return; }
-
-  note(t('dex.swap.loading'));
-  const out = await discoverPools({ scope: 'all', limit: 50 });
-  if (!out.ok) { dead(out.reason === 'no factory' ? t('dex.swap.noFactory') : t('dex.swap.unreadable')); return; }
-  if (!out.pools.length) { dead(t('dex.swap.noPools')); return; }
-  pools = await fillMeta(out.pools.slice());
-
-  const shortOf = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-  sel.innerHTML = pools.map(() => '<option></option>').join('');
-  [...sel.options].forEach((o, i) => {
-    const r = pools[i];
-    const q = quoteBy(r.quote);
-    o.textContent = `${r.symbol || shortOf(r.address)} / ${q ? q.symbol : '…'}`;
-  });
-  const wanted = String(get('dex.lpToken') || '').toLowerCase();
-  const pick = pools.find((r) => r.address.toLowerCase() === wanted) || pools[0];
-  sel.value = pick.address;
+  const fmt2 = (bps) => (Number(bps) / 100).toFixed(2);
+  const trimNum = (s) => {
+    const t = s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
+    return t === '' ? '0' : t;
+  };
 
   const paintPosition = () => {
     if (!cur) return;
@@ -198,16 +294,35 @@ export async function bindLp(host) {
     const preview = qp.ok && tp.ok
       ? addPreview({ quoteIn: qp.value, tokenIn: tp.value, quoteReserve: cur.ps.quoteReserve, tokenReserve: cur.ps.tokenReserve, supply: cur.ps.supply })
       : null;
-    if (!preview || !preview.ok) {
-      addPrevEl.textContent = '';
-      addBtn.disabled = true;
-      return;
-    }
-    addPrevEl.textContent = t('dex.lp.previewAdd', {
-      shares: fmtTok(preview.shares, 18, 6),
-      min: fmtTok(preview.minShares, 18, 6),
+    const g = addGate({
+      unlocked: !!get('unlocked'),
+      qRaw: quoteIn.value,
+      tRaw: tokenIn.value,
+      qParsed: qp,
+      tParsed: tp,
+      qBal: cur.qBal,
+      tBal: cur.tBal,
+      qSym: cur.qSym,
+      tSym: cur.tSym,
+      preview,
     });
-    addBtn.disabled = false;
+    addBtn.disabled = g.disabled;
+    addReasonEl.textContent = g.reasonKey ? t(g.reasonKey, g.reasonArgs || {}) : '';
+    if (!preview || !preview.ok) { addPrevEl.textContent = ''; return; }
+    const pct = sharePctShift({ currentShares: cur.shares, delta: preview.shares, supply: cur.ps.supply });
+    const imb = imbalance({ quoteIn: qp.value, tokenIn: tp.value, quoteReserve: cur.ps.quoteReserve, tokenReserve: cur.ps.tokenReserve, supply: cur.ps.supply });
+    let line = t('dex.lp.previewAdd', { shares: fmtTok(preview.shares, 18, 6), min: fmtTok(preview.minShares, 18, 6) });
+    if (pct) line += ` · ${t('dex.lp.shareShift', { a: fmt2(pct.beforeBps), b: fmt2(pct.afterBps) })}`;
+    if (imb && !imb.balanced) {
+      const sideDec = imb.side === 'quote' ? cur.qd : cur.td;
+      const sideSym = imb.side === 'quote' ? cur.qSym : cur.tSym;
+      // Dust from the floor never deserves a warning: below the displayed
+      // precision the "excess" reads as ~0, and that scare line would be a
+      // lie in the other direction.
+      const excess = visibleExcess(imb.excess, sideDec);
+      if (excess > 0n) line += ` · ${t('dex.lp.unbalanced', { amt: fmtTok(excess, sideDec, 6), sym: sideSym })}`;
+    }
+    addPrevEl.textContent = line;
   };
 
   const refreshRemove = () => {
@@ -216,18 +331,24 @@ export async function bindLp(host) {
     const preview = sp.ok
       ? removePreview({ shares: sp.value, quoteReserve: cur.ps.quoteReserve, tokenReserve: cur.ps.tokenReserve, supply: cur.ps.supply })
       : null;
-    if (!preview || !preview.ok) {
-      remPrevEl.textContent = '';
-      remBtn.disabled = true;
-      return;
-    }
-    remPrevEl.textContent = t('dex.lp.previewRemove', {
+    let reasonKey = null;
+    let reasonArgs = null;
+    if (!String(sharesIn.value ?? '').trim()) reasonKey = 'dex.swap.pickAmount';
+    else if (!sp.ok) reasonKey = 'dex.ts.reason.invalid';
+    else if (sp.value > cur.shares) { reasonKey = 'dex.lp.overShares'; reasonArgs = { n: fmtTok(cur.shares, 18, 6) }; }
+    else if (!preview || !preview.ok) reasonKey = preview?.reason === 'too small' ? 'dex.ts.reason.small' : 'dex.ts.reason.empty';
+    remBtn.disabled = Boolean(reasonKey);
+    remReasonEl.textContent = reasonKey ? t(reasonKey, reasonArgs || {}) : '';
+    if (reasonKey || !preview || !preview.ok) { remPrevEl.textContent = ''; return; }
+    const pct = sharePctShift({ currentShares: cur.shares, delta: -sp.value, supply: cur.ps.supply });
+    let line = t('dex.lp.previewRemove', {
       q: fmtTok(preview.quoteOut, cur.qd, 6),
       qsym: cur.qSym,
       tk: fmtTok(preview.tokenOut, cur.td, 6),
       tsym: cur.tSym,
     });
-    remBtn.disabled = false;
+    if (pct) line += ` · ${t('dex.lp.shareShift', { a: fmt2(pct.beforeBps), b: fmt2(pct.afterBps) })}`;
+    remPrevEl.textContent = line;
   };
 
   const loadPool = async () => {
@@ -250,25 +371,93 @@ export async function bindLp(host) {
       tSym: ti.ok && ti.symbol ? ti.symbol : shortOf(row.address),
       qd: qi.ok ? qi.decimals : (qPreset ? qPreset.decimals : 18),
       qSym: qPreset ? qPreset.symbol : '…',
+      tBal: ti.ok ? ti.balance : 0n,
+      qBal: qi.ok ? qi.balance : 0n,
       shares: lp.ok ? lp.shares : 0n,
       lockedUntil: lp.ok ? lp.lockedUntil : 0n,
       quoteShare: lp.ok ? lp.quoteShare : 0n,
       tokenShare: lp.ok ? lp.tokenShare : 0n,
     };
+    // The ratio the deposit must follow, in the user's units (riset R10).
+    const rate = Number(ps.quoteReserve) / Number(ps.tokenReserve);
+    rateEl.textContent = Number.isFinite(rate) && rate > 0
+      ? t('dex.lp.rate', { t: cur.tSym, p: fmtPrice(rate), q: cur.qSym })
+      : '';
     quoteLabel.textContent = t('dex.lp.youAdd', { sym: cur.qSym });
     tokenLabel.textContent = t('dex.lp.youAdd', { sym: cur.tSym });
     quoteIn.value = '';
     tokenIn.value = '';
     sharesIn.value = '';
     lockBtn.disabled = cur.shares <= 0n; // locking zero shares locks nothing
+    lockReasonEl.textContent = cur.shares <= 0n ? t('dex.lp.noShares') : '';
     note('');
+    retryBtn.hidden = true;
     paintPosition();
     refreshAdd();
     refreshRemove();
   };
 
-  for (const el of [quoteIn, tokenIn]) el.addEventListener('input', refreshAdd);
-  sharesIn.addEventListener('input', refreshRemove);
+  // The way back: chain gate → discovery → pick → live pool. Re-runnable —
+  // the retry button below re-enters HERE, not into a fresh half-bound panel.
+  const bootstrap = async () => {
+    if (!dexChainOk()) { dead(t('dex.gate.needSepolia')); return; }
+    if (!provider()) { dead(t('dex.swap.unreadable')); return; }
+    note(t('dex.swap.loading'));
+    retryBtn.hidden = true;
+    const out = await discoverPools({ scope: 'all', limit: 50 });
+    if (!out.ok) { dead(out.reason === 'no factory' ? t('dex.swap.noFactory') : t('dex.swap.unreadable')); return; }
+    if (!out.pools.length) { dead(t('dex.swap.noPools')); return; }
+    pools = await fillMeta(out.pools.slice());
+    sel.disabled = false;
+    sel.innerHTML = pools.map(() => '<option></option>').join('');
+    [...sel.options].forEach((o, i) => {
+      const r = pools[i];
+      const q = quoteBy(r.quote);
+      o.textContent = `${r.symbol || shortOf(r.address)} / ${q ? q.symbol : '…'}`;
+    });
+    const wanted = String(get('dex.lpToken') || '').toLowerCase();
+    const pick = pools.find((r) => r.address.toLowerCase() === wanted) || pools[0];
+    sel.value = pick.address;
+    await loadPool();
+  };
+
+  // One Auto button, anchored to the side the user touched last (R10: "auto
+  // isi sisi lain"). It follows the reserves' ratio, and what it writes is
+  // exactly what the preview then parses — no hidden numbers anywhere.
+  autoBtn.addEventListener('click', () => {
+    if (!cur) return;
+    const qp = parseAmount(quoteIn.value, cur.qd);
+    const tp = parseAmount(tokenIn.value, cur.td);
+    let side = lastSide;
+    if (side === 'quote' && !qp.ok && tp.ok) side = 'token';
+    if (side === 'token' && !tp.ok && qp.ok) side = 'quote';
+    const src = side === 'quote' ? qp : tp;
+    if (!src.ok) { note(t('dex.swap.pickAmount')); return; }
+    const res = side === 'quote'
+      ? otherSideFromRatio(src.value, cur.ps.quoteReserve, cur.ps.tokenReserve)
+      : otherSideFromRatio(src.value, cur.ps.tokenReserve, cur.ps.quoteReserve);
+    if (!res.ok) { note(t('dex.ts.reason.small')); return; }
+    const E = ethersLib();
+    if (!E) return;
+    if (side === 'quote') tokenIn.value = trimNum(E.formatUnits(res.value, cur.td));
+    else quoteIn.value = trimNum(E.formatUnits(res.value, cur.qd));
+    note('');
+    refreshAdd();
+  });
+
+  for (const [el, side] of [[quoteIn, 'quote'], [tokenIn, 'token']]) {
+    el.addEventListener('input', () => {
+      lastSide = side;
+      const n = normalizeAmountInput(el.value);
+      if (n.changed) el.value = n.value;
+      refreshAdd();
+    });
+  }
+  sharesIn.addEventListener('input', () => {
+    const n = normalizeAmountInput(sharesIn.value);
+    if (n.changed) sharesIn.value = n.value;
+    refreshRemove();
+  });
   maxBtn.addEventListener('click', () => {
     if (!cur || cur.shares <= 0n) return;
     const E = ethersLib();
@@ -285,6 +474,15 @@ export async function bindLp(host) {
     if (!qp.ok || !tp.ok) { note(t('dex.swap.pickAmount')); return; }
     const preview = addPreview({ quoteIn: qp.value, tokenIn: tp.value, quoteReserve: cur.ps.quoteReserve, tokenReserve: cur.ps.tokenReserve, supply: cur.ps.supply });
     if (!preview.ok) { refreshAdd(); return; }
+    const pct = sharePctShift({ currentShares: cur.shares, delta: preview.shares, supply: cur.ps.supply });
+    const rows = [
+      { k: t('dex.lp.youAdd', { sym: cur.qSym }), v: `${quoteIn.value.trim()} ${cur.qSym}` },
+      { k: t('dex.lp.youAdd', { sym: cur.tSym }), v: `${tokenIn.value.trim()} ${cur.tSym}` },
+      { k: t('dex.lp.sharesGet'), v: `≈ ${fmtTok(preview.shares, 18, 6)} (min ${fmtTok(preview.minShares, 18, 6)})` },
+    ];
+    if (pct) rows.push({ k: t('dex.lp.shareLabel'), v: `${fmt2(pct.beforeBps)}% → ${fmt2(pct.afterBps)}%` });
+    const ok = await confirmTx({ title: t('dex.lp.confirmAdd'), rows, confirmText: t('dex.lp.goAdd') });
+    if (!ok) return;
     const signer = needSigner();
     if (!signer) return;
     addBtn.disabled = true;
@@ -306,6 +504,19 @@ export async function bindLp(host) {
     if (!sp.ok) { note(t('dex.swap.pickAmount')); return; }
     const preview = removePreview({ shares: sp.value, quoteReserve: cur.ps.quoteReserve, tokenReserve: cur.ps.tokenReserve, supply: cur.ps.supply });
     if (!preview.ok) { refreshRemove(); return; }
+    const pct = sharePctShift({ currentShares: cur.shares, delta: -sp.value, supply: cur.ps.supply });
+    const rows = [
+      { k: t('dex.lp.sharesIn'), v: sharesIn.value.trim() },
+      { k: t('dex.trade.youGet'), v: `≈ ${fmtTok(preview.quoteOut, cur.qd, 6)} ${cur.qSym} + ${fmtTok(preview.tokenOut, cur.td, 6)} ${cur.tSym}` },
+    ];
+    if (pct) rows.push({ k: t('dex.lp.shareLabel'), v: `${fmt2(pct.beforeBps)}% → ${fmt2(pct.afterBps)}%` });
+    const ok = await confirmTx({
+      title: t('dex.lp.confirmRemove'),
+      rows,
+      confirmText: t('dex.lp.remove'),
+      danger: sp.value === cur.shares, // a full exit turns the sheet red
+    });
+    if (!ok) return;
     const signer = needSigner();
     if (!signer) return;
     remBtn.disabled = true;
@@ -326,8 +537,14 @@ export async function bindLp(host) {
     if (!signer) return;
     lockBtn.disabled = true;
     const rc = await lockSharesTx({ pair: cur.row.pair, durationSecs: secs, signer });
-    if (rc) await loadPool(); else lockBtn.disabled = cur.shares <= 0n;
+    if (rc) await loadPool();
+    else {
+      lockBtn.disabled = cur.shares <= 0n;
+      lockReasonEl.textContent = cur.shares <= 0n ? t('dex.lp.noShares') : '';
+    }
   });
 
-  await loadPool();
+  retryBtn.addEventListener('click', () => { bootstrap(); });
+
+  await bootstrap();
 }

@@ -497,7 +497,8 @@ const dynamicSkip = new Set([
   // is picked and what the chain says it holds.
   'dexLpPool','dexLpPosition','dexLpQuoteLabel','dexLpQuoteIn','dexLpTokenLabel','dexLpTokenIn',
   'dexLpAddPreview','dexLpAddGo','dexLpShares','dexLpMax','dexLpRemovePreview','dexLpRemoveGo',
-  'dexLpLockDur','dexLpLockGo','dexLpNote',
+  'dexLpLockDur','dexLpLockGo','dexLpNote','dexLpRate','dexLpAuto','dexLpAddReason',
+  'dexLpRemoveReason','dexLpLockReason','dexLpRetry','dexLpApproveNote',
   'dexPfLpHdr','dexPfLp','dexPfTokenHdr','dexPfTokens','dexPfNote',
   // Dex v2 launch wizard + token page (M4): painted by js/dex/launch.js and
   // js/dex/token-page.js.

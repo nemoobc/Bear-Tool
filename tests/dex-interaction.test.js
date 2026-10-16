@@ -125,7 +125,8 @@ test('the Liquidity tab renders the add/remove/lock controls, honestly gated', a
   await click($('[data-dex-tab="liquidity"]'));
   assert.equal(state.get('dex.route'), 'liquidity');
   for (const id of ['dexLpPool', 'dexLpQuoteIn', 'dexLpTokenIn', 'dexLpAddGo', 'dexLpShares',
-    'dexLpMax', 'dexLpRemoveGo', 'dexLpLockDur', 'dexLpLockGo', 'dexLpNote']) {
+    'dexLpMax', 'dexLpRemoveGo', 'dexLpLockDur', 'dexLpLockGo', 'dexLpNote',
+    'dexLpRate', 'dexLpAuto', 'dexLpAddReason', 'dexLpRemoveReason', 'dexLpLockReason', 'dexLpRetry']) {
     assert.ok($(`#${id}`), `the liquidity tab must carry #${id}`);
   }
   // No provider in this gate: the panel must SAY it cannot read — never zeros.
