@@ -360,6 +360,8 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
   display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
 }
 .dex-pool-card .btn { margin-top: auto; }
+.dex-pf-up { color: #1B7F4D; }
+.dex-pf-down { color: #B42318; }
 
 /* The coin page's face. Same idea as the card's, sized for the header: the
    coin you are looking at is the coin's picture, not a thumbnail beside text. */
