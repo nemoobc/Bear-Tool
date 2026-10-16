@@ -272,8 +272,8 @@ Bear-Tool/
 │   │   ├── tokens.js   # the feed — a grid of POOL tokens from the chain (factory), each with its live price; local index only for instant paint
 │   │   ├── trade.js    # a coin's page: live curve state, chart + tape, buy()/sell(), creator claim/graduate
 │   │   ├── history.js  # the coin's trade tape: Bought/Sold logs → rows and OHLC candles
-│   │   ├── launch.js   # the launch wizard: image → data URI, ONE factory.launch tx, token from receipt
-│   │   ├── token-page.js # v2 token page: face, price, reserves, positions — all read live
+│   │   ├── launch.js   # the launch wizard: image → data URI, socials + fee slice + one-tx dev buy, ONE factory.launch tx, token from receipt
+│   │   ├── token-page.js # v2 token page: face, on-chain socials, price, reserves, positions + safety chips — all read live
 │   │   ├── pump-source.js # the PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
 │   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over those same logs
 │   │   ├── list.js     # per-coin delisting: hide/restore a coin from your own feed, per chain, reversible
@@ -293,7 +293,7 @@ Bear-Tool/
 │   │   ├── pool-list.js # v2 Pools panel: live reserves + price per pool, opens the Swap tab
 │   │   ├── lp.js       # v2 Liquidity panel: add / remove / lock the pair's LP shares
 │   │   ├── holders.js  # v2 holder scan: Transfer logs walked BACKWARD in chunks — complete, pruned or still reading; + the pair's 24h volume
-│   │   └── portfolio.js # v2 Portfolio panel: LP positions + token balances, read live
+│   │   └── portfolio.js # v2 Portfolio panel: LP positions + token balances + your creator fees (claim / claim all), read live
 │   ├── sign-render.js  # how a signing payload is SHOWN: hex→text, binary labelled, bidi chars stripped (one copy, three sheets)
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder

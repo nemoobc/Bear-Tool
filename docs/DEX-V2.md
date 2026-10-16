@@ -42,7 +42,7 @@ Sekarang dijawab dengan arah sebaliknya tapi tetap satu mesin: **pools = satu-sa
 - **Sepolia-only v1** + gate chain tetap (satu klik pindah ke Sepolia).
 - Tanpa migrasi coin PumpToken lama (testnet; coin lama tidak muncul di registry baru).
 - Kontrak ditulis sendiri (bukan fork Uniswap/pump); 3 kontrak: `BearToken`, `BearPair`, `BearFactory`.
-- Fee swap 0.3% (997/1000) — 100% ke pool (LP). Tidak ada protocol fee (jujur + sederhana).
+- Fee swap 0.3% (997/1000) — dibagi dari fee yang SAMA: default 100% ke pool (LP); sejak R6/R9 koin bisa mengarahkan potongan TETAP ke kreatornya (0/10/15 bps dari volume — dipilih saat launch, immutable; math trader tidak berubah). Tidak ada protocol fee; tanpa owner/pause/saklar fee.
 - Pembulatan: selalu floor ke arah pool (kontrak) dan JS memakai rumus floor yang SAMA (parity test).
 - i18n EN+ID penuh untuk semua string baru; style cartoon konsisten; a11y (label, focus, aria).
 
@@ -80,15 +80,20 @@ SISA    : testnet-only → dana nyata minim; audit pihak ketiga = non-goal v1 (d
 
 ### 4.1 Kontrak (Solidity, compile in-browser via solc pipeline yang ada — satu source string, tiga artifact)
 - `BearToken` — ERC-20 penuh: name/symbol/decimals 18, supply TETAP saat deploy (mint penuh ke deployer = factory),
-  metadata string (image data-URI, description) di constructor; tanpa owner, tanpa mint lanjutan.
+  metadata string (image data-URI, description) di constructor + socials (twitter/telegram/website) ditulis SEKALI
+  oleh factory (`setSocials`, factory-only, di tx launch yang sama); tanpa owner, tanpa mint lanjutan.
 - `BearPair` — pool: reserve = **quote ERC-20 (immutable)** + token (immutable); `addLiquidity` / `removeLiquidity`
   (pull kedua sisi dari msg.sender, shares = sqrt utk provider pertama, proporsional setelahnya);
   `swapQuoteForToken(amountIn, minOut)` / `swapTokenForQuote(amountIn, minOut)`; `getAmountOut` view;
   LP = ERC-20 (`Bear LP`/`BLP`) dengan `lockShares(until)` — cek lock di transfer/burn; `nonReentrant`;
-  invariant `k' ≥ k` dicek pasca-swap; **tanpa `receive()`** — ETH native ditolak (gas-only, order user dipertahankan).
-- `BearFactory` — `launch(meta…, quote, tokensForPool, quoteForPool, lockUntil)` SATU TX: deploy token + pair,
-  transferFrom quote (creator approve dulu) + supply token ke pair, `pair.mintInitial(creator, …, lockUntil)`
-  (sekali, factory-only, lock atomik), sisa supply → creator; `createPool(token, quote, …)` utk token existing;
+  invariant `k' ≥ k` dicek pasca-swap; **tanpa `receive()`** — ETH native ditolak (gas-only, order user dipertahankan);
+  fee kreator: `creatorFeeBps` (0..30, immutable) + `creator` + `totalFeesCreator`; potongan `amount×bps/10000` diambil
+  dari sisi quote penerimaan pool saat swap (dibagi dari fee, bukan tambahan — trader tetap 997/1000); `claimFees()`
+  creator-only (pull) + event `FeesClaimed`; `reserves()` = saldo − fee belum diklaim (net); `devBuy(buyer, quoteIn)`
+  factory-only = beli pertama atomik di tx launch.
+- `BearFactory` — `launch(meta7, quote, tokensForPool, quoteForPool, lockUntil, creatorFeeBps, devBuyIn)` SATU TX: deploy token + pair,
+  `setSocials` + transferFrom quote (seed + dev buy; creator approve dulu) + supply token ke pair, `pair.mintInitial(creator, …, lockUntil)`
+  (sekali, factory-only, lock atomik), dev buy opsional dibelikan di tx yang sama, sisa supply → creator; `createPool(token, quote, …)` utk token existing;
   `pairFor[token]` unik (satu pair per token); registry lewat event `Launched` / `PoolCreated` (source of truth = chain).
 
 ### 4.2 JS (js/dex/ — ganti pump modules)
