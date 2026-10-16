@@ -34,6 +34,7 @@ import { swapHtml, bindSwap } from './swap.js';
 import { poolsHtml, bindPools } from './pool-list.js';
 import { lpHtml, bindLp } from './lp.js';
 import { portfolioHtml, bindPortfolio } from './portfolio.js';
+import { ensureWatcher } from './watch.js';
 import {
   DEX_NETWORK_ID, DEX_CHAIN_ID, dexChainOk,
   provider,
@@ -181,6 +182,12 @@ export function renderPanel() {
   // keeps polling the chain forever.
   host.dispatchEvent(new CustomEvent('dex:teardown', { bubbles: false }));
   host.innerHTML = '';
+
+  // The watcher rides the whole Dex, not one panel: started once per session
+  // (ensureWatcher is idempotent) as soon as a provider exists, it keeps its
+  // own 60s clock — panel timers die with their panel, but a watch alert must
+  // reach the user wherever they are in the Dex.
+  ensureWatcher();
 
   const coin = get('dex.tokenView');
   if (coin) { paintNav('feed'); renderTokenView(host, coin); return; }

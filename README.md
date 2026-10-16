@@ -277,6 +277,7 @@ Bear-Tool/
 │   │   ├── pump-source.js # the PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
 │   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over those same logs
 │   │   ├── list.js     # per-coin delisting: hide/restore a coin from your own feed, per chain, reversible
+│   │   ├── watch.js    # the watchlist: star a coin, a watch scope in the feed, and an in-app price watcher (≥10% moves, app open only)
 │   │   ├── liquidity.js # the pool panel: add/remove backing, your share, what it is worth — the contract functions made reachable
 │   │   ├── bot.js      # the market maker: fund once, it derives its own addresses and trades until stopped
 │   │   ├── bot-engine.js  # the bot's rules, pure: when to buy/sell/hold/stop, and which address pays

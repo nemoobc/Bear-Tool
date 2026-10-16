@@ -18,6 +18,7 @@ import { loadPoolHistory, poolCandles, tradesHtml } from './history.js';
 import { drawCandles } from './chart.js';
 import { deleteCoin } from './list.js';
 import { forgetLaunchedToken } from './tokens.js';
+import { isWatched, toggleWatch, WATCH_MAX } from './watch.js';
 import { mountTradeSheet } from './trade-sheet.js';
 import { scanHolders, holderRows, topShareBps, pool24h, chunkedGetLogs, ZERO_ADDR } from './holders.js';
 
@@ -66,6 +67,9 @@ export function tokenPageHtml() {
       <div class="mt-8" id="dexTpSec"></div>
       <div class="mt-8">
         <button type="button" class="btn btn-secondary" id="dexTpLp"></button>
+      </div>
+      <div class="mt-8">
+        <button type="button" class="btn btn-secondary" id="dexTpWatch" aria-pressed="false"></button>
       </div>
       <div class="small mt-8" id="dexTpNote" role="status"></div>
     </div>
@@ -133,6 +137,32 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
   lpBtn.textContent = t('dex.pf.manage');
   if (onLp) lpBtn.addEventListener('click', () => onLp(token));
 
+  // The watch star is wired HERE, before the reads, on the same rule as
+  // Delete: it must work even when every read below fails. The ticker is
+  // filled in the moment the contract answers; until then the messages fall
+  // back to the short address — never a guessed ticker.
+  let watchSym = '';
+  const watchBtn = el('dexTpWatch');
+  const paintWatch = () => {
+    if (!watchBtn) return;
+    const on = isWatched(token);
+    watchBtn.textContent = on ? t('dex.watch.watching') : t('dex.watch.watch');
+    watchBtn.setAttribute('aria-pressed', String(on));
+  };
+  if (watchBtn) {
+    watchBtn.addEventListener('click', () => {
+      const watched = toggleWatch(token, watchSym);
+      if (watched === null) {
+        toast(t('dex.watch.full', { n: String(WATCH_MAX) }), 'error');
+        return;
+      }
+      paintWatch();
+      const label = watchSym || shortOf(token);
+      toast(watched ? t('dex.watch.added', { sym: label }) : t('dex.watch.removed', { sym: label }), 'success');
+    });
+    paintWatch();
+  }
+
   // Delete first, so it works even when every read below fails: the tombstone
   // forgets the token for THIS wallet's feed (list.js) and the launched index
   // drops it (tokens.js) — the same two stores the legacy coin page uses. The
@@ -173,6 +203,7 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
 
   const sym = ti.ok && ti.symbol ? ti.symbol : shortOf(token);
   const name = ti.ok && ti.name ? ti.name : sym;
+  watchSym = ti.ok && ti.symbol ? ti.symbol : '';
   const nameEl = el('dexTpName');
   const descEl = el('dexTpDesc');
   const img = el('dexTpImg');

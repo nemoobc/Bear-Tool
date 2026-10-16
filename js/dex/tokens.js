@@ -22,8 +22,9 @@ import { get, set } from '../state.js';
 import { $, escapeHtml } from '../ui.js';
 import { quoteBy, fmtTok, provider, ethersLib, isAddr, DEX_CHAIN_ID } from './core.js';
 import { discoverPools, fillMeta } from './pools.js';
-import { poolState } from './pool-data.js';
+import { poolState, tokenInfo } from './pool-data.js';
 import { quotePerToken } from './pool-list.js';
+import { watchList, pairOf } from './watch.js';
 
 // Where the launched-token index is KEPT, and why it is not in state.js.
 //
@@ -169,6 +170,7 @@ export function tokensHtml() {
       <div class="dex-tabstrip" role="group" aria-label="${escapeHtml(t('dex.tokens.filter'))}">
         <button type="button" class="dex-tab" data-dex-scope="all" aria-pressed="true">${escapeHtml(t('dex.tokens.all'))}</button>
         <button type="button" class="dex-tab" data-dex-scope="mine" aria-pressed="false">${escapeHtml(t('dex.tokens.mine'))}</button>
+        <button type="button" class="dex-tab" data-dex-scope="watch" aria-pressed="false">${escapeHtml(t('dex.tokens.watch'))}</button>
       </div>
       <div class="dex-feedtools">
         <input id="dexFeedSearch" class="dex-search" type="search" autocomplete="off"
@@ -250,6 +252,73 @@ async function readLock(pair, creator) {
   }
 }
 
+// ── the watch scope's own reads ────────────────────────────────
+// A watched coin is read DIRECTLY — factory pairFor → the pair → the token —
+// with no discovery window involved, so a coin that has scrolled out of the
+// latest-24 feed still shows up in its own list. What this path does not read
+// is the launch event (creator, birth block) or the scan tip, so the New /
+// LP-locked badges do not exist on these rows: a badge without its source
+// would be a claim, and this path holds no claim. A read that fails leaves
+// the dash in place — never a guessed number.
+const WATCH_IMG_ABI = ['function image() view returns (string)'];
+
+async function readWatchImage(address) {
+  const E = ethersLib();
+  const p = provider();
+  if (!E || !p || !isAddr(address)) return '';
+  try {
+    const face = await new E.Contract(address, WATCH_IMG_ABI, p).image();
+    return /^data:image\//.test(String(face || '')) ? String(face) : '';
+  } catch {
+    return '';
+  }
+}
+
+async function readWatchRow(w) {
+  const row = { address: w.address, name: '', symbol: w.symbol || '', image: '', price: '', qSym: '' };
+  try {
+    const pair = await pairOf(w.address);
+    if (!pair) return row;
+    const [ps, ti, face] = await Promise.all([
+      poolState(pair),
+      tokenInfo(w.address, get('address')),
+      readWatchImage(w.address),
+    ]);
+    if (ti && ti.ok) {
+      row.name = ti.name || '';
+      row.symbol = row.symbol || ti.symbol || '';
+    }
+    row.image = face;
+    if (ps && ps.ok) {
+      const q = quoteBy(ps.quote);
+      const td = ti && ti.ok ? ti.decimals : 18;
+      row.price = fmtTok(quotePerToken(ps.quoteReserve, ps.tokenReserve, td), q ? q.decimals : 18, 6);
+      row.qSym = q ? q.symbol : '';
+      row.liq = ps.quoteReserve;
+    }
+  } catch {
+    // A row that cannot be read stays a row with no numbers — the dash is the
+    // whole message; inventing the rest of it is not.
+  }
+  return row;
+}
+
+/** The empty box is pre-rendered once, so its words are chosen per pass: the
+ *  chain scopes get the "no coins yet" story, the watch scope gets its own
+ *  instruction. Set on every pass, so a scope switch can never leave the
+ *  wrong sentence standing under the right tab. */
+function setEmptyCopy(host, scope) {
+  const box = host.querySelector('.dex-empty');
+  if (!box) return;
+  const ttl = box.querySelector('.dex-empty-title');
+  const msg = box.querySelector('.dex-empty-msg');
+  const hint = box.querySelector('.dex-empty-hint');
+  const watch = scope === 'watch';
+  if (ttl) ttl.textContent = t(watch ? 'dex.watch.emptyTitle' : 'dex.tokens.emptyTitle');
+  if (msg && watch) msg.textContent = t('dex.watch.emptyMsg');
+  if (hint) hint.textContent = t(watch ? 'dex.watch.emptyHint' : 'dex.tokens.emptyHint');
+}
+
 // Paints whatever the chain knows, and says so honestly when it could not look.
 // The three outcomes are kept apart on purpose:
 //   • pools found        → show them, each priced from its own pair
@@ -263,6 +332,33 @@ export async function refreshFeed(host, scope = 'all') {
   const box = host.querySelector('.dex-empty');
   const msg = box ? box.querySelector('.dex-empty-msg') : null;
   const say = (text) => { if (msg) msg.textContent = text; };
+
+  setEmptyCopy(host, scope);
+
+  // The watch scope reads its own list before anything else: a watched coin
+  // is read directly (outside any scan window), and an empty watchlist is not
+  // a chain state at all — it is an instruction, and it is said immediately.
+  if (scope === 'watch') {
+    const watched = watchList();
+    if (!watched.length) {
+      list.innerHTML = '';
+      feedState.rows = [];
+      feedState.status = '';
+      if (status) status.textContent = '';
+      if (box) box.hidden = false;
+      return { coins: [], ok: true };
+    }
+    if (box) box.hidden = true;
+    if (!feedState.rows.length && status) status.textContent = t('dex.pools.loading');
+    const rows = await Promise.all(watched.map(readWatchRow));
+    feedState.rows = rows;
+    // All dashes at once is a read problem, not a price story — the one line
+    // that says so; a single unreadable row keeps its dash without a headline.
+    feedState.status = '';
+    if (status) status.textContent = rows.some((r) => r.price) ? '' : t('dex.swap.unreadable');
+    applyView(host);
+    return { coins: rows, ok: true };
+  }
 
   // A slow WebView and a slow public RPC are the normal case, not an edge: on
   // the first pass the pre-rendered "no coins yet" is not a verdict yet, so it
