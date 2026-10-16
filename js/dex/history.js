@@ -13,7 +13,7 @@
 
 import { t } from '../i18n.js';
 import { escapeHtml } from '../ui.js';
-import { tradesToCandles, PRICE_SCALE } from './chart.js';
+import { tradesToCandles, timeCandles, PRICE_SCALE } from './chart.js';
 import { PUMP_ABI } from './pump-source.js';
 import { fmtEth, fmtTokens, fmtPrice } from './curve.js';
 // The chunk walker the holder scan already uses: a node that refuses a wide
@@ -261,6 +261,24 @@ export function historyCandles(trades) {
 // function under the name the pool page calls it by. One implementation, so
 // the curve page and the pool page can never draw a different candle.
 export const poolCandles = historyCandles;
+
+// The R8 twin: the same decoded trades, cut by TIME buckets — historyCandles
+// answers "the last N fills", this answers "the last hour/day, in candles".
+// Same mapping as above (ascending blocks, PRICE_SCALE, quote volume), then
+// chart.js does the time bucketing, so both twin pairs share one maths each.
+export function historyTimeCandles(trades, intervalSec) {
+  if (!trades || !trades.length) return [];
+  const asc = [...trades].sort((a, b) => a.block - b.block);
+  const rows = asc.map((x) => ({
+    time: x.time,
+    price: x.price * PRICE_SCALE,
+    volQuote: x.eth,
+  }));
+  return timeCandles(rows, intervalSec);
+}
+
+// Pool twin, the SAME function under the name the pool page calls it by.
+export const poolTimeCandles = historyTimeCandles;
 
 // Reads a POOL's Swap logs and returns them newest-first, in the same row
 // shape loadHistory returns.

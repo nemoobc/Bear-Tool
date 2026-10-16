@@ -65,6 +65,66 @@ export async function tradesToCandles(trades, timeFor, max = MAX_CANDLES) {
   return out.sort((a, b) => a.time - b.time);
 }
 
+/**
+ * Bucket trades into candles by TIME — the R8 timeframes (1m/5m/1h/1d) are
+ * the same decoded rows re-cut against the clock instead of against the trade
+ * count. Pure and sync: the caller already holds the trades, so switching a
+ * timeframe costs zero extra reads.
+ *
+ * @param {Array<{time:number, price:number, volQuote:bigint}>} rows `price`
+ *   scaled by PRICE_SCALE, `time` in seconds — the same row contract as
+ *   tradesToCandles. Rows may arrive in any order; they are sorted by time.
+ * @param {number} intervalSec bucket width in seconds (60/300/3600/86400)
+ * @param {number} [max]
+ * @returns {Array<{time:number, open:number, high:number, low:number,
+ *   close:number, volume:number}>} ascending by bucket start
+ *
+ * A bucket exists ONLY where a trade landed: a quiet hour draws no candle, so
+ * a gap is a fact ("no trade then"), not a bar invented to hide it. Each
+ * bucket's time is its start (floor) — distinct and ascending by
+ * construction, so the library's strictly-increasing rule holds without the
+ * per-row nudge the count path needs. A row whose timestamp never got read
+ * (time 0) is skipped: 1970 is not where the trade happened, and a wrong
+ * candle is worse than a missing one.
+ */
+export function timeCandles(rows, intervalSec, max = MAX_CANDLES) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  const sec = Math.floor(Number(intervalSec));
+  if (!Number.isFinite(sec) || sec <= 0) return [];
+  const sorted = rows
+    .filter((r) => r && Number.isFinite(r.time) && r.time > 0 && Number.isFinite(r.price))
+    .sort((a, b) => a.time - b.time);
+  if (!sorted.length) return [];
+
+  const out = [];
+  let cur = null;
+  for (const r of sorted) {
+    const bucket = Math.floor(r.time / sec) * sec;
+    const price = r.price / PRICE_SCALE;
+    if (!cur || bucket !== cur.time) {
+      cur = { time: bucket, open: price, high: price, low: price, close: price, vol: 0n };
+      out.push(cur);
+    } else {
+      cur.high = Math.max(cur.high, price);
+      cur.low = Math.min(cur.low, price);
+      cur.close = price;
+    }
+    cur.vol += r.volQuote || 0n;
+  }
+
+  const cap = Number.isFinite(max) && max >= 1 ? Math.floor(max) : MAX_CANDLES;
+  const kept = out.length > cap ? out.slice(out.length - cap) : out;
+  return kept.map((c) => ({
+    time: c.time,
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+    // Same volume contract as the count path: quote units, bigint → float.
+    volume: Number(c.vol) / PRICE_SCALE,
+  }));
+}
+
 /** Is the pinned library already on the page? */
 export function chartEngine(win = globalThis) {
   return (win && win.LightweightCharts) || null;

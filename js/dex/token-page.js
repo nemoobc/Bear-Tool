@@ -14,7 +14,7 @@ import { poolState, tokenInfo, lpPosition } from './pool-data.js';
 import { quotePerToken } from './pool-list.js';
 import { BEAR_TOKEN_ABI, BEAR_FACTORY_ABI, BEAR_PAIR_ABI } from './bear-source.js';
 import { factoryAddress } from './factory.js';
-import { loadPoolHistory, poolCandles, tradesHtml } from './history.js';
+import { loadPoolHistory, poolTimeCandles, tradesHtml } from './history.js';
 import { drawCandles } from './chart.js';
 import { deleteCoin } from './list.js';
 import { forgetLaunchedToken } from './tokens.js';
@@ -23,6 +23,18 @@ import { mountTradeSheet } from './trade-sheet.js';
 import { scanHolders, holderRows, topShareBps, pool24h, chunkedGetLogs, ZERO_ADDR } from './holders.js';
 
 const shortOf = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+
+// R8: the chart's candle widths. Buckets are cut client-side from the SAME
+// decoded trades the tape shows — switching a timeframe costs zero extra
+// reads. `1m` is the default: launch hours are why the chart exists.
+const CHART_TFS = [
+  { sec: 60, label: '1m' },
+  { sec: 300, label: '5m' },
+  { sec: 3600, label: '1h' },
+  { sec: 86400, label: '1d' },
+];
+const DEFAULT_TF = 60;
+const tfLabel = (sec) => (CHART_TFS.find((x) => x.sec === sec) || CHART_TFS[0]).label;
 
 /**
  * Is this token one of ours? Answers with the pair address when the factory
@@ -84,6 +96,7 @@ export function tokenPageHtml() {
     <div class="card mb-8" id="dexTpTrade"></div>
     <div class="card mb-8">
       <div class="field-label">${escapeHtml(t('dex.tp.chart'))}</div>
+      <div class="dex-tabstrip mt-8" id="dexTpTfs" role="group" aria-label="${escapeHtml(t('dex.tp.tfGroup'))}">${CHART_TFS.map((tf) => `<button type="button" class="dex-tab" data-tf="${tf.sec}" aria-pressed="${tf.sec === DEFAULT_TF}">${tf.label}</button>`).join('')}</div>
       <div id="dexTpChart" class="dex-chart-host" role="img" aria-label="${escapeHtml(t('dex.tp.chart'))}"></div>
       <div class="small" id="dexTpChartNote" role="status"></div>
     </div>
@@ -300,9 +313,57 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
   // paints: identity and price first, the series fills in under them.
   const chartHost = el('dexTpChart');
   const chartNote = el('dexTpChartNote');
+  const tfRow = el('dexTpTfs');
   const tapeEl = el('dexTpTape');
   if (chartNote) chartNote.textContent = t('dex.pools.loading');
   let chartTearDown = null;
+  let chartTrades = null; // rows a timeframe switch re-cuts — no new read
+  let chartNoteBase = ''; // the read's own sentence (cut window / reason)
+  let chartTf = DEFAULT_TF;
+  let chartSeq = 0; // an overtaken draw tears itself down
+
+  const tfPaint = () => {
+    if (!tfRow) return;
+    for (const b of tfRow.querySelectorAll('button[data-tf]')) {
+      b.setAttribute('aria-pressed', String(Number(b.dataset.tf) === chartTf));
+    }
+  };
+  const chartDraw = async () => {
+    if (!chartHost || !chartTrades) return;
+    const candles = poolTimeCandles(chartTrades, chartTf);
+    // One candle for the whole window means the read holds less than one
+    // bucket — say it plainly instead of letting a lone bar look like calm.
+    const thin = chartTrades.length && candles.length < 2
+      ? t('dex.tp.tfThin', { tf: tfLabel(chartTf) })
+      : '';
+    if (chartNote) chartNote.textContent = [chartNoteBase, thin].filter(Boolean).join(' ');
+    const seq = ++chartSeq;
+    if (chartTearDown) { try { chartTearDown(); } catch { /* already gone */ } chartTearDown = null; }
+    const handle = await drawCandles(chartHost, candles, {
+      height: 220,
+      theme: 'light',
+      fmt: (v) => fmtPrice(v, 4),
+      empty: t('dex.tp.noTrades'),
+    });
+    // A draw overtaken by a newer click is torn down at once — two live
+    // charts in one host is exactly the double-paint this guard exists for.
+    if (seq === chartSeq) chartTearDown = handle;
+    else { try { handle(); } catch { /* stale draw */ } }
+  };
+  if (tfRow) {
+    tfRow.addEventListener('click', (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest('button[data-tf]') : null;
+      if (!btn) return;
+      chartTf = Number(btn.dataset.tf) || DEFAULT_TF;
+      tfPaint();
+      chartDraw();
+    });
+  }
+  if (chartHost) {
+    host.addEventListener('dex:teardown', () => {
+      if (chartTearDown) { try { chartTearDown(); } catch { /* already gone */ } }
+    }, { once: true });
+  }
   try {
     const pc = new E.Contract(pair, BEAR_PAIR_ABI, provider());
     const hist = await loadPoolHistory(pc, provider());
@@ -314,27 +375,17 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
         ? tradesHtml(hist.trades, sym, qSym) + (hist.partial ? `<div class="small">${escapeHtml(t('dex.trades.partial'))}</div>` : '')
         : `<div class="small">${escapeHtml(hist.reason || t('dex.swap.unreadable'))}</div>`;
     }
-    let candles = [];
     if (hist.ok) {
       // A cut window is stated on the chart too: fewer candles than the window
       // claims is exactly the kind of silent half-truth this page must not do.
-      if (chartNote) chartNote.textContent = hist.partial ? t('dex.trades.partial') : '';
-      candles = await poolCandles(hist.trades);
-    } else if (chartNote) {
+      chartTrades = hist.trades;
+      chartNoteBase = hist.partial ? t('dex.trades.partial') : '';
+      await chartDraw();
+    } else {
       // A node that cannot serve logs must not blank the page: the header is
       // already painted, and the reason rides under the empty frame.
-      chartNote.textContent = hist.reason || t('dex.swap.unreadable');
-    }
-    if (chartHost) {
-      chartTearDown = await drawCandles(chartHost, candles, {
-        height: 220,
-        theme: 'light',
-        fmt: (v) => fmtPrice(v, 4),
-        empty: t('dex.tp.noTrades'),
-      });
-      host.addEventListener('dex:teardown', () => {
-        if (chartTearDown) { try { chartTearDown(); } catch { /* already gone */ } }
-      }, { once: true });
+      chartNoteBase = hist.reason || t('dex.swap.unreadable');
+      if (chartNote) chartNote.textContent = chartNoteBase;
     }
   } catch {
     // The header is already read and painted; a chart that cannot draw must

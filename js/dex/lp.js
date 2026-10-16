@@ -12,6 +12,7 @@ import { addShares, removeAmounts, minOutWithSlippage } from './pool-math.js';
 import { parseAmount, ensureAllowanceTx, DEFAULT_SLIPPAGE_BPS } from './swap.js';
 import { discoverPools, fillMeta } from './pools.js';
 import { poolState, tokenInfo, lpPosition } from './pool-data.js';
+import { pool24h } from './holders.js';
 import { BEAR_PAIR_ABI } from './bear-source.js';
 import { normalizeAmountInput } from './trade-sheet.js';
 
@@ -118,6 +119,26 @@ export function visibleExcess(excess, dec) {
 }
 
 /**
+ * R10: annualised LP fee yield from the window that was actually read —
+ * (quote volume × the LP's slice of the fee × 365) over TVL, in bigint bps of
+ * percent (10000 = 100%/yr, so 365 = 3.65%). The LP's slice is the whole 0.3%
+ * swap fee MINUS the creator's cut — the same split the pair books on every
+ * swap. TVL is 2× the quote reserve: a constant-product pool always holds
+ * equal value in each side by construction. null = nothing honest to divide
+ * by; 0n = the window truly was quiet.
+ */
+export function feeAprBps({ volQuote, quoteReserve, creatorFeeBps = 0, feeBps = 30 } = {}) {
+  if (typeof volQuote !== 'bigint' || typeof quoteReserve !== 'bigint') return null;
+  if (quoteReserve <= 0n) return null;
+  const total = Math.floor(Number(feeBps));
+  const cut = Math.floor(Number(creatorFeeBps));
+  if (!Number.isFinite(total) || !Number.isFinite(cut)) return null;
+  const lpBps = BigInt(Math.max(0, total - Math.max(0, cut)));
+  if (lpBps === 0n || volQuote <= 0n) return 0n;
+  return (volQuote * lpBps * 365n) / (2n * quoteReserve);
+}
+
+/**
  * Every way the add CTA can be disabled, each with its reason key — checked in
  * order: wallet, amounts, validity, balance (quote then token), mint. The CTA
  * is disabled ONLY with a reason on screen; "grey and silent" is the bug class
@@ -188,6 +209,7 @@ export function lpHtml() {
       <select id="dexLpPool" class="input"></select>
       <div class="small mt-8" id="dexLpPosition"></div>
       <div class="small mt-8" id="dexLpRate"></div>
+      <div class="small mt-8" id="dexLpApr"></div>
     </div>
     <div class="card mb-8">
       <label class="field-label" for="dexLpQuoteIn" id="dexLpQuoteLabel"></label>
@@ -200,7 +222,7 @@ export function lpHtml() {
       <div class="small mt-8" id="dexLpAddPreview"></div>
       <div class="small mt-8" id="dexLpAddReason" role="status"></div>
       <button type="button" class="btn btn-primary btn-block mt-8" id="dexLpAddGo" disabled>${escapeHtml(t('dex.lp.goAdd'))}</button>
-      <div class="small mt-8" id="dexLpApproveNote">${escapeHtml(t('dex.lp.approveNote'))}</div>
+      <div class="small mt-8" id="dexLpApproveNote"></div>
     </div>
     <div class="card mb-8">
       <label class="field-label" for="dexLpShares">${escapeHtml(t('dex.lp.sharesIn'))}</label>
@@ -226,6 +248,8 @@ export async function bindLp(host) {
   const sel = $('#dexLpPool', host);
   const posEl = $('#dexLpPosition', host);
   const rateEl = $('#dexLpRate', host);
+  const aprEl = $('#dexLpApr', host);
+  const approveNoteEl = $('#dexLpApproveNote', host);
   const quoteIn = $('#dexLpQuoteIn', host);
   const tokenIn = $('#dexLpTokenIn', host);
   const quoteLabel = $('#dexLpQuoteLabel', host);
@@ -246,7 +270,7 @@ export async function bindLp(host) {
   const lockBtn = $('#dexLpLockGo', host);
   const noteEl = $('#dexLpNote', host);
   const retryBtn = $('#dexLpRetry', host);
-  if (!sel || !posEl || !rateEl || !quoteIn || !tokenIn || !quoteLabel || !tokenLabel || !autoBtn
+  if (!sel || !posEl || !rateEl || !aprEl || !approveNoteEl || !quoteIn || !tokenIn || !quoteLabel || !tokenLabel || !autoBtn
     || !addPrevEl || !addReasonEl || !addBtn || !sharesIn || !maxBtn || !remPrevEl || !remReasonEl
     || !remBtn || !lockDur || !lockReasonEl || !lockBtn || !noteEl || !retryBtn) return;
 
@@ -271,6 +295,8 @@ export async function bindLp(host) {
     lockReasonEl.textContent = '';
     posEl.textContent = '';
     rateEl.textContent = '';
+    aprEl.textContent = '';
+    approveNoteEl.textContent = '';
     sel.disabled = true;
   };
   const fmt2 = (bps) => (Number(bps) / 100).toFixed(2);
@@ -359,12 +385,28 @@ export async function bindLp(host) {
     set('dex.lpToken', row.address);
     note(t('dex.swap.loading'));
     const me = get('address');
-    const [ps, ti, qi, lp] = await Promise.all([
+    // The select can move while these reads fly: a late answer for a pool the
+    // user already left must not paint over the one they are looking at.
+    const want = row.address;
+    const [ps, ti, qi, lp, day, fnBps] = await Promise.all([
       poolState(row.pair),
       tokenInfo(row.address),
       tokenInfo(row.quote),
       lpPosition(row.pair, me),
+      // R10: the fee-yield estimate reads the same 24h Swap window the token
+      // page shows. `!ok` hides the APR line — never a zero that was not seen.
+      pool24h({ E: ethersLib(), provider: provider(), pair: row.pair }),
+      // The creator's slice of the 0.3% fee (0..30 bps). A pair from before
+      // R6 has no getter and truly charges 0 — the catch says so, and the
+      // estimate then credits the LP with the whole fee, which is correct.
+      (async () => {
+        try {
+          const pb = new (ethersLib()).Contract(row.pair, BEAR_PAIR_ABI, provider());
+          return Number(await pb.creatorFeeBps()) || 0;
+        } catch { return 0; }
+      })(),
     ]);
+    if (sel.value !== want) return;
     if (!ps.ok) { dead(t('dex.swap.unreadable')); return; }
     const qPreset = quoteBy(row.quote);
     cur = {
@@ -388,6 +430,19 @@ export async function bindLp(host) {
       : '';
     quoteLabel.textContent = t('dex.lp.youAdd', { sym: cur.qSym });
     tokenLabel.textContent = t('dex.lp.youAdd', { sym: cur.tSym });
+    // R10: the two clarity pieces the panel was missing — the approve order
+    // named for THIS pool's coins, and the fee-yield estimate from the 24h
+    // window. Both say only what was read: a failed volume read hides the
+    // APR line instead of printing a zero nobody saw.
+    approveNoteEl.textContent = t('dex.lp.approveNote', { q: cur.qSym, t: cur.tSym });
+    const aprBps = day.ok
+      ? feeAprBps({ volQuote: day.volQuote, quoteReserve: ps.quoteReserve, creatorFeeBps: fnBps })
+      : null;
+    aprEl.textContent = aprBps == null ? '' : t('dex.lp.apr', {
+      p: (Number(aprBps) / 100).toFixed(2),
+      v: fmtTok(day.volQuote, cur.qd, 4),
+      q: cur.qSym,
+    });
     quoteIn.value = '';
     tokenIn.value = '';
     sharesIn.value = '';
@@ -416,6 +471,10 @@ export async function bindLp(host) {
     [...sel.options].forEach((o, i) => {
       const r = pools[i];
       const q = quoteBy(r.quote);
+      // The address IS the value: without it an <option> answers with its
+      // label, the find in loadPool misses every time, and switching pools
+      // silently kept loading the first one (R10).
+      o.value = r.address;
       o.textContent = `${r.symbol || shortOf(r.address)} / ${q ? q.symbol : '…'}`;
     });
     const wanted = String(get('dex.lpToken') || '').toLowerCase();
@@ -485,6 +544,8 @@ export async function bindLp(host) {
         { k: t('dex.lp.sharesGet'), v: `≈ ${fmtTok(preview.shares, 18, 6)} (min ${fmtTok(preview.minShares, 18, 6)})` },
       ];
       if (pct) rows.push({ k: t('dex.lp.shareLabel'), v: `${fmt2(pct.beforeBps)}% → ${fmt2(pct.afterBps)}%` });
+      // The approve order, spelled out at the moment money is committed (R10).
+      rows.push({ k: t('dex.lp.stepsLabel'), v: t('dex.lp.approveSteps', { q: cur.qSym, t: cur.tSym }) });
       const ok = await confirmTx({ title: t('dex.lp.confirmAdd'), rows, confirmText: t('dex.lp.goAdd') });
       if (!ok) return;
       const signer = needSigner();

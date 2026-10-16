@@ -328,7 +328,7 @@ test('the v2 token page carries its own chart, tape and delete (M5b)', () => {
   assert.match(page, /from '\.\/history\.js';/, 'the pool tape must come from history.js');
   assert.match(page, /from '\.\/chart\.js';/, 'the chart renderer must be the shared one');
   assert.match(page, /loadPoolHistory\(/, 'reading the pool\'s own Swap logs');
-  assert.match(page, /poolCandles\(/, 'candles via the shared pool candle maths');
+  assert.match(page, /poolTimeCandles\(/, 'candles via the shared pool time-bucket maths (R8)');
   assert.match(page, /drawCandles\(/, 'drawn by the shared renderer');
   assert.match(page, /tradesHtml\(/, 'taped by the shared renderer');
   for (const id of ['dexTpChart', 'dexTpTape', 'dexTpDelete']) {
