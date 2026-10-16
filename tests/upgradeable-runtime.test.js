@@ -163,6 +163,12 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
     return t.skip(`toolchain unavailable: ${e?.message || e}`);
   }
   const { child, url } = started;
+  // One phase line per step: a stall on a shared runner must name its place
+  // instead of showing 15 minutes of silence (run 38926627716 — the 900s cap
+  // fired and nothing had printed since the toolchain came up).
+  const t0 = Date.now();
+  const mark = (m) => console.log(`# [m9] ${m} (+${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  mark(`toolchain ready — anvil answering at ${url}`);
   // batchMaxCount:1 + cacheTimeout:-1 — ethers v6's default response cache
       // races anvil's instan-mine here: a stale eth_getTransactionCount answers
       // with an old nonce and the proxy deploy dies NONCE_EXPIRED (seen on CI).
@@ -173,9 +179,12 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
       // Gas for the stranger: a "rejection" that only happens because the
       // account cannot pay for the transaction would prove nothing.
       await (await deployer.sendTransaction({ to: stranger.address, value: ethers.parseEther('1') })).wait();
+      mark('stranger funded');
 
       // ── UUPS ────────────────────────────────────────────────────
+      mark('compiling uups');
       const uups = await build({ upgradeable: true, proxyType: 'uups' });
+      mark('uups compiled');
       const initArgs = uups.plan.args;
       const implF = new ethers.ContractFactory(uups.out.contracts[uups.std.contract].abi,
         uups.out.contracts[uups.std.contract].bytecode, deployer);
@@ -192,6 +201,7 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
       const proxy1 = await proxyF.deploy(impl1Addr, initData, ethers.ZeroAddress);
       await proxy1.waitForDeployment();
       const proxy1Addr = await proxy1.getAddress();
+      mark('uups impl+proxy deployed');
 
       const tok = new ethers.Contract(proxy1Addr, uups.out.contracts[uups.std.contract].abi, deployer);
       assert.equal(await tok.name(), 'Bear Runtime', 'the proxy answers with initialize() state');
@@ -225,6 +235,7 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
       await assert.rejects(
         tok.connect(stranger).upgradeToAndCall(await impl3.getAddress(), '0x'),
         'a stranger cannot upgrade a UUPS proxy');
+      mark('uups upgraded + stranger gate tested');
 
       // And the proxy itself must not offer an admin path in UUPS mode —
       // the four selectors are admin-only, and UUPS has no admin.
@@ -232,9 +243,12 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
         both(uups.out.contracts[uups.std.contract].abi, uups.out.contracts.ERC1967Proxy.abi), deployer);
       await assert.rejects(uupsProxy.upgradeTo(impl2Addr),
         'a UUPS proxy must not expose an admin upgrade path');
+      mark('uups section done');
 
       // ── Transparent ─────────────────────────────────────────────
+      mark('compiling transparent');
       const tr = await build({ upgradeable: true, proxyType: 'transparent' });
+      mark('transparent compiled');
       const trInit = tr.plan.args;
       const trIface = new ethers.Interface(tr.out.contracts[tr.std.contract].abi);
       const trImplF = new ethers.ContractFactory(tr.out.contracts[tr.std.contract].abi,
@@ -249,6 +263,7 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
       const tProxy = await trProxyF.deploy(tImpl1Addr, trIface.encodeFunctionData('initialize', trInit), deployer.address);
       await tProxy.waitForDeployment();
       const tProxyAddr = await tProxy.getAddress();
+      mark('transparent impl+proxy deployed');
 
       const tTok = new ethers.Contract(tProxyAddr, tr.out.contracts[tr.std.contract].abi, deployer);
       // Proxy-only selectors need the proxy's ABI next to the token's: in
@@ -276,13 +291,16 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
         tImpl2Addr, 'the admin upgrades through the proxy');
       assert.equal(await tTok.name(), 'Bear Runtime', 'state survives a transparent upgrade');
       await assert.rejects(tAdmin.connect(stranger).upgradeTo(tImpl1Addr), 'a stranger cannot upgrade through the proxy');
+      mark('transparent section done');
 
       // ── ERC-721 behind a proxy ──────────────────────────────────
       // The NFT wizard path is the one shape whose initialize() is easiest to
       // break silently: nothing else in the suite executes it, and a regression
       // that drops `owner = msg.sender` would ship a proxy that can never mint
       // or upgrade again. So drive it: ownership set, mint accepted, id owned.
+      mark('compiling nft uups');
       const nft = await build({ standard: 'erc721', upgradeable: true, proxyType: 'uups' });
+      mark('nft compiled');
       const nftIface = new ethers.Interface(nft.out.contracts[nft.std.contract].abi);
       const nftImplF = new ethers.ContractFactory(nft.out.contracts[nft.std.contract].abi,
         nft.out.contracts[nft.std.contract].bytecode, deployer);
@@ -293,6 +311,7 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
       const nftProxy = await nftProxyF.deploy(await nftImpl.getAddress(),
         nftIface.encodeFunctionData('initialize', nft.plan.args), ethers.ZeroAddress);
       await nftProxy.waitForDeployment();
+      mark('nft impl+proxy deployed');
       const nftTok = new ethers.Contract(await nftProxy.getAddress(), nft.out.contracts[nft.std.contract].abi, deployer);
       assert.equal(await nftTok.owner(), deployer.address, 'the NFT initialize() must hand ownership to the deployer');
       assert.equal(await nftTok.name(), 'Bear Runtime', 'the NFT proxy answers with initialize() state');
@@ -303,6 +322,7 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
       await nftImpl2.waitForDeployment();
       await (await nftTok.upgradeToAndCall(await nftImpl2.getAddress(), '0x')).wait();
       assert.equal(await nftTok.ownerOf(nextId), deployer.address, 'the mint survives an NFT upgrade');
+      mark('done — upgrade pair fully driven');
     } finally {
       provider.destroy();
       child.kill('SIGKILL');
