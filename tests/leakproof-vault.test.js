@@ -82,6 +82,9 @@ async function startAnvil(port) {
   const child = spawn('anvil', ['--port', String(port), '--mnemonic', MNEMONIC], { stdio: ['ignore', 'ignore', 'pipe'] });
   let err = '';
   child.stderr.on('data', (d) => { err = (err + String(d)).slice(-400); });
+  // An anvil that dies mid-test turns every later ethers await into a wait
+  // that never settles. Leave its death on the record, timestamped.
+  child.on('exit', (code, signal) => console.log(`# [anvil] exited code=${code} signal=${signal}`));
   const url = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 20000;
   for (;;) {
@@ -89,10 +92,14 @@ async function startAnvil(port) {
       throw new Error(`anvil exited with ${child.exitCode}${err.trim() ? `: ${err.trim()}` : ''}`);
     }
     try {
+      // A probe with no bound can hang on undici's long default timeout
+      // against a socket that accepts but never answers — this loop has to
+      // keep its own clock: 2s per probe, then try again.
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+        signal: AbortSignal.timeout(2000),
       });
       if (res.ok) break;
     } catch { /* not up yet */ }
@@ -108,26 +115,39 @@ async function warp(provider, seconds) {
   await provider.send('evm_mine', []);
 }
 
-// 900s, the same budget the M9 proof carries, for the same reason: the
-// download, the wasm compile, anvil's boot and every await after them are
-// wall-clock (ethers retries forever against a node that stopped answering),
-// and a shared CI runner stretches all of it. This test passes in 64.2s on a
-// Termux phone — yet run 38898501268 cancelled it at exactly 300001ms, and
-// with its body still pending the file process never exited: `npm test` could
-// not end and the job backstop eventually killed everything else unread. A
-// longer cap still ends in a loud cancelled test naming itself; it just stops
-// firing on work that was still legitimately moving.
-test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReason, timeout: 900_000 }, async (t) => {
+// 300s, sized from measurement, not fear: this story passes in 64.2s on a
+// Termux phone (2026-10-16, anvil + real wasm compile included) and 26.2s on
+// a GitHub runner — 300s is ~4.7x the slowest honest run, the same headroom
+// ratio the M9 proof carries. The old 900s turned one wedged await into
+// fifteen minutes of silence (runs 38898501268, 38930491444); five is enough
+// for a hang to name itself, and the [leakproof] phase lines below say WHICH
+// await wedged.
+test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReason, timeout: 300_000 }, async (t) => {
   if (skipReason) return;
   let started;
   try {
+    console.log('# [leakproof] boot: injecting real solc (local file or download)');
     await injectRealSolc();
+    console.log('# [leakproof] solc injected — spawning anvil');
     const port = await freePort();
     started = await startAnvil(port);
   } catch (e) {
     return t.skip(`toolchain unavailable: ${e?.message || e}`);
   }
   const { child, url } = started;
+  // Phase lines + a 30s alive-tick: on 2026-10-16 this file froze twice with
+  // zero output under a silent cap (runs 38898501268 at 300s, 38930491444 at
+  // 900s). A tick still printing = an await never settled; tick silence = the
+  // call stack itself is wedged.
+  let phase = 'starting';
+  const t0 = Date.now();
+  const mark = (m) => {
+    phase = m;
+    console.log(`# [leakproof] ${m} (+${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  };
+  const hb = setInterval(() => console.log(`# [leakproof] alive, waiting on: ${phase}`), 30_000);
+  hb.unref();
+  mark(`toolchain ready — anvil answering at ${url}`);
   const provider = new ethers.JsonRpcProvider(url, undefined, { batchMaxCount: 1, cacheTimeout: -1 });
   // anvil's key #0 is the deployer; key #1 is the guardian; the thief owns a
   // DIFFERENT private key — the leak scenario only works because the vault
@@ -143,9 +163,11 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     for (const w of [leaked, guardian, stranger, fresh]) {
       await (await deployer.sendTransaction({ to: w.address, value: ethers.parseEther('10') })).wait();
     }
+    mark('wallets funded');
 
     const src = readFileSync(path.join(root, 'test-contracts', 'LeakProofVault.sol'), 'utf8');
     const out = await solcJs.compileContract(src, 'LeakProofVault');
+    mark('vault compiled');
     // The OWNER deploys the vault: the key that ends up in the attacker's hands
     // is the one the chain already accepts as owner.
     const factory = new ethers.ContractFactory(out.abi, out.bytecode, leaked);
@@ -157,6 +179,7 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     assert.equal(await vault.guardian(), guardian.address, 'guardian key is registered at deploy');
     await (await deployer.sendTransaction({ to: vaultAddr, value: ethers.parseEther('1.337') })).wait();
     assert.equal(await vault.balance(), ethers.parseEther('1.337'), 'the vault holds the funds');
+    mark('vault deployed + funded');
 
     // ── The public has no access at all ──────────────────────────
     await assert.rejects(vault.connect(stranger).queueWithdrawal(1n, stranger.address), 'a stranger cannot queue');
@@ -164,6 +187,7 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     await assert.rejects(vault.connect(stranger).cancelWithdrawal(), 'a stranger cannot cancel');
     await assert.rejects(vault.connect(stranger).recoverOwner(stranger.address), 'a stranger cannot recover');
     await assert.rejects(vault.connect(stranger).finalizeRecovery(), 'with nothing pending, a stranger cannot finalize');
+    mark('stranger gates all rejected');
 
     // ── The benign path: owner queues, waits, executes ───────────
     await (await vault.queueWithdrawal(ethers.parseEther('0.337'), leaked.address)).wait();
@@ -171,6 +195,7 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     await warp(provider, 2 * 24 * 3600 + 1);
     await (await vault.executeWithdrawal()).wait();
     assert.equal(await vault.balance(), ethers.parseEther('1'), 'the queued amount left, the rest stayed');
+    mark('benign withdraw done');
 
     // ── THE LEAK: that owner key is now in an attacker's hands ───
     // From the chain's point of view the attacker IS the owner. It queues a
@@ -179,6 +204,7 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     await (await vault.queueWithdrawal(ethers.parseEther('1'), leaked.address)).wait();
     await (await vault.connect(guardian).cancelWithdrawal()).wait();
     assert.equal(await vault.balance(), ethers.parseEther('1'), 'guardian cancelled the theft — nothing moved');
+    mark('theft cancelled by guardian');
 
     // The attacker tries to take over instead: it cannot replace the guardian
     // (the watchdog), and it cannot cancel the guardian's recovery.
@@ -192,6 +218,7 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     await (await vault.finalizeRecovery()).wait();
     assert.equal(await vault.owner(), fresh.address, 'the vault escaped to a fresh key');
     assert.equal(await vault.balance(), ethers.parseEther('1'), 'the attacker drained nothing across the whole story');
+    mark('recovery done — leaked key powerless');
 
     // Post-recovery, the stolen key is a nobody: not owner, not guardian.
     await assert.rejects(vault.queueWithdrawal(1n, leaked.address), 'the stolen key lost all power after recovery');
@@ -206,7 +233,9 @@ test('LeakProofVault: a leaked key can never drain the vault', { skip: skipReaso
     const nextGuardian = new ethers.Wallet(ethers.Wallet.createRandom().privateKey, provider);
     await (await vault.connect(guardian).changeGuardian(nextGuardian.address)).wait();
     assert.equal(await vault.guardian(), nextGuardian.address, 'guardian key hands off to the next cold key');
+    mark('done — rotation complete');
   } finally {
+    clearInterval(hb);
     provider.destroy();
     child.kill('SIGKILL');
   }

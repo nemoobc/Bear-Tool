@@ -85,6 +85,20 @@ jobs:
           grep -qE "^(ℹ|#) cancelled 0" /tmp/npm-test.log || {
             echo "::error::npm test reported cancelled tests (timeout or interrupt)"; exit 1; }
 
+      # One compiler, fetched once and verified here: the runtime tests below
+      # then read it from disk (BEAR_SOLC_FILE) and never touch the network
+      # mid-test — a stalled CDN connection can no longer wedge a test body,
+      # and a failed fetch fails THIS step in minutes, named (2026-10-16:
+      # two silent 900s test timeouts, one hang in each compiler file).
+      - name: Pre-fetch solc compiler into vendor/
+        shell: bash
+        run: |
+          URL=$(node --input-type=module -e "import { SOLC_URL } from './js/solc.js'; console.log(SOLC_URL)")
+          echo "solc: $URL"
+          mkdir -p vendor
+          curl -fsSL --retry 3 --retry-all-errors --max-time 180 -o vendor/soljson-0.8.37.js "$URL"
+          node -e "const s = require('fs').readFileSync('vendor/soljson-0.8.37.js', 'utf8'); if (!s.includes('solidity_compile')) { console.error('vendor file is not a soljson build'); process.exit(1); } console.log('soljson bytes:', s.length);"
+
       # The three files below are the whole reason foundry and BEAR_SOLC exist
       # in this job. They run here, serially (`test:runtime` pins
       # --test-concurrency=1) because side by side with the 160-file suite
@@ -98,6 +112,7 @@ jobs:
         shell: bash
         env:
           BEAR_SOLC: '1'
+          BEAR_SOLC_FILE: vendor/soljson-0.8.37.js
         timeout-minutes: 30
         run: |
           set -o pipefail

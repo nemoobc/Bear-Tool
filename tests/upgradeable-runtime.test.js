@@ -100,6 +100,9 @@ async function startAnvil(port) {
   const child = spawn('anvil', ['--port', String(port), '--mnemonic', MNEMONIC], { stdio: ['ignore', 'ignore', 'pipe'] });
   let err = '';
   child.stderr.on('data', (d) => { err = (err + String(d)).slice(-400); });
+  // An anvil that dies mid-test turns every later ethers await into a wait
+  // that never settles. Leave its death on the record, timestamped.
+  child.on('exit', (code, signal) => console.log(`# [anvil] exited code=${code} signal=${signal}`));
   const url = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 20000;
   for (;;) {
@@ -107,10 +110,14 @@ async function startAnvil(port) {
       throw new Error(`anvil exited with ${child.exitCode}${err.trim() ? `: ${err.trim()}` : ''}`);
     }
     try {
+      // A probe with no bound can hang on undici's long default timeout
+      // against a socket that accepts but never answers — this loop has to
+      // keep its own clock: 2s per probe, then try again.
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+        signal: AbortSignal.timeout(2000),
       });
       if (res.ok) break;
     } catch { /* not up yet */ }
@@ -156,18 +163,28 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
   // letting that skip would hide an argument typo as an environmental excuse.
   let started;
   try {
+    console.log('# [m9] boot: injecting real solc (local file or download)');
     await injectRealSolc();
+    console.log('# [m9] solc injected — spawning anvil');
     const port = await freePort();
     started = await startAnvil(port);
   } catch (e) {
     return t.skip(`toolchain unavailable: ${e?.message || e}`);
   }
   const { child, url } = started;
-  // One phase line per step: a stall on a shared runner must name its place
-  // instead of showing 15 minutes of silence (run 38926627716 — the 900s cap
-  // fired and nothing had printed since the toolchain came up).
+  // Phase lines + a 30s alive-tick: a stall on a shared runner must name its
+  // place and its nature instead of showing 15 minutes of silence (neither
+  // run 38926627716 nor 38930491444 had printed since the toolchain came up).
+  // A tick still printing = an await never settled; tick silence = the call
+  // stack itself is wedged — two different bugs, two different fixes.
+  let phase = 'starting';
   const t0 = Date.now();
-  const mark = (m) => console.log(`# [m9] ${m} (+${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  const mark = (m) => {
+    phase = m;
+    console.log(`# [m9] ${m} (+${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  };
+  const hb = setInterval(() => console.log(`# [m9] alive, waiting on: ${phase}`), 30_000);
+  hb.unref();
   mark(`toolchain ready — anvil answering at ${url}`);
   // batchMaxCount:1 + cacheTimeout:-1 — ethers v6's default response cache
       // races anvil's instan-mine here: a stale eth_getTransactionCount answers
@@ -324,6 +341,7 @@ test('M9 runtime: a deployed proxy pair behaves like a proxy pair', { skip: skip
       assert.equal(await nftTok.ownerOf(nextId), deployer.address, 'the mint survives an NFT upgrade');
       mark('done — upgrade pair fully driven');
     } finally {
+      clearInterval(hb);
       provider.destroy();
       child.kill('SIGKILL');
     }
