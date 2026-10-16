@@ -614,3 +614,66 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
 .dex-social-plain { opacity: 0.75; word-break: break-all; }
 .dex-fee-card { border: 2px solid var(--ink); border-radius: 12px; background: var(--white); padding: 10px 12px; }
 .dex-fee-card [data-fee-accrued] { font-variant-numeric: tabular-nums; }
+
+/* Launch wizard 3-step stepper (DEX UX: launchpad-style flow) */
+.launch-stepper { display: flex; gap: 10px; overflow-x: auto; margin: 8px 0 12px; padding-bottom: 6px; scrollbar-width: none; }
+.launch-stepper::-webkit-scrollbar { display: none; }
+.launch-step {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-width: 110px; padding: 8px 10px; border-radius: 20px;
+  border: 1px solid var(--border-thick); background: var(--white);
+  color: var(--ink-muted); font-size: 13px; font-weight: 600; cursor: pointer;
+  white-space: nowrap;
+}
+.launch-step:disabled { opacity: 0.5; cursor: not-allowed; }
+.launch-step-num { width: 22px; height: 22px; border-radius: 50%; border: 1px solid currentColor;
+  color: currentColor; font-size: 12px; display: grid; place-items: center; flex-shrink: 0; }
+.launch-step-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launch-step-active { border-color: var(--accent); color: var(--accent); background: #EEF3FF; }
+.launch-step-active .launch-step-num { background: var(--accent); color: #fff; border-color: var(--accent); }
+.launch-step-panel { display: none; }
+.launch-step-panel.launch-step-panel-active { display: block; }
+.hidden { display: none !important; }
+
+.launch-step-actions { display: flex; gap: 8px; margin-top: 12px; }
+.launch-step-actions .btn { flex: 1; min-height: 44px; }
+
+.launch-summary { border: 1px solid var(--border); border-radius: 10px; background: #F5F7FA; padding: 10px 12px; }
+.launch-summary .small { color: var(--ink); }
+
+.launch-badges { display: flex; gap: 8px; margin-top: 8px; }
+.launch-badge {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px;
+  border: 1px solid var(--border-thick); background: var(--white); color: var(--ink-muted);
+  font-size: 12px; font-weight: 600;
+}
+.launch-badge-fair { color: #15803d; border-color: #4ade80; }
+.launch-badge-anti { color: #B45309; border-color: #FB923C; }
+
+.launch-confirm-actions { display: flex; gap: 8px; margin-top: 12px; }
+.launch-confirm-actions .btn { flex: 1; min-height: 44px; }
+
+/* OKX-style dApp tab strip (native browser) */
+.launch-tabstrip { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.launch-tab {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border: 1px solid var(--border-thick); border-radius: 10px;
+  background: var(--white); color: var(--ink); cursor: pointer; text-align: left;
+  min-height: 44px;
+}
+.launch-tab:disabled { opacity: 0.5; cursor: not-allowed; }
+.launch-tab-active { border-color: var(--accent); background: #EEF3FF; }
+.launch-tab-icon { flex-shrink: 0; font-size: 18px; }
+.launch-tab-body { flex: 1; min-width: 0; }
+.launch-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 14px; }
+.launch-tab-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-soft); }
+.launch-tab-close {
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px;
+  border: 1px solid var(--border-thick); background: var(--white); color: var(--ink-muted);
+  font-size: 18px; line-height: 1; display: grid; place-items: center; cursor: pointer;
+}
+.launch-tab-close:hover { background: #F2F4FB; }
+
+/* Market maker notice: no new private keys */
+.bot-notice { border-left: 3px solid var(--honey); background: #FDF6E7; color: var(--ink-soft); padding: 8px 12px; border-radius: 0 8px 8px 0; }
+.bot-notice b, .bot-notice strong { color: var(--ink); }

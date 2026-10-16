@@ -358,9 +358,16 @@ export async function drawCandles(host, candles, opts = {}) {
       priceScaleId: '',
     });
     volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    volSeries.setData(candles.map(({ time, volume, close, open }) => ({
-      time, value: volume, color: close >= open ? theme.volUp : theme.volDown,
-    })));
+    volSeries.setData(series.map(({ time, volume, close, open }) => {
+      // volume already left the builder as float quote units
+      // (tradesToCandles / timeCandles divide bigint vol by PRICE_SCALE once);
+      // dividing again here would shrink every bar to ~0. Invalid → 0, never NaN.
+      return {
+        time,
+        value: Number.isFinite(volume) ? volume : 0,
+        color: close >= open ? theme.volUp : theme.volDown,
+      };
+    }));
   }
 
   chart.timeScale().fitContent();

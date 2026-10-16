@@ -16,6 +16,7 @@ import {
   t, $, toast, escapeHtml, fmtTok, withTxButton, openEdu,
   QUOTE_PRESETS, quoteBy, provider, ethersLib, sendDexTx, needSigner, isAddr, dexChainOk,
 } from './core.js';
+import { openModal } from '../ui.js';
 import { parseAmount, ensureAllowanceTx } from './swap.js';
 import { factoryAddress, deployFactory } from './factory.js';
 import { BEAR_FACTORY_ABI } from './bear-source.js';
@@ -62,7 +63,20 @@ export function launchHtml() {
         <button type="button" class="btn btn-secondary btn-block mt-8" id="dexLaunchDeployFactory">${escapeHtml(t('dex.launch.deployFactory'))}</button>
       </div>` : ''}
 
-      <div class="dex-create-top">
+      <div class="launch-stepper" id="launch-stepper" role="tablist" aria-label="${escapeHtml(t('dex.create.title'))}">
+        <button type="button" class="launch-step launch-step-active" data-step="1" role="tab" aria-selected="true">
+          <span class="launch-step-num">1</span><span class="launch-step-lbl">${escapeHtml(t('launch.step.one'))}</span>
+        </button>
+        <button type="button" class="launch-step launch-step-disabled" data-step="2" role="tab" aria-selected="false" disabled>
+          <span class="launch-step-num">2</span><span class="launch-step-lbl">${escapeHtml(t('launch.step.two'))}</span>
+        </button>
+        <button type="button" class="launch-step launch-step-disabled" data-step="3" role="tab" aria-selected="false" disabled>
+          <span class="launch-step-num">3</span><span class="launch-step-lbl">${escapeHtml(t('launch.step.three'))}</span>
+        </button>
+      </div>
+
+      <div class="launch-step-panel launch-step-panel-active" id="launch-step-1">
+        <div class="dex-create-top">
         <div class="dex-create-preview">
           <img id="dexCreateImg" alt="" />
           <input id="dexCreateFile" type="file" accept="image/*" class="sr-file"
@@ -90,9 +104,15 @@ export function launchHtml() {
         <input id="dexCreateWebsite" class="input" maxlength="80" placeholder="example.com">
         <div class="small mt-8">${escapeHtml(t('dex.create.socialsWhy'))}</div>
       </div>
+        <div class="launch-step-actions mt-8">
+          <button type="button" class="btn btn-primary btn-block" id="launchStep1Next">${escapeHtml(t('launch.button.next'))}</button>
+        </div>
+        <div id="launchStep1Error" class="small mt-8" role="status"></div>
+      </div>
 
-      <div class="dex-create-fields mt-8">
-        <label class="field-label" for="dexCreateQuote">${escapeHtml(t('dex.create.quote'))}</label>
+      <div class="launch-step-panel hidden" id="launch-step-2">
+        <div class="dex-create-fields mt-8">
+          <label class="field-label" for="dexCreateQuote">${escapeHtml(t('dex.create.quote'))}</label>
         <select id="dexCreateQuote" class="input" aria-describedby="dexCreateQuoteWhy">
           ${QUOTE_PRESETS.map((q, i) => `<option value="${escapeHtml(q.address)}"${i === 0 ? ' selected' : ''}>${escapeHtml(q.symbol)} — ${escapeHtml(q.name)}</option>`).join('')}
         </select>
@@ -127,8 +147,30 @@ export function launchHtml() {
         </div>
         <div class="small mt-8" id="dexLaunchPreview"></div>
       </div>
+        <div class="launch-step-actions mt-8">
+          <button type="button" class="btn btn-secondary" id="launchStep2Back">${escapeHtml(t('launch.button.back'))}</button>
+          <button type="button" class="btn btn-primary" id="launchStep2Next">${escapeHtml(t('launch.button.next'))}</button>
+        </div>
+        <div id="launchStep2Error" class="small mt-8" role="status"></div>
+      </div>
 
-      <button id="dexCreateGo" type="button" class="btn btn-primary btn-block mt-8">${escapeHtml(t('dex.create.launch'))}</button>
+      <div class="launch-step-panel hidden" id="launch-step-3">
+        <div class="dex-create-fields mt-8 launch-summary">
+          <div class="small mt-8"><strong>${escapeHtml(t('launch.preview.openingPrice'))}</strong> <span id="launchSumPrice">–</span></div>
+          <div class="small mt-8"><strong>${escapeHtml(t('launch.preview.pair'))}</strong> <span id="launchSumPair">–</span></div>
+          <div class="small mt-8"><strong>${escapeHtml(t('launch.preview.creatorTokens'))}</strong> <span id="launchSumKeep">–</span></div>
+          <div class="small mt-8"><strong>${escapeHtml(t('launch.preview.gasEst'))}</strong> <span id="launchSumGas">–</span></div>
+        </div>
+        <div class="launch-step-actions mt-8">
+          <button type="button" class="btn btn-secondary" id="launchStep3Back">${escapeHtml(t('launch.button.back'))}</button>
+          <button type="button" class="btn btn-primary btn-block" id="launchStep3Review">${escapeHtml(t('launch.button.reviewLaunch'))}</button>
+        </div>
+        <div id="launchStep3Error" class="small mt-8" role="status"></div>
+        <div class="launch-badges small mt-8">
+          <span class="launch-badge launch-badge-fair">${escapeHtml(t('launch.badge.fairLaunch'))}</span>
+          <span class="launch-badge launch-badge-anti">${escapeHtml(t('launch.badge.antiSniper'))}</span>
+        </div>
+      </div>
       <div id="dexCreateStatus" class="small mt-8" role="status"></div>
     </div>`;
 }
@@ -321,35 +363,135 @@ export function bindLaunch(host, onLaunched) {
   paintQuoteLabel();
   refreshPreview();
 
-  $('#dexCreateGo', host).addEventListener('click', () => {
-    if (!dexChainOk()) return toast(t('dex.gate.needSepolia'), 'error');
+  // ── 3-step wizard ────────────────────────────────────────────────
+  let step = 1;
+  const stepPanels = ['launch-step-1', 'launch-step-2', 'launch-step-3'];
+  const stepBtns = document.querySelectorAll('.launch-step');
+  const showStep = (n) => {
+    step = n;
+    stepPanels.forEach((id, i) => {
+      const el = $(id, host);
+      if (el) el.hidden = i + 1 !== n;
+    });
+    stepBtns.forEach((b, i) => {
+      b.classList.toggle('launch-step-active', i + 1 === n);
+      b.classList.toggle('launch-step-disabled', i + 1 !== n);
+      b.setAttribute('aria-selected', String(i + 1 === n));
+      b.disabled = i + 1 !== n;
+    });
+    const err = $(`launch-step-${n}Error`, host);
+    if (err) err.textContent = '';
+    if (n === 3) paintStep3Summary();
+  };
+
+  const clearErr = (id) => { const e = $(id, host); if (e) e.textContent = ''; };
+  const setErr = (id, msg) => { const e = $(id, host); if (e) e.textContent = msg; };
+
+  const validSymbol = (s) => /^[A-Z0-9]{1,12}$/.test(s || '');
+
+  const paintStep3Summary = () => {
+    const dec = (quoteBy(quoteEl.value) || {}).decimals ?? 18;
+    const s = parseAmount(supplyEl.value, 18);
+    const tk = parseAmount(tokensEl.value, 18);
+    const q = parseAmount(quoteInEl.value, dec);
+    const price = s.ok && tk.ok && q.ok && tk.value > 0n ? fmtTok(quotePerToken(q.value, tk.value, 18), dec, 6) : '–';
+    const pair = s.ok && tk.ok ? `${fmtTok(tk.value, 18, 0)} ${quoteSymFor(quoteEl.value)} · ${q.ok ? fmtTok(q.value, dec, 6) : '–'} ${quoteSymFor(quoteEl.value)}` : '–';
+    const keep = s.ok && tk.ok ? fmtTok(s.value - tk.value, 18, 0) : '–';
+    $(`launchSumPrice`, host).textContent = price;
+    $(`launchSumPair`, host).textContent = pair;
+    $(`launchSumKeep`, host).textContent = keep;
+    $(`launchSumGas`, host).textContent = '–'; // gas ditetapkan saat transaksi dikirim (withTxButton)
+  };
+
+  $('#launchStep1Next', host).addEventListener('click', () => {
+    clearErr('launchStep1Error');
+    const name = $('#dexCreateName', host).value.trim();
+    let symbol = $('#dexCreateSymbol', host).value.trim().toUpperCase();
+    if (!name) { setErr('launchStep1Error', t('launch.error.required')); return; }
+    if (!symbol) { setErr('launchStep1Error', t('launch.error.required')); return; }
+    if (!validSymbol(symbol)) { setErr('launchStep1Error', t('launch.error.invalidSymbol')); return; }
+    $('#dexCreateSymbol', host).value = symbol;
+    showStep(2);
+  });
+
+  $('#launchStep2Back', host).addEventListener('click', () => { clearErr('launchStep2Error'); showStep(1); });
+
+  $('#launchStep2Next', host).addEventListener('click', () => {
+    clearErr('launchStep2Error');
+    if (!dexChainOk()) { setErr('launchStep2Error', t('dex.gate.needSepolia')); return; }
+    if (!isAddr(factoryAddress())) { setErr('launchStep2Error', t('dex.launch.needFactory')); return; }
+    const dec = (quoteBy(quoteEl.value) || {}).decimals ?? 18;
+    const supply = parseAmount(supplyEl.value, 18);
+    const tokensForPool = parseAmount(tokensEl.value, 18);
+    const quoteForPool = parseAmount(quoteInEl.value, dec);
+    if (!supply.ok || !tokensForPool.ok || !quoteForPool.ok
+      || tokensForPool.value > supply.value || quoteForPool.value <= 0n) {
+      setErr('launchStep2Error', t('dex.launch.badAmounts')); return;
+    }
+    const devBuyRaw = (devBuyEl && devBuyEl.value.trim()) || '';
+    if (devBuyRaw) {
+      const devBuy = parseAmount(devBuyRaw, dec);
+      if (!devBuy.ok || devBuy.value <= 0n) { setErr('launchStep2Error', t('dex.launch.badDevBuy')); return; }
+    }
+    showStep(3);
+  });
+
+  $('#launchStep3Back', host).addEventListener('click', () => { clearErr('launchStep3Error'); showStep(2); });
+
+  $('#launchStep3Review', host).addEventListener('click', async () => {
+    clearErr('launchStep3Error');
+    if (!dexChainOk()) { setErr('launchStep3Error', t('dex.gate.needSepolia')); return; }
+    const signer = needSigner();
+    if (!signer) return;
     const name = $('#dexCreateName', host).value.trim();
     const symbol = $('#dexCreateSymbol', host).value.trim();
     const description = $('#dexCreateDesc', host).value.trim();
     const twitter = ($('#dexCreateTwitter', host)?.value || '').trim();
     const telegram = ($('#dexCreateTelegram', host)?.value || '').trim();
     const website = ($('#dexCreateWebsite', host)?.value || '').trim();
-    const creatorFeeBps = feeEl ? (Number(feeEl.value) || 0) : 0;
-    const devBuyRaw = (devBuyEl && devBuyEl.value.trim()) || '';
-    if (!name) return toast(t('dex.create.needName'), 'error');
-    if (!symbol) return toast(t('dex.create.needSymbol'), 'error');
     const quote = quoteEl.value || (QUOTE_PRESETS[0] && QUOTE_PRESETS[0].address);
     const dec = (quoteBy(quote) || {}).decimals ?? 18;
     const supply = parseAmount(supplyEl.value, 18);
     const tokensForPool = parseAmount(tokensEl.value, 18);
     const quoteForPool = parseAmount(quoteInEl.value, dec);
-    if (!supply.ok || !tokensForPool.ok || !quoteForPool.ok
-      || tokensForPool.value > supply.value || quoteForPool.value <= 0n) {
-      return toast(t('dex.launch.badAmounts'), 'error');
-    }
+    const creatorFeeBps = feeEl ? (Number(feeEl.value) || 0) : 0;
+    const devBuyRaw = (devBuyEl && devBuyEl.value.trim()) || '';
     const devBuy = devBuyRaw ? parseAmount(devBuyRaw, dec) : null;
-    if (devBuyRaw && (!devBuy.ok || devBuy.value <= 0n)) {
-      return toast(t('dex.launch.badDevBuy'), 'error');
-    }
-    if (!isAddr(factoryAddress())) return toast(t('dex.launch.needFactory'), 'error');
-    const signer = needSigner();
-    if (!signer) return;
-    const btn = $('#dexCreateGo', host);
+    const lockDuration = Number(lockEl.value) || 0;
+    const devBuyQuote = devBuy && devBuy.ok ? devBuy.value : 0n;
+
+    const priceEl = $('#launchSumPrice', host);
+    const keepEl = $('#launchSumKeep', host);
+    const price = priceEl ? priceEl.textContent : '–';
+    const keep = keepEl ? keepEl.textContent : '–';
+
+    const html = `
+      <div class="launch-confirm-modal">
+        <div class="small mb-8">${escapeHtml(t('launch.confirm.title'))}</div>
+        <div class="small mb-8">${escapeHtml(t('launch.confirm.body'))}</div>
+        <div class="card mb-8">
+          <div class="small mt-8">${escapeHtml(name)} · ${escapeHtml(symbol)}</div>
+          <div class="small mt-8">${t('launch.preview.openingPrice')}: <span>${escapeHtml(price)}</span></div>
+          <div class="small mt-8">${t('launch.preview.creatorTokens')}: <span>${escapeHtml(keep)}</span></div>
+          <div class="small mt-8">${t('launch.preview.pair')}: ${escapeHtml(quoteSymFor(quote))}</div>
+          <div class="small mt-8">${t('launch.label.lock')}: ${String(Math.round(lockDuration / 86400))} hari</div>
+          <div class="small mt-8">${t('launch.label.creatorFee')}: ${creatorFeeBps} bps</div>
+        </div>
+        <div class="launch-confirm-actions mt-8">
+          <button type="button" class="btn btn-secondary" id="launchConfirmCancel">${escapeHtml(t('launch.confirm.cancel'))}</button>
+          <button type="button" class="btn btn-danger" id="launchConfirmOk">${escapeHtml(t('launch.confirm.confirm'))}</button>
+        </div>
+      </div>`;
+    let resolveConfirm;
+    const confirmed = new Promise((r) => { resolveConfirm = r; });
+    const close = () => { try { closeModal(); } catch { /* already closed */ } };
+    openModal(html, { wide: false });
+    $('#launchConfirmCancel', host)?.addEventListener('click', () => { close(); resolveConfirm(false); }, { once: true });
+    $('#launchConfirmOk', host)?.addEventListener('click', () => { close(); resolveConfirm(true); }, { once: true });
+    const ok = await confirmed;
+    if (!ok) return;
+
+    const btn = $('#launchStep3Review', host);
     return withTxButton(btn, t('dex.create.sending'), async () => {
       status.textContent = t('dex.launch.sending');
       const res = await launchTx({
@@ -359,17 +501,17 @@ export function bindLaunch(host, onLaunched) {
         quote,
         tokensForPool: tokensForPool.value,
         quoteForPool: quoteForPool.value,
-        lockDuration: Number(lockEl.value) || 0,
+        lockDuration,
         creatorFeeBps,
         devBuyQuote: devBuy && devBuy.ok ? devBuy.value : 0n,
         signer,
       });
-      if (!res.ok) { status.textContent = ''; return; }
+      if (!res.ok) { return; }
       status.textContent = t('dex.launch.done');
-      // Remember it locally, so the feed paints it the moment it opens — the
-      // chain stays the authority, this is only the instant copy.
       if (res.token) rememberLaunchedToken({ address: res.token, name, symbol, image });
       if (res.token && onLaunched) onLaunched(res.token);
     });
   });
+
+  showStep(1);
 }

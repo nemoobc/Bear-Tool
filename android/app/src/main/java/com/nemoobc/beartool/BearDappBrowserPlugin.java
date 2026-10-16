@@ -1662,6 +1662,20 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         });
     }
 
+    /** Wallet → native: close tab <index> and show the next tab (or hide the browser when none remain). */
+    @PluginMethod
+    public void closeTab(PluginCall call) {
+        Integer idx = call.getInt("index");
+        getActivity().runOnUiThread(() -> {
+            if (idx == null || idx < 0 || idx >= tabs.size()) { call.reject("bad index"); return; }
+            tabs.remove(idx);
+            if (activeTab >= tabs.size()) activeTab = Math.max(tabs.size() - 1, -1);
+            if (activeTab >= 0) setActiveTab(activeTab);
+            else closeTabPanel();
+            call.resolve(null);
+        });
+    }
+
     /** Wallet → native: bring tab <index> to the front and show the browser. */
     @PluginMethod
     public void selectTab(PluginCall call) {

@@ -96,6 +96,7 @@ export function tokenPageHtml() {
     </div>
     <div class="card mb-8" id="dexTpTrade"></div>
     ${botHtml()}
+    <div class="bot-notice small mt-8">${escapeHtml(t('dex.bot.noNewKeys'))}</div>
     <div class="card mb-8">
       <div class="field-label">${escapeHtml(t('dex.tp.chart'))}</div>
       <div class="dex-tabstrip mt-8" id="dexTpTfs" role="group" aria-label="${escapeHtml(t('dex.tp.tfGroup'))}">${CHART_TFS.map((tf) => `<button type="button" class="dex-tab" data-tf="${tf.sec}" aria-pressed="${tf.sec === DEFAULT_TF}">${tf.label}</button>`).join('')}</div>

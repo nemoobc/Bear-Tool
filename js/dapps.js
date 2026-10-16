@@ -9,7 +9,7 @@ import { escapeHtml, dappMark, dappLogo, openModal, closeModal } from './ui.js';
 import { openDappBrowser as openInBrowser, openDappHome, openExternalNotice, initDappBrowser } from './dapp-browser.js';
 import { classifyInput, inspectUrl, baseHost, VERDICT } from './dapp-safety.js';
 import { listBlocked, listTrusted } from './dapp-sessions.js';
-import { isNativeDappBrowser, nativeTabs, openNativeTab } from './native-dapp.js';
+import { isNativeDappBrowser, nativeTabs, openNativeTab, closeNativeTab } from './native-dapp.js';
 import { t } from './i18n.js';
 
 // frameable:false → the site ships clickjacking protection (X-Frame-Options or
@@ -137,28 +137,30 @@ export function looksLikeUrl(v) {
 async function renderTabsEntry(container) {
   const bar = container.querySelector('.dapps-browser');
   if (!bar) return;
-  const info = await nativeTabs();          // null on web, or with no session
+  const info = await nativeTabs();
   const tabs = (info && info.tabs) || [];
-  if (!tabs.length) return;
-  const label = (tab) => tab.title || tab.url || 'New tab';
+  const active = info.active ?? 0;
+
+  // Entry utama "Browser" dengan badge hitung tab — selalu ada.
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.id = 'dappTabsBtn';
   btn.className = 'dapp-tabs-entry';
-  btn.setAttribute('aria-label', 'Open the in-app browser tabs');
+  btn.setAttribute('aria-label', t('dapp.browser.label'));
+  const n = tabs.length;
   btn.innerHTML = `<span class="dapp-tabs-ic" aria-hidden="true">\u29C9</span>
-    <span class="dapp-tabs-lb">Browser</span>
-    <span class="dapp-tabs-n" aria-hidden="true">${tabs.length}</span>`;
+    <span class="dapp-tabs-lb">${escapeHtml(t('dapp.browser.label'))}</span>
+    <span class="dapp-tabs-n" aria-hidden="true">${n}</span>`;
   btn.addEventListener('click', async () => {
     const fresh = await nativeTabs();
     const list = (fresh && fresh.tabs) || [];
     if (!list.length) return;
     openModal(`
-      <h3>Browser tabs</h3>
-      <p class="small">The in-app browser still has ${list.length} tab${list.length === 1 ? '' : 's'} open. Pick one to go back.</p>
+      <h3>${escapeHtml(t('dapp.browser.label'))}</h3>
+      <p class="small">${escapeHtml(t('dapp.tab.empty.desc'))}</p>
       <div class="dapp-tabs-list" role="list">
         ${list.map((tab, i) => `<button type="button" class="dapp-tabs-row" role="listitem" data-i="${i}">
-          <span class="dapp-tabs-row-t">${escapeHtml(label(tab))}</span>
+          <span class="dapp-tabs-row-t">${escapeHtml(tab.title || tab.url || 'New tab')}</span>
           <span class="dapp-tabs-row-u">${escapeHtml(tab.url || '')}</span>
         </button>`).join('')}
       </div>`, { wide: true });
@@ -170,7 +172,46 @@ async function renderTabsEntry(container) {
       });
     });
   });
-  bar.insertBefore(btn, bar.firstChild);
+  bar.appendChild(btn);
+
+  // No tabs → no strip at all.
+  if (!tabs.length) return;
+
+  const domainOf = (url) => {
+    try { return new URL(url).hostname; } catch { return url || ''; }
+  };
+  const strip = document.createElement('div');
+  strip.className = 'launch-tabstrip';
+  strip.setAttribute('role', 'tablist');
+  strip.setAttribute('aria-label', t('dapp.browser.label'));
+  strip.innerHTML = tabs.map((tab, i) => `
+    <button type="button" class="launch-tab${i === active ? ' launch-tab-active' : ''}" role="tab" aria-selected="${i === active}" data-i="${i}">
+      <span class="launch-tab-icon" aria-hidden="true">🌐</span>
+      <div class="launch-tab-body">
+        <div class="launch-tab-title" title="${escapeHtml(tab.title || '')}">${escapeHtml(tab.title || tab.url || 'New tab')}</div>
+        <div class="launch-tab-url">${escapeHtml(domainOf(tab.url || ''))}</div>
+      </div>
+      <button type="button" class="launch-tab-close" aria-label="${escapeHtml(t('dapp.tab.closeAria', { n: tab.title || tab.url || 'New tab' }))}" data-i="${i}">×</button>
+    </button>
+  `).join('');
+  bar.appendChild(strip);
+
+  strip.querySelectorAll('.launch-tab').forEach((btn, i) => {
+    btn.addEventListener('click', async () => {
+      const fresh = await nativeTabs();
+      const list = (fresh && fresh.tabs) || [];
+      if (!list.length) return;
+      await openNativeTab(i);
+    });
+  });
+  strip.querySelectorAll('.launch-tab-close').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const i = Number(btn.dataset.i);
+      await closeNativeTab(i);
+      renderTabsEntry(container);
+    });
+  });
 }
 
 export function renderDapps(container) {

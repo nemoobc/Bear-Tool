@@ -290,10 +290,7 @@ export async function nativeTabs() {
     const r = await p.getTabs();
     return r && r.open && Array.isArray(r.tabs) ? r : null;
   } catch { return null; }   // older build without getTabs — no entry, no crash
-}
 
-/** Wallet DApps page → native: reopen the in-app browser on tab <index>. */
-export async function openNativeTab(index) {
   try {
     const p = await ensurePlugin();
     await p.selectTab({ index: Number(index) || 0 });
@@ -951,4 +948,24 @@ if (typeof window !== 'undefined') {
   window.__bearE2EOpenDapp = (url) => (isNativeDappBrowser()
     ? openNativeDapp(url)
     : Promise.reject(new Error('dapp browser hook is native-only')));
+}
+
+/** Wallet → native: close tab <index> and repaint the tabs entry underneath. */
+export async function closeNativeTab(index) {
+  if (!isNativeDappBrowser()) return false;
+  try {
+    const p = await ensurePlugin();
+    await p.closeTab({ index: Number(index) || 0 });
+    return true;
+  } catch { return false; }
+}
+
+/** Wallet → native: bring tab <index> to the front and show the browser. */
+export async function openNativeTab(index) {
+  if (!isNativeDappBrowser()) return false;
+  try {
+    const p = await ensurePlugin();
+    await p.selectTab({ index: Number(index) || 0 });
+    return true;
+  } catch { return false; }
 }
