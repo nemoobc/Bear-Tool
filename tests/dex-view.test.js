@@ -663,3 +663,35 @@ test('the curve LP panel says it is reading before it has figures (R13)', () => 
   assert.match(liq, /async function refresh\(\) \{[\s\S]*?dex\.swap\.loading/,
     'refresh announces itself — the panel never sits blank');
 });
+
+// ── R17 — ID+EN sejak awal: tanpa string keras, satu lokale angka ──────────
+test('every Dex number formatter speaks the same locale (R17)', () => {
+  const dir = new URL('../js/dex/', import.meta.url);
+  let count = 0;
+  for (const f of readdirSync(dir).filter((name) => name.endsWith('.js'))) {
+    const src = readFileSync(new URL(f, dir), 'utf8');
+    for (const m of src.matchAll(/toLocaleString\(([^)]*)\)/g)) {
+      count += 1;
+      assert.match(m[0], /toLocaleString\('en-US'/,
+        `${f}: every formatter must agree on one locale — found ${m[0]}`);
+    }
+  }
+  assert.ok(count >= 5, `expected the shared formatters to be scanned, found ${count}`);
+});
+
+test('a timed-out broadcast never leaks the English raw label (R17)', () => {
+  const core = read('../js/dex/core.js');
+  assert.match(core, /e\.code === 'BEAR_TIMEOUT'/, 'sendDexTx must tell a timeout apart from a revert');
+  assert.match(core, /t\('dex\.tx\.timeout'\)/, 'and say it in human words');
+  const i18n = read('../js/i18n.js');
+  assert.equal((i18n.match(/'dex\.tx\.timeout':/g) || []).length, 2, 'the key must exist in both languages');
+});
+
+test('a chart that cannot draw says so in words, not in node errors (R17)', () => {
+  const tp = read('../js/dex/token-page.js');
+  assert.match(tp, /t\('dex\.chart\.fail'\)/, 'the chart note gets the human line');
+  assert.doesNotMatch(tp, /chartNote\.textContent = \(e &&/,
+    'the raw error passthrough is gone from the chart note');
+  const i18n = read('../js/i18n.js');
+  assert.equal((i18n.match(/'dex\.chart\.fail':/g) || []).length, 2, 'the key must exist in both languages');
+});

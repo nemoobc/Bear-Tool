@@ -77,7 +77,11 @@ export async function sendDexTx(promiseFactory, label) {
   try {
     tx = await withTimeout(promiseFactory(), BROADCAST_TIMEOUT_MS, `${label} broadcast`);
   } catch (e) {
-    toast((e && (e.shortMessage || e.message)) || String(e), 'error');
+    // A broadcast that ran out of clock is NOT a revert: the wallet may or may
+    // not have sent it. The raw `{label} timed out` string is a log line, not
+    // an interface — the user gets the honest sentence instead (R17).
+    if (e && e.code === 'BEAR_TIMEOUT') toast(t('dex.tx.timeout'), 'error');
+    else toast((e && (e.shortMessage || e.message)) || String(e), 'error');
     return null;
   }
   const v = receiptVerdict(await waitForReceipt(tx, { label }));

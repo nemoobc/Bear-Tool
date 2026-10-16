@@ -270,10 +270,11 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
         if (chartTearDown) { try { chartTearDown(); } catch { /* already gone */ } }
       }, { once: true });
     }
-  } catch (e) {
+  } catch {
     // The header is already read and painted; a chart that cannot draw must
-    // not take the page down with it — say so under the frame.
-    if (chartNote) chartNote.textContent = (e && (e.shortMessage || e.message)) || String(e);
+    // not take the page down with it — and a raw node error is not a user
+    // interface, so the note gets the human line (R17).
+    if (chartNote) chartNote.textContent = t('dex.chart.fail');
   }
 
   // ── statistics & holders (M8) ────────────────────────────────────
