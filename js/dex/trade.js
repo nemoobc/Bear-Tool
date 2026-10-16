@@ -191,11 +191,20 @@ export function bindTokenTrade(host, token, onBack) {
 
   const paintHistory = async () => {
     if (chartLoading) chartLoading.hidden = false;
-    const hist = await loadHistory(c, p);
-    if (chartLoading) chartLoading.hidden = true;
+    let hist = { trades: [], ok: false, reason: '' };
+    try {
+      hist = await loadHistory(c, p);
+    } finally {
+      if (chartLoading) chartLoading.hidden = true;
+    }
     if (tapeHost) {
-      tapeHost.innerHTML = tradesHtml(hist.trades, state.sym || token.symbol || '', state.quoteSym)
-        + (hist.partial ? `<div class="small">${escapeHtml(t('dex.trades.partial'))}</div>` : '');
+      // An unreadable walk is NOT an empty tape — "never bought or sold" would
+      // be a claim the read never made. Say why instead; the v2 page answers
+      // its tape the same way.
+      tapeHost.innerHTML = hist.ok
+        ? tradesHtml(hist.trades, state.sym || token.symbol || '', state.quoteSym)
+          + (hist.partial ? `<div class="small">${escapeHtml(t('dex.trades.partial'))}</div>` : '')
+        : `<div class="small">${escapeHtml(hist.reason || t('dex.swap.unreadable'))}</div>`;
     }
     const candles = await historyCandles(hist.trades);
     await paintChart(candles);
@@ -699,7 +708,14 @@ export function bindTokenTrade(host, token, onBack) {
   };
 
   const liq = bindLiquidity(host, token);
-  once().then(() => liq.refresh()).catch(() => { /* an unreadable pool says so when opened */ });
+  // First paint only: the read fans out ~10 RPCs, so the page opens under the
+  // stock loader instead of a frame of zeros. It never returns — later passes
+  // update in place, and a spinner that blinks on every refresh is worse than
+  // none.
+  const initialLoading = $('#dexTradeLoading', host);
+  if (initialLoading) initialLoading.hidden = false;
+  once().then(() => liq.refresh()).catch(() => { /* an unreadable pool says so when opened */ })
+    .finally(() => { if (initialLoading) initialLoading.hidden = true; });
 
   once().then(() => { drawCurve(); return quoteBuyLive(); }).then(quoteSellLive);
   // Keep the numbers, the tape and the curve live while the panel is open. The

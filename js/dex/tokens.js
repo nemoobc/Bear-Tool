@@ -260,16 +260,25 @@ export async function refreshFeed(host, scope = 'all') {
   const status = $('#dexFeedStatus', host);
   if (!list) return { coins: [], ok: false };
 
+  const box = host.querySelector('.dex-empty');
+  const msg = box ? box.querySelector('.dex-empty-msg') : null;
+  const say = (text) => { if (msg) msg.textContent = text; };
+
+  // A slow WebView and a slow public RPC are the normal case, not an edge: on
+  // the first pass the pre-rendered "no coins yet" is not a verdict yet, so it
+  // hides and the status line says what is actually happening. Both are
+  // overwritten the moment there is something true to say.
+  if (!feedState.rows.length) {
+    if (box) box.hidden = true;
+    if (status) status.textContent = t('dex.pools.loading');
+  }
+
   const out = await discoverPools({ scope: scope === 'mine' ? 'mine' : 'all', limit: 24 });
 
   // Deleted tokens never come back: the filter drops them from chain rows and
   // the local paint alike, so a re-scan cannot resurrect one. There is no
   // hidden tab and no restore path; that design was rejected.
   const rows = out.ok ? withoutDeleted(await fillMeta(out.pools.slice())) : [];
-
-  const box = host.querySelector('.dex-empty');
-  const msg = box ? box.querySelector('.dex-empty-msg') : null;
-  const say = (text) => { if (msg) msg.textContent = text; };
 
   if (!out.ok) {
     // The empty box is cleared HERE too: it is pre-rendered, so a stale "no

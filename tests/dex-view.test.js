@@ -636,3 +636,30 @@ test('starting the bot shows its stage — funding is several transactions (R7)'
   assert.match(bot, /withTxButton\(startBtn, t\('dex\.bot\.starting'\)/,
     'the bot funds addresses one tx at a time; the button must say so');
 });
+
+// ── R13 — a slow RPC is the normal case: waits say so, failures say why ────
+test('the trade page never calls an unreadable tape "no trades" (R13)', () => {
+  const trade = read('../js/dex/trade.js');
+  assert.match(trade, /tapeHost\.innerHTML = hist\.ok/,
+    'the tape branches on the read result — an empty list and a failed read are two claims');
+  assert.match(trade, /hist\.reason \|\| t\('dex\.swap\.unreadable'\)/,
+    'and the failed read carries its reason, exactly like the v2 page');
+});
+
+test('the trade page opens under its loader instead of a frame of zeros (R13)', () => {
+  const trade = read('../js/dex/trade.js');
+  assert.match(trade, /initialLoading\.hidden = false/, 'the stock loader is shown at mount');
+  assert.match(trade, /initialLoading\.hidden = true/, 'and leaves once the first read settles');
+});
+
+test('the feed waits honestly: first pass hides the pre-rendered empty box (R13)', () => {
+  const tokens = read('../js/dex/tokens.js');
+  assert.match(tokens, /if \(!feedState\.rows\.length\) \{[\s\S]*?dex\.pools\.loading/,
+    'with no verified rows yet, the status says "reading" and the empty box waits');
+});
+
+test('the curve LP panel says it is reading before it has figures (R13)', () => {
+  const liq = read('../js/dex/liquidity.js');
+  assert.match(liq, /async function refresh\(\) \{[\s\S]*?dex\.swap\.loading/,
+    'refresh announces itself — the panel never sits blank');
+});

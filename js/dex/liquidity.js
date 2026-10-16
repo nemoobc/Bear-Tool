@@ -123,6 +123,9 @@ export function bindLiquidity(host, token) {
 let snap = { quoteAddr: null, pool: 0n, shares: 0n, total: 0n, value: 0n, dec: 18, sym: '', qbal: 0n, signedIn: false };
 
   async function refresh() {
+    // Even a fast RPC is a wait on a slow WebView — say what is happening
+    // instead of leaving the last figures unlabelled while new ones are read.
+    say(t('dex.swap.loading'));
     const E = ethersLib();
     const cs = new E.Contract(token.address, PUMP_ABI, provider());
     const me = get('address');
