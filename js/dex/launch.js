@@ -64,7 +64,7 @@ export function launchHtml() {
           <input id="dexCreateFile" type="file" accept="image/*" class="sr-file"
                  aria-label="${escapeHtml(t('dex.create.pickImage'))}">
           <div id="dexCreateImgEmpty" class="small">${escapeHtml(t('dex.create.noImage'))}</div>
-          <div id="dexCreateImgNote" class="small dex-img-note"></div>
+          <div id="dexCreateImgNote" class="small dex-img-note" role="status"></div>
         </div>
         <div class="dex-create-fields">
           <label class="field-label" for="dexCreateName">${escapeHtml(t('dex.create.name'))}</label>

@@ -182,7 +182,7 @@ export function tokensHtml() {
     </div>
     <div id="dexFeedMatch" hidden></div>
     <div id="dexTokenList" class="dex-grid">${rows}</div>
-    <div id="dexFeedStatus" class="small mt-8"></div>
+    <div id="dexFeedStatus" class="small mt-8" role="status"></div>
     <div class="dex-empty mt-8" ${rows ? 'hidden' : ''}>
       <span class="dex-empty-ic" aria-hidden="true">◎</span>
       <strong class="dex-empty-title">${escapeHtml(t('dex.tokens.emptyTitle'))}</strong>

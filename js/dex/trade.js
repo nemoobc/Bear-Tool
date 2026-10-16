@@ -138,7 +138,7 @@ export function tokenTradeHtml(token) {
     ${liquidityHtml()}
 
     <div class="dex-loading" id="dexTradeLoading" hidden><span class="dex-spinner"></span><span>${escapeHtml(t('dex.chart.loading'))}</span></div>
-    <div id="dexTradeStatus" class="small mt-8"></div>
+    <div id="dexTradeStatus" class="small mt-8" role="status"></div>
     <div id="dexTradeLog" class="small"></div>
 
     <!-- The action bar is the LAST element on purpose: a sticky-bottom bar only

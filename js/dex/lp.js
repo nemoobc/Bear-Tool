@@ -7,7 +7,7 @@
 //
 // The previews (addPreview / removePreview) mirror the contract's mint/burn
 // rules to the wei — the anvil e2e pins them against the real pair.
-import { provider, ethersLib, get, set, sendDexTx, needSigner, t, escapeHtml, fmtTok, fmtPrice, confirmTx, $, dexChainOk, quoteBy } from './core.js';
+import { provider, ethersLib, get, set, sendDexTx, needSigner, t, escapeHtml, fmtTok, fmtPrice, confirmTx, withTxButton, $, dexChainOk, quoteBy } from './core.js';
 import { addShares, removeAmounts, minOutWithSlippage } from './pool-math.js';
 import { parseAmount, ensureAllowanceTx, DEFAULT_SLIPPAGE_BPS } from './swap.js';
 import { discoverPools, fillMeta } from './pools.js';
@@ -214,7 +214,7 @@ export function lpHtml() {
     <div class="card mb-8">
       <label class="field-label" for="dexLpLockDur">${escapeHtml(t('dex.lp.lockDur'))}</label>
       <select id="dexLpLockDur" class="input">${lockOpts}</select>
-      <div class="small mt-8" id="dexLpLockReason"></div>
+      <div class="small mt-8" id="dexLpLockReason" role="status"></div>
       <button type="button" class="btn btn-secondary btn-block mt-8" id="dexLpLockGo" disabled>${escapeHtml(t('dex.lp.lockGo'))}</button>
       <div class="small mt-8" id="dexLpNote" role="status"></div>
       <button type="button" class="btn btn-secondary btn-block mt-8" id="dexLpRetry" hidden>${escapeHtml(t('dex.ts.retry'))}</button>
@@ -468,79 +468,92 @@ export async function bindLp(host) {
   sel.addEventListener('change', () => { loadPool(); });
 
   addBtn.addEventListener('click', async () => {
-    if (!cur) return;
-    const qp = parseAmount(quoteIn.value, cur.qd);
-    const tp = parseAmount(tokenIn.value, cur.td);
-    if (!qp.ok || !tp.ok) { note(t('dex.swap.pickAmount')); return; }
-    const preview = addPreview({ quoteIn: qp.value, tokenIn: tp.value, quoteReserve: cur.ps.quoteReserve, tokenReserve: cur.ps.tokenReserve, supply: cur.ps.supply });
-    if (!preview.ok) { refreshAdd(); return; }
-    const pct = sharePctShift({ currentShares: cur.shares, delta: preview.shares, supply: cur.ps.supply });
-    const rows = [
-      { k: t('dex.lp.youAdd', { sym: cur.qSym }), v: `${quoteIn.value.trim()} ${cur.qSym}` },
-      { k: t('dex.lp.youAdd', { sym: cur.tSym }), v: `${tokenIn.value.trim()} ${cur.tSym}` },
-      { k: t('dex.lp.sharesGet'), v: `≈ ${fmtTok(preview.shares, 18, 6)} (min ${fmtTok(preview.minShares, 18, 6)})` },
-    ];
-    if (pct) rows.push({ k: t('dex.lp.shareLabel'), v: `${fmt2(pct.beforeBps)}% → ${fmt2(pct.afterBps)}%` });
-    const ok = await confirmTx({ title: t('dex.lp.confirmAdd'), rows, confirmText: t('dex.lp.goAdd') });
-    if (!ok) return;
-    const signer = needSigner();
-    if (!signer) return;
-    addBtn.disabled = true;
-    const rc = await addLiquidityTx({
-      pair: cur.row.pair,
-      quoteToken: cur.row.quote,
-      token: cur.row.address,
-      quoteAmount: qp.value,
-      tokenAmount: tp.value,
-      minShares: preview.minShares,
-      signer,
+    await withTxButton(addBtn, t('dex.liq.sending'), async () => {
+      if (!cur) return;
+      const qp = parseAmount(quoteIn.value, cur.qd);
+      const tp = parseAmount(tokenIn.value, cur.td);
+      if (!qp.ok || !tp.ok) { note(t('dex.swap.pickAmount')); return; }
+      const preview = addPreview({ quoteIn: qp.value, tokenIn: tp.value, quoteReserve: cur.ps.quoteReserve, tokenReserve: cur.ps.tokenReserve, supply: cur.ps.supply });
+      if (!preview.ok) { refreshAdd(); return; }
+      const pct = sharePctShift({ currentShares: cur.shares, delta: preview.shares, supply: cur.ps.supply });
+      const rows = [
+        { k: t('dex.lp.youAdd', { sym: cur.qSym }), v: `${quoteIn.value.trim()} ${cur.qSym}` },
+        { k: t('dex.lp.youAdd', { sym: cur.tSym }), v: `${tokenIn.value.trim()} ${cur.tSym}` },
+        { k: t('dex.lp.sharesGet'), v: `≈ ${fmtTok(preview.shares, 18, 6)} (min ${fmtTok(preview.minShares, 18, 6)})` },
+      ];
+      if (pct) rows.push({ k: t('dex.lp.shareLabel'), v: `${fmt2(pct.beforeBps)}% → ${fmt2(pct.afterBps)}%` });
+      const ok = await confirmTx({ title: t('dex.lp.confirmAdd'), rows, confirmText: t('dex.lp.goAdd') });
+      if (!ok) return;
+      const signer = needSigner();
+      if (!signer) return;
+      const rc = await addLiquidityTx({
+        pair: cur.row.pair,
+        quoteToken: cur.row.quote,
+        token: cur.row.address,
+        quoteAmount: qp.value,
+        tokenAmount: tp.value,
+        minShares: preview.minShares,
+        signer,
+      });
+      if (rc) await loadPool(); else refreshAdd();
     });
-    if (rc) await loadPool(); else refreshAdd();
+    // setBtnDots restores "enabled" blindly — only the gate may decide.
+    // Re-apply it so a failed or cleared form never looks ready.
+    if (cur) refreshAdd(); else addBtn.disabled = true;
   });
 
   remBtn.addEventListener('click', async () => {
-    if (!cur) return;
-    const sp = parseAmount(sharesIn.value, 18);
-    if (!sp.ok) { note(t('dex.swap.pickAmount')); return; }
-    const preview = removePreview({ shares: sp.value, quoteReserve: cur.ps.quoteReserve, tokenReserve: cur.ps.tokenReserve, supply: cur.ps.supply });
-    if (!preview.ok) { refreshRemove(); return; }
-    const pct = sharePctShift({ currentShares: cur.shares, delta: -sp.value, supply: cur.ps.supply });
-    const rows = [
-      { k: t('dex.lp.sharesIn'), v: sharesIn.value.trim() },
-      { k: t('dex.trade.youGet'), v: `≈ ${fmtTok(preview.quoteOut, cur.qd, 6)} ${cur.qSym} + ${fmtTok(preview.tokenOut, cur.td, 6)} ${cur.tSym}` },
-    ];
-    if (pct) rows.push({ k: t('dex.lp.shareLabel'), v: `${fmt2(pct.beforeBps)}% → ${fmt2(pct.afterBps)}%` });
-    const ok = await confirmTx({
-      title: t('dex.lp.confirmRemove'),
-      rows,
-      confirmText: t('dex.lp.remove'),
-      danger: sp.value === cur.shares, // a full exit turns the sheet red
+    await withTxButton(remBtn, t('dex.liq.sending'), async () => {
+      if (!cur) return;
+      const sp = parseAmount(sharesIn.value, 18);
+      if (!sp.ok) { note(t('dex.swap.pickAmount')); return; }
+      const preview = removePreview({ shares: sp.value, quoteReserve: cur.ps.quoteReserve, tokenReserve: cur.ps.tokenReserve, supply: cur.ps.supply });
+      if (!preview.ok) { refreshRemove(); return; }
+      const pct = sharePctShift({ currentShares: cur.shares, delta: -sp.value, supply: cur.ps.supply });
+      const rows = [
+        { k: t('dex.lp.sharesIn'), v: sharesIn.value.trim() },
+        { k: t('dex.trade.youGet'), v: `≈ ${fmtTok(preview.quoteOut, cur.qd, 6)} ${cur.qSym} + ${fmtTok(preview.tokenOut, cur.td, 6)} ${cur.tSym}` },
+      ];
+      if (pct) rows.push({ k: t('dex.lp.shareLabel'), v: `${fmt2(pct.beforeBps)}% → ${fmt2(pct.afterBps)}%` });
+      const ok = await confirmTx({
+        title: t('dex.lp.confirmRemove'),
+        rows,
+        confirmText: t('dex.lp.remove'),
+        danger: sp.value === cur.shares, // a full exit turns the sheet red
+      });
+      if (!ok) return;
+      const signer = needSigner();
+      if (!signer) return;
+      const rc = await removeLiquidityTx({
+        pair: cur.row.pair,
+        shares: sp.value,
+        minQuote: preview.minQuote,
+        minToken: preview.minToken,
+        signer,
+      });
+      if (rc) await loadPool(); else refreshRemove();
     });
-    if (!ok) return;
-    const signer = needSigner();
-    if (!signer) return;
-    remBtn.disabled = true;
-    const rc = await removeLiquidityTx({
-      pair: cur.row.pair,
-      shares: sp.value,
-      minQuote: preview.minQuote,
-      minToken: preview.minToken,
-      signer,
-    });
-    if (rc) await loadPool(); else refreshRemove();
+    // Same discipline as the trade sheet: the gate owns the button, not the
+    // last setBtnDots restore.
+    if (cur) refreshRemove(); else remBtn.disabled = true;
   });
 
   lockBtn.addEventListener('click', async () => {
-    if (!cur) return;
-    const secs = Number(lockDur.value) || 0;
-    const signer = needSigner();
-    if (!signer) return;
-    lockBtn.disabled = true;
-    const rc = await lockSharesTx({ pair: cur.row.pair, durationSecs: secs, signer });
-    if (rc) await loadPool();
-    else {
+    await withTxButton(lockBtn, t('dex.liq.sending'), async () => {
+      if (!cur) return;
+      const secs = Number(lockDur.value) || 0;
+      const signer = needSigner();
+      if (!signer) return;
+      const rc = await lockSharesTx({ pair: cur.row.pair, durationSecs: secs, signer });
+      if (rc) await loadPool();
+    });
+    // Same discipline as the trade sheet: the gate owns the button, not the
+    // last setBtnDots restore.
+    if (cur) {
       lockBtn.disabled = cur.shares <= 0n;
       lockReasonEl.textContent = cur.shares <= 0n ? t('dex.lp.noShares') : '';
+    } else {
+      lockBtn.disabled = true;
     }
   });
 

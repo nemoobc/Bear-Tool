@@ -600,3 +600,39 @@ test('the chip copy fills its placeholders in both languages', async () => {
   assert.notEqual(t('dex.sec.fee'), 'dex.sec.fee', 'the fee fact must exist');
   assert.notEqual(t('dex.sec.noOwner'), 'dex.sec.noOwner', 'the no-owner fact must exist');
 });
+
+// ── R7 — ONE button language: sends ride withTxButton, status lines announce ──
+// The audit behind these pins: every Dex send path already rides the shared
+// spine (sendDexTx + confirmTx + withTxButton); the LP panel was the last
+// surface where a 30-second confirm still looked like a dead button, and four
+// status lines updated in silence for screen readers.
+test('every Dex status/reason line is a live region (R7)', () => {
+  const dir = new URL('../js/dex/', import.meta.url);
+  let count = 0;
+  for (const f of readdirSync(dir).filter((name) => name.endsWith('.js'))) {
+    const src = readFileSync(new URL(f, dir), 'utf8');
+    for (const m of src.matchAll(/<div[^>]*id="(dex[A-Za-z]*(?:Status|Reason))"[^>]*>/g)) {
+      count += 1;
+      assert.match(m[0], /role="status"/, `${f}: #${m[1]} must announce its updates`);
+    }
+  }
+  assert.ok(count >= 8, `expected every status line to be scanned, found ${count}`);
+  assert.match(read('../js/dex/launch.js'), /id="dexCreateImgNote"[^>]*role="status"/,
+    'the image picker note speaks too — it carries the only error the picker can raise');
+});
+
+test('the LP panel runs every send through the shared tx button (R7)', () => {
+  const lpSrc = read('../js/dex/lp.js');
+  for (const btn of ['addBtn', 'remBtn', 'lockBtn']) {
+    assert.match(lpSrc, new RegExp(`withTxButton\\(${btn}, t\\('dex\\.liq\\.sending'\\)`),
+      `${btn} must ride withTxButton like every other Dex send`);
+  }
+  assert.match(lpSrc, /only the gate may decide/,
+    'the gate must be re-applied after the busy restore — the trade sheet discipline');
+});
+
+test('starting the bot shows its stage — funding is several transactions (R7)', () => {
+  const bot = read('../js/dex/bot.js');
+  assert.match(bot, /withTxButton\(startBtn, t\('dex\.bot\.starting'\)/,
+    'the bot funds addresses one tx at a time; the button must say so');
+});

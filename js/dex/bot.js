@@ -21,7 +21,7 @@
 import { t } from '../i18n.js';
 import { getAccounts, getSession } from '../wallet.js';
 import { $, toast, escapeHtml, confirmTx } from '../ui.js';
-import { sendDexTx, provider, ethersLib, dexChainOk, fmtTok, ERC20_ABI, get } from './core.js';
+import { sendDexTx, provider, ethersLib, dexChainOk, fmtTok, ERC20_ABI, get, withTxButton } from './core.js';
 import { PUMP_ABI } from './pump-source.js';
 import { quoteBuy, quoteSell, fmtEth } from './curve.js';
 import { decide, nextAccount, budgetBps, bandUsable, stopReason, BUY, SELL, STOP, WHY } from './bot-engine.js';
@@ -157,7 +157,12 @@ export function bindBot(host, token) {
     toggle.setAttribute('aria-expanded', String(!body.hidden));
   });
   stopBtn?.addEventListener('click', () => stop(t('dex.bot.stoppedByUser')));
-  startBtn?.addEventListener('click', () => start(token).catch((e) => say(String(e.message || e))));
+  // Starting funds several addresses one tx at a time — a button that looks
+  // untouched through all of it is the dead-button bug the shared tx-button
+  // exists to kill. The dots own the button until the last tx settles.
+  startBtn?.addEventListener('click', () => withTxButton(startBtn, t('dex.bot.starting'), async () => {
+    await start(token).catch((e) => say(String(e.message || e)));
+  }));
 
   const say = (msg, kind = '') => {
     if (!statusEl) return;
