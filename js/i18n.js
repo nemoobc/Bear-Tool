@@ -342,6 +342,18 @@ const TRANSLATIONS = {
     'dex.hold.copied': 'Address copied',
     'dex.hold.lockUntil': 'Creator LP locked until {{date}}',
     'dex.hold.lockFree': 'Creator LP is not locked',
+    // R11 — the pool's safety chips. Lock/age name a chain source; the last
+    // two are the shipped contracts' own shape (0.3% stays in the pool, no
+    // owner/pause/fee switch exists).
+    'dex.sec.fee': '0.3% fee stays in the pool',
+    'dex.sec.noOwner': 'No owner — no pause, no fee switch',
+    'dex.sec.lpLocked': 'LP locked until {{date}}',
+    'dex.sec.lpExpired': 'LP lock ended {{date}}',
+    'dex.sec.lpUnlocked': 'LP not locked',
+    'dex.sec.ageNow': 'Pool age: just now',
+    'dex.sec.ageMin': 'Pool age: {{n}} min',
+    'dex.sec.ageHour': 'Pool age: {{n}} h',
+    'dex.sec.ageDay': 'Pool age: {{n}} d',
     'dex.pf.title': 'Portfolio',
     'dex.pf.hint': 'What this wallet holds in the Dex — LP positions and tokens, read live.',
     'dex.pf.lp': 'LP positions',
@@ -1131,6 +1143,18 @@ const TRANSLATIONS = {
     'dex.hold.copied': 'Alamat disalin',
     'dex.hold.lockUntil': 'LP kreator terkunci sampai {{date}}',
     'dex.hold.lockFree': 'LP kreator tidak terkunci',
+    // R11 — chip keamanan pool. Lock/umur menyebut sumber chain-nya; dua
+    // terakhir = bentuk kontrak yang dikirim (0,3% tinggal di pool, tanpa
+    // owner/pause/ubah-fee).
+    'dex.sec.fee': 'Fee 0,3% tinggal di pool',
+    'dex.sec.noOwner': 'Tanpa owner — tanpa pause & ubah-fee',
+    'dex.sec.lpLocked': 'LP terkunci s/d {{date}}',
+    'dex.sec.lpExpired': 'Kunci LP berakhir {{date}}',
+    'dex.sec.lpUnlocked': 'LP tidak terkunci',
+    'dex.sec.ageNow': 'Umur pool: baru saja',
+    'dex.sec.ageMin': 'Umur pool: {{n}} mnt',
+    'dex.sec.ageHour': 'Umur pool: {{n}} jam',
+    'dex.sec.ageDay': 'Umur pool: {{n}} hr',
     'dex.pf.title': 'Portofolio',
     'dex.pf.hint': 'Yang dipegang wallet ini di Dex — posisi LP dan token, dibaca langsung.',
     'dex.pf.lp': 'Posisi LP',

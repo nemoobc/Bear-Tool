@@ -562,6 +562,8 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
 }
 .dex-badge-new { background: var(--honey, #F5C24A); }
 .dex-badge-lock { background: #CDEBD9; }
+.dex-badge-safe { background: #DCEEE2; }
+.dex-badge-warn { background: #FFD9C7; }
 
 /* The not-in-the-window contract: an explicit door, not a dead end. */
 .dex-open {

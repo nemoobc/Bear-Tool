@@ -350,7 +350,7 @@ test('Dex labels are translated in both languages', () => {
                      'dex.tp.chart', 'dex.tp.noTrades',
                      'dex.feed.search', 'dex.feed.sortAria', 'dex.feed.sortNew', 'dex.feed.sortLiq', 'dex.feed.sortName',
                      'dex.feed.badgeNew', 'dex.feed.badgeLock', 'dex.feed.lockUntil', 'dex.feed.noMatch', 'dex.feed.openAddr',
-                     'dex.create.', 'dex.ts.', 'dex.hold.', 'dex.lp.', 'dex.trade.graduatedWhy']) {
+                     'dex.create.', 'dex.ts.', 'dex.hold.', 'dex.lp.', 'dex.sec.', 'dex.trade.graduatedWhy']) {
     const re = new RegExp(`'${key.replace(/\./g, '\\.').replace(/\\\.$/, '\\.')}`);
     for (const [lang, block] of [['en', en], ['id', id]]) {
       assert.ok(re.test(block), `${key} must be defined in the ${lang} block`);
@@ -536,4 +536,67 @@ test('the read order cannot silently swap two values', () => {
     'the destructuring must claim the quote token, the name and the ticker');
   assert.ok(!destructured.includes('ethBal'),
     'there is no native balance on a curve quoted in an ERC-20');
+});
+
+// ── R11 — the pool's safety chips ───────────────────────────────────
+// A badge is a FACT with a source. Lock and age chips need the factory's own
+// launch event; with no event read there is nothing to claim, and the two
+// static chips (the shipped contracts' own shape) stand alone.
+test('security chips claim lock/age ONLY when the launch event was read', async () => {
+  const { securityChips } = await import('../js/dex/token-page.js');
+  const bare = securityChips({ hasLaunch: false });
+  assert.deepEqual(bare.map((c) => c.key), ['dex.sec.fee', 'dex.sec.noOwner'],
+    'no launch read = only the facts that need no chain read');
+
+  const now = 1_700_000_000;
+  const locked = securityChips({ hasLaunch: true, untilSec: now + 86400, ageSec: 7200, nowSec: now });
+  assert.deepEqual(locked.map((c) => c.key),
+    ['dex.sec.lpLocked', 'dex.sec.ageHour', 'dex.sec.fee', 'dex.sec.noOwner']);
+  assert.equal(locked[0].tone, 'dex-badge-lock', 'a live lock is the calm colour');
+  assert.match(locked[0].params.date, /^\d{4}-\d{2}-\d{2}$/, 'the date is a plain date, no locale games');
+  assert.equal(locked[1].params.n, '2', 'two hours old');
+});
+
+test('an ended or missing lock is NEVER the calm colour', async () => {
+  const { securityChips } = await import('../js/dex/token-page.js');
+  const now = 1_700_000_000;
+  const expired = securityChips({ hasLaunch: true, untilSec: now - 10, nowSec: now });
+  assert.equal(expired[0].key, 'dex.sec.lpExpired');
+  assert.equal(expired[0].tone, 'dex-badge-warn', 'a lock that ran out is a warning, not a comfort');
+  const never = securityChips({ hasLaunch: true, untilSec: 0, nowSec: now });
+  assert.equal(never[0].key, 'dex.sec.lpUnlocked');
+  assert.equal(never[0].tone, 'dex-badge-warn', 'never locked is a warning too');
+});
+
+test('age chips pick their unit, and go silent when the block would not read', async () => {
+  const { securityChips } = await import('../js/dex/token-page.js');
+  const at = (ageSec) => securityChips({ hasLaunch: true, ageSec, nowSec: 1_700_000_000 });
+  assert.equal(at(30)[1].key, 'dex.sec.ageNow');
+  assert.equal(at(90)[1].key, 'dex.sec.ageMin');
+  assert.equal(at(90)[1].params.n, '1');
+  assert.equal(at(7200)[1].key, 'dex.sec.ageHour');
+  assert.equal(at(3 * 86400)[1].key, 'dex.sec.ageDay');
+  assert.equal(at(3 * 86400)[1].params.n, '3');
+  const noAge = securityChips({ hasLaunch: true, untilSec: 0, ageSec: null });
+  assert.ok(!noAge.some((c) => c.key.startsWith('dex.sec.age')),
+    'an unread block means NO age chip — silence, not a guess');
+});
+
+test('the v2 token page ships the chip row and paints it safely', async () => {
+  const { tokenPageHtml } = await import('../js/dex/token-page.js');
+  assert.ok(tokenPageHtml().includes('id="dexTpSec"'), 'the token page must carry #dexTpSec');
+  const page = read('../js/dex/token-page.js');
+  assert.match(page, /securityChips\(/, 'the row is painted from the pure chip builder');
+  assert.match(page, /if \(!gone\(\) && secEl\)/, 'painting waits for a page that is still alive');
+  assert.match(page, /stopAfter: 1,/, 'the launch read stops at the first hit — no wide claim');
+});
+
+test('the chip copy fills its placeholders in both languages', async () => {
+  const { t } = await import('../js/i18n.js');
+  const locked = t('dex.sec.lpLocked', { date: '2026-11-01' });
+  assert.ok(locked.includes('2026-11-01') && !locked.includes('{{'), `unfilled lock chip: ${locked}`);
+  const age = t('dex.sec.ageHour', { n: '2' });
+  assert.ok(age.includes('2') && !age.includes('{{'), `unfilled age chip: ${age}`);
+  assert.notEqual(t('dex.sec.fee'), 'dex.sec.fee', 'the fee fact must exist');
+  assert.notEqual(t('dex.sec.noOwner'), 'dex.sec.noOwner', 'the no-owner fact must exist');
 });

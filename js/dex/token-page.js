@@ -63,6 +63,7 @@ export function tokenPageHtml() {
       <div class="small" id="dexTpReserves"></div>
       <div class="small mt-8" id="dexTpMy"></div>
       <div class="small mt-8" id="dexTpStats" role="status"></div>
+      <div class="mt-8" id="dexTpSec"></div>
       <div class="mt-8">
         <button type="button" class="btn btn-secondary" id="dexTpLp"></button>
       </div>
@@ -87,6 +88,38 @@ export function tokenPageHtml() {
     </div>
     <button type="button" class="btn btn-danger btn-block mt-8" id="dexTpDelete">${escapeHtml(t('dex.list.delete'))}</button>
     <div class="small" id="dexTpDeleteNote">${escapeHtml(t('dex.list.deleteNote'))}</div>`;
+}
+
+// R11 — the pool's safety chips, built as pure data so the honest cases are
+// testable without a chain: each chip names its source, or it does not exist.
+//
+// The lock and the age chips only exist when `hasLaunch` — the factory's own
+// launch event was actually read (it is where the creator AND the birth block
+// come from). No event = NO claim: the static facts stand alone, exactly the
+// M8 rule. The static two are the shipped contracts' own shape: 0.3% stays in
+// the pool (pool-math.js SWAP_FEE_BPS, pinned by the anvil e2e "k grows"), and
+// no owner/pause/fee-switch exists in the source (bear-source.js).
+export function securityChips({ hasLaunch = false, untilSec = 0, ageSec = null, nowSec = 0 } = {}) {
+  const chips = [];
+  if (hasLaunch) {
+    if (untilSec > 0) {
+      const date = new Date(untilSec * 1000).toISOString().slice(0, 10);
+      chips.push(untilSec > nowSec
+        ? { key: 'dex.sec.lpLocked', params: { date }, tone: 'dex-badge-lock' }
+        : { key: 'dex.sec.lpExpired', params: { date }, tone: 'dex-badge-warn' });
+    } else {
+      chips.push({ key: 'dex.sec.lpUnlocked', tone: 'dex-badge-warn' });
+    }
+    if (ageSec != null) {
+      if (ageSec < 60) chips.push({ key: 'dex.sec.ageNow', tone: 'dex-badge-safe' });
+      else if (ageSec < 3600) chips.push({ key: 'dex.sec.ageMin', params: { n: String(Math.floor(ageSec / 60)) }, tone: 'dex-badge-safe' });
+      else if (ageSec < 86400) chips.push({ key: 'dex.sec.ageHour', params: { n: String(Math.floor(ageSec / 3600)) }, tone: 'dex-badge-safe' });
+      else chips.push({ key: 'dex.sec.ageDay', params: { n: String(Math.floor(ageSec / 86400)) }, tone: 'dex-badge-safe' });
+    }
+  }
+  chips.push({ key: 'dex.sec.fee', tone: 'dex-badge-safe' });
+  chips.push({ key: 'dex.sec.noOwner', tone: 'dex-badge-safe' });
+  return chips;
 }
 
 export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
@@ -268,14 +301,20 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
     statsEl.textContent = bits.join(' · ');
   }
 
-  // The creator's own lock — read from the pair, the creator found in the
-  // factory's own event. No creator found = no claim made (an empty line,
-  // never a guessed "locked").
-  if (holdLock) {
-    try {
-      const f = factoryAddress();
-      const p = provider();
-      if (isAddr(f) && p) {
+  // ── safety chips (R11) + the creator's own lock ──────────────────
+  // ONE factory read feeds both: the launch event names the creator (for the
+  // pair's own lockedUntil) and carries the block the pool was born in (for
+  // its age). No event found = no lock/age claim — an empty line and two
+  // static chips, never a guessed "locked".
+  const secEl = el('dexTpSec');
+  if (secEl || holdLock) {
+    const f = factoryAddress();
+    const p = provider();
+    let hasLaunch = false;
+    let untilSec = 0;
+    let ageSec = null;
+    if (isAddr(f) && p) {
+      try {
         const latest = await p.getBlockNumber();
         const sigs = [E.id('Launched(address,address,address,address)'), E.id('PoolCreated(address,address,address,address)')];
         const found = await chunkedGetLogs({
@@ -284,18 +323,31 @@ export async function bindTokenPage(host, token, pair, { onBack, onLp } = {}) {
           toBlock: latest,
           stopAfter: 1,
         });
-        if (found.length && !gone()) {
-          const creator = E.getAddress('0x' + String(found[0].topics[1] || '').slice(-40));
-          const pc = new E.Contract(pair, BEAR_PAIR_ABI, provider());
-          const until = Number(await pc.lockedUntil(creator));
-          if (!gone() && until > 0) {
-            const date = new Date(until * 1000).toISOString().slice(0, 10);
-            const now = Math.floor(Date.now() / 1000);
-            holdLock.textContent = until > now ? t('dex.hold.lockUntil', { date }) : t('dex.hold.lockFree');
-          }
+        if (found.length) {
+          hasLaunch = true;
+          try {
+            const creator = E.getAddress('0x' + String(found[0].topics[1] || '').slice(-40));
+            const pc = new E.Contract(pair, BEAR_PAIR_ABI, p);
+            untilSec = Number(await pc.lockedUntil(creator));
+          } catch { untilSec = 0; }
+          try {
+            const blk = await p.getBlock(Number(found[0].blockNumber));
+            const ts = blk && blk.timestamp != null ? Number(blk.timestamp) : null;
+            if (ts != null) ageSec = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+          } catch { ageSec = null; }
         }
-      }
-    } catch { /* no creator read = no lock claim */ }
+      } catch { /* no launch read = no lock/age claim */ }
+    }
+    if (!gone() && secEl) {
+      secEl.innerHTML = securityChips({ hasLaunch, untilSec, ageSec, nowSec: Math.floor(Date.now() / 1000) })
+        .map((c) => `<span class="dex-badge ${c.tone}">${escapeHtml(t(c.key, c.params))}</span>`)
+        .join(' ');
+    }
+    if (!gone() && holdLock && untilSec > 0) {
+      const date = new Date(untilSec * 1000).toISOString().slice(0, 10);
+      const now = Math.floor(Date.now() / 1000);
+      holdLock.textContent = untilSec > now ? t('dex.hold.lockUntil', { date }) : t('dex.hold.lockFree');
+    }
   }
 
   // The holder list: the whole Transfer history, or the honest reason why the
