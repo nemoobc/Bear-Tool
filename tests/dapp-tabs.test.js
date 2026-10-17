@@ -28,12 +28,22 @@ test('dApp browser tab strip: closeNativeTab exposed + renderTabsEntry builds th
     'tab strip rendered (horizontal strip of tab cards)');
   assert.match(dapps, /class="launch-tab-close"/,
     'close button on every tab card');
-  assert.match(dapps, /closeNativeTab\(i\)/,
-    'tab close wired to the native plugin');
-  assert.match(dapps, /openNativeTab\(i\)/,
-    'tab open wired to the native plugin');
+  assert.match(dapps, /closeNativeTab\(Number\(btn\.dataset\.i\)\)/,
+    'tab close wired to the native plugin (exact tab index from the pressed row)');
+  assert.match(dapps, /openNativeTab\(Number\(tabBtn\.dataset\.i\)/,
+    'tab open wired to the native plugin (exact tab index from the pressed row)');
   assert.match(dapps, /info\.active/,
     'active tab highlighted');
+  // 2026-10-17 live bug: <button> rows wrapping <button class="…-close"> —
+  // nested interactive elements are INVALID HTML, the parser hoists the inner
+  // button out of its row, indexes shift, and one ✕ press duplicated the
+  // Browser chip while deleting the wrong tab. Rows must stay divs.
+  assert.doesNotMatch(dapps, /<button[^>]*class="launch-tab"/,
+    'tab row outer element must NOT be a button (no nested interactive)');
+  assert.match(dapps, /#dappTabsBtn'\)\?\.remove\(\)/,
+    're-render removes the old Browser chip');
+  assert.match(dapps, /\.launch-tabstrip'\)\.forEach\(\(el\) => el\.remove\(\)/,
+    're-render removes stale strips');
 });
 
 test('dApp tab i18n keys balanced EN vs ID', () => {

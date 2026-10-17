@@ -663,6 +663,7 @@ select.dex-swapbox-token { appearance: none; padding-right: 12px; }
   min-height: 44px;
 }
 .launch-tab:disabled { opacity: 0.5; cursor: not-allowed; }
+.launch-tab:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .launch-tab-active { border-color: var(--accent); background: #EEF3FF; }
 .launch-tab-icon { flex-shrink: 0; font-size: 18px; }
 .launch-tab-body { flex: 1; min-width: 0; }

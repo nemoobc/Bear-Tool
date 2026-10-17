@@ -269,31 +269,26 @@ test('looksLikeUrl is the line between opening and filtering', () => {
   assert.equal(looksLikeUrl('myserver'), false, 'a bare word stays a filter');
 });
 
-// ── a literal brace leaked into every featured card icon ────────────────────
-// The featured strip (js/dapps.js renderDapps) built its icon as
-// `${dappMark(...)}${dappLogo(d.url)}}` — one `}` too many, AFTER the
-// template expression, so it was not part of any interpolation: a literal
-// brace character rendered beside every featured dApp logo. The plain
-// #dappGrid cards were built cleanly on the same line shape, so the defect
-// was visible only in the hero row. Caught by eye on an emulator screenshot,
-// not by any structural assertion — hence this behaviour test.
+// ── the featured rail was removed on user request (2026-10-17) ──────────────
+// The old "Most popular" horizontal rail (`.dapp-featured`, six big cards
+// between the hero and the omnibox) took a whole screenful before the search
+// bar ever showed. The user asked it gone. The rail had a real defect history
+// (a literal `}` leaked into every icon — caught by eye on an emulator shot,
+// not by a structural test), so its absence is pinned here exactly like its
+// former content was: a re-introduction must overwrite this test consciously.
 
-test('featured cards render no stray brace beside the logo', () => {
+test('featured hero rail stays removed; omnibox and grid still render', () => {
   set('address', null);
   nodes.clear();
   const box = container();
   app.refreshView('dapps');
 
-  // Every .dapp-feat-icon's inner markup must not end in a bare `}` after the
-  // last tag — that trailing brace is the bug. Compare against the count of
-  // opening divs: a healthy icon has no orphan `}` text node.
-  const icons = box.innerHTML.match(/<div class="dapp-feat-icon"[^>]*>[\s\S]*?<\/div>/g) || [];
-  assert.ok(icons.length >= 6,
-    'the featured strip must render its cards (expected at least 6)');
-  for (const icon of icons) {
-    // Strip balanced tags; any `}` remaining in the text is a leaked brace.
-    const text = icon.replace(/<[^>]*>/g, '');
-    assert.ok(!text.includes('}'),
-      `a featured icon leaked a literal "}" into its visible text: ${JSON.stringify(icon)}`);
-  }
+  assert.equal(box.innerHTML.includes('class="dapp-featured"'), false,
+    'the removed featured rail must not come back');
+  assert.equal(box.innerHTML.includes('dapp-feat-card'), false,
+    'no orphan featured cards may render');
+  assert.ok(box.innerHTML.includes('id="dappSearch"'),
+    'omnibox renders directly under the hero now');
+  assert.ok(/<div class="dapp-card"/.test(box.innerHTML),
+    'the catalogue grid keeps its cards');
 });

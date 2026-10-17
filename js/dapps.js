@@ -137,6 +137,8 @@ export function looksLikeUrl(v) {
 async function renderTabsEntry(container) {
   const bar = container.querySelector('.dapps-browser');
   if (!bar) return;
+  bar.querySelector('#dappTabsBtn')?.remove();
+  bar.querySelectorAll('.launch-tabstrip').forEach((el) => el.remove());
   const info = await nativeTabs();
   const tabs = (info && info.tabs) || [];
   const active = (info && info.active) ?? 0;
@@ -185,33 +187,43 @@ async function renderTabsEntry(container) {
   strip.className = 'launch-tabstrip';
   strip.setAttribute('role', 'tablist');
   strip.setAttribute('aria-label', t('dapp.browser.label'));
+  // Outer row is a DIV — a <button> inside <button> is invalid HTML and the
+  // parser rips the inner close button out of the row, shifting indexes so a
+  // ✕ press deleted the wrong tab (live report 2026-10-17).
   strip.innerHTML = tabs.map((tab, i) => `
-    <button type="button" class="launch-tab${i === active ? ' launch-tab-active' : ''}" role="tab" aria-selected="${i === active}" data-i="${i}">
+    <div class="launch-tab${i === active ? ' launch-tab-active' : ''}" role="tab" tabindex="0" aria-selected="${i === active}" data-i="${i}">
       <span class="launch-tab-icon" aria-hidden="true">${CAT_STYLE.All.glyph}</span>
       <div class="launch-tab-body">
         <div class="launch-tab-title" title="${escapeHtml(tab.title || '')}">${escapeHtml(tab.title || tab.url || 'New tab')}</div>
         <div class="launch-tab-url">${escapeHtml(domainOf(tab.url || ''))}</div>
       </div>
       <button type="button" class="launch-tab-close" aria-label="${escapeHtml(t('dapp.tab.closeAria', { n: tab.title || tab.url || 'New tab' }))}" data-i="${i}">×</button>
-    </button>
+    </div>
   `).join('');
   // Strip rides directly under the omnibox row — OKX puts live tabs above the
   // catalogue, not under the whole page fold.
   bar.querySelector('.dapps-omni')?.insertAdjacentElement('afterend', strip);
 
-  strip.querySelectorAll('.launch-tab').forEach((btn, i) => {
-    btn.addEventListener('click', async () => {
+  strip.querySelectorAll('.launch-tab').forEach((tabBtn, i) => {
+    const open = async () => {
       const fresh = await nativeTabs();
       const list = (fresh && fresh.tabs) || [];
       if (!list.length) return;
-      await openNativeTab(i);
+      await openNativeTab(Number(tabBtn.dataset.i) || i);
+    };
+    tabBtn.addEventListener('click', open);
+    // Div rows with tabindex=0 must answer Enter/Space by hand (same rule the
+    // dapp cards follow: keyboard parity is part of the a11y gate).
+    tabBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
     });
   });
   strip.querySelectorAll('.launch-tab-close').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
       ev.stopPropagation();
-      const i = Number(btn.dataset.i);
-      await closeNativeTab(i);
+      await closeNativeTab(Number(btn.dataset.i));
+      // Idempotent re-render: old chip + strips are removed first, so one
+      // close leaves exactly one strip with one fewer ✕.
       renderTabsEntry(container);
     });
   });
@@ -219,6 +231,10 @@ async function renderTabsEntry(container) {
 
 export function renderDapps(container) {
   if (!container) return;
+  // NOTE: the old "Most popular" featured rail was removed on user request
+  // (2026-10-17) — beyond the hero text, the first thing the view shows now
+  // is the omnibox. Do not re-add a `.dapp-featured` strip; the render test
+  // pins its absence.
   // Native build (APK): every dApp opens in-app (full-page WebView), where
   // X-Frame-Options / frame-ancestors do NOT apply — so the web-only split
   // ("Ready in-app" vs "Opens in a new tab") must not leak into the UI. On
@@ -253,13 +269,6 @@ export function renderDapps(container) {
         <div class="dapps-hero-title">${escapeHtml(t('dapps.browser'))}</div>
         <div class="dapps-hero-sub small">${escapeHtml(t('dapps.hero.sub'))}</div>
       </div>
-      <div class="dapp-featured" aria-label="Most popular" role="list">
-        ${POPULAR_DAPPS.slice(0, 6).map((d) => `
-          <div class="dapp-feat-card" role="listitem" data-url="${escapeHtml(d.url)}" data-name="${escapeHtml(d.name)}" data-frameable="1">
-            <div class="dapp-feat-icon" style="--cat:${catStyle(d.category).color}">${dappMark(d.name, catStyle(d.category).color, 36)}${dappLogo(d.url)}</div>
-            <div class="dapp-feat-name">${escapeHtml(d.name)}</div>
-          </div>`).join('')}
-      </div>
       <div class="dapps-omni">
         <input type="text" id="dappSearch" placeholder="${escapeHtml(t('dapps.search', { n: POPULAR_DAPPS.length }))}" class="dapps-omni-input" autocomplete="off" spellcheck="false" aria-label="Search DApps or paste a URL" />
         <button id="dappGo" class="btn btn-primary btn-sm" hidden>Open</button>
@@ -276,11 +285,6 @@ export function renderDapps(container) {
     </div>`;
 
   const openCard = (el) => openDappBrowser(el.dataset.url, el.dataset.name, el.dataset.frameable === '1');
-  container.querySelectorAll('.dapp-feat-card').forEach((el) => {
-    el.addEventListener('click', () => openCard(el));
-    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openCard(el); } });
-    el.tabIndex = 0; el.role = 'button'; el.setAttribute('aria-label', el.dataset.name);
-  });
   container.querySelectorAll('.dapp-card').forEach((el) => {
     el.addEventListener('click', () => openCard(el));
     // Cards are divs with role="button", so Enter/Space must be wired by hand.
