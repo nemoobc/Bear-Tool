@@ -1295,6 +1295,40 @@ async function main() {
       throw new Error('the wallet could not reopen a closed browser: ' + JSON.stringify(reopened));
     }
     await shotScreen('19c-reopened-after-guard');
+
+    // ── the ✕ regression (2026-10-17) — end-to-end on the device ───────────
+    // Two defects shipped together and only a journey step can separating them:
+    // 1. <button> rows wrapping the ✕ button were INVALID HTML — the parser
+    //    hoisted the inner button out of its row, indexes shifted, one press
+    //    closed the WRONG tab.
+    // 2. renderTabsEntry appended the chip and strip with no cleanup — every
+    //    press multiplied the Browser chip and stale strips.
+    // The state entering this step: exactly ONE tab (the 19c reopen above).
+    step('dapps view: ✕ removes exactly one tab; the Browser chip never multiplies');
+    if (!(await tapNativeButton('dapp-close'))) throw new Error('✕ step: dapp-close did not tap');
+    await sleep(1500);
+    await page.click('.mobile-nav-item[data-view="dapps"]').catch(() => { throw new Error('✕ step: dapps nav missing'); });
+    await sleep(1600);
+    const stripState = () => page.evaluate(
+      `(function () { return { chips: document.querySelectorAll('.dapp-tabs-entry').length, rows: document.querySelectorAll('.launch-tab').length, x: document.querySelectorAll('.launch-tab-close').length }; })()`
+    ).catch(() => ({ chips: 0, rows: 0, x: 0 }));
+    let st = await stripState();
+    report.dapp.stripClose = st;
+    if (st.chips !== 1) throw new Error('✕ step: expected exactly ONE Browser chip before any close, got ' + JSON.stringify(st));
+    if (st.x < 1) throw new Error('✕ step: strip has no ✕ buttons although a tab was just reopened — ' + JSON.stringify(st));
+    let closes = 0;
+    while (closes < 12) {
+      await page.evaluate(`document.querySelector('.launch-tab-close')?.click()`);
+      await sleep(1200);
+      st = await stripState();
+      if (st.chips !== 1) throw new Error(`✕ step: Browser chip multiplied after close #${closes + 1}: ` + JSON.stringify(st));
+      closes += 1;
+      if (st.x === 0) break;
+    }
+    if (st.x !== 0) throw new Error('✕ step: strip kept tabs after ' + closes + ' close presses — ' + JSON.stringify(st));
+    if (st.rows !== 0) throw new Error('✕ step: rows linger after all closes — ' + JSON.stringify(st));
+    report.dapp.stripClosesUsed = closes;
+    await shotScreen('19d-strip-close-regression');
   }
 
   // ── feature sweep: every view + the paths the journey never touched ──────
