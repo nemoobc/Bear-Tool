@@ -139,7 +139,7 @@ async function renderTabsEntry(container) {
   if (!bar) return;
   const info = await nativeTabs();
   const tabs = (info && info.tabs) || [];
-  const active = info.active ?? 0;
+  const active = (info && info.active) ?? 0;
 
   // Entry utama "Browser" dengan badge hitung tab — selalu ada.
   const btn = document.createElement('button');
