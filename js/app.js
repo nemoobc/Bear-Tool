@@ -2998,9 +2998,24 @@ function renderActivity() {
   if (!list) return;
   const visible = currentNetworkActivity();
   if (!visible.length) {
+    // "Empty" is honest only WITH its scope: this list journals what you DID
+    // inside Bear Tool on THIS wallet + network — it has never been a chain
+    // history scan, so txs the explorer shows (made in another wallet, made
+    // before the storage was wiped, made on another network) never appear
+    // here. Name that, and hand the user the explorer door instead of a dead
+    // end (the sheet already links transactions the app knows; the empty
+    // state links the ADDRESS history, which always has something).
+    const net = getNetworkById(get('networkId'));
+    const me = get('address');
+    const exp = net && net.explorer && me
+      ? `<a class="btn btn-ghost btn-block mt-8" href="${escapeHtml(net.explorer)}/address/${escapeHtml(me)}" target="_blank" rel="noopener">${escapeHtml(t('act.emptyExplorer', { net: net.name || 'network' }))}
+<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></a>`
+      : '';
     list.innerHTML = `<div class="empty-state">
       <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       <p>${escapeHtml(t('act.empty'))}</p>
+      <p class="small dim">${escapeHtml(t('act.emptyScope'))}</p>
+      ${exp}
     </div>`;
     return;
   }
