@@ -3,6 +3,24 @@ apply plugin: 'com.android.application'
 android {
     namespace = "com.nemoobc.beartool"
     compileSdk = rootProject.ext.compileSdkVersion
+    // Pinned signing key (bootstrap 2026-10-17). CI runners mint a fresh
+    // debug keystore on every build, so each APK from the old flow needed
+    // uninstall→install to replace — which WIPES app data (wallet, activity,
+    // helper registry live in localStorage). With the key riding in via repo
+    // secrets, one signature covers every future build: updates install in
+    // place and keep user data. No secrets (fork/PR/emulator builds) falls
+    // back to the default debug keystore, exactly like before.
+    signingConfigs {
+        if (System.getenv('ANDROID_KEYSTORE_PATH')) {
+            bearPinned {
+                storeFile file(System.getenv('ANDROID_KEYSTORE_PATH'))
+                storePassword System.getenv('ANDROID_KEYSTORE_PASS')
+                keyAlias System.getenv('ANDROID_KEYSTORE_ALIAS') ?: 'bear'
+                keyPassword System.getenv('ANDROID_KEYSTORE_PASS')
+                storeType 'PKCS12'
+            }
+        }
+    }
     defaultConfig {
         applicationId "com.nemoobc.beartool"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -20,6 +38,11 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            if (System.getenv('ANDROID_KEYSTORE_PATH')) {
+                signingConfig signingConfigs.bearPinned
+            }
         }
     }
 }

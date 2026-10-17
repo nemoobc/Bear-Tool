@@ -63,6 +63,51 @@ jobs:
           cp -r dist/. www/
           npx cap sync android
 
+      # ── pinned signing key ────────────────────────────────────────
+      # secrets present  → decode the repo key; signature stable forever.
+      # secrets missing  → ONE-TIME bootstrap: mint the key with keytool,
+      # sign the APK with it, and ship key+pass out via artifacts so the
+      # maintainer promotes them into repo secrets (next run decodes them).
+      # Either way gradle gets ANDROID_KEYSTORE_PATH/PASS/ALIAS.
+      - name: Keystore (decode from secrets, or first-run bootstrap)
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_B64" ]; then
+            echo "$ANDROID_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/bear.p12"
+            KEY_PASS_VAL="$ANDROID_KEYSTORE_PASS"
+          else
+            KEY_PASS_VAL="$(openssl rand -hex 16)"
+            keytool -genkeypair -storetype PKCS12 -keyalg RSA -keysize 2048 \
+              -validity 10950 -alias bear \
+              -dname "CN=Bear Tool, OU=BearTool, O=nemoobc, C=ID" \
+              -keystore "$RUNNER_TEMP/bear.p12" -storepass "$KEY_PASS_VAL" -keypass "$KEY_PASS_VAL"
+            cp "$RUNNER_TEMP/bear.p12" bear-keystore.p12
+            # The pass must reach the maintainer ONCE so it can become a
+            # secret; it never appears in the console log.
+            printf '%s' "$KEY_PASS_VAL" > bootstrap-keystore-pass.txt
+            echo "BOOTSTRAP=true" >> "$GITHUB_ENV"
+          fi
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/bear.p12" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_ALIAS=bear" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASS=$KEY_PASS_VAL" >> "$GITHUB_ENV"
+          # Fingerprint = the identity users can hold us to. Printed every
+          # build; it must never change between releases.
+          keytool -list -v -keystore "$RUNNER_TEMP/bear.p12" -storepass "$KEY_PASS_VAL" -alias bear \
+            | sed -n 's/.*SHA256: \(.*\)/  key SHA256 = \1/p'
+
+      - name: Upload keystore bootstrap artifacts (one-time)
+        if: ${{ env.BOOTSTRAP == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bear-keystore-bootstrap
+          path: |
+            bear-keystore.p12
+            bootstrap-keystore-pass.txt
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Gradle assembleDebug
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
