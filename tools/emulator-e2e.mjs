@@ -1366,16 +1366,26 @@ async function main() {
     report.dapp.stripClose = st;
     if (st.rows !== list.tabs) throw new Error('✕ step: DOM strip (' + st.rows + ' rows) and the native list (' + list.tabs + ' tabs) disagree BEFORE any close — ' + JSON.stringify(st) + ' vs ' + JSON.stringify(list));
     if (st.rows < 2) {
-      // "Exactly ONE per press" needs two rows to have meaning; ask the grid
-      // for a second session (card click = a fresh tab in this build).
-      await page.evaluate('document.querySelectorAll(".dapp-card")[1]?.click()');
+      // "Exactly ONE per press" needs two rows to have meaning. Tabs are
+      // created EXPLICITLY (open() navigates the active tab — card taps never
+      // spawn one), so the second tab comes the way a user makes one: tabs
+      // button → the panel's "New tab" control, then hide the browser again.
+      const card = await page.evaluate('(function(){var c=document.querySelectorAll(".dapp-card");return c&&c.length?(c[Math.min(1,c.length-1)].getAttribute("data-url")||"ok"):null;})()');
+      if (!card) throw new Error('✕ step: no dApp card on the grid to raise the browser with — session ' + JSON.stringify(list));
+      await page.evaluate('document.querySelectorAll(".dapp-card")[Math.min(1, document.querySelectorAll(".dapp-card").length - 1)].click()');
       await sleep(2500);
+      // The click navigated/showed the browser. The panel needs the browser
+      // on screen: toolbar `dapp-tabs` → `dapp-tab-new`, each a native tap.
+      if (!(await tapNativeButton('dapp-tabs'))) throw new Error('✕ step: the tab panel button did not respond');
+      await sleep(900);
+      if (!(await tapNativeButton('dapp-tab-new'))) throw new Error('✕ step: the "New tab" control did not respond');
+      await sleep(1100);
       await hideBrowserAndReturn();
       st = await stripState();
       list = await pluginProbe('list');
       report.dapp.stripAfter2nd = st;
       report.dapp.pluginList2 = list;
-      if (st.rows !== list.tabs) throw new Error('✕ step: after opening a 2nd tab, DOM (' + st.rows + ') and native (' + list.tabs + ') disagree — ' + JSON.stringify(list));
+      if (st.rows !== list.tabs) throw new Error('✕ step: after making a 2nd tab, DOM (' + st.rows + ') and native (' + list.tabs + ') disagree — ' + JSON.stringify(list));
     }
     if (st.rows < 2) throw new Error('✕ step: could not reach two tabs — ' + JSON.stringify({ st, list }));
     let closes = 0;
