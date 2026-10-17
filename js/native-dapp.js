@@ -284,12 +284,16 @@ export async function openNativeDapp(url) {
  * "diluar daaps ga ada tabs").
  */
 export async function nativeTabs() {
-  if (!isNativeDappBrowser()) return null;
+  // NEVER null: every consumer (dApps entry, strip, modal) reads .tabs/.active
+  // off one shape — a plugin without getTabs, a web run, or a bad payload all
+  // mean "no tabs", never "crash the view".
+  const none = { open: false, tabs: [], active: 0 };
+  if (!isNativeDappBrowser()) return none;
   try {
     const p = await ensurePlugin();
     const r = await p.getTabs();
-    return r && r.open && Array.isArray(r.tabs) ? r : null;
-  } catch { return null; }   // older build without getTabs — no entry, no crash
+    return r && r.open && Array.isArray(r.tabs) ? r : none;
+  } catch { return none; }   // older build without getTabs — no entry, no crash
 
   try {
     const p = await ensurePlugin();
