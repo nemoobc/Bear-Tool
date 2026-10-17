@@ -14,6 +14,7 @@ import { getNetworkById, getProvider, getDelegation, EIP7702 } from './network.j
 import * as wallet from './wallet.js';
 import { saveDeployed, findDeployed, listDeployed, removeDeployed } from './registry.js';
 import { compileContract } from './solc.js';
+import { autoVerify } from './verify.js';
 
 const { ethers } = globalThis;
 
@@ -135,6 +136,15 @@ async function deployContract(signer, abi, bytecode, constructorArgs = []) {
   }
   if (v.kind === 'failed') throw new Error('Helper contract deploy reverted');
   return contract;
+}
+
+// ── fire-and-forget auto-verify (Sourcify keyless + Etherscan bila ada key) ──
+// Verifikasi tidak pernah memblokir atau menggagalkan deploy: sudah di
+// chain itu untungnya terpisah. Kegagalan verify hanya jadi toast + status.
+function verifyHelperDeployed({ chainId, address, source, contractName, abi, args = [], txHash }) {
+  autoVerify({ net: { chainId: Number(chainId) }, address, source, contractName, abi, args, creationTxHash: txHash })
+    .then((r) => { if (r && !r.skipped) toast(`Verify: ${r.line}`, r.ok ? 'success' : 'info'); })
+    .catch(() => { /* best effort — deploy sudah landed */ });
 }
 
 // ── EIP-7702: delegate wallet to implementation, then execute calldata atomically ──
@@ -381,6 +391,7 @@ async function executeBatch() {
         const addr = await contract.getAddress();
         const dtx = contract.deploymentTransaction();
         saveDeployed('batch', addr, { chainId, deployer: get('address'), abi });
+        verifyHelperDeployed({ chainId, address: addr, source: BATCH_SOURCE, contractName: 'batch', abi, args: [], txHash: dtx?.hash });
         addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `batch → ${addr}` });
         return { address: addr, abi };
       });
@@ -726,6 +737,7 @@ async function executeRescue() {
         const addr = await contract.getAddress();
         const dtx = contract.deploymentTransaction();
         saveDeployed('rescue', addr, { chainId, safe, target, sponsor: sponsorAddress, abi });
+        verifyHelperDeployed({ chainId, address: addr, source: RESCUE_SOURCE, contractName: 'rescue', abi, args: [safe, sponsorAddress], txHash: dtx?.hash });
         addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
         return { address: addr, abi };
       });
@@ -902,6 +914,7 @@ async function executeClaim() {
         const addr = await contract.getAddress();
         const dtx = contract.deploymentTransaction();
         saveDeployed('airdrop', addr, { chainId, target: targetAddress, rescuer: sponsorAddress, abi });
+        verifyHelperDeployed({ chainId, address: addr, source: AIRDROP_CLAIMER_SOURCE, contractName: 'airdropClaimer', abi, args: [sponsorAddress], txHash: dtx?.hash });
         addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `airdrop → ${addr}` });
         return { address: addr, abi };
       });
@@ -1132,6 +1145,7 @@ export async function deployBatchHelper() {
     const addr = await contract.getAddress();
     const dtx = contract.deploymentTransaction();
     saveDeployed('batch', addr, { chainId: Number(net.chainId), deployer: get('address'), abi });
+    verifyHelperDeployed({ chainId: net.chainId, address: addr, source: BATCH_SOURCE, contractName: 'batch', abi, args: [], txHash: dtx?.hash });
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `batch → ${addr}` });
     toast('Batch helper deployed: ' + wallet.shortAddress(addr), 'success');
     renderDeployedRegistry();
@@ -1190,6 +1204,7 @@ export async function deployRescueHelper() {
     const addr = await contract.getAddress();
     const dtx = contract.deploymentTransaction();
     saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, sponsor: sponsorSigner.address, abi });
+    verifyHelperDeployed({ chainId: net.chainId, address: addr, source: RESCUE_SOURCE, contractName: 'rescue', abi, args: [safe, sponsorSigner.address], txHash: dtx?.hash });
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
     toast('Rescue helper deployed: ' + wallet.shortAddress(addr), 'success');
     const det = $('#rescueHelperDetect');
@@ -1240,6 +1255,7 @@ export async function deployAirdropClaimer() {
     const addr = await contract.getAddress();
     const dtx = contract.deploymentTransaction();
     saveDeployed('airdrop', addr, { chainId: Number(net.chainId), target: targetAddress, rescuer: sponsorAddress, abi });
+    verifyHelperDeployed({ chainId: net.chainId, address: addr, source: AIRDROP_CLAIMER_SOURCE, contractName: 'airdropClaimer', abi, args: [sponsorAddress], txHash: dtx?.hash });
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `airdrop → ${addr}` });
     toast('Airdrop claimer deployed: ' + wallet.shortAddress(addr), 'success');
     renderHelperStatus();

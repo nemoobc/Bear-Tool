@@ -12,12 +12,14 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { $, escapeHtml, toast } from './ui.js';
+import { t } from './i18n.js';
 import {
   listSites, removeSite, clearSites,
   listBlocked, addBlockedHost, removeBlockedHost,
   listTrusted, addTrustedHost, removeTrustedHost,
   clearBrowsingData, revokePermission,
 } from './dapp-sessions.js';
+import { getEtherscanKey, setEtherscanKey, etherscanDailyLimitUntil } from './verify.js';
 import { ALLOWED_METHODS, CONFIRMED_METHODS, BIG_VALUE_WEI } from './security.js';
 
 const row = (label, value) =>
@@ -123,6 +125,19 @@ export function renderSecurityCenter(container) {
     </div>
 
     <div class="sec-block">
+      <h4 class="sec-h">${t('set.verifykey.h4')}</h4>
+      <p class="small dim">${t('set.verifykey.hint')}</p>
+      <div class="sec-keys-row" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">
+        <input id="secEtherscanKey" type="password" autocomplete="off" spellcheck="false"
+               placeholder="${t('set.verifykey.ph')}" aria-label="${t('set.verifykey.ph')}"
+               class="input" style="flex:1;min-width:0;width:auto;padding:8px 10px" />
+        <button class="btn btn-sm btn-primary" id="secEtherscanSave">${t('set.verifykey.save')}</button>
+        <button class="btn btn-sm btn-secondary" id="secEtherscanDelete">${t('set.verifykey.delete')}</button>
+      </div>
+      <div class="small" id="secEtherscanState" role="status" style="margin-top:4px"></div>
+    </div>
+
+    <div class="sec-block">
       <h4 class="sec-h">Stored keys</h4>
       <p class="small dim">The OpenSea key is a public read key, kept in this browser only. It is never
       sent to any Bear Tool server, because there is no Bear Tool server. A wallet key is never
@@ -148,6 +163,33 @@ function refreshSites(container) {
 }
 
 function wire(container) {
+  // ── Etherscan verify key: load, save, delete, daily-limit note ──
+  const vkey = container.querySelector('#secEtherscanKey');
+  const vstate = container.querySelector('#secEtherscanState');
+  if (vkey && vstate) {
+    vkey.value = getEtherscanKey();
+    const paintState = () => {
+      const saved = getEtherscanKey();
+      const until = etherscanDailyLimitUntil();
+      const limit = until > Date.now() ? ` · ${t('set.verifykey.limit', { time: new Date(until).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' })}` : '';
+      vstate.textContent = (saved ? t('set.verifykey.saved') : t('set.verifykey.none')) + limit;
+    };
+    paintState();
+    container.querySelector('#secEtherscanSave')?.addEventListener('click', () => {
+      const saved = setEtherscanKey(vkey.value);
+      vkey.value = saved;
+      paintState();
+      toast(saved ? 'Etherscan key saved (this browser only)' : 'Etherscan key is empty — nothing saved', 'ok');
+    });
+    container.querySelector('#secEtherscanDelete')?.addEventListener('click', () => {
+      setEtherscanKey('');
+      vkey.value = '';
+      paintState();
+      toast('Etherscan key deleted', 'info');
+    });
+    vkey.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); container.querySelector('#secEtherscanSave')?.click(); } });
+  }
+
   container.querySelectorAll('[data-disconnect]').forEach((b) => {
     b.addEventListener('click', () => {
       removeSite(b.dataset.disconnect);

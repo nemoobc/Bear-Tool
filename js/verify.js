@@ -39,6 +39,24 @@ import { isLoopbackRpc, LOCAL_DEV_CHAIN_IDS } from './network.js';
 export const SOURCIFY_BASE = 'https://sourcify.dev/server';
 export const ETHERSCAN_V2_BASE = 'https://api.etherscan.io/v2/api';
 const KEY_STORE = 'bear.etherscanKey';
+const LIMIT_STORE = 'bear.etherscanLimitUntil';
+
+const isEtherscanLimitMsg = (msg) => /daily limit of \d+ source/i.test(String(msg));
+
+/** When Etherscan said "daily limit reached", remember it until the day turns
+ *  (UTC) — every later autoVerify skips the Etherscan leg instead of burning
+ *  another failing submission. Sourcify keeps running keyless either way. */
+export function markEtherscanDailyLimit() {
+  const until = (Math.floor(Date.now() / 86400000) + 1) * 86400000;
+  try { localStorage.setItem(LIMIT_STORE, String(until)); } catch { /* private mode */ }
+  return until;
+}
+
+export function etherscanDailyLimitUntil() {
+  try { return Number(localStorage.getItem(LIMIT_STORE)) || 0; } catch { return 0; }
+}
+
+export { isEtherscanLimitMsg };
 
 // Poll budget: enough for a slow queue, short enough that the deploy card is
 // not spinning forever. Injectable so tests never sleep.
@@ -293,13 +311,24 @@ export async function autoVerify({
   }));
 
   const key = getEtherscanKey();
-  if (key) {
-    await run('etherscan', () => verifyEtherscan({
-      chainId: Number(net.chainId), address, stdJsonInput, contractName,
-      constructorArguments, key, fetchFn, sleepFn, onStatus,
-    }));
-  } else {
+  const limitUntil = etherscanDailyLimitUntil();
+  if (!key) {
     results.push({ service: 'etherscan', skipped: true, msg: 'no API key saved (Sourcify ran keyless)' });
+  } else if (limitUntil > Date.now()) {
+    // A earlier run already hit the day cap — do not burn another failing
+    // submission, and do not even trigger a request. Sourcify ran above.
+    results.push({ service: 'etherscan', skipped: true, msg: `daily limit detected earlier — paused until ${new Date(limitUntil).toISOString()} (Sourcify runs keyless)` });
+  } else {
+    try {
+      const r = await verifyEtherscan({
+        chainId: Number(net.chainId), address, stdJsonInput, contractName,
+        constructorArguments, key, fetchFn, sleepFn, onStatus,
+      });
+      results.push(r);
+    } catch (e) {
+      if (isEtherscanLimitMsg(e)) markEtherscanDailyLimit();
+      results.push({ service: 'etherscan', ok: false, msg: e?.message || String(e) });
+    }
   }
 
   const ok = results.some((r) => r.ok);
