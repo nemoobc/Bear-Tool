@@ -1312,20 +1312,35 @@ async function main() {
     const stripState = () => page.evaluate(
       `(function () { return { chips: document.querySelectorAll('.dapp-tabs-entry').length, rows: document.querySelectorAll('.launch-tab').length, x: document.querySelectorAll('.launch-tab-close').length }; })()`
     ).catch(() => ({ chips: 0, rows: 0, x: 0 }));
+    // Per-press telemetry — the 39043467179 failure needed facts, not guesses:
+    // which element answered the click, its data-i, and the live native tab
+    // list after each press.
+    const pressClose = async () => page.evaluate(
+      `(function () {
+        const b = document.querySelector('.launch-tab-close');
+        if (!b) return { ok: false, why: 'no close button in document' };
+        const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+        b.dispatchEvent(ev);
+        const row = b.closest('.launch-tab');
+        return { ok: true, xDi: b.getAttribute('data-i'), rowDi: row ? row.getAttribute('data-i') : null };
+      })()`
+    ).catch((e) => ({ ok: false, why: String(e).slice(0, 140) }));
     let st = await stripState();
     report.dapp.stripClose = st;
+    report.dapp.stripPresses = [];
     if (st.chips !== 1) throw new Error('✕ step: expected exactly ONE Browser chip before any close, got ' + JSON.stringify(st));
     if (st.x < 1) throw new Error('✕ step: strip has no ✕ buttons although a tab was just reopened — ' + JSON.stringify(st));
     let closes = 0;
     while (closes < 12) {
-      await page.evaluate(`document.querySelector('.launch-tab-close')?.click()`);
+      const press = await pressClose();
       await sleep(1200);
       st = await stripState();
+      report.dapp.stripPresses.push({ press, st });
       if (st.chips !== 1) throw new Error(`✕ step: Browser chip multiplied after close #${closes + 1}: ` + JSON.stringify(st));
       closes += 1;
       if (st.x === 0) break;
     }
-    if (st.x !== 0) throw new Error('✕ step: strip kept tabs after ' + closes + ' close presses — ' + JSON.stringify(st));
+    if (st.x !== 0) throw new Error('✕ step: strip kept tabs after ' + closes + ' presses — ' + JSON.stringify(st) + ' presses=' + JSON.stringify(report.dapp.stripPresses));
     if (st.rows !== 0) throw new Error('✕ step: rows linger after all closes — ' + JSON.stringify(st));
     report.dapp.stripClosesUsed = closes;
     await shotScreen('19d-strip-close-regression');
