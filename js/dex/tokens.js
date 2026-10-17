@@ -225,6 +225,7 @@ function rowHtml(tk) {
       ? `<span class="dex-badge dex-badge-lock" title="${escapeHtml(t('dex.feed.lockUntil', { date: dateOf(tk.lockedUntil) }))}">${escapeHtml(t('dex.feed.badgeLock'))}</span>`
       : '',
     tk.vol1hTxt ? `<span class="dex-badge dex-badge-vol">${escapeHtml(t('dex.feed.badgeVol', { v: tk.vol1hTxt }))}</span>` : '',
+    tk.liqTxt ? `<span class="dex-badge dex-badge-liq">${escapeHtml(t('dex.feed.badgeLiq', { v: tk.liqTxt }))}</span>` : '',
   ].join('');
   return `
     <button type="button" class="dex-card" data-dex-token="${escapeHtml(tk.address)}">
@@ -498,6 +499,7 @@ export async function refreshFeed(host, scope = 'all') {
       ...r,
       price: fmtTok(quotePerToken(ps.quoteReserve, ps.tokenReserve, 18), q ? q.decimals : 18, 6),
       qSym: q ? q.symbol : '',
+      liqTxt: `${fmtTok(ps.quoteReserve, q ? q.decimals : 18, 2)} ${q ? q.symbol : ''}`.trim(),
       liq: ps.quoteReserve,
       lockedUntil,
       fresh: isFresh(r.block, out.latest),

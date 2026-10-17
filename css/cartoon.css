@@ -3243,6 +3243,9 @@ select.input option, select.select option, .input option {
 /* Native only: the door back into the in-app browser (its session survives
    while the full-screen overlay is hidden). */
 .dapp-tabs-entry { display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 12px; padding: 10px 12px; border-radius: 12px; cursor: pointer; background: var(--bg-card, #f5f5f0); border: 2px solid var(--border, #ddd); color: var(--text, #333); font-size: 13px; font-weight: 800; text-align: left; }
+/* Inline chip variant: when the entry lives beside the URL field it stops
+   being a banner and becomes a compact button. */
+.dapps-omni .dapp-tabs-entry { width: auto; flex: 0 0 auto; margin-bottom: 0; padding: 8px 10px; border-radius: 8px; }
 .dapp-tabs-entry:hover { border-color: var(--primary, #FF6B35); }
 .dapp-tabs-entry:focus-visible { outline: 3px solid var(--ink, #222); outline-offset: 2px; }
 .dapp-tabs-ic { font-size: 15px; }

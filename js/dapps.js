@@ -172,7 +172,8 @@ async function renderTabsEntry(container) {
       });
     });
   });
-  bar.appendChild(btn);
+  // OKX-style: the tabs chip sits IN the omnibox row, right beside the URL field.
+  bar.querySelector('.dapps-omni')?.appendChild(btn);
 
   // No tabs → no strip at all.
   if (!tabs.length) return;
@@ -194,7 +195,9 @@ async function renderTabsEntry(container) {
       <button type="button" class="launch-tab-close" aria-label="${escapeHtml(t('dapp.tab.closeAria', { n: tab.title || tab.url || 'New tab' }))}" data-i="${i}">×</button>
     </button>
   `).join('');
-  bar.appendChild(strip);
+  // Strip rides directly under the omnibox row — OKX puts live tabs above the
+  // catalogue, not under the whole page fold.
+  bar.querySelector('.dapps-omni')?.insertAdjacentElement('afterend', strip);
 
   strip.querySelectorAll('.launch-tab').forEach((btn, i) => {
     btn.addEventListener('click', async () => {

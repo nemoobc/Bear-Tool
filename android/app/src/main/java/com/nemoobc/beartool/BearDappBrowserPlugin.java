@@ -340,11 +340,39 @@ public class BearDappBrowserPlugin extends Plugin {
         glp.bottomMargin = (int) (12 * density);
         sheet.addView(grab, glp);
 
+        // Cartoon completeness, parity with confirmTx (js/ui.js):
+        // a close ✕ the sheet body itself carries, the bear mascot, and a
+        // centered bold question — the wallet's own dialog has all three;
+        // this sheet used to ship none of them.
+        LinearLayout closeBar = new LinearLayout(getContext());
+        closeBar.setOrientation(LinearLayout.HORIZONTAL);
+        android.widget.Space closeSpace = new android.widget.Space(getContext());
+        closeBar.addView(closeSpace, new LinearLayout.LayoutParams(0, 1, 1f));
+        android.widget.TextView closeX = new android.widget.TextView(getContext());
+        closeX.setText("✕");
+        closeX.setTextColor(INK_SOFT);
+        closeX.setTextSize(15);
+        closeX.setPadding((int) (10 * density), (int) (2 * density), (int) (2 * density), (int) (6 * density));
+        closeX.setContentDescription("dapp-confirm-close");
+        closeX.setOnClickListener(v -> finishConfirm(false));
+        closeBar.addView(closeX, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        closeBar.setPadding(0, 0, 0, (int) (4 * density));
+        sheet.addView(closeBar, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        android.widget.TextView mascot = new android.widget.TextView(getContext());
+        mascot.setText("🐻");
+        mascot.setTextSize(40);
+        mascot.setGravity(android.view.Gravity.CENTER);
+        mascot.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        sheet.addView(mascot, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         confirmTitleView = new android.widget.TextView(getContext());
         confirmTitleView.setText(title == null ? "" : title);
         confirmTitleView.setTextColor(INK);
         confirmTitleView.setTextSize(17);
-        confirmTitleView.setPadding(0, 0, 0, (int) (12 * density));
+        confirmTitleView.setGravity(android.view.Gravity.CENTER);
+        confirmTitleView.setTypeface(confirmTitleView.getTypeface(), android.graphics.Typeface.BOLD);
+        confirmTitleView.setPadding(0, (int) (6 * density), 0, (int) (12 * density));
         sheet.addView(confirmTitleView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // The headline: big, centered, above every row — the single number the
@@ -381,6 +409,19 @@ public class BearDappBrowserPlugin extends Plugin {
                 addSheetRow(confirmRowsBox, o.optString("k", ""), o.optString("v", ""), density);
             }
         }
+        // Rows ride a cartoon CARD: a rounded, ink-edge box like every detail
+        // box in the wallet theme (see .tx-detail in css/cartoon.css), not a
+        // bare stack of text on the sheet.
+        android.widget.LinearLayout card = new android.widget.LinearLayout(getContext());
+        card.setOrientation(LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable cardBg = new android.graphics.drawable.GradientDrawable();
+        cardBg.setColor(0xFFFFFCF4);
+        cardBg.setCornerRadius(12 * density);
+        cardBg.setStroke((int) (2 * density), 0xFFE8E2D8);
+        card.setBackground(cardBg);
+        card.setPadding((int) (12 * density), (int) (10 * density), (int) (12 * density), (int) (10 * density));
+        card.addView(confirmRowsBox, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         // A long sheet (send tx: money line + eight rows + findings) can grow
         // taller than the screen and clip its own top on a small phone. The
         // rows ride a ScrollView whose height is capped after the first layout
@@ -388,7 +429,7 @@ public class BearDappBrowserPlugin extends Plugin {
         // buttons never leave the screen (report 2026-10-16, "ask tx").
         final android.widget.ScrollView rowsScroll = new android.widget.ScrollView(getContext());
         rowsScroll.setFillViewport(false);
-        rowsScroll.addView(confirmRowsBox, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        rowsScroll.addView(card, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         sheet.addView(rowsScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout btns = new LinearLayout(getContext());
@@ -402,20 +443,28 @@ public class BearDappBrowserPlugin extends Plugin {
 
         android.widget.TextView cancel = new android.widget.TextView(getContext());
         cancel.setText(cancelText == null ? "Cancel" : cancelText);
-        cancel.setTextColor(SHEET_VAL);
+        cancel.setTextColor(INK);
         cancel.setTextSize(15);
         cancel.setGravity(android.view.Gravity.CENTER);
-        cancel.setPadding(0, (int) (12 * density), 0, (int) (12 * density));
+        cancel.setTypeface(cancel.getTypeface(), android.graphics.Typeface.BOLD);
+        cancel.setPadding(0, (int) (14 * density), 0, (int) (14 * density));
         cancel.setContentDescription("dapp-confirm-cancel");
+        // full boxed ghost button — the plain unboxed text line never read as a
+        // button (report 2026-10-17, cartoon UI "kurang lengkap")
+        android.graphics.drawable.GradientDrawable cancelBg = new android.graphics.drawable.GradientDrawable();
+        cancelBg.setColor(0xFFFFFFFF);
+        cancelBg.setCornerRadius(12 * density);
+        cancelBg.setStroke((int) (2 * density), INK);
+        cancel.setBackground(cancelBg);
         cancel.setOnClickListener(v -> finishConfirm(false));
 
         android.widget.TextView ok = new android.widget.TextView(getContext());
         ok.setText(confirmText == null ? "Confirm" : confirmText);
         ok.setTextColor(INK);
-        ok.setTextSize(15);
+        ok.setTextSize(16);
         ok.setGravity(android.view.Gravity.CENTER);
         ok.setTypeface(ok.getTypeface(), android.graphics.Typeface.BOLD);
-        ok.setPadding(0, (int) (12 * density), 0, (int) (12 * density));
+        ok.setPadding(0, (int) (14 * density), 0, (int) (14 * density));
         ok.setContentDescription("dapp-confirm-ok");
         android.graphics.drawable.GradientDrawable okBg = new android.graphics.drawable.GradientDrawable();
         okBg.setColor(ACCENT);
