@@ -34,6 +34,8 @@ test('dApp browser tab strip: closeNativeTab exposed + renderTabsEntry builds th
     'tab open wired to the native plugin (exact tab index from the pressed row)');
   assert.match(dapps, /if \(!info\.open \|\| !tabs\.length\) return;/,
     'no ghost "Browser · 0" chip: a closed/empty session paints no door');
+  assert.doesNotMatch(dapps, /closeNativeTab\(Number\(close\.dataset\.i\)[\s\S]{0,240}renderTabsEntry\(/,
+    'the ✕ handler must NOT paint a second render — the browserClosed event owns the repaint (a second one races it: chips×2, strips×2)');
   assert.match(dapps, /info\.active/,
     'active tab highlighted');
   // 2026-10-17 live bug: <button> rows wrapping <button class="…-close"> —

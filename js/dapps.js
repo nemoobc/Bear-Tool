@@ -217,9 +217,12 @@ async function renderTabsEntry(container) {
     if (close) {
       ev.stopPropagation();
       await closeNativeTab(Number(close.dataset.i) || 0);
-      // Idempotent re-render: old chip + strips are removed first, so one
-      // close leaves exactly one strip with one fewer ✕.
-      renderTabsEntry(container);
+      // NO self re-render here. The native closeTab answers with
+      // walletCommand('browserClosed') → refreshView('dapps') → ONE repaint
+      // that cleans and repaints the door. A second renderTabsEntry from
+      // THIS handler raced that repaint (run 39052392948: both ran the
+      // cleanup before either appended — chips×2, strips×2, the ORIGINAL
+      // "chip & ✕ bertambah" report verbatim). One close → one repaint.
       return;
     }
     const row = ev.target.closest('.launch-tab');
