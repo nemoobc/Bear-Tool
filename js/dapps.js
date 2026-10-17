@@ -148,7 +148,7 @@ async function renderTabsEntry(container) {
   btn.className = 'dapp-tabs-entry';
   btn.setAttribute('aria-label', t('dapp.browser.label'));
   const n = tabs.length;
-  btn.innerHTML = `<span class="dapp-tabs-ic" aria-hidden="true">\u29C9</span>
+  btn.innerHTML = `<span class="dapp-tabs-ic" aria-hidden="true">${face(INK, '<rect x="8.5" y="4.5" width="11" height="11" rx="2.5"/><path d="M5 17V8.5A2.5 2.5 0 0 1 7.5 6"/><path d="M5 17a2.5 2.5 0 0 0 2.5 2.5H16"/>')}</span>
     <span class="dapp-tabs-lb">${escapeHtml(t('dapp.browser.label'))}</span>
     <span class="dapp-tabs-n" aria-hidden="true">${n}</span>`;
   btn.addEventListener('click', async () => {
@@ -187,7 +187,7 @@ async function renderTabsEntry(container) {
   strip.setAttribute('aria-label', t('dapp.browser.label'));
   strip.innerHTML = tabs.map((tab, i) => `
     <button type="button" class="launch-tab${i === active ? ' launch-tab-active' : ''}" role="tab" aria-selected="${i === active}" data-i="${i}">
-      <span class="launch-tab-icon" aria-hidden="true">🌐</span>
+      <span class="launch-tab-icon" aria-hidden="true">${CAT_STYLE.All.glyph}</span>
       <div class="launch-tab-body">
         <div class="launch-tab-title" title="${escapeHtml(tab.title || '')}">${escapeHtml(tab.title || tab.url || 'New tab')}</div>
         <div class="launch-tab-url">${escapeHtml(domainOf(tab.url || ''))}</div>
