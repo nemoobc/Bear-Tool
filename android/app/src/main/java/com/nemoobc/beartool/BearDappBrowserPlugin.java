@@ -340,31 +340,33 @@ public class BearDappBrowserPlugin extends Plugin {
         glp.bottomMargin = (int) (12 * density);
         sheet.addView(grab, glp);
 
-        // Cartoon completeness, parity with confirmTx (js/ui.js):
-        // a close ✕ the sheet body itself carries, the bear mascot, and a
-        // centered bold question — the wallet's own dialog has all three;
-        // this sheet used to ship none of them.
+        // Cartoon completeness, parity with confirmTx (js/ui.js): a close ✕,
+        // the bear mascot, and a centered bold question. Chrome reads only
+        // DRAWN vectors (ic_dbr_paw / ic_dbr_x) — device-font emoji are
+        // forbidden in this file (user pin 2026-10-15, "icon² versi cartoon").
         LinearLayout closeBar = new LinearLayout(getContext());
         closeBar.setOrientation(LinearLayout.HORIZONTAL);
         android.widget.Space closeSpace = new android.widget.Space(getContext());
         closeBar.addView(closeSpace, new LinearLayout.LayoutParams(0, 1, 1f));
-        android.widget.TextView closeX = new android.widget.TextView(getContext());
-        closeX.setText("✕");
-        closeX.setTextColor(INK_SOFT);
-        closeX.setTextSize(15);
-        closeX.setPadding((int) (10 * density), (int) (2 * density), (int) (2 * density), (int) (6 * density));
+        android.widget.ImageView closeX = new android.widget.ImageView(getContext());
+        closeX.setImageResource(R.drawable.ic_dbr_x);
+        LinearLayout.LayoutParams xlp = new LinearLayout.LayoutParams((int) (28 * density), (int) (28 * density));
+        xlp.setMargins(0, (int) (2 * density), (int) (6 * density), 0);
+        closeX.setLayoutParams(xlp);
         closeX.setContentDescription("dapp-confirm-close");
         closeX.setOnClickListener(v -> finishConfirm(false));
-        closeBar.addView(closeX, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        closeBar.addView(closeX);
         closeBar.setPadding(0, 0, 0, (int) (4 * density));
         sheet.addView(closeBar, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        android.widget.TextView mascot = new android.widget.TextView(getContext());
-        mascot.setText("🐻");
-        mascot.setTextSize(40);
-        mascot.setGravity(android.view.Gravity.CENTER);
+        android.widget.ImageView mascot = new android.widget.ImageView(getContext());
+        mascot.setImageResource(R.drawable.ic_dbr_paw);
+        android.widget.LinearLayout.LayoutParams mlp = new android.widget.LinearLayout.LayoutParams((int) (40 * density), (int) (40 * density));
+        mlp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+        mlp.bottomMargin = (int) (6 * density);
+        mascot.setScaleType(android.widget.ImageView.ScaleType.CENTER);
         mascot.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        sheet.addView(mascot, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        sheet.addView(mascot, mlp);
 
         confirmTitleView = new android.widget.TextView(getContext());
         confirmTitleView.setText(title == null ? "" : title);
@@ -409,18 +411,16 @@ public class BearDappBrowserPlugin extends Plugin {
                 addSheetRow(confirmRowsBox, o.optString("k", ""), o.optString("v", ""), density);
             }
         }
-        // Rows ride a cartoon CARD: a rounded, ink-edge box like every detail
-        // box in the wallet theme (see .tx-detail in css/cartoon.css), not a
-        // bare stack of text on the sheet.
-        android.widget.LinearLayout card = new android.widget.LinearLayout(getContext());
-        card.setOrientation(LinearLayout.VERTICAL);
+        // Rows ride a cartoon CARD: the box itself gets the rounded, ink-edge
+        // look every detail box in the wallet theme wears (see .tx-detail in
+        // css/cartoon.css) — styled in place so the box stays what the
+        // ScrollView carries (pinned by dapp-native-ui).
         android.graphics.drawable.GradientDrawable cardBg = new android.graphics.drawable.GradientDrawable();
         cardBg.setColor(0xFFFFFCF4);
         cardBg.setCornerRadius(12 * density);
         cardBg.setStroke((int) (2 * density), 0xFFE8E2D8);
-        card.setBackground(cardBg);
-        card.setPadding((int) (12 * density), (int) (10 * density), (int) (12 * density), (int) (10 * density));
-        card.addView(confirmRowsBox, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        confirmRowsBox.setBackground(cardBg);
+        confirmRowsBox.setPadding((int) (12 * density), (int) (10 * density), (int) (12 * density), (int) (10 * density));
 
         // A long sheet (send tx: money line + eight rows + findings) can grow
         // taller than the screen and clip its own top on a small phone. The
@@ -429,7 +429,7 @@ public class BearDappBrowserPlugin extends Plugin {
         // buttons never leave the screen (report 2026-10-16, "ask tx").
         final android.widget.ScrollView rowsScroll = new android.widget.ScrollView(getContext());
         rowsScroll.setFillViewport(false);
-        rowsScroll.addView(card, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        rowsScroll.addView(confirmRowsBox, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         sheet.addView(rowsScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout btns = new LinearLayout(getContext());
