@@ -1717,10 +1717,35 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         Integer idx = call.getInt("index");
         getActivity().runOnUiThread(() -> {
             if (idx == null || idx < 0 || idx >= tabs.size()) { call.reject("bad index"); return; }
-            tabs.remove(idx);
-            if (activeTab >= tabs.size()) activeTab = Math.max(tabs.size() - 1, -1);
-            if (activeTab >= 0) setActiveTab(activeTab);
-            else closeTabPanel();
+            Tab t = tabs.remove(idx);
+            // The wallet ✕ used to be a mutant of the panel path: it removed
+            // the tab from the list but left the WebView attached to the
+            // stack (no removeView, no destroy) and mis-settled activeTab —
+            // the list shrank while the screen still showed the dead view
+            // (emulator runs 39043467179/39047708057: one ✕ never closed a
+            // tab). One path now serves both callers: strip rows (this) and
+            // the panel's per-tab ✕ (internal closeTab(i)) keep the same
+            // cleanup and activeTab arithmetic.
+            if (stack != null) stack.removeView(t.wrap);
+            try { t.view.destroy(); } catch (Throwable ignore) { /* already gone */ }
+            if (activeTab > idx) activeTab -= 1;
+            else if (activeTab == idx) activeTab = Math.min(idx, tabs.size() - 1);
+            if (!tabs.isEmpty()) {
+                setActiveTab(activeTab);
+                openTabPanel();   // rebuild the sheet with the new set (panel parity)
+            } else {
+                // The wallet ✕ is an explicit leave: last tab gone → the
+                // browser goes with it and nothing can resurrect it. The
+                // panel's "last tab is the floor" rule does not apply here —
+                // the user is IN the wallet asking to close, and a zero-tab
+                // browser lingering on screen was the ghost bug.
+                activeTab = -1;
+                doClose();
+                dappView = null;
+            }
+            // The wallet must repaint its Browser entry either way (badge down,
+            // or the whole "Browser · N" door gone when the session empties).
+            walletCommand("browserClosed", "");
             call.resolve(null);
         });
     }

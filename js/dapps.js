@@ -143,7 +143,14 @@ async function renderTabsEntry(container) {
   const tabs = (info && info.tabs) || [];
   const active = (info && info.active) ?? 0;
 
-  // Entry utama "Browser" dengan badge hitung tab — selalu ada.
+  // Entry utama "Browser" dengan badge hitung tab — HANYA saat sesi hidup.
+  // open=false (belum ada browser, atau ✕ terakhir menutup semuanya —
+  // BearDappBrowserPlugin.closeTab) berarti pintu ke tidak ada apa-apa:
+  // menampilkannya sebagai "Browser · 0" yang tak bisa diklik adalah UI hantu
+  // (chip muncul tanpa efek). Pintu muncul lagi otomatis begitu sesi ada
+  // (browserClosed → refreshView('dapps') → panggilan ini).
+  if (!info.open || !tabs.length) return;
+
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.id = 'dappTabsBtn';
@@ -176,9 +183,6 @@ async function renderTabsEntry(container) {
   });
   // OKX-style: the tabs chip sits IN the omnibox row, right beside the URL field.
   bar.querySelector('.dapps-omni')?.appendChild(btn);
-
-  // No tabs → no strip at all.
-  if (!tabs.length) return;
 
   const domainOf = (url) => {
     try { return new URL(url).hostname; } catch { return url || ''; }

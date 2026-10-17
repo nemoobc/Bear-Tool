@@ -1297,14 +1297,18 @@ async function main() {
     await shotScreen('19c-reopened-after-guard');
 
     // ── the ✕ regression (2026-10-17) — end-to-end on the device ───────────
-    // Two defects shipped together and only a journey step can separating them:
+    // Two defects shipped together and only a journey step can separate them:
     // 1. <button> rows wrapping the ✕ button were INVALID HTML — the parser
     //    hoisted the inner button out of its row, indexes shifted, one press
     //    closed the WRONG tab.
     // 2. renderTabsEntry appended the chip and strip with no cleanup — every
     //    press multiplied the Browser chip and stale strips.
-    // The state entering this step: exactly ONE tab (the 19c reopen above).
-    step('dapps view: ✕ removes exactly one tab; the Browser chip never multiplies');
+    // Ground truth about the session comes from the PLUGIN, not from the DOM:
+    // runs 39043467179/39047708057 proved DOM counts can describe a mutant
+    // while the native list answers nothing, and the plugin probe of
+    // 39047708057 itself was dead code (a shadowed `cmd` inside the evaluated
+    // string — ReferenceError, caught, reported as err: a silent evidence gap).
+    step('dapps view: ✕ closes exactly ONE tab per press; the last ✕ leaves no ghost');
     if (!(await tapNativeButton('dapp-close'))) throw new Error('✕ step: dapp-close did not tap');
     await sleep(1500);
     await page.click('.mobile-nav-item[data-view="dapps"]').catch(() => { throw new Error('✕ step: dapps nav missing'); });
@@ -1312,23 +1316,20 @@ async function main() {
     const stripState = () => page.evaluate(
       `(function () { return { chips: document.querySelectorAll('.dapp-tabs-entry').length, strips: document.querySelectorAll('.launch-tabstrip').length, rows: document.querySelectorAll('.launch-tab').length, x: document.querySelectorAll('.launch-tab-close').length }; })()`
     ).catch(() => ({ chips: 0, strips: 0, rows: 0, x: 0 }));
-    // Plugin-layer probe — separates the DOM path (✕ handler → closeNativeTab)
-    // from the native layer (Java closeTab). If EITHER never shows a change
-    // while the other does, the failing half is named by the data.
+    // Plugin-layer probe: DOM path (✕ handler → closeNativeTab) vs native
+    // layer (Java closeTab) — whichever half stops moving names itself.
     const pluginProbe = async (cmd) => page.evaluate(
       `(async function () {
         try {
           const P = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BearDappBrowser) || window.BearDappBrowser;
           if (!P) return { hasP: false };
-          if (cmd === 'list') { const r = await P.getTabs(); return { hasP: true, tabs: (r && r.tabs || []).length, urls: (r && r.tabs || []).map(function (t) { return (t.url || '').slice(0, 40); }) }; }
-          if (cmd === 'close0') { await P.closeTab({ index: 0 }); const r = await P.getTabs(); return { hasP: true, tabs: (r && r.tabs || []).length }; }
+          const CMD = ${JSON.stringify(cmd)};
+          if (CMD === 'list') { const r = await P.getTabs(); return { hasP: true, open: !!(r && r.open), tabs: (r && r.tabs || []).length, urls: (r && r.tabs || []).map(function (t) { return (t.url || '').slice(0, 40); }) }; }
+          if (CMD === 'close0') { await P.closeTab({ index: 0 }); const r = await P.getTabs(); return { hasP: true, open: !!(r && r.open), tabs: (r && r.tabs || []).length }; }
           return { hasP: true };
         } catch (e) { return { err: String(e).slice(0, 120) }; }
       })()`
     ).catch((e) => ({ err: String(e).slice(0, 140) }));
-    // Per-press telemetry — the 39043467179 failure needed facts, not guesses:
-    // which element answered the click, its data-i, and the live native tab
-    // list after each press.
     const pressClose = async () => page.evaluate(
       `(function () {
         const b = document.querySelector('.launch-tab-close');
@@ -1339,49 +1340,66 @@ async function main() {
         return { ok: true, xDi: b.getAttribute('data-i'), rowDi: row ? row.getAttribute('data-i') : null };
       })()`
     ).catch((e) => ({ ok: false, why: String(e).slice(0, 140) }));
+    const hideBrowserAndReturn = async () => {
+      if (!(await tapNativeButton('dapp-close'))) throw new Error('✕ step: could not hide the browser after opening a session');
+      await sleep(1400);
+      await page.click('.mobile-nav-item[data-view="dapps"]').catch(() => {});
+      await sleep(1500);
+    };
+    report.dapp.stripPresses = [];
+    let list = await pluginProbe('list');
+    report.dapp.pluginList0 = list;
+    if (list.err || !list.hasP) throw new Error('✕ step: plugin unreachable from the page — ' + JSON.stringify(list));
+    if (typeof list.tabs !== 'number') throw new Error('✕ step: plugin list unreadable — ' + JSON.stringify(list));
+    if (list.tabs === 0) {
+      const gridCard = await page.evaluate('(function(){var c=document.querySelector(".dapp-card");return c?(c.getAttribute("data-url")||c.className):null;})()');
+      report.dapp.gridCardProbe = String(gridCard).slice(0, 120);
+      if (!gridCard) throw new Error('✕ step: zero tabs AND no dApp card to open one from — ' + JSON.stringify(gridCard));
+      await page.evaluate('document.querySelector(".dapp-card").click()');
+      await sleep(2500);
+      await hideBrowserAndReturn();
+      list = await pluginProbe('list');
+      report.dapp.pluginListAfterBoot = list;
+      if (typeof list.tabs !== 'number' || list.tabs < 1) throw new Error('✕ step: opening a dApp card did not create a session for the ✕ to close — ' + JSON.stringify(list));
+    }
     let st = await stripState();
     report.dapp.stripClose = st;
-    report.dapp.stripPresses = [];
-    const list0 = await pluginProbe('list');
-    report.dapp.pluginList0 = list0;
-    if (st.chips !== 1) throw new Error('✕ step: expected exactly ONE Browser chip before any close, got ' + JSON.stringify(st));
-    if (st.x < 1) throw new Error('✕ step: strip has no ✕ buttons although a tab was just reopened — ' + JSON.stringify(st));
+    if (st.rows !== list.tabs) throw new Error('✕ step: DOM strip (' + st.rows + ' rows) and the native list (' + list.tabs + ' tabs) disagree BEFORE any close — ' + JSON.stringify(st) + ' vs ' + JSON.stringify(list));
+    if (st.rows < 2) {
+      // "Exactly ONE per press" needs two rows to have meaning; ask the grid
+      // for a second session (card click = a fresh tab in this build).
+      await page.evaluate('document.querySelectorAll(".dapp-card")[1]?.click()');
+      await sleep(2500);
+      await hideBrowserAndReturn();
+      st = await stripState();
+      list = await pluginProbe('list');
+      report.dapp.stripAfter2nd = st;
+      report.dapp.pluginList2 = list;
+      if (st.rows !== list.tabs) throw new Error('✕ step: after opening a 2nd tab, DOM (' + st.rows + ') and native (' + list.tabs + ') disagree — ' + JSON.stringify(list));
+    }
+    if (st.rows < 2) throw new Error('✕ step: could not reach two tabs — ' + JSON.stringify({ st, list }));
     let closes = 0;
     while (closes < 12) {
+      const before = st.rows;
       const press = await pressClose();
-      await sleep(1200);
+      await sleep(1000);
       st = await stripState();
-      report.dapp.stripPresses.push({ press, st });
-      if (st.chips !== 1) throw new Error(`✕ step: Browser chip multiplied after close #${closes + 1}: ` + JSON.stringify(st));
+      list = await pluginProbe('list');
+      report.dapp.stripPresses.push({ press, rows: before + '→' + st.rows, native: list.tabs });
+      if (press.ok === false) throw new Error('✕ step: press ' + (closes + 1) + ' found no ✕ in the DOM — ' + JSON.stringify(press));
+      if (st.rows !== before - 1) throw new Error('✕ step: press ' + (closes + 1) + ' moved rows ' + before + '→' + st.rows + ' (exactly −1 required) — ' + JSON.stringify(st));
+      if (list.tabs !== st.rows) throw new Error('✕ step: press ' + (closes + 1) + ' left DOM (' + st.rows + ') and native (' + list.tabs + ') disagreeing — ' + JSON.stringify(list));
       closes += 1;
       if (st.x === 0) break;
-      // NEVER spin: after 3 presses with a static strip, ask the PLUGIN
-      // directly — the state that decides is the native list, not the DOM.
-      if (closes === 3 && st.x !== 0) {
-        const pAdd = await pluginProbe('list');
-        report.dapp.pluginListMid = pAdd;
-        if (typeof pAdd.tabs === 'number' && pAdd.tabs > 0) {
-          // Native list still holds tabs → drive a close THROUGH the plugin,
-          // one index less per loop, until the plugin list is empty. The DOM
-          // must agree with the plugin set; any disagreement names the bug by
-          // which half broke.
-          while (true) {
-            const r = await pluginProbe('list');
-            if (typeof r.tabs !== 'number' || r.err) throw new Error('✕ step: plugin list unprobeable — ' + JSON.stringify(r));
-            if (r.tabs === 0) break;
-            const c0 = await pluginProbe('close0');
-            report.dapp.pluginClose = JSON.stringify(c0).slice(0, 200);
-          }
-          for (let i = 0; i < 20; i++) {
-            st = await stripState();
-            if (st.x === 0) break;
-            await sleep(500);
-          }
-        }
-      }
+      if (st.chips !== 1) throw new Error('✕ step: Browser chip multiplied after press ' + closes + ' — ' + JSON.stringify(st));
     }
-    if (st.x !== 0) throw new Error('✕ step: strip kept tabs after ' + closes + ' presses — ' + JSON.stringify(st) + ' presses=' + JSON.stringify((report.dapp.stripPresses || []).slice(-2)) + ' plugin=' + JSON.stringify({ list0: report.dapp.pluginList0, mid: report.dapp.pluginListMid, close: (report.dapp.pluginClose || '').slice(0, 120) }));
-    if (st.rows !== 0) throw new Error('✕ step: rows linger after all closes — ' + JSON.stringify(st));
+    // All tabs gone: the browser is CLOSED (no floor zombie) and the ghost
+    // "Browser · 0" chip exists only if the empty-session guard failed.
+    if (st.x !== 0 || st.rows !== 0 || st.strips !== 0) throw new Error('✕ step: strip survived the full session close — ' + JSON.stringify(st));
+    if (st.chips !== 0) throw new Error('✕ step: ghost "Browser · 0" chip after the session closed — ' + JSON.stringify(st));
+    const fin = await pluginProbe('list');
+    report.dapp.pluginListFin = fin;
+    if (fin.open !== false || fin.tabs !== 0) throw new Error('✕ step: the native session still claims life after the last close — ' + JSON.stringify(fin));
     report.dapp.stripClosesUsed = closes;
     await shotScreen('19d-strip-close-regression');
   }
@@ -2165,6 +2183,98 @@ async function main() {
   // UI and re-reads the live error counters.
   const SOAK = Math.max(0, parseInt(process.env.E2E_SOAK || '8', 10) || 0);
   if (SOAK > 0) {
+    // ═══ HUNT: the flows no lone widget test can reach ══════════════
+    // User ask (2026-10-17): hunt bugs to the ROOT of every feature, end to
+    // end. These steps walk the whole wallet lifecycle SHELL — accounts
+    // add/switch/remove, lock→unlock, secret reveal — and then sweep EVERY
+    // declared data-view for the two silent failures that pass unit tests:
+    // unreachable nav and a router that opens an empty screen.
+    step('hunt: the account pill opens the account modal');
+    await openView('dashboard');
+    if (!(await jsClick('#accountPill'))) throw new Error('hunt: #accountPill is not clickable');
+    await sleep(900);
+    const rows0 = await page.evaluate('document.querySelectorAll("[data-acc]").length');
+    if (!rows0) throw new Error('hunt: the account modal listed zero wallets');
+    report.hunt = { rows0 };
+
+    step('hunt: + Add Account derives a second wallet from the seed');
+    if (!(await jsClick('#addAccBtn'))) throw new Error('hunt: #addAccBtn missing');
+    await sleep(700);
+    if (!(await page.evaluate('!!document.getElementById("pwInput")'))) throw new Error('hunt: deriving did not ask for the password');
+    await page.type('#pwInput', WALLET_PW);
+    await page.click('#pwOk');
+    await sleep(1500);
+    const rows1 = await page.evaluate('document.querySelectorAll("[data-acc]").length');
+    report.hunt.rowsAfterAdd = rows1;
+    if (rows1 !== rows0 + 1) throw new Error('hunt: add account moved ' + rows0 + '→' + rows1);
+
+    step('hunt: switching accounts moves the active pointer and survives reload');
+    await page.evaluate(`document.querySelectorAll('[data-acc]')[${rows1 - 1}].click()`);
+    await sleep(800);
+    if (await page.evaluate('!!document.getElementById("pwInput")')) {
+      await page.type('#pwInput', WALLET_PW);
+      await page.click('#pwOk');
+    }
+    await sleep(1400);
+    const pillTxt = await page.evaluate('(document.getElementById("accountShort")||{textContent:""}).textContent');
+    report.hunt.pillAfterSwitch = pillTxt;
+    if (/Not connected/.test(pillTxt)) throw new Error('hunt: after switching, the topbar says the wallet is disconnected');
+
+    step('hunt: deleting the extra account keeps exactly the original one');
+    if (!(await jsClick('#accountPill'))) throw new Error('hunt: account pill did not reopen after the switch');
+    await sleep(800);
+    await page.evaluate('document.querySelector(\'[data-del-acc="1"]\')?.click()');
+    await sleep(700);
+    if (!(await page.evaluate('!!document.getElementById("confirmYes")'))) throw new Error('hunt: deleting a wallet never showed its confirm sheet');
+    await page.click('#confirmYes');
+    await sleep(1400);
+    const rows2 = await page.evaluate('document.querySelectorAll("[data-acc]").length');
+    report.hunt.rowsAfterDelete = rows2;
+    if (rows2 !== rows0) throw new Error('hunt: delete left ' + rows2 + ' wallets, expected ' + rows0);
+
+    step('hunt: Export Secret asks the password and shows a key');
+    if (!(await jsClick('#accountPill'))) throw new Error('hunt: account pill did not reopen for export');
+    await sleep(800);
+    if (!(await jsClick('#exportBtn'))) throw new Error('hunt: #exportBtn missing');
+    await sleep(700);
+    if (!(await page.evaluate('!!document.getElementById("pwInput")'))) throw new Error('hunt: export skipped the password gate');
+    await page.type('#pwInput', WALLET_PW);
+    await page.click('#pwOk');
+    await sleep(1200);
+    const leak = await page.evaluate('(function(){const m=document.getElementById("modalBox"); return m ? (m.textContent||"").length : 0;})()');
+    report.hunt.exportShown = leak;
+    if (leak < 40) throw new Error('hunt: the secret sheet rendered empty after unlock');
+    await page.evaluate('document.querySelector("#modalBox [data-close-modal]")?.click()');
+    await sleep(500);
+
+    step('hunt: Lock locks instantly and the password brings the wallet back');
+    if (!(await jsClick('#accountPill'))) throw new Error('hunt: account pill did not reopen for lock');
+    await sleep(700);
+    if (!(await jsClick('#lockBtn'))) throw new Error('hunt: #lockBtn missing');
+    await sleep(900);
+    if (!(await page.evaluate('!!document.getElementById("unlockPw")'))) throw new Error('hunt: locking did not show the unlock gate');
+    await page.type('#unlockPw', WALLET_PW);
+    await page.click('#unlockBtn');
+    await sleep(1500);
+    const backDash = await viewActive('dashboard');
+    report.hunt.unlockBackToDashboard = backDash;
+    if (!backDash) throw new Error('hunt: after unlocking, the wallet did not return to the dashboard');
+
+    step('hunt: EVERY declared data-view is reachable and paints content');
+    const views = await page.evaluate('[...document.querySelectorAll(".sidebar .nav-item")].map(function (i) { return i.dataset.view; }).filter(Boolean)');
+    const painted = {};
+    for (const v of views) {
+      const okv = await openView(v);
+      await sleep(500);
+      const has = await page.evaluate('(function(){var m=document.querySelector(".main"); return !!(m && (m.textContent || "").trim().length > 30);})()');
+      painted[v] = okv && has;
+      if (!okv) throw new Error('hunt: view "' + v + '" is unreachable from the nav');
+      if (!has) throw new Error('hunt: view "' + v + '" opened EMPTY — router with no content behind it');
+    }
+    report.hunt.views = painted;
+    await openView('dashboard');
+    await shotScreen('20-hunt-sweep');
+
     step('soak: ' + SOAK + ' nav cycles leak no errors and never crash');
     const base = { errs: report.consoleErrors.length, exc: report.exceptions.length };
     const cycViews = ['dashboard', 'activity', 'swap', 'send', 'deploy', 'settings', 'dashboard'];

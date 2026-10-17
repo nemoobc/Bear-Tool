@@ -636,6 +636,20 @@ test('tabs: multi-tab lives on its own WebView and the last tab can never be clo
   assert.match(java, /destroy\(\)/, 'tab yang ditutup melepas WebView-nya');
 });
 
+test('the wallet ✕ (closeTab PluginMethod) uses the SAME cleanup the panel ✕ uses, and closes on the last tab', () => {
+  // Regresi 39043467179/39047708057: mutan PluginCall menghapus tab dari
+  // list TANPA removeView/destroy — daftar mengecil, layar tetap menampilkan
+  // WebView mati, satu ✕ tak pernah menutup apa pun.
+  assert.match(java, /public void closeTab\(PluginCall call\) \{[^}]*Integer idx = call\.getInt\("index"\);\s*\n\s*getActivity\(\)\.runOnUiThread\(\(\) -> \{\s*\n\s*if \(idx == null \|\| idx < 0 \|\| idx >= tabs\.size\(\)\) \{ call\.reject\("bad index"\); return; \}/,
+    'metode wallet ✕ memvalidasi index sebelum menyentuh daftar tab');
+  assert.match(java, /public void closeTab\(PluginCall call\) \{[\s\S]*?if \(stack != null\) stack\.removeView\(t\.wrap\);[\s\S]*?try \{ t\.view\.destroy\(\); \} catch \(Throwable ignore\)/,
+    'wallet-✕ membersihkan WebView seperti panel-✕ (removeView + destroy, bukan mutan)');
+  assert.match(java, /public void closeTab\(PluginCall call\) \{[\s\S]*?if \(!tabs\.isEmpty\(\)\) \{[\s\S]*?setActiveTab\(activeTab\);[\s\S]*?openTabPanel\(\);[\s\S]*?\} else \{[\s\S]*?activeTab = -1;[\s\S]*?doClose\(\);[\s\S]*?dappView = null;/,
+    'tab terakhir dari wallet = sesi benar-benar selesai: browser hilang, tak bisa dihidupkan ulang');
+  assert.match(java, /walletCommand\("browserClosed", ""\);\s*\n\s*call\.resolve\(null\);/,
+    'wallet selalu diberi tahu merender ulang pintu Browser-nya (badge turun atau pintu hilang)');
+});
+
 test('the toolbar exposes native controls the E2E (and a real user) can reach', () => {
   assert.match(java, /\.setContentDescription\("dapp-tabs"\)/, 'tombol tabs berlabel');
   assert.match(java, /\.setContentDescription\("dapp-tab-new"\)/, 'tombol tab baru berlabel');
@@ -1040,8 +1054,8 @@ test('closing the native browser repaints the DApps tabs entry underneath', () =
   // re-report 2026-10-16).
   assert.match(java, /walletCommand\("browserClosed", ""\)/,
     'doClose/doBack memberitahu wallet');
-  assert.equal((java.match(/walletCommand\("browserClosed", ""\)/g) || []).length, 2,
-    'kedua jalur keluar: tombol ✕ dan back tanpa history');
+  assert.equal((java.match(/walletCommand\("browserClosed", ""\)/g) || []).length, 3,
+    'tiga jalur keluar: tombol ✕, back tanpa history, dan wallet-✕ penutup tab');
   assert.match(code, /if \(cmd === 'browserClosed'\)/);
   assert.match(code, /refreshView\('dapps'\)/,
     'wallet merender ulang DApps view — entry tabs muncul tanpa pindah view');
