@@ -648,6 +648,12 @@ test('the wallet ✕ (closeTab PluginMethod) uses the SAME cleanup the panel ✕
     'tab terakhir dari wallet = sesi benar-benar selesai: browser hilang, tak bisa dihidupkan ulang');
   assert.match(java, /walletCommand\("browserClosed", ""\);\s*\n\s*call\.resolve\(null\);/,
     'wallet selalu diberi tahu merender ulang pintu Browser-nya (badge turun atau pintu hilang)');
+  // THE root cause stays forbidden forever, not just to fix it once:
+  const javaCode = java.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.doesNotMatch(javaCode, /tabs\.remove\(idx\)/,
+    'removal dengan Integer mengikuti jalur untuk menghapus(Object) — daftar Tab tidak pernah memuat Integer, munakah tidak pernah hilang, ✕ tidak pernah menutup');
+  assert.match(javaCode, /\.remove\(at\)/,
+    'penutation yang benar-benar unboxed int: List.remove(int-by-index) yang sebenarnya');
 });
 
 test('the toolbar exposes native controls the E2E (and a real user) can reach', () => {

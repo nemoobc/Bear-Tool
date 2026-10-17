@@ -1717,19 +1717,17 @@ private void toggleBookmark(String url) { walletCommand("toggleBookmark", url); 
         Integer idx = call.getInt("index");
         getActivity().runOnUiThread(() -> {
             if (idx == null || idx < 0 || idx >= tabs.size()) { call.reject("bad index"); return; }
-            Tab t = tabs.remove(idx);
-            // The wallet ✕ used to be a mutant of the panel path: it removed
-            // the tab from the list but left the WebView attached to the
-            // stack (no removeView, no destroy) and mis-settled activeTab —
-            // the list shrank while the screen still showed the dead view
-            // (emulator runs 39043467179/39047708057: one ✕ never closed a
-            // tab). One path now serves both callers: strip rows (this) and
-            // the panel's per-tab ✕ (internal closeTab(i)) keep the same
-            // cleanup and activeTab arithmetic.
+            // EXPLICIT unbox — this line is the whole bug: with an Integer in
+            // hand, tabs.remove(idx) binds List.remove(Object) and matches
+            // NOTHING (a Tab list holds no Integer), returns false, shrinks
+            // nothing. Every silent ✕ on every device came from this one
+            // overload choice. Primitive int brings remove(int)-by-index back.
+            final int at = idx;
+            Tab t = tabs.remove(at);
             if (stack != null) stack.removeView(t.wrap);
             try { t.view.destroy(); } catch (Throwable ignore) { /* already gone */ }
-            if (activeTab > idx) activeTab -= 1;
-            else if (activeTab == idx) activeTab = Math.min(idx, tabs.size() - 1);
+            if (activeTab > at) activeTab -= 1;
+            else if (activeTab == at) activeTab = Math.min(at, tabs.size() - 1);
             if (!tabs.isEmpty()) {
                 setActiveTab(activeTab);
                 openTabPanel();   // rebuild the sheet with the new set (panel parity)
