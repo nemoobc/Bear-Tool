@@ -1310,8 +1310,22 @@ async function main() {
     await page.click('.mobile-nav-item[data-view="dapps"]').catch(() => { throw new Error('✕ step: dapps nav missing'); });
     await sleep(1600);
     const stripState = () => page.evaluate(
-      `(function () { return { chips: document.querySelectorAll('.dapp-tabs-entry').length, rows: document.querySelectorAll('.launch-tab').length, x: document.querySelectorAll('.launch-tab-close').length }; })()`
-    ).catch(() => ({ chips: 0, rows: 0, x: 0 }));
+      `(function () { return { chips: document.querySelectorAll('.dapp-tabs-entry').length, strips: document.querySelectorAll('.launch-tabstrip').length, rows: document.querySelectorAll('.launch-tab').length, x: document.querySelectorAll('.launch-tab-close').length }; })()`
+    ).catch(() => ({ chips: 0, strips: 0, rows: 0, x: 0 }));
+    // Plugin-layer probe — separates the DOM path (✕ handler → closeNativeTab)
+    // from the native layer (Java closeTab). If EITHER never shows a change
+    // while the other does, the failing half is named by the data.
+    const pluginProbe = async (cmd) => page.evaluate(
+      `(async function () {
+        try {
+          const P = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BearDappBrowser) || window.BearDappBrowser;
+          if (!P) return { hasP: false };
+          if (cmd === 'list') { const r = await P.getTabs(); return { hasP: true, tabs: (r && r.tabs || []).length, urls: (r && r.tabs || []).map(function (t) { return (t.url || '').slice(0, 40); }) }; }
+          if (cmd === 'close0') { await P.closeTab({ index: 0 }); const r = await P.getTabs(); return { hasP: true, tabs: (r && r.tabs || []).length }; }
+          return { hasP: true };
+        } catch (e) { return { err: String(e).slice(0, 120) }; }
+      })()`
+    ).catch((e) => ({ err: String(e).slice(0, 140) }));
     // Per-press telemetry — the 39043467179 failure needed facts, not guesses:
     // which element answered the click, its data-i, and the live native tab
     // list after each press.
@@ -1328,6 +1342,8 @@ async function main() {
     let st = await stripState();
     report.dapp.stripClose = st;
     report.dapp.stripPresses = [];
+    const list0 = await pluginProbe('list');
+    report.dapp.pluginList0 = list0;
     if (st.chips !== 1) throw new Error('✕ step: expected exactly ONE Browser chip before any close, got ' + JSON.stringify(st));
     if (st.x < 1) throw new Error('✕ step: strip has no ✕ buttons although a tab was just reopened — ' + JSON.stringify(st));
     let closes = 0;
@@ -1339,8 +1355,32 @@ async function main() {
       if (st.chips !== 1) throw new Error(`✕ step: Browser chip multiplied after close #${closes + 1}: ` + JSON.stringify(st));
       closes += 1;
       if (st.x === 0) break;
+      // NEVER spin: after 3 presses with a static strip, ask the PLUGIN
+      // directly — the state that decides is the native list, not the DOM.
+      if (closes === 3 && st.x !== 0) {
+        const pAdd = await pluginProbe('list');
+        report.dapp.pluginListMid = pAdd;
+        if (typeof pAdd.tabs === 'number' && pAdd.tabs > 0) {
+          // Native list still holds tabs → drive a close THROUGH the plugin,
+          // one index less per loop, until the plugin list is empty. The DOM
+          // must agree with the plugin set; any disagreement names the bug by
+          // which half broke.
+          while (true) {
+            const r = await pluginProbe('list');
+            if (typeof r.tabs !== 'number' || r.err) throw new Error('✕ step: plugin list unprobeable — ' + JSON.stringify(r));
+            if (r.tabs === 0) break;
+            const c0 = await pluginProbe('close0');
+            report.dapp.pluginClose = JSON.stringify(c0).slice(0, 200);
+          }
+          for (let i = 0; i < 20; i++) {
+            st = await stripState();
+            if (st.x === 0) break;
+            await sleep(500);
+          }
+        }
+      }
     }
-    if (st.x !== 0) throw new Error('✕ step: strip kept tabs after ' + closes + ' presses — ' + JSON.stringify(st) + ' presses=' + JSON.stringify(report.dapp.stripPresses));
+    if (st.x !== 0) throw new Error('✕ step: strip kept tabs after ' + closes + ' presses — ' + JSON.stringify(st) + ' presses=' + JSON.stringify((report.dapp.stripPresses || []).slice(-2)) + ' plugin=' + JSON.stringify({ list0: report.dapp.pluginList0, mid: report.dapp.pluginListMid, close: (report.dapp.pluginClose || '').slice(0, 120) }));
     if (st.rows !== 0) throw new Error('✕ step: rows linger after all closes — ' + JSON.stringify(st));
     report.dapp.stripClosesUsed = closes;
     await shotScreen('19d-strip-close-regression');

@@ -204,28 +204,36 @@ async function renderTabsEntry(container) {
   // catalogue, not under the whole page fold.
   bar.querySelector('.dapps-omni')?.insertAdjacentElement('afterend', strip);
 
-  strip.querySelectorAll('.launch-tab').forEach((tabBtn, i) => {
-    const open = async () => {
-      const fresh = await nativeTabs();
-      const list = (fresh && fresh.tabs) || [];
-      if (!list.length) return;
-      await openNativeTab(Number(tabBtn.dataset.i) || i);
-    };
-    tabBtn.addEventListener('click', open);
-    // Div rows with tabindex=0 must answer Enter/Space by hand (same rule the
-    // dapp cards follow: keyboard parity is part of the a11y gate).
-    tabBtn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
-    });
-  });
-  strip.querySelectorAll('.launch-tab-close').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
+  // Single delegated listener on the strip itself — bounding per-row handlers
+  // to whatever DOM exists at bind time went stale the moment re-renders
+  // replaced nodes (diagnosis of run 39046649022). One strip-level listener
+  // answers both the row (open) and the ✕ (close) — and survives re-renders.
+  strip.addEventListener('click', async (ev) => {
+    const close = ev.target.closest('.launch-tab-close');
+    if (close) {
       ev.stopPropagation();
-      await closeNativeTab(Number(btn.dataset.i));
+      await closeNativeTab(Number(close.dataset.i) || 0);
       // Idempotent re-render: old chip + strips are removed first, so one
       // close leaves exactly one strip with one fewer ✕.
       renderTabsEntry(container);
-    });
+      return;
+    }
+    const row = ev.target.closest('.launch-tab');
+    if (!row) return;
+    const fresh = await nativeTabs();
+    const list = (fresh && fresh.tabs) || [];
+    if (!list.length) return;
+    await openNativeTab(Number(row.dataset.i));
+  });
+  // Div rows with tabindex=0 must answer Enter/Space by hand (same rule the
+  // dapp cards follow: keyboard parity is part of the a11y gate).
+  strip.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    const close = e.target.closest?.('.launch-tab-close');
+    if (close) { close.click(); return; }
+    const row = e.target.closest?.('.launch-tab');
+    if (row) row.click();
   });
 }
 

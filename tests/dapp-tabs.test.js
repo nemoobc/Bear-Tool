@@ -28,9 +28,9 @@ test('dApp browser tab strip: closeNativeTab exposed + renderTabsEntry builds th
     'tab strip rendered (horizontal strip of tab cards)');
   assert.match(dapps, /class="launch-tab-close"/,
     'close button on every tab card');
-  assert.match(dapps, /closeNativeTab\(Number\(btn\.dataset\.i\)\)/,
+  assert.match(dapps, /closeNativeTab\(Number\(close\.dataset\.i\)/,
     'tab close wired to the native plugin (exact tab index from the pressed row)');
-  assert.match(dapps, /openNativeTab\(Number\(tabBtn\.dataset\.i\)/,
+  assert.match(dapps, /openNativeTab\(Number\(row\.dataset\.i\)/,
     'tab open wired to the native plugin (exact tab index from the pressed row)');
   assert.match(dapps, /info\.active/,
     'active tab highlighted');
