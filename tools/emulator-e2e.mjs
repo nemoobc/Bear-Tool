@@ -1531,126 +1531,34 @@ async function main() {
     report.anvilStage = { reachable: false, note: 'no anvil on host — stage skipped' };
   }
 
-  step('dex: the launchpad is reachable and paints its shell');
+  // ── Dex v2: the shell is reachable and honest (rebuilt from 0) ────────────
+  // The 2026-10-17 order: delete the dex and rebuild it from zero until
+  // mature. The old journey (welcome gate → feed scopes → launch form) died
+  // with the 27 legacy modules it belonged to. Milestone 1 pins the fresh
+  // surface: the nav lands on the view, #dexRoot is painted by renderDex
+  // (not just the React static shell), and the state card shows its three
+  // honest rows. Later milestones pin their own surfaces at this exact spot.
+  step('dex: the nav lands on the fresh v2 shell and paints its state');
   if (!(await openView('dex'))) {
-    die('Dex: tidak terjangkau dari HP — tidak ada slot bar bawah maupun quick action yang membukanya');
-    throw new Error('dex unreachable from the phone');
+    report.dexView = 'no-host';
+    die('dex unreachable from the phone');
   }
   await page.wait('#dexRoot', 12000).catch(() => {});
-  await sleep(600);
-  const shellInfo = await page.evaluate(`(() => {
-    const root = document.querySelector('#dexRoot');
-    return JSON.stringify({
-      hasRoot: !!root,
-      rootLen: root ? (root.innerText || '').trim().length : -1,
-      welcome: !!document.querySelector('#dexWelcome:not([hidden])'),
-      startBtn: !!document.querySelector('#dexStartHere'),
-      host: !!document.querySelector('#dexPanelHost'),
-      gate: !!document.querySelector('#dexGate:not([hidden])'),
-    });
-  })()`).catch(() => 'evaluate-failed');
-  report.dexShell = shellInfo;
-  if (String(shellInfo) === 'evaluate-failed') die('Dex: tidak bisa membaca #dexRoot');
-  if (String(shellInfo).includes('"hasRoot":false')) die('Dex: #dexRoot tidak ada — shell view tidak dirender');
-  if (String(shellInfo).includes('"rootLen":0')) die('Dex: #dexRoot kosong — renderDex() tidak melukis apa pun');
-  await page.shot('31-dex-welcome');
+  const dexShell = await page.evaluate(`JSON.stringify({
+    hasRoot: !!document.querySelector('#dexRoot'),
+    rootLen: (((document.querySelector('#dexRoot') || {}).innerText) || '').trim().length,
+    stateCard: !!document.querySelector('#dexState'),
+    rows: document.querySelectorAll('#dexState [data-dex-row]').length,
+    engine: ((document.querySelector('#dexEngineState') || {}).innerText || ''),
+  })`).catch(() => 'evaluate-failed');
+  report.dexShell = dexShell;
+  await page.shot('31-dex-shell');
+  if (String(dexShell) === 'evaluate-failed') die('Dex: tidak bisa membaca #dexRoot');
+  if (String(dexShell).includes('"hasRoot":false')) die('Dex: #dexRoot tidak ada — shell view tidak dirender');
+  if (String(dexShell).includes('"rootLen":0')) die('Dex: #dexRoot kosong — renderDex() tidak melukis apa pun');
+  if (String(dexShell).includes('"stateCard":false')) die('Dex: kartu state tidak dirender');
+  if ((JSON.parse(dexShell) || {}).rows < 3) die('Dex: baris state kurang dari tiga (jaringan/dompet/mesin)');
 
-  // First visit shows the welcome card and nothing else (deliberate: the
-  // workspace is hidden until the user says they are ready). Pass it the way a
-  // user does, then the feed chrome must be there.
-  step('dex: the welcome gate opens the workspace, and the feed has its tabs');
-  if (String(shellInfo).includes('"startBtn":true')) {
-    await jsClick('#dexStartHere');
-    await sleep(800);
-  }
-  const welcomeGone = await page.evaluate(
-    `!document.querySelector('#dexWelcome') || document.querySelector('#dexWelcome').hidden === true`
-  ).catch(() => false);
-  if (!welcomeGone) die('Dex: tombol "Start here" tidak menutup kartu sambutan — workspace tak pernah terbuka');
-
-  // The Sepolia gate dims the whole panel AND sets pointer-events:none on it, so
-  // a JS .click() below would fire a handler that a finger could not reach —
-  // a false pass of exactly the kind this driver keeps getting bitten by. The
-  // gate ships its own way out (#dexGateGo → setTestnetVisible + activateNetwork),
-  // so take it, and RECORD whether it landed instead of pretending it did.
-  const gateUp = String(shellInfo).includes('"gate":true');
-  let gateCleared = !gateUp;
-  if (gateUp) {
-    await jsClick('#dexGateGo');
-    for (let i = 0; i < 32; i++) {
-      gateCleared = await page.evaluate(
-        `!document.querySelector('#dexGate') || document.querySelector('#dexGate').hidden === true`
-      ).catch(() => false);
-      if (gateCleared) break;
-      await sleep(250);
-    }
-    report.dexGate = { gateUp: true, cleared: gateCleared };
-    await page.shot('31b-dex-gate');
-  }
-
-  // Wait for the panel, then for the scope tabs. The feed paints the tabs on
-  // its first synchronous pass, so a missing tab after this wait is a real
-  // structural failure rather than a race.
-  await page.wait('#dexPanelHost', 12000).catch(() => {});
-  let tabs = 0;
-  let hiddenTab = false;
-  let scopes = [];
-  let coinCards = 0;
-  for (let i = 0; i < 40; i++) {
-    const snap = await page.evaluate(`JSON.stringify({
-      tabs: document.querySelectorAll('#dexPanelHost [data-dex-scope]').length,
-      hidden: !!document.querySelector('#dexPanelHost [data-dex-scope="hidden"]'),
-      scopes: Array.from(document.querySelectorAll('#dexPanelHost [data-dex-scope]')).map((b) => b.dataset.dexScope),
-      cards: document.querySelectorAll('#dexPanelHost [data-dex-token]').length,
-      text: (document.querySelector('#dexPanelHost') || {}).innerText ? (document.querySelector('#dexPanelHost').innerText || '').trim().length : 0,
-    })`).catch(() => '{}');
-    const o = JSON.parse(snap || '{}');
-    tabs = o.tabs || 0; hiddenTab = !!o.hidden; scopes = o.scopes || []; coinCards = o.cards || 0;
-    if (tabs > 0) break;
-    await sleep(250);
-  }
-  report.dex = { shell: shellInfo, tabs, hiddenTab, scopes, coinCards, gateUp, gateCleared };
-  await page.shot('32-dex-feed');
-  if (!tabs) die('Dex: #dexPanelHost tidak punya satu pun scope tab — feed tidak ter-render');
-  // The delisting UX changed on user order ("bener² hapus coin bukan hide coin",
-  // APK 2026-10-15): delete is real — the coin leaves the feed for good
-  // (tombstone, no restore path) and the Hidden tab is GONE by design. The old
-  // check demanded that tab, so it failed against the design it had asked for.
-  // What must hold now: the two live scopes render, and no Hidden scope crept
-  // back — its return would mean hidden-coin delisting came back with it.
-  if (hiddenTab) die('Dex: tab Hidden muncul lagi — hapus coin harus nyata (tombstone), bukan delisting tersembunyi');
-  if (!scopes.includes('all') || !scopes.includes('mine')) {
-    die('Dex: scope feed tidak lengkap — butuh "all" + "mine", dapat: ' + JSON.stringify(scopes));
-  }
-
-  // The launch form is a second screen of the same view. It must open from the
-  // feed and paint its own fields — a control that exists in source but cannot
-  // be reached is not a feature.
-  step('dex: the launch form opens from the feed');
-  const createOpened = await jsClick('#dexGoCreate');
-  if (!createOpened) die('Dex: tombol "+ Create Token" tidak ada di feed');
-  await sleep(900);
-  const createInfo = await page.evaluate(`JSON.stringify({
-    host: (document.querySelector('#dexPanelHost') || {}).innerText ? (document.querySelector('#dexPanelHost').innerText || '').trim().length : 0,
-    fields: document.querySelectorAll('#dexPanelHost input, #dexPanelHost textarea, #dexPanelHost select').length,
-    back: !!document.querySelector('#dexPanelHost [data-dex-back], #dexPanelHost .dex-back'),
-  })`).catch(() => '{}');
-  report.dexCreate = createInfo;
-  // Say out loud when this tap could not have been a finger: the gate dims the
-  // panel and disables pointer events, so the click below proves the FORM is
-  // wired, not that a user could have reached it.
-  report.dexCreateSynthetic = !gateCleared;
-  await page.shot('33-dex-create');
-  if (!String(createInfo).includes('"fields"') || JSON.parse(createInfo || '{}').fields === 0) {
-    die('Dex: form launch terbuka tanpa satu pun input — tidak ada yang bisa diterbitkan');
-  }
-
-  // ── Tools: the sponsor picker must not be an empty box ────────────────────
-  // Live bug report 2026-10-14 ("fitur tools list sponsor wallet kosong"): the
-  // picker was filled only at boot — before a fresh install has any wallet —
-  // and entering the view never refilled it. A wallet exists by now (this run
-  // created and confirmed one), so the box must be populated. This is the
-  // end-to-end proof of the fix, on a device, not in jsdom.
   step('tools: the sponsor wallet picker lists the wallets we actually have');
   if (await openView('deploy')) {
     await sleep(1200);

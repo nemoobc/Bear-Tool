@@ -58,16 +58,16 @@ test('a folder feature must never be dropped by the build again', (t) => {
   }
 
   // Read the Dex module list off disk rather than repeating it here. A
-  // hardcoded list is a list that goes stale: bot.js, bot-engine.js,
-  // bot-wallets.js and list.js were all added after this gate was written, and
-  // a build that silently dropped the whole market maker would have passed it
-  // every single run. The gate has to fail when a NEW module is missing, which
-  // it cannot do if it does not know the new module exists.
+  // hardcoded list is a list that goes stale — exactly how the old launchpad
+  // collection was pinned. The floor tracks the milestone the build is in:
+  // M1 rebuilt the Dex from zero (2 modules: core.js + index.js) and every
+  // later milestone (swap, pools, launch, bot) must raise this floor, not
+  // silently sit under it.
   const sourceModules = readdirSync(join(rootDir, 'js/dex'))
     .filter((f) => f.endsWith('.js'))
     .sort();
-  assert.ok(sourceModules.length >= 10,
-    `js/dex should hold the whole launchpad; found only ${sourceModules.length}`);
+  assert.ok(sourceModules.length >= 2,
+    `js/dex should hold the fresh engine (M1: core + index); found only ${sourceModules.length}`);
   for (const f of sourceModules) {
     assert.ok(existsSync(`${distDir}/js/dex/${f}`),
       `dist/js/dex/${f} is missing — every module in js/dex must reach the APK`);
@@ -86,16 +86,16 @@ test('the built Dex carries the feature, not just the folder', (t) => {
     return;
   }
   const index = readFileSync(`${distDir}/js/dex/index.js`, 'utf8');
-  const tokens = readFileSync(`${distDir}/js/dex/tokens.js`, 'utf8');
   const css = readFileSync(`${distDir}/css/dex.css`, 'utf8');
 
   // A stale dist/ is worse than none: the folder present but the old code inside
-  // is exactly the failure that shipped. So assert the CURRENT behaviour.
-  assert.match(index, /DEX_ROUTES/, 'the built view must be the v2 route list');
-  assert.match(tokens, /dex-card/, 'the built feed must be the card grid');
-  assert.match(tokens, /quotePerToken/, 'the built feed must price rows from the pool');
-  assert.ok(css.includes('.dex-card'), 'the built CSS must style the cards');
-  assert.ok(css.includes('.dex-card-price'), 'the built CSS must style the price row');
+  // is exactly the failure that shipped. So assert the CURRENT behaviour —
+  // M1 of the rebuilt engine: renderDex paints the honest state card into the
+  // root, and the stylesheet actually styles it.
+  assert.match(index, /renderDex/, 'the built entry must still be the renderDex contract');
+  assert.match(index, /dexState/, 'the built view must paint the honest state card');
+  assert.ok(css.includes('.dex-state'), 'the built CSS must style the state card');
+  assert.ok(css.includes('.dex-row'), 'the built CSS must style the state rows');
 });
 
 test('the copy step is recursive, by construction', () => {
