@@ -2237,6 +2237,15 @@ async function main() {
     await sleep(700);
     if (!(await page.evaluate('!!document.getElementById("confirmYes")'))) throw new Error('hunt: deleting a wallet never showed its confirm sheet');
     await page.click('#confirmYes');
+    await sleep(800);
+    // Deleting asks for the password AFTER the confirm sheet (key removal is
+    // gated too): confirm → promptPassword → deleteAccount → repaint. The old
+    // step stopped at the confirm and then counted a password prompt with no
+    // [data-acc] rows in it — "delete left 0 wallets".
+    if (await page.evaluate('!!document.getElementById("pwInput")')) {
+      await page.type('#pwInput', WALLET_PW);
+      await page.click('#pwOk');
+    }
     await sleep(1400);
     const rows2 = await page.evaluate('document.querySelectorAll("[data-acc]").length');
     report.hunt.rowsAfterDelete = rows2;
