@@ -353,45 +353,146 @@ export function ensureTokenLogos(tokens, chainId) {
 // Extracted from app.js so the network modal and every network picker render
 // the SAME brand marks — the Bridge chain pickers showed the raw emoji
 // .icon field instead, which never matched the list. One renderer, by construction.
-export function getNetworkLogo(name, size = 24) {
-  const n = (name || '').toLowerCase();
-  // Ethereum — blue diamond
-  if (n === 'ethereum' || n === 'eth') {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/></svg>`;
+//
+// 2026-10-18 (user report "list network ga ada logo"): the marks keyed on the
+// lowercase NAME only — a chain renamed slightly ("BNB Smart Chain" vs
+// "bnb", a fork named "Ethereum Llama") fell through to a blank satellite,
+// and user-added chains got nothing branded at all. Input is now EITHER a
+// network-like object ({ name, chainId, type }) — preferred: the chain id
+// pins the brand (ids never drift; names do) and the type drives the
+// testnet ring — or a bare name for legacy callers. Unknown chains get a
+// MONOGRAM roundel hashed from their chain id (colors deterministic, letter
+// from the name, green T ring on testnets): a logo appears automatically for
+// every network the user can add, never an emoji.
+const T_BADGE = '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>';
+
+// Chain id → brand kind. Addresses the registry's own chains plus the
+// chainlist majors users actually add; ids are stable, so this is the
+// truth-table for everything the list can hold.
+const BRAND_BY_ID = new Map([
+  [1, 'eth'], [5, 'eth'], [11155111, 'eth'], [17000, 'eth'], [560048, 'eth'],
+  [56, 'bnb'], [97, 'bnb'],
+  [137, 'pol'], [80001, 'pol'], [80002, 'pol'],
+  [10, 'op'], [11155420, 'op'],
+  [42161, 'arb'], [421614, 'arb'],
+  [8453, 'base'], [84532, 'base'],
+  [43114, 'avax'], [43113, 'avax'],
+  [100, 'gno'], [42220, 'celo'], [146, 'sonic'],
+  [59144, 'linea'], [59140, 'linea'],
+  [534352, 'scroll'], [534351, 'scroll'],
+  [250, 'ftm'],
+]);
+
+const escAttr = (s) => String(s).replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
+// FNV-1a → hue 0..359. Deterministic across sessions and devices: the same
+// chain id always yields the same color, so a user's list looks stable.
+function hueFor(seed) {
+  let h = 2166136261;
+  const s = String(seed == null ? '' : seed);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
-  // Sepolia — blue diamond with S
-  if (n === 'sepolia') {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/><text x="12" y="15" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">S</text></svg>`;
+  return Math.abs(h) % 360;
+}
+
+// The monogram roundel — the automatic mark for user-added chains.
+function monogram(net, size) {
+  const name = String(net.name || '');
+  const id = Number(net.chainId) || 0;
+  const hue = hueFor(id || name || 'chain');
+  const letter = (name.trim()[0] || '?').toUpperCase();
+  const isTest = net.type === 'testnet' || /\btest|sepolia|amoy|goerli|holesky|fuji|hoodi/i.test(name);
+  const body = `<circle cx="12" cy="12" r="11" fill="hsl(${hue}, 62%, 46%)"/>`
+    + `<text x="12" y="16.5" text-anchor="middle" fill="white" font-size="10" font-weight="800" font-family="Arial">${escAttr(letter)}</text>`
+    + (isTest ? T_BADGE : '');
+  return wrapBrand(body, size, name || 'Network');
+}
+
+function wrapBrand(body, size, label) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" role="img" aria-label="${escAttr(label)}">${body}</svg>`;
+}
+
+// Brand marks, one function per kind. The type badge rides on the object's
+// type when supplied; a testnet-sounding NAME carries the ring too (legacy
+// name-only callers).
+function brandSvg(kind, size, net) {
+  const name = String((net && net.name) || '').toLowerCase();
+  const type = String((net && net.type) || '').toLowerCase();
+  const isTest =
+    type === 'testnet'
+    || (kind !== 'eth' && (name.includes('sepolia') || name.includes('testnet') || name.includes('amoy')))
+    || (kind === 'eth' && (name === 'sepolia' || name.includes('holesky') || name.includes('hoodi')));
+  const badge = isTest ? T_BADGE : '';
+  switch (kind) {
+    case 'eth':
+      return wrapBrand(`<path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/>${badge}`, size, 'Ethereum');
+    case 'bnb':
+      return wrapBrand(`<path d="M12 2L2 12l10 10 10-10z" fill="#F0B90B"/><path d="M8 9h8l-4 6z" fill="#2D2A32"/><path d="M8 9l4-4 4 4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 15l4 4 4-4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/>${badge}`, size, 'BNB Chain');
+    case 'pol':
+      return wrapBrand(`<polygon points="12,1 21,6.5 21,17.5 12,23 3,17.5 3,6.5" fill="#8247E5"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">POL</text>${badge}`, size, 'Polygon');
+    case 'op':
+      return wrapBrand(`<circle cx="12" cy="12" r="11" fill="#FF0420"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">OP</text>${badge}`, size, 'OP Mainnet');
+    case 'base':
+      return wrapBrand(`<circle cx="12" cy="12" r="11" fill="#0052FF"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="9" font-weight="800" font-family="Arial">B</text>${badge}`, size, 'Base');
+    case 'arb':
+      return wrapBrand(`<circle cx="12" cy="12" r="11" fill="#28A0F0"/><path d="M8 16l4-10 4 10" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 13h5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/>${badge}`, size, 'Arbitrum');
+    case 'avax':
+      return wrapBrand(`<polygon points="12,2 2,22 22,22" fill="#E84142"/><text x="12" y="18" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">AVAX</text>${badge}`, size, 'Avalanche');
+    case 'gno':
+      return wrapBrand(`<circle cx="12" cy="12" r="11" fill="#062021"/><text x="12" y="16" text-anchor="middle" fill="#30E58D" font-size="8" font-weight="800" font-family="Arial">G</text>${badge}`, size, 'Gnosis');
+    case 'celo':
+      return wrapBrand(`<circle cx="12" cy="12" r="11" fill="#FCFF04"/><text x="12" y="16" text-anchor="middle" fill="#111111" font-size="8" font-weight="800" font-family="Arial">C</text>${badge}`, size, 'Celo');
+    case 'sonic':
+      return wrapBrand(`<circle cx="12" cy="12" r="11" fill="#0D0D0D" stroke="rgba(255,255,255,0.35)" stroke-width="1"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">S</text>${badge}`, size, 'Sonic');
+    case 'linea':
+      return wrapBrand(`<circle cx="12" cy="12" r="11" fill="#12141C" stroke="rgba(255,255,255,0.35)" stroke-width="1"/><text x="12" y="16" text-anchor="middle" fill="#B1F510" font-size="8" font-weight="800" font-family="Arial">L</text>${badge}`, size, 'Linea');
+    case 'scroll':
+      return wrapBrand(`<circle cx="12" cy="12" r="11" fill="#EBC28E"/><text x="12" y="16" text-anchor="middle" fill="#31210B" font-size="7" font-weight="800" font-family="Arial">SC</text>${badge}`, size, 'Scroll');
+    case 'ftm':
+      return wrapBrand(`<circle cx="12" cy="12" r="11" fill="#13B5EC"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">F</text>${badge}`, size, 'Fantom');
+    case 'sepolia-x':
+      return wrapBrand(`<path d="M12 2L5 12l7 10 7-10z" fill="#627EEA"/><path d="M12 2L5 12l7 10" fill="#8B9FE8" opacity="0.7"/><text x="12" y="15" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">S</text>${badge}`, size, 'Sepolia');
+    default:
+      return monogram(net, size);
   }
-  // Arbitrum — blue circle with A chevron
-  if (n.includes('arbitrum')) {
-    const isTest = n.includes('sepolia');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#28A0F0"/><path d="M8 16l4-10 4 10" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 13h5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+}
+
+export function getNetworkLogo(input, size = 24) {
+  // Accept the object form ({ name, chainId, type }) preferred by every
+  // caller that holds a real network, and the bare-name form for legacy
+  // callers (empty → honest "network" mark, never a crash).
+  const net = input && typeof input === 'object'
+    ? input
+    : { name: input };
+  const name = String(net.name || '').toLowerCase();
+  const kindFromId = BRAND_BY_ID.get(Number(net.chainId));
+  if (kindFromId) return brandSvg(kindFromId, size, net);
+
+  // Name-keyword fallback — the historical matchers, preserved so legacy
+  // name-only callers keep their exact marks.
+  if (name === 'ethereum' || name === 'eth' || name === 'ethereum mainnet') {
+    return brandSvg('eth', size, net);
   }
-  // Optimism — red circle with OP
-  if (n.includes('optimism') || n === 'op mainnet' || n === 'op sepolia') {
-    const isTest = n.includes('sepolia');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#FF0420"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="8" font-weight="800" font-family="Arial">OP</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
+  if (name === 'sepolia') {
+    return brandSvg('sepolia-x', size, { ...net, type: net.type || 'testnet' });
   }
-  // Base — blue circle with B
-  if (n === 'base' || n === 'base sepolia') {
-    const isTest = n.includes('sepolia');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#0052FF"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="9" font-weight="800" font-family="Arial">B</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
-  }
-  // Polygon — purple hexagon
-  if (n.includes('polygon') || n === 'amoy') {
-    const isTest = n.includes('amoy');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,1 21,6.5 21,17.5 12,23 3,17.5 3,6.5" fill="#8247E5"/><text x="12" y="16" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">POL</text>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
-  }
-  // BSC — yellow diamond
-  if (n.includes('bnb') || n.includes('bsc')) {
-    const isTest = n.includes('testnet');
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 2L2 12l10 10 10-10z" fill="#F0B90B"/><path d="M8 9h8l-4 6z" fill="#2D2A32"/><path d="M8 9l4-4 4 4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 15l4 4 4-4" fill="none" stroke="#2D2A32" stroke-width="1.5" stroke-linejoin="round"/>${isTest ? '<circle cx="19" cy="5" r="3.5" fill="#06D6A0" stroke="white" stroke-width="1.5"/><text x="19" y="6.5" text-anchor="middle" fill="white" font-size="5" font-weight="800" font-family="Arial">T</text>' : ''}</svg>`;
-  }
-  // Avalanche — red triangle
-  if (n.includes('avalanche')) {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,2 2,22 22,22" fill="#E84142"/><text x="12" y="18" text-anchor="middle" fill="white" font-size="7" font-weight="800" font-family="Arial">AVAX</text></svg>`;
-  }
-  // Custom / unknown — satellite icon
-  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="10" fill="#9B5DE5"/><circle cx="12" cy="12" r="4" fill="white"/><line x1="12" y1="2" x2="12" y2="6" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="18" x2="12" y2="22" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="2" y1="12" x2="6" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/><line x1="18" y1="12" x2="22" y2="12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`;
+  if (name.includes('arbitrum')) return brandSvg('arb', size, net);
+  if (name.includes('optimism') || name === 'op mainnet' || name === 'op sepolia') return brandSvg('op', size, net);
+  if (name === 'base' || name === 'base sepolia') return brandSvg('base', size, net);
+  if (name.includes('polygon') || name === 'amoy') return brandSvg('pol', size, net);
+  if (name.includes('bnb') || name.includes('bsc')) return brandSvg('bnb', size, net);
+  if (name.includes('avalanche')) return brandSvg('avax', size, net);
+  if (name.includes('gnosis')) return brandSvg('gno', size, net);
+  if (name.includes('celo')) return brandSvg('celo', size, net);
+  if (name.includes('sonic')) return brandSvg('sonic', size, net);
+  if (name.includes('linea')) return brandSvg('linea', size, net);
+  if (name.includes('scroll')) return brandSvg('scroll', size, net);
+  if (name.includes('fantom')) return brandSvg('ftm', size, net);
+
+  // Unknown chain — the automatic monogram (was the blank satellite).
+  return brandSvg(null, size, net);
 }

@@ -302,9 +302,11 @@ test('E2E-probe: network icons share ONE renderer (bridge picker == network list
   assert.deepStrictEqual(defs, ['token-logo.js'],
     `getNetworkLogo must be defined exactly once (found: ${defs.join(', ')})`);
   const picker = fs.readFileSync(path.join(dir.pathname, 'token-picker.js'), 'utf8');
-  assert.match(picker, /getNetworkLogo\(n\.name, 18\)/,
+  // 2026-10-18: the whole net object travels in — the id pins the brand and
+  // the type adds the testnet ring; name-only matching missed renamed chains.
+  assert.match(picker, /getNetworkLogo\(n, 18\)/,
     'network picker rows must paint with getNetworkLogo (the list renderer)');
-  assert.match(picker, /getNetworkLogo\(n\.name, 16\)/,
+  assert.match(picker, /getNetworkLogo\(n, 16\)/,
     'network picker trigger must paint with getNetworkLogo (the list renderer)');
   assert.ok(!picker.includes("n.icon || '🛰️'"),
     'network picker must not fall back to the raw emoji .icon field');

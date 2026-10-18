@@ -1223,12 +1223,14 @@ export function updateTopbar() {
   const net = getNetworkById(get('networkId'));
   const pill = $('#networkPill');
   pill.className = 'network-pill ' + (net?.type || 'mainnet');
+  // The whole net object travels in: the id picks the brand, the type adds
+  // the testnet ring — a name alone no longer decides (user report: logos).
   const netLogoEl = pill.querySelector('.net-logo');
-  if (netLogoEl) netLogoEl.innerHTML = getNetworkLogo(net?.name, 18);
+  if (netLogoEl) netLogoEl.innerHTML = getNetworkLogo(net || {}, 18);
   else {
     const logoWrap = document.createElement('span');
     logoWrap.className = 'net-logo';
-    logoWrap.innerHTML = getNetworkLogo(net?.name, 18);
+    logoWrap.innerHTML = getNetworkLogo(net || {}, 18);
     pill.prepend(logoWrap);
   }
   // Remove the old .dot span if present
@@ -1773,7 +1775,7 @@ function netRow(n) {
   // the class is set per row because the tail is per row.
   return `<div class="asset-row${tail ? ' has-tail' : ''}" data-net="${escapeHtml(n.id)}" ${active}>
     <div class="net-logo-wrap">
-      <div class="net-logo">${getNetworkLogo(n.name, 32)}</div>
+      <div class="net-logo">${getNetworkLogo(n, 32)}</div>
       ${isCurrent
         ? `<span class="net-current-mark" role="img" aria-label="Current network — tapping it does nothing"
              title="Current network — tapping it does nothing">\u2713</span>`
@@ -1797,8 +1799,8 @@ function showAddNetworkModal() {
     <div class="asset-row asset-clickable chain-preset" role="button" tabindex="0"
          data-name="${escapeHtml(p.name)}" data-chain="${p.chainId}" data-type="${p.type}"
          data-symbol="${escapeHtml(p.symbol)}" data-rpc="${escapeHtml(p.rpc[0])}"
-         data-explorer="${escapeHtml(p.explorer || '')}" data-icon="${escapeHtml(p.icon || '🛰️')}">
-      <div class="net-logo" style="font-size:20px">${escapeHtml(p.icon || '🛰️')}</div>
+         data-explorer="${escapeHtml(p.explorer || '')}">
+      <div class="net-logo">${getNetworkLogo(p, 20)}</div>
       <div class="asset-info">
         <div class="asset-name">${escapeHtml(p.name)}</div>
         <div class="asset-symbol">Chain ${p.chainId} · ${escapeHtml(p.symbol)}</div>
@@ -1826,7 +1828,7 @@ function showAddNetworkModal() {
     <div id="cnForm" style="display:none">
       <hr class="mt-16 mb-16">
       <div class="asset-row" style="border-left:8px solid var(--mint)">
-        <div class="net-logo" id="cnIcon" style="font-size:20px">🛰️</div>
+        <div class="net-logo" id="cnIcon">${getNetworkLogo({ name: 'Custom network' }, 20)}</div>
         <div class="asset-info">
           <div class="asset-name" id="cnNameLabel">—</div>
           <div class="asset-symbol" id="cnChainLabel">—</div>
@@ -1868,10 +1870,14 @@ function showAddNetworkModal() {
       const known = presets.find((p) => Number(p.chainId) === chainId);
       picked = known
         ? { name: known.name, chainId, type: known.type, symbol: known.symbol,
-            rpc: [url], explorer: known.explorer, icon: known.icon, color: '#9B5DE5', decimals: 18 }
+            rpc: [url], explorer: known.explorer, icon: '', color: '#9B5DE5', decimals: 18 }
+        // The unknown chain gets its name FROM THE USER (below) — until then
+        // the type detector already sees what it is from the id alone, and
+        // the icon field stays empty on purpose: the preview chip paints the
+        // automatic SVG monogram keyed on the chain id.
         : { name: '', chainId, type: detectNetworkType(chainId, url), symbol: 'ETH', rpc: [url],
-            explorer: '', icon: '🛰️', color: '#9B5DE5', decimals: 18 };
-      $('#cnIcon').textContent = picked.icon;
+            explorer: '', icon: '', color: '#9B5DE5', decimals: 18 };
+      $('#cnIcon').innerHTML = getNetworkLogo(picked, 20);
       $('#cnNameLabel').textContent = known ? picked.name : `Chain ${chainId}`;
       $('#cnChainLabel').textContent = known
         ? `Chain ${chainId} · ${picked.symbol}`
@@ -1913,12 +1919,12 @@ function showAddNetworkModal() {
     clearTimeout(detectTimer); detectSeq++;   // drop any probe still in flight
     picked = {
       name: d.name, chainId: Number(d.chain), type: d.type, symbol: d.symbol,
-      rpc: [d.rpc], explorer: d.explorer, icon: d.icon, color: '#9B5DE5', decimals: 18
+      rpc: [d.rpc], explorer: d.explorer, icon: '', color: '#9B5DE5', decimals: 18
     };
     $('#cnNameField').style.display = 'none';
     $('#cnName').value = '';
     $('#cnDetect').textContent = '';
-    $('#cnIcon').textContent = d.icon;
+    $('#cnIcon').innerHTML = getNetworkLogo(picked, 20);
     $('#cnNameLabel').textContent = d.name;
     $('#cnChainLabel').textContent = t('net.chainLabel', { chain: d.chain, symbol: d.symbol });
     $('#cnRpc').value = d.rpc;
@@ -1996,7 +2002,14 @@ function showAddNetworkModal() {
       btn.disabled = false; btn.textContent = t('net.addNetwork');
     }
     // An unknown chain has no catalogue name, so the one the user typed is used.
-    if (custom && !picked.name) picked.name = displayName;
+    if (custom && !picked.name) {
+      picked.name = displayName;
+      // The name exists NOW, was typed after detection — the type must not stay
+      // frozen on the pre-name verdict ("Mango Test Chain" blended into the
+      // mainnets exactly this way, user report 2026-10-18). The id already
+      // proved itself above via eth_chainId.
+      picked.type = detectNetworkType(picked.chainId, rpc, displayName);
+    }
     addCustomNetwork({ ...picked, rpc: [rpc] });
     closeModal();
     toast(`${picked.name} added!`, 'success');
@@ -2929,7 +2942,7 @@ function renderEip7702Results(results) {
       .join('');
     return `<div class="eip7702-row">
       <div class="eip7702-head">
-        <span class="eip7702-net">${escapeHtml(n.icon || '⬡')} ${escapeHtml(n.name)}</span>
+        <span class="eip7702-net">${getNetworkLogo(n, 14)} ${escapeHtml(n.name)}</span>
         <span class="eip7702-pill eip7702-${cls}" data-status="${r.status}">${EIP7702_LABEL[r.status] || r.status}</span>
         <span class="small dim">${escapeHtml(r.detail || '')}</span>
       </div>

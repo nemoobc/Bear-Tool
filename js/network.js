@@ -559,14 +559,24 @@ export function isLoopbackRpc(rpcUrl) {
  * @param {string} [rpcUrl] loopback endpoints are dev nodes — including a
  *   mainnet FORK — and are labelled testnet regardless of the chain id.
  */
-export function detectNetworkType(chainId, rpcUrl) {
+export function detectNetworkType(chainId, rpcUrl, name = '') {
   if (isLoopbackRpc(rpcUrl)) return 'testnet';
   const id = Number(chainId);
   if (LOCAL_DEV_CHAIN_IDS.has(id)) return 'testnet';
-  // The app's own catalogues already carry a verdict per chain.
+  // The app's own catalogues already carry a verdict per chain — and a chain
+  // id is the chain's identity, so a KNOWN id wins even when a dApp sends a
+  // lying chainName with it.
   const known = NETWORKS.find(n => Number(n.chainId) === id)
     || CHAIN_PRESETS.find(p => Number(p.chainId) === id);
   if (known) return known.type;
+  // 2026-10-18 user report ("pas tambahin network testnet nyatu ke mainnet"):
+  // an UNKNOWN chain whose name says what it is must not blend into the
+  // mainnet section. Name verdicts are the safe direction — a testnet badge
+  // only ADDS caution to the user, never removes it. Mainnet markers win
+  // over testnet markers (a name claiming both is nonsense; trust "main").
+  const n = String(name || '').toLowerCase();
+  if (/\b(mainnet|main)\b/.test(n)) return 'mainnet';
+  if (/\b(test|testnet|tst|sepolia|goerli|holesky|amoy|fuji|shibuya|mumbai|hoodi|devnet|dev)\b/.test(n)) return 'testnet';
   if (TESTNET_CHAIN_IDS.has(id)) return 'testnet';
   return 'mainnet';
 }
@@ -603,9 +613,10 @@ export function isSafeRpcUrl(url) {
 
 export function addCustomNetwork(net) {
   const list = getCustomNetworks();
-  // Fallback type is DETECTED, not assumed mainnet.
+  // Fallback type is DETECTED, not assumed mainnet — and the NAME takes part
+  // in the verdict (2026-10-18: "Xyz Testnet" must not join the mainnets).
   list.push({ ...net, id: 'custom-' + Date.now(),
-    type: net.type || detectNetworkType(net.chainId, Array.isArray(net.rpc) ? net.rpc[0] : net.rpc),
+    type: net.type || detectNetworkType(net.chainId, Array.isArray(net.rpc) ? net.rpc[0] : net.rpc, net.name),
     custom: true });
   localStorage.setItem(CUSTOM_KEY, JSON.stringify(list));
   return list;
@@ -667,7 +678,11 @@ export function sanitizeChainRequest(payload) {
   }
   return { ok: true, net: {
     name, chainId, symbol, decimals, rpc: [rpc], explorer,
-    type: detectNetworkType(chainId, rpc), icon: '🔗', color: '#9B5DE5',
+    // The NAME travels into the type detector (2026-10-18: a dApp adding
+    // "… Testnet" must not install into the mainnet section). The icon
+    // field stays empty — every row renders the automatic SVG mark from
+    // token-logo.js; no emoji is stored or drawn for networks.
+    type: detectNetworkType(chainId, rpc, name), icon: '', color: '#9B5DE5',
   } };
 }
 
@@ -730,7 +745,7 @@ export async function installRequestedChain(net) {
     rpc: [rpc],
     explorer: net.explorer || '',
     type: net.type,
-    icon: net.icon || '🔗',
+    icon: typeof net.icon === 'string' ? net.icon : '', // no emoji — the rows draw the SVG mark
   });
   return { ok: true, net: list[list.length - 1], reused: false };
 }
