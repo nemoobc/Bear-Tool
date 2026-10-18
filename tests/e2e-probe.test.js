@@ -433,6 +433,9 @@ const dynamicSkip = new Set([
   'importPw','lockBtn','wImport','createPw2','exportBtn','seedDone',
   'importBtn','unlockPw','cnSave','wCreate','createPw','unlockBtn',
   'clearBtn','createBtn','addAccBtn','seedConfirm','addNetBtn',
+  // the "+ Add Account" choice sheet (2026-10-18): built in showAccountModal's
+  // openModal template — Create / Import / derive-from-current-seed buttons.
+  'accAddCreate','accAddImport','accAddDerive',
   'tokenSend','tokenReceive','tokenSwap','tokenHistory','tokenPriceChart','tokenRemove',
   'netSearchInput','netListMainnet','netListTestnet','chooseSwap','chooseBridge',
   'createName','importName','deploySupply','deployDecimals','deployBaseUri',

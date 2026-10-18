@@ -44,8 +44,8 @@ test('dApp browser tab strip: closeNativeTab exposed + renderTabsEntry builds th
   // Browser chip while deleting the wrong tab. Rows must stay divs.
   assert.doesNotMatch(dapps, /<button[^>]*class="launch-tab"/,
     'tab row outer element must NOT be a button (no nested interactive)');
-  assert.match(dapps, /#dappTabsBtn'\)\?\.remove\(\)/,
-    're-render removes the old Browser chip');
+  assert.doesNotMatch(dapps, /dappTabsBtn/,
+    'ONE tabs feature post-merge (user report 2026-10-18): the "Browser · n" chip + its modal chooser are gone — the live strip is the only tabs door');
   assert.match(dapps, /\.launch-tabstrip'\)\.forEach\(\(el\) => el\.remove\(\)/,
     're-render removes stale strips');
 });

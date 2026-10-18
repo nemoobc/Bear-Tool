@@ -1150,22 +1150,16 @@ async function main() {
     await page.click('.mobile-nav-item[data-view="dapps"]').catch(() => { throw new Error('dapps nav missing'); });
     await sleep(1600);
     const entry = await page.evaluate(
-      `(function () { var b = document.getElementById('dappTabsBtn'); return b ? b.textContent.replace(/\\s+/g, ' ').trim() : ''; })()`
+      `(function () { var s = document.querySelector('.launch-tabstrip'); var c = s ? s.querySelectorAll('.launch-tab').length : 0; return s && c ? ((s.getAttribute('aria-label') || '') + '|' + c) : ''; })()`
     ).catch(() => '');
     report.dapp.walletTabsEntry = String(entry);
-    if (!/Browser/.test(entry)) throw new Error('wallet DApps page has no Browser tabs entry: ' + JSON.stringify(String(entry)));
+    if (!/Browser/.test(entry)) throw new Error('wallet DApps page has no Browser tabs strip: ' + JSON.stringify(String(entry)));
     // The fixture target still alive with its URL PROVES the session survived
     // the hide — a tabs entry without live tabs would be a lie.
     if (!(await cdpTargetUrls()).some((u) => u.includes('dapp-rpc-fixture'))) {
-      throw new Error('hiding the browser killed the tab session (Browser entry with no live tabs)');
+      throw new Error('hiding the browser killed the tab session (tabs strip with no live tabs)');
     }
-    await page.click('#dappTabsBtn').catch(() => { throw new Error('dappTabsBtn not clickable'); });
-    await sleep(1200);
-    const rowsN = await page.evaluate(`document.querySelectorAll('.dapp-tabs-row').length`).catch(() => 0);
-    report.dapp.walletTabsRows = rowsN;
-    if (!rowsN) throw new Error('wallet tabs chooser listed no rows');
-    await shotScreen('17-wallet-tabs');
-    await page.click('.dapp-tabs-row').catch(() => { throw new Error('no tabs row to click'); });
+    await page.click('.launch-tab').catch(() => { throw new Error('no live tab row on the strip to click'); });
     await sleep(2500);
     // Back on the dApp: the browser overlay is up again, same live session.
     report.dapp.walletTabsReopened = (await cdpTargetUrls()).some((u) => u.includes('dapp-rpc-fixture'));
@@ -1282,12 +1276,16 @@ async function main() {
       throw new Error('a closed browser CAME BACK on the wallet restore call: ' + JSON.stringify(resurrectAttempt));
     }
     await shotScreen('19b-closed-no-resurrect');
-    // And the guard must not brick reopening: the wallet's own Tabs door.
+    // And the guard must not brick reopening: the strip row = the wallet's
+    // own tabs door (chip + modal merged away 2026-10-18).
     await page.click('.mobile-nav-item[data-view="dapps"]').catch(() => { throw new Error('dapps nav missing after close'); });
     await sleep(1500);
-    await page.click('#dappTabsBtn').catch(() => { throw new Error('dappTabsBtn missing after close'); });
-    await sleep(1100);
-    await page.click('.dapp-tabs-row').catch(() => { throw new Error('no tabs row to reopen after close'); });
+    const door = await page.evaluate(
+      `(function () { var s = document.querySelector('.launch-tabstrip'); return s ? s.querySelectorAll('.launch-tab').length : 0; })()`
+    ).catch(() => 0);
+    report.dapp.stripDoorAfterClose = door;
+    if (!door) throw new Error('no live strip row to reopen after close');
+    await page.click('.launch-tab').catch(() => { throw new Error('no tabs row to reopen after close'); });
     await sleep(2400);
     const reopened = await browserState();
     report.dapp.reopenedAfterGuard = reopened;
@@ -1401,7 +1399,7 @@ async function main() {
       if (list.tabs !== st.rows) throw new Error('✕ step: press ' + (closes + 1) + ' left DOM (' + st.rows + ') and native (' + list.tabs + ') disagreeing — ' + JSON.stringify(list));
       closes += 1;
       if (st.x === 0) break;
-      if (st.chips !== 1) throw new Error('✕ step: Browser chip multiplied after press ' + closes + ' — ' + JSON.stringify(st));
+      if (st.chips !== 0) throw new Error('✕ step: the old Browser chip reappeared after press ' + closes + ' — one tabs feature only (merge 2026-10-18): ' + JSON.stringify(st));
     }
     // All tabs gone: the browser is CLOSED (no floor zombie) and the ghost
     // "Browser · 0" chip exists only if the empty-session guard failed.
@@ -2179,7 +2177,12 @@ async function main() {
     await sleep(700);
     if (!(await jsClick('#lockBtn'))) throw new Error('hunt: #lockBtn missing');
     await sleep(900);
-    if (!(await page.evaluate('!!document.getElementById("unlockPw")'))) throw new Error('hunt: locking did not show the unlock gate');
+    // Lock must NOT self-invite "Welcome back" (user request 2026-10-18):
+    // the bear logo opens the gate manually.
+    if (await page.evaluate('!!document.getElementById("unlockPw")')) throw new Error('hunt: the unlock sheet auto-appeared after lock — must wait for the bear-logo tap');
+    if (!(await jsClick('#btnHome'))) throw new Error('hunt: bear logo (#btnHome) did not tap');
+    await sleep(900);
+    if (!(await page.evaluate('!!document.getElementById("unlockPw")'))) throw new Error('hunt: tapping the bear logo did not open the unlock gate');
     await page.type('#unlockPw', WALLET_PW);
     await page.click('#unlockBtn');
     await sleep(1500);

@@ -255,7 +255,7 @@ const TRANSLATIONS = {
     'eip7702.noCalls': 'No calls yet. Add one below.',
     'eip7702.invalidAddress': 'Invalid address',
     'eip7702.checkingContract': 'Checking contract on-chain…',
-    'eip7702.detectedRescue': 'Detected rescue contract — SAFE {{safe}} · deployer {{deployer}}',
+    'eip7702.detectedRescue': 'Rescue contract detected — sweeps land on your wallet. Deployer: {{deployer}}',
     'eip7702.cannotRead': 'Could not read that contract —',
     'eip7702.deployed': 'Deployed:',
     'eip7702.noHelpers': 'No deployed helper contracts on this chain yet.',
@@ -267,6 +267,11 @@ const TRANSLATIONS = {
     'send.previewSending': 'Sending',
     'send.previewTo': 'to',
     'acc.same': 'You are already on this account',
+    'acc.add.title': 'Add Wallet',
+    'acc.add.create': 'Create Wallet',
+    'acc.add.import': 'Import Wallet',
+    'acc.add.derive': 'Add account from current seed',
+    'acc.add.replace': 'Creating or importing a new wallet REPLACES the wallet on this device. Export its secret first (account sheet → Export Secret) if you still need it.',
     'nav.dex': 'Dex',
     // Dex v2 — built from zero (2026-10-17, user order: delete the dex and
     // rebuild it until mature). Only fresh keys live under this line.
@@ -814,7 +819,7 @@ const TRANSLATIONS = {
     'eip7702.noCalls': 'Belum ada panggilan. Tambahkan di bawah.',
     'eip7702.invalidAddress': 'Alamat tidak valid',
     'eip7702.checkingContract': 'Memeriksa kontrak on-chain…',
-    'eip7702.detectedRescue': 'Kontrak rescue terdeteksi — SAFE {{safe}} · deployer {{deployer}}',
+    'eip7702.detectedRescue': 'Kontrak rescue terdeteksi — sweep mendarat di dompetmu. Deployer: {{deployer}}',
     'eip7702.cannotRead': 'Kontrak itu tak terbaca —',
     'eip7702.deployed': 'Ter-deploy:',
     'eip7702.noHelpers': 'Belum ada kontrak helper yang ter-deploy di jaringan ini.',
@@ -826,6 +831,11 @@ const TRANSLATIONS = {
     'send.previewSending': 'Mengirim',
     'send.previewTo': 'ke',
     'acc.same': 'Kamu sudah berada di akun ini',
+    'acc.add.title': 'Tambah Dompet',
+    'acc.add.create': 'Buat Dompet Baru',
+    'acc.add.import': 'Impor Dompet',
+    'acc.add.derive': 'Tambah akun dari seed sekarang',
+    'acc.add.replace': 'Membuat atau mengimpor dompet baru akan MENGGANTI dompet di perangkat ini. Ekspor secret-nya dulu (sheet akun → Export Secret) bila masih dibutuhkan.',
     'nav.dex': 'Dex',
     // Dex v2 — dibangun dari nol (2026-10-17, order user: hapus dex dan bangun
     // sampai matang). Hanya kunci baru yang hidup di bawah baris ini.

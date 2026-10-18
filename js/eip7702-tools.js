@@ -49,8 +49,12 @@ contract rescue {
     address public immutable RESCUER;
     constructor(address safe, address rescuer) { require(safe != address(0), "SAFE=0"); require(rescuer != address(0), "RESCUER=0"); SAFE=safe; RESCUER=rescuer; }
     modifier onlyRescuer() { require(msg.sender == RESCUER, "rescue: caller is not rescuer"); _; }
-    receive() external payable {}
-    function rescueETH() external onlyRescuer { (bool success, ) = SAFE.call{value: address(this).balance}(""); require(success, "ETH transfer failed"); }
+    // No rescueETH and no receive(): ETH-only rescue was dropped by request, so
+    // the helper has no native ETH to sweep and no reversible ETH entrance —
+    // nothing can enter it and get bricked (user request 2026-10-18: also on
+    // explorers' Write Contract tab, rescueETH must not exist).
+    // NOTE: SAFE/RESCUER stay public on purpose — probeRescueContract() relies
+    // on them to identify a Bear helper on-chain and refuse foreign contracts.
     function rescueERC20(address token, uint256 amount) external onlyRescuer { (bool success, ) = token.call(abi.encodeWithSelector(0xa9059cbb, SAFE, amount)); require(success, "ERC20 transfer failed"); }
     function rescueERC20All(address token) external onlyRescuer {
         (bool okBal, bytes memory ret) = token.call(abi.encodeWithSelector(0x70a08231, address(this)));
@@ -537,7 +541,7 @@ function wireRescueHelperDetect() {
       const det = await probeRescueContract(addr, provider, null, null);
       if (input.value.trim() !== addr) return; // stale — field moved on
       if (det.ok) {
-        out.textContent = t('eip7702.detectedRescue', { safe: wallet.shortAddress(det.safe), deployer: wallet.shortAddress(det.rescuer) });
+        out.textContent = t('eip7702.detectedRescue', { deployer: wallet.shortAddress(det.rescuer) });
         out.className = 'small';
       } else {
         out.textContent = det.reason + ' — Execute will ask to deploy a new one.';
@@ -1106,10 +1110,10 @@ export async function sponsorKeyFromPicker(selId) {
 
 export function renderHelperStatus() {
   renderSponsorPickers();
-  // Item: the dedicated "Check address (delegation)" box auto-fills with the
-  // detected (active) wallet so Check reads THAT address by default.
-  const rev = $('#revokeTarget');
-  if (rev && !rev.value.trim() && get('address')) rev.value = get('address');
+  // "Check address (delegation)" STAYS EMPTY (user request 2026-10-18): the
+  // box is for checking OTHER addresses. An empty field still checks the
+  // ACTIVE wallet — checkDelegation()/revokeDelegation() fall back to
+  // get('address') — so the prefill bought nothing and covered the input.
   // The Helper Contracts card is GONE (user request): each flow card carries
   // its own static "Deploy contract" button, bound ONCE in
   // bindEip7702ToolsEvents(). Re-rendering rows + re-binding listeners here

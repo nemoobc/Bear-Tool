@@ -195,7 +195,7 @@ export default function DeployView() {
               {/* Auto-filled with the detected (active) address on load — the
                   check reads THIS address's delegation only; the sponsor is
                   just the gas payer. */}
-              <input className="input" id="revokeTarget" placeholder="0x… (auto: current wallet)" data-auto-fill="address" />
+              <input className="input" id="revokeTarget" placeholder="0x… (auto: current wallet)" />
             </div>
             <div className="field">
               <label htmlFor="revokeKey" data-i18n="deploy.revokeKey">Private key (optional — only if target is not the active wallet)</label>

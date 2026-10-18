@@ -168,8 +168,9 @@ test('the wallet can reopen any open tab from its own DApps page', () => {
   assert.match(code, /export async function openNativeTab\(index\)/, 'helper wallet → openNativeTab ada');
   const dapps = readFileSync(path.join(here, '..', 'js', 'dapps.js'), 'utf8');
   assert.match(dapps, /renderTabsEntry\(container\)/, 'view dApps memanggil renderTabsEntry');
-  assert.match(dapps, /dappTabsBtn/, 'entry "Browser" punya tombol berlabel');
-  assert.match(dapps, /openNativeTab\(Number\(row\.dataset\.i\) \|\| 0\)/, 'klik row → selectTab native');
+  assert.doesNotMatch(dapps, /dappTabsBtn/, 'satu pintu tabs saja — chip "Browser · n" tidak ada lagi (merge 2026-10-18)');
+  assert.match(dapps, /\.launch-tabstrip/, 'strip tab hidup = pintu tabs di halaman dApps');
+  assert.match(dapps, /openNativeTab\(Number\(row\.dataset\.i\)\)/, 'klik row strip → selectTab native');
 });
 
 test('the fixture page can never hang the journey — every request races a deadline', () => {

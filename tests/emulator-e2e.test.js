@@ -275,9 +275,10 @@ test('the confirm button has a tap fallback when the platform dumper is dead', (
 
 test('the wallet can walk back into a hidden browser through its own Tabs door', () => {
   assert.match(driverSrc, /tapNativeButton\('dapp-close'\)/, 'browser ditutup lewat ✕ native');
-  assert.match(driverSrc, /dappTabsBtn/, 'view dApps punya entry Browser (tabs)');
+  assert.doesNotMatch(driverSrc, /dappTabsBtn/, 'satu pintu tabs — chip lama sudah digabung (merge 2026-10-18)');
+  assert.match(driverSrc, /launch-tabstrip/, 'view dApps punya strip tab hidup sebagai pintu');
   assert.match(driverSrc, /hiding the browser killed the tab session/, 'sesi WAJIB hidup setelah hide — blanking membunuh door tabs');
-  assert.match(driverSrc, /.dapp-tabs-row./, 'chooser tab dirender di modal wallet');
+  assert.match(driverSrc, /\.launch-tab\b/, 'row strip = pintu buka ulang tab dari wallet');
   assert.match(driverSrc, /walletTabsReopened/, 'reopen dari wallet dibuktikan lewat target CDP yang masih live');
 });
 

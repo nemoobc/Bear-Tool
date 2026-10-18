@@ -5,7 +5,7 @@
 // is js/dapp-safety.js and the session/permission store is js/dapp-sessions.js.
 // ═══════════════════════════════════════════════════════════════
 
-import { escapeHtml, dappMark, dappLogo, openModal, closeModal } from './ui.js';
+import { escapeHtml, dappMark, dappLogo } from './ui.js';
 import { openDappBrowser as openInBrowser, openDappHome, openExternalNotice, initDappBrowser } from './dapp-browser.js';
 import { classifyInput, inspectUrl, baseHost, VERDICT } from './dapp-safety.js';
 import { listBlocked, listTrusted } from './dapp-sessions.js';
@@ -129,15 +129,19 @@ export function looksLikeUrl(v) {
 }
 
 /**
- * Native only: a live "Browser" entry above the dApp grid showing how many tabs
- * the in-app browser still holds, and letting the user reopen it on any of
- * them. The browser keeps its session while the overlay is hidden, so without
- * this door back the only way in was another dApp card (which reloaded).
+ * Native only: the live tab strip above the dApp grid — every tab the in-app
+ * browser holds, one row each, tap to reopen, ✕ to close. The browser keeps
+ * its session while the overlay is hidden, so without this door back the only
+ * way in was another dApp card (which reloaded).
+ *
+ * ONE tabs feature, per user request 2026-10-18: the old side door — a
+ * "Browser · n" chip beside the URL field opening a modal list of the SAME
+ * rows — duplicated this strip (fair report: "ada 2 fitur tabs"). The strip
+ * stays (live rows, close buttons, OKX-style); the chip + modal are gone.
  */
 async function renderTabsEntry(container) {
   const bar = container.querySelector('.dapps-browser');
   if (!bar) return;
-  bar.querySelector('#dappTabsBtn')?.remove();
   bar.querySelectorAll('.launch-tabstrip').forEach((el) => el.remove());
   const info = await nativeTabs();
   const tabs = (info && info.tabs) || [];
@@ -150,39 +154,6 @@ async function renderTabsEntry(container) {
   // (chip muncul tanpa efek). Pintu muncul lagi otomatis begitu sesi ada
   // (browserClosed → refreshView('dapps') → panggilan ini).
   if (!info.open || !tabs.length) return;
-
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.id = 'dappTabsBtn';
-  btn.className = 'dapp-tabs-entry';
-  btn.setAttribute('aria-label', t('dapp.browser.label'));
-  const n = tabs.length;
-  btn.innerHTML = `<span class="dapp-tabs-ic" aria-hidden="true">${face(INK, '<rect x="8.5" y="4.5" width="11" height="11" rx="2.5"/><path d="M5 17V8.5A2.5 2.5 0 0 1 7.5 6"/><path d="M5 17a2.5 2.5 0 0 0 2.5 2.5H16"/>')}</span>
-    <span class="dapp-tabs-lb">${escapeHtml(t('dapp.browser.label'))}</span>
-    <span class="dapp-tabs-n" aria-hidden="true">${n}</span>`;
-  btn.addEventListener('click', async () => {
-    const fresh = await nativeTabs();
-    const list = (fresh && fresh.tabs) || [];
-    if (!list.length) return;
-    openModal(`
-      <h3>${escapeHtml(t('dapp.browser.label'))}</h3>
-      <p class="small">${escapeHtml(t('dapp.tab.empty.desc'))}</p>
-      <div class="dapp-tabs-list" role="list">
-        ${list.map((tab, i) => `<button type="button" class="dapp-tabs-row" role="listitem" data-i="${i}">
-          <span class="dapp-tabs-row-t">${escapeHtml(tab.title || tab.url || 'New tab')}</span>
-          <span class="dapp-tabs-row-u">${escapeHtml(tab.url || '')}</span>
-        </button>`).join('')}
-      </div>`, { wide: true });
-    const box = document.getElementById('modalBox');
-    box?.querySelectorAll('.dapp-tabs-row').forEach((row) => {
-      row.addEventListener('click', async () => {
-        closeModal();
-        await openNativeTab(Number(row.dataset.i) || 0);
-      });
-    });
-  });
-  // OKX-style: the tabs chip sits IN the omnibox row, right beside the URL field.
-  bar.querySelector('.dapps-omni')?.appendChild(btn);
 
   const domainOf = (url) => {
     try { return new URL(url).hostname; } catch { return url || ''; }

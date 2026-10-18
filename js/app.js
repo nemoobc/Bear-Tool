@@ -178,8 +178,7 @@ window.addEventListener('DOMContentLoaded', () => {
         return;
       } catch { wallet.clearSession(); }
     }
-    if (restored) { updateTopbar(); loadDashboard(); }
-    else if (wallet.getKeystore()) showUnlockModal();
+    if (restored || wallet.getKeystore()) { updateTopbar(); loadDashboard(); }
     else showWelcomeModal();
   };
   // The 5s logo intro is a first-impression flourish, not a refresh tax.
@@ -1172,6 +1171,13 @@ function bindOpenSeaPanel() {
 // ── topbar ──
 function bindTopbar() {
   $('#btnHome').addEventListener('click', () => {
+    // The bear logo is the wallet's manual door, per user request 2026-10-18:
+    // the "Welcome back" sheet no longer pops by itself after lock / auto-lock
+    // / app reopen — the user taps the logo FIRST, then the sheet appears.
+    // Self-invited actions (Send, dApp connect, …) still open it via their
+    // guards, so unlocking stayed reachable everywhere. First run (no keystore
+    // yet) keeps its welcome flow and must not offer an unlock.
+    if (!get('unlocked') && wallet.getKeystore()) { showUnlockModal(); return; }
     switchView('dashboard');
   });
   // The pills are divs (role="button", tabindex="0" in index.html) so they need
@@ -1524,7 +1530,9 @@ function startAutoLock() {
     set('signer', null);
     wallet.clearSession();
     toast('Auto-locked 🔒', 'info');
-    showUnlockModal();
+    // NO self-invited unlock sheet (user request 2026-10-18: "welcome backnya
+    // harus manual pencet logo dompet"). The wallet simply IS locked; the
+    // bear logo / any guarded action opens the sheet on demand.
   }, minutes * 60 * 1000);
 }
 function resetLock() {
@@ -2127,20 +2135,38 @@ function showAccountModal() {
     syncHomeWalletName();
     showAccountModal();
   }));
-  $('#addAccBtn').onclick = async () => {
-    const pw = await promptPassword('Enter password to derive new account');
-    if (!pw) return;
-    try {
-      const addr = await wallet.deriveNextAccount(pw);
-      toast('Account added: ' + wallet.shortAddress(addr), 'success');
-      showAccountModal();
-    } catch (err) {
-      // deriveNextAccount already names the failure: a wrong password, or a
-      // wallet with no HD tree (a private-key import) that cannot derive at
-      // all. Printing "Wrong password" for the second case sent people back to
-      // retype a password that was right.
-      toast(err?.message || 'Could not add account', 'error');
-    }
+  $('#addAccBtn').onclick = () => {
+    // Choice first, password later (user request 2026-10-18: "add wallet
+    // harusnya ga munculin password tapi munculin create wallet sama import
+    // wallet"). The password still fronts each flow once chosen.
+    openModal(`
+      <button class="modal-close" type="button" data-close-modal>✕</button>
+      <div class="tx-confirm">
+        <div class="question">${escapeHtml(t('acc.add.title'))}</div>
+        ${wallet.getKeystore() ? `<div class="danger-box">${escapeHtml(t('acc.add.replace'))}</div>` : ''}
+        <button class="btn btn-primary btn-block" id="accAddCreate">${escapeHtml(t('acc.add.create'))}</button>
+        <button class="btn btn-secondary btn-block mt-8" id="accAddImport">${escapeHtml(t('acc.add.import'))}</button>
+        <button class="btn btn-ghost btn-block mt-8" id="accAddDerive">${escapeHtml(t('acc.add.derive'))}</button>
+      </div>
+    `, { wide: true });
+    $('#accAddCreate').onclick = () => { showCreateModal(); };
+    $('#accAddImport').onclick = () => { showImportModal(); };
+    $('#accAddDerive').onclick = async () => {
+      closeModal();
+      const pw = await promptPassword('Enter password to derive new account');
+      if (!pw) return;
+      try {
+        const addr = await wallet.deriveNextAccount(pw);
+        toast('Account added: ' + wallet.shortAddress(addr), 'success');
+        showAccountModal();
+      } catch (err) {
+        // deriveNextAccount already names the failure: a wrong password, or a
+        // wallet with no HD tree (a private-key import) that cannot derive at
+        // all. Printing "Wrong password" for the second case sent people back to
+        // retype a password that was right.
+        toast(err?.message || 'Could not add account', 'error');
+      }
+    };
   };
   $('#exportBtn').onclick = async () => {
     const pw = await promptPassword('Enter password to export');
@@ -2185,7 +2211,8 @@ function showAccountModal() {
     wallet.clearSession();
     closeModal();
     toast('Locked 🔒', 'info');
-    showUnlockModal();
+    // Same manual rule as auto-lock: no sheet forced on the user — the bear
+    // logo (or any guarded action) opens "Welcome back" on demand.
   };
 }
 

@@ -18,6 +18,20 @@ test('revoke: Tools card has check + revoke controls in HTML', () => {
   }
 });
 
+test('revoke: the Check-address box starts EMPTY (user report 2026-10-18)', () => {
+  // renderHelperStatus used to stuff the active wallet address into
+  // #revokeTarget on every render. The box is for checking OTHER addresses;
+  // the empty field still checks the active wallet via the existing
+  // `|| get('address')` fallbacks — the prefill bought nothing and hid the
+  // input the user wanted to type into.
+  assert.doesNotMatch(toolsSrc, /rev\.value = get\('address'\)/,
+    'renderHelperStatus must not prefill #revokeTarget');
+  assert.match(toolsSrc, /\$\('#revokeTarget'\)\?\.value\.trim\(\) \|\| get\('address'\)/,
+    'empty field still checks the active wallet (fallback kept)');
+  assert.doesNotMatch(html, /id="revokeTarget"[^>]*data-auto-fill/,
+    'no auto-fill attribute may creep back onto the check-address input');
+});
+
 test('revoke: revokeDelegation is exported and wired', () => {
   assert.match(toolsSrc, /export async function revokeDelegation\(/, 'revokeDelegation must be exported');
   assert.match(toolsSrc, /btnRevokeDelegation.*addEventListener\('click', revokeDelegation\)/, 'revoke button must be bound');
