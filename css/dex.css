@@ -25,3 +25,68 @@
   font-weight: 600; font-size: 13px; text-align: right;
   overflow-wrap: anywhere; min-width: 0;
 }
+
+/* ── M3 — the trade card, quote panel and the two confirm sheets. Theme
+   neutral again: same border recipe as the state rows, so the card reads in
+   the cartoon light theme and the OKX dark one without special-casing. */
+.dex-card {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 14px; padding: 12px;
+  border: 1px solid rgba(128, 128, 128, 0.28);
+  border-radius: 14px;
+}
+.dex-card-head {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 700; font-size: 14px;
+  color: var(--ink, inherit);
+}
+.dex-t-hint { margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink-soft); }
+.dex-trade-bar { display: flex; gap: 8px; }
+.dex-input {
+  flex: 1 1 auto; min-width: 0;
+  padding: 9px 10px; font-size: 13px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 10px; background: transparent; color: inherit;
+}
+.dex-select { flex: 0 0 auto; width: auto; padding: 8px 6px; }
+.dex-btn {
+  flex: 0 0 auto; padding: 9px 14px; font-size: 13px; font-weight: 600;
+  border: 1px solid rgba(128, 128, 128, 0.35); border-radius: 10px;
+  background: transparent; color: inherit; cursor: pointer;
+}
+.dex-btn:disabled { opacity: 0.55; cursor: default; }
+.dex-btn-primary { background: var(--accent, #f80); color: var(--accent-contrast, #fff); border-color: transparent; }
+.dex-dir { display: flex; gap: 8px; }
+.dex-dir-btn {
+  flex: 1 1 0; padding: 8px 10px; font-weight: 600; font-size: 13px;
+  border: 1px solid rgba(128, 128, 128, 0.35); border-radius: 10px;
+  background: transparent; color: inherit; cursor: pointer;
+}
+.dex-dir-btn.on { background: var(--accent, #f80); color: var(--accent-contrast, #fff); border-color: transparent; }
+.dex-amtrow { display: flex; gap: 8px; }
+.dex-sliprow {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 4px 2px 0;
+}
+.dex-live { display: flex; flex-direction: column; gap: 6px; }
+.dex-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.dex-status { min-height: 15px; font-size: 12px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.dex-status.ok { color: #2c8a4b; }
+.dex-status.err { color: #c0392b; }
+.dex-status.busy { color: var(--ink-soft); }
+.dex-sending { padding: 4px 0; font-size: 13px; font-weight: 600; }
+.dex-sending.dex-err { color: #c0392b; font-weight: 500; }
+
+/* The sheet: an inline dialog INSIDE the trade card (no global overlay) so a
+   stale backdrop can never cover another view after a navigation race. */
+[data-dex-sheet-host] { margin-top: 4px; }
+.dex-sheet { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--accent, #f80); border-radius: 12px; }
+.dex-sheet-title { font-weight: 700; font-size: 13px; }
+.dex-sheet-body { display: flex; flex-direction: column; gap: 6px; }
+.dex-sheet-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.dex-sheet-body .dex-row { border: none; padding: 2px 0; }
+
+/* Focus discipline (the M1 a11y promise) */
+.dex-btn:focus-visible, .dex-dir-btn:focus-visible, .dex-input:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 2px;
+}

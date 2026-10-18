@@ -11,6 +11,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+// The dex graph now reaches the trade engine, which reads ethers off
+// globalThis exactly like every other wallet module (js/max-ui.js): the
+// browser has it before js/app.js evals, so the test arms the same shim.
+import { ethers } from 'ethers';
+globalThis.ethers = ethers;
+
 const store = {};
 globalThis.localStorage = {
   getItem: (k) => (k in store ? store[k] : null),

@@ -33,6 +33,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+// ethers before app.js: the browser has the vendored ethers global loaded
+// before any wallet module evals; the test graph mirrors the real order.
+import { ethers as e6 } from 'ethers';
+globalThis.ethers = e6;
+
 const APP = new URL('../js/app.js', import.meta.url).href;
 
 // ── DOM stub ────────────────────────────────────────────────────────────────
