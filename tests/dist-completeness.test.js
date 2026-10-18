@@ -60,14 +60,15 @@ test('a folder feature must never be dropped by the build again', (t) => {
   // Read the Dex module list off disk rather than repeating it here. A
   // hardcoded list is a list that goes stale — exactly how the old launchpad
   // collection was pinned. The floor tracks the milestone the build is in:
-  // M1 rebuilt the Dex from zero (2 modules: core.js + index.js) and every
-  // later milestone (swap, pools, launch, bot) must raise this floor, not
-  // silently sit under it.
+  // M1 rebuilt the Dex from zero (2 modules: core.js + index.js); M2 added
+  // the contract source (contracts.js) and every later milestone (swap,
+  // pools, launch, bot) must raise this floor, not silently sit under it.
   const sourceModules = readdirSync(join(rootDir, 'js/dex'))
     .filter((f) => f.endsWith('.js'))
     .sort();
-  assert.ok(sourceModules.length >= 2,
-    `js/dex should hold the fresh engine (M1: core + index); found only ${sourceModules.length}`);
+  assert.ok(sourceModules.length >= 3,
+    `js/dex should hold the fresh engine (M1: core + index; M2 adds contracts); found only ${sourceModules.length}`);
+  assert.ok(sourceModules.includes('contracts.js'), 'the engine contracts must live in js/dex/contracts.js');
   for (const f of sourceModules) {
     assert.ok(existsSync(`${distDir}/js/dex/${f}`),
       `dist/js/dex/${f} is missing — every module in js/dex must reach the APK`);
