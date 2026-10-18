@@ -184,3 +184,106 @@ test('renderDex wires the trade card only on the engine chain, and guards input'
   openBtn.click();
   assert.ok(statusNode.textContent.length > 0, 'the panel speaks instead of hanging silently');
 });
+
+// ── M4: the pools card ─────────────────────────────────────────────────
+
+test('pool card + LP panel strings: scan gate, one lock line, zero emoji, no silent prefill', () => {
+  const stub = v.poolsStubHtml();
+  const st = {
+    pair: '0x' + 'b'.repeat(40),
+    token: { address: '0x' + '01'.repeat(20), symbol: 'BMEME', decimals: 18 },
+    quote: { address: '0x' + 'aa'.repeat(20), symbol: 'SQ', decimals: 18 },
+    reserves: [10n ** 21n, 10n ** 23n],
+    totalSupply: 10n ** 22n,
+    myShares: 10n ** 21n,
+    lockUntil: Math.floor(Date.now() / 1000) + 86400 * 30,
+    creatorBps: 6,
+  };
+  const row = v.poolRowHtml(st);
+  const lp = v.lpBodyHtml(st);
+  for (const [name, html] of [['stub', stub], ['row', row], ['lp', lp]]) {
+    assert.equal(/\p{Extended_Pictographic}/u.test(html), false, `${name} must not carry emoji — icons are SVG`);
+  }
+  // inquiry beats decoration: no address is ever prefilled for the user
+  assert.doesNotMatch(stub, /value="0x/, 'the factory input never prefills a value');
+  assert.match(stub, /id="dexPoolFactory"/);
+  assert.match(stub, /id="dexPoolScan"/);
+  assert.match(stub, /aria-label="[^"]+"/);
+  // the row speaks every number the spec asked for: reserves, price, fee, lock, mine
+  assert.match(row, /data-dex-pair="0x/);
+  assert.match(row, /data-dex-act="trade"/);
+  assert.match(row, /data-dex-act="lp"/);
+  assert.match(row, /BMEME\/SQ/);
+  assert.match(row, /6 bps/);
+  assert.match(row, /\(10%\)/, 'my share percent is plain math out');
+  // the panel: band select, both floors, both out slots, close door
+  assert.match(lp, /id="dexLpSlip"/);
+  assert.match(lp, /value="100" selected/);
+  assert.match(lp, /data-dex-lp-made/);
+  assert.match(lp, /data-dex-lp-min/);
+  assert.match(lp, /data-dex-lp-out/);
+  assert.match(lp, /data-dex-lpclose/);
+  assert.match(lp, /inputmode="decimal"/);
+  const inputs = (lp.match(/aria-label=/g) || []).length;
+  assert.ok(inputs >= 3, `the LP inputs name themselves for readers (found ${inputs})`);
+});
+
+test('renderDex wires the pools card on the engine chain, and the scan gate answers', async () => {
+  const mkEl = () => ({
+    _listeners: new Map(),
+    addEventListener(type, fn) { this._listeners.set(type, fn); },
+    click() { this._listeners.get('click')?.({}); },
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    style: {}, dataset: {}, hidden: false, value: '', textContent: '', innerHTML: '',
+    setAttribute() {}, getAttribute: () => null, appendChild() {}, remove() {},
+    querySelectorAll: () => [],
+    querySelector: () => null,
+  });
+  const scanBtn = mkEl();
+  const facIn = mkEl();
+  const listEl = mkEl();
+  const lastEl = mkEl();
+  const statusPool = mkEl();
+  const statusTrade = mkEl();
+  const openBtn = mkEl();
+  const pairIn = mkEl();
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, val) => { store.set(k, String(val)); },
+  };
+  const stmod = await import('../js/state.js');
+  const root = {
+    _innerHTML: '',
+    set innerHTML(v) { this._innerHTML = v; },
+    get innerHTML() { return this._innerHTML; },
+    querySelector(sel) {
+      if (sel === '#dexSwapOpen') return openBtn;
+      if (sel === '#dexSwapPair') return pairIn;
+      if (sel === '#dexSwapStatus') return statusTrade;
+      if (sel === '#dexPoolScan') return scanBtn;
+      if (sel === '#dexPoolFactory') return facIn;
+      if (sel === '#dexPoolList') return listEl;
+      if (sel === '#dexPoolLast') return lastEl;
+      if (sel === '#dexPoolStatus') return statusPool;
+      return null;
+    },
+    isConnected: true,
+  };
+  stmod.set('networkId', 'ethereum');
+  const outMainnet = v.renderDex(root, {});
+  assert.equal(outMainnet.chainOk, false);
+  assert.equal(scanBtn._listeners.size, 0, 'no scan binding off the engine chain');
+
+  stmod.set('networkId', 'sepolia');
+  const out = v.renderDex(root, {});
+  assert.equal(out.chainOk, true);
+  assert.ok(scanBtn._listeners.has('click'), 'the scanner is wired');
+  assert.ok(listEl._listeners.has('click'), 'row actions delegate through the list');
+  facIn.value = '0x123';
+  scanBtn.click();
+  assert.match(statusPool.textContent, /valid address|alamat yang valid/i, 'the gate answers before any RPC');
+  facIn.value = '0x' + 'c1'.repeat(40);
+  scanBtn.click();
+  assert.ok(statusPool.textContent.length > 0, 'a good address still speaks (no provider = honest status)');
+});

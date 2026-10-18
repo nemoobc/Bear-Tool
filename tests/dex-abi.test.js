@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { ethers } from 'ethers';
 
 const { DEX_SOLIDITY } = await import('../js/dex/contracts.js');
-const { BEAR_TOKEN_ABI, BEAR_PAIR_ABI } = await import('../js/dex/abi.js');
+const { BEAR_TOKEN_ABI, BEAR_PAIR_ABI, BEAR_FACTORY_ABI } = await import('../js/dex/abi.js');
 
 // offline compiler path (solc 0.8.37 pin — the browser loader's pin)
 const require = (await import('node:module')).createRequire(import.meta.url);
@@ -45,6 +45,13 @@ test('shipped BEAR_PAIR_ABI is the compiled codegen, field for field', () => {
   const shipped = canonSet(BEAR_PAIR_ABI);
   const codegen = canonSetT(art.BearPair.abi);
   assert.equal(shipped.size, 36, 'pair fragment count (M2 surface pin)');
+  assert.deepEqual([...shipped].sort(), [...codegen].sort());
+});
+
+test('shipped BEAR_FACTORY_ABI is the compiled codegen, field for field', () => {
+  const shipped = canonSet(BEAR_FACTORY_ABI);
+  const codegen = canonSetT(art.BearFactory.abi);
+  assert.equal(shipped.size, 7, 'factory fragment count (M4 surface pin: ctor+event+launch+4 getters)');
   assert.deepEqual([...shipped].sort(), [...codegen].sort());
 });
 

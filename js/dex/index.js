@@ -32,6 +32,10 @@ import {
   slippageMinOut, swapData, tokenContract,
   SLIP_DEFAULT_BPS, SLIP_MAX_BPS,
 } from './swap.js';
+import {
+  addLiqData, factoryRecall, factoryRemember,
+  lpPreviewAdd, lpPreviewRemove, poolState, removeLiqData, scanFactory,
+} from './pools.js';
 
 const { ethers } = globalThis;
 
@@ -169,15 +173,21 @@ async function refreshQuote(st, mount) {
   }
 }
 
-function setStatus(mount, msg, cls = '') {
-  const el = mount.querySelector('#dexSwapStatus');
+function setStatus(mount, msg, cls = '', sel = '#dexSwapStatus') {
+  const el = mount.querySelector(sel);
   if (el) { el.textContent = msg; el.className = `dex-status ${cls}`.trim(); }
 }
 
 // ── the sheets: one dialog per transaction, cancel + confirm ──────────
 
-function openSheet(mount, title, bodyHtml) {
-  const host = mount.querySelector('#dexTradeBody');
+// hostSel/stateRef keep the sheet machinery generic: the trade card mounts
+// its sheets in #dexTradeBody and owns them through `trade`; the pools card
+// mounts in #dexPoolList/env and owns them through `pools` (M4). One
+// lifecycle, two owners — every call site passes its own ref.
+function openSheet(mount, title, bodyHtml, hostSel = '#dexTradeBody', stateRef = null) {
+  const host = mount.querySelector(hostSel);
+  if (!host) throw new Error('dex/index: no-sheet-host');
+  const ref = stateRef;
   const wrap = document.createElement('div');
   wrap.dataset.dexSheetHost = '';
   wrap.innerHTML = sheetHtml(title);
@@ -192,13 +202,13 @@ function openSheet(mount, title, bodyHtml) {
     if (wrap._busy) return; // a send in flight: the cancel door is closed, the tx must land or fail on record
     document.removeEventListener('keydown', onKey);
     wrap.remove();
-    trade.sheet = null;
+    if (ref) ref.sheet = null;
   }
   document.addEventListener('keydown', onKey);
   const forceRemove = () => {
     document.removeEventListener('keydown', onKey);
     wrap.remove();
-    trade.sheet = null;
+    if (ref) ref.sheet = null;
   };
   cancelB.addEventListener('click', onCancel);
   return { wrap, confirmB, cancelB, onCancel, forceRemove };
@@ -246,6 +256,398 @@ async function sendTx(st, to, data) {
   if (v.kind === 'failed') { const e = new Error('reverted'); e.why = 'revert'; throw e; }
   if (v.kind === 'pending') { const e = new Error('pending'); e.why = 'pending'; e.hash = v.hash; throw e; }
   return v;
+}
+
+// ── M4: the pools card — factory discovery + the LP panel ─────────────
+
+const PS = '#dexPoolStatus'; // the pools card's own status slot
+const LPSHEET_HOST = '#dexPoolList'; // LP sheets mount inside the list
+
+// Live pools state for the current mount, dies with the paint like `trade`:
+// { sheet, factory, quote, rows, st: Map(pair → live state), sel }
+let pools = null;
+
+const nowSec = () => Math.floor(Date.now() / 1000);
+const lockDate = (un) => {
+  try { return new Date(un * 1000).toISOString().slice(0, 16).replace('T', ' '); } catch { return String(un); }
+};
+const pctOf = (mine, sup) => (sup > 0n ? Number((mine * 10000n) / sup) / 100 : 0);
+
+function debounced(fn, ms = 220) {
+  let ti = null;
+  return () => { clearTimeout(ti); ti = setTimeout(fn, ms); };
+}
+
+export function poolsStubHtml() {
+  return `
+    <div class="dex-card" id="dexPoolCard">
+      <div class="dex-card-head">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.7S6 10 6 14a6 6 0 0 0 12 0c0-4-6-11.3-6-11.3z"/></svg>
+        <span>${t('dex.pool.h')}</span>
+      </div>
+      <p class="dex-t-hint">${t('dex.pool.hint')}</p>
+      <div class="dex-trade-bar">
+        <input id="dexPoolFactory" class="dex-input" type="text" spellcheck="false" autocomplete="off"
+               placeholder="${t('dex.pool.ph')}" aria-label="${t('dex.pool.aria')}">
+        <button id="dexPoolScan" class="dex-btn" type="button">${t('dex.pool.scan')}</button>
+      </div>
+      <div class="dex-last" id="dexPoolLast"></div>
+      <div class="dex-status" id="dexPoolStatus"></div>
+      <div id="dexPoolList" class="dex-pool-list"></div>
+    </div>`;
+}
+
+const PRICE_PER_TOKEN = (st) => {
+  const [rQ, rT] = st.reserves;
+  if (rT === 0n) return null;
+  // quote-wei per ONE whole token — raw wei ratio, decimals cancel out
+  return (rQ * 10n ** BigInt(st.token.decimals)) / rT;
+};
+
+export function poolRowHtml(st) {
+  const px = PRICE_PER_TOKEN(st);
+  const evLock = Number(st.lockUntil); // the launch's own LP lock, straight from the event
+  const evLockLive = evLock > nowSec();
+  return `
+    <div class="dex-pool-row" data-dex-pair="${esc(st.pair)}">
+      <div class="dex-pairline">
+        <span class="dex-pairname">${esc(st.token.symbol)}/${esc(st.quote.symbol)}</span>
+        <span class="dex-pairaddr">${esc(shortAddr(st.pair))}</span>
+      </div>
+      <div class="dex-row"><span class="dex-k">${t('dex.swap.reserves')}</span><span class="dex-v">${esc(fmt(st.reserves[0], st.quote.decimals))} / ${esc(fmt(st.reserves[1], st.token.decimals))}</span></div>
+      <div class="dex-row"><span class="dex-k">${t('dex.pool.price')}</span><span class="dex-v">${px === null ? '—' : `${esc(ethers.formatUnits(px, st.quote.decimals))} ${esc(st.quote.symbol)}`}</span></div>
+      <div class="dex-row"><span class="dex-k">${t('dex.swap.fee')}</span><span class="dex-v">0.30%${st.creatorBps > 0 ? ` + ${esc(t('dex.swap.creator').replace('{bps}', String(st.creatorBps)))}` : ''}</span></div>
+      ${evLockLive ? `<div class="dex-row"><span class="dex-k">${t('dex.pool.lock.label')}</span><span class="dex-v dex-warn">${esc(t('dex.pool.locked').replace('{until}', lockDate(evLock)))}</span></div>` : ''}
+      ${st.myShares > 0n ? `<div class="dex-row"><span class="dex-k">${t('dex.lp.mine')}</span><span class="dex-v">${esc(fmt(st.myShares, 18))} (${pctOf(st.myShares, st.totalSupply)}%)</span></div>` : ''}
+      <div class="dex-pool-acts">
+        <button type="button" class="dex-btn" data-dex-act="trade">${t('dex.pool.trade')}</button>
+        <button type="button" class="dex-btn dex-btn-primary" data-dex-act="lp">${t('dex.lp.open')}</button>
+      </div>
+    </div>`;
+}
+
+// One panel under the row list: my position + add + remove, one band select
+// governing both floors. Lock truth is LIVE here (pair.lockOf(me)), not the
+// event's launch-day stamp.
+export function lpBodyHtml(st) {
+  const bands = SLIP_BANDS.map((b) => `<option value="${b}" ${b === SLIP_DEFAULT_BPS ? 'selected' : ''}>${b / 100}%</option>`).join('');
+  const lockedNow = st.lockUntil > nowSec();
+  return `
+    <div id="dexLpPanel" data-dex-lp-panel>
+      <div class="dex-lp-head">
+        <span class="dex-lp-title">${t('dex.lp.h')} <strong>${esc(st.token.symbol)}</strong></span>
+        <button type="button" class="dex-btn dex-btn-sm" data-dex-lpclose aria-label="${t('dex.lp.close')}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="dex-live">
+        <div class="dex-row"><span class="dex-k">${t('dex.lp.mine')}</span><span class="dex-v">${esc(fmt(st.myShares, 18))} (${pctOf(st.myShares, st.totalSupply)}%)</span></div>
+        <div class="dex-row"><span class="dex-k">${t('dex.lp.sup')}</span><span class="dex-v">${esc(fmt(st.totalSupply, 18))}</span></div>
+        <div class="dex-row"><span class="dex-k">${t('dex.pool.lock.label')}</span><span class="dex-v ${lockedNow ? 'dex-warn' : ''}">${lockedNow ? esc(t('dex.lp.locknow').replace('{until}', lockDate(st.lockUntil))) : esc(t('dex.lp.opennow'))}</span></div>
+      </div>
+      <div class="dex-sliprow">
+        <span class="dex-k">${t('dex.swap.slip')}</span>
+        <select id="dexLpSlip" class="dex-input dex-select" aria-label="${t('dex.swap.slip')}">${bands}</select>
+      </div>
+      <div class="dex-lp-block">
+        <div class="dex-lp-title">${t('dex.lp.add')}</div>
+        <div class="dex-amtrow">
+          <input id="dexLpAddQ" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
+                 placeholder="${esc(t('dex.lp.in').replace('{sym}', st.quote.symbol))}" aria-label="${esc(t('dex.lp.in').replace('{sym}', st.quote.symbol))}">
+          <button type="button" id="dexLpAddQMax" class="dex-btn">${t('dex.swap.max')}</button>
+        </div>
+        <div class="dex-amtrow">
+          <input id="dexLpAddT" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
+                 placeholder="${esc(t('dex.lp.in').replace('{sym}', st.token.symbol))}" aria-label="${esc(t('dex.lp.in').replace('{sym}', st.token.symbol))}">
+          <button type="button" id="dexLpAddTMax" class="dex-btn">${t('dex.swap.max')}</button>
+        </div>
+        <div class="dex-row"><span class="dex-k">${t('dex.lp.est')}</span><span class="dex-v" data-dex-lp-made>—</span></div>
+        <div class="dex-row"><span class="dex-k">${t('dex.lp.minsym')}</span><span class="dex-v" data-dex-lp-min>—</span></div>
+        <p class="dex-warn" data-dex-lp-lwarn></p>
+        <div class="dex-actions">
+          <button type="button" id="dexLpAddGo" class="dex-btn dex-btn-primary" disabled>${t('dex.lp.gadd')}</button>
+        </div>
+      </div>
+      <div class="dex-lp-block">
+        <div class="dex-lp-title">${t('dex.lp.rm')}</div>
+        <div class="dex-amtrow">
+          <input id="dexLpRmS" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
+                 placeholder="${esc(t('dex.lp.saria'))}" aria-label="${esc(t('dex.lp.saria'))}">
+          <button type="button" id="dexLpRmSMax" class="dex-btn">${t('dex.swap.max')}</button>
+        </div>
+        <div class="dex-row"><span class="dex-k">${t('dex.lp.out')}</span><span class="dex-v" data-dex-lp-out>—</span></div>
+        <div class="dex-row"><span class="dex-k">${t('dex.lp.minsym')}</span><span class="dex-v" data-dex-lp-min2>—</span></div>
+        <p class="dex-warn" data-dex-lp-rwarn></p>
+        <div class="dex-actions">
+          <button type="button" id="dexLpRmGo" class="dex-btn dex-btn-primary" disabled>${t('dex.lp.grm')}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── scan + list paint ──────────────────────────────────────────────────
+
+function rowsFor() {
+  return Array.from(pools.st.values()).map(poolRowHtml).join('');
+}
+
+function paintPoolList(mount) {
+  const listEl = mount.querySelector('#dexPoolList');
+  if (!listEl || !pools) return;
+  if (!pools.st.size) {
+    listEl.innerHTML = `<div class="dex-empty">${esc(t('dex.pool.empty'))}</div>`;
+    return;
+  }
+  listEl.innerHTML = rowsFor() + `<div id="dexLpBody"></div>`;
+  if (pools.sel && pools.st.has(pools.sel)) openLp(mount, pools.sel);
+}
+
+async function scanPools(mount, raw) {
+  const v = String(raw || '').trim();
+  if (!isAddress(v)) { setStatus(mount, t('dex.pool.bad'), 'err', PS); return; }
+  const provider = get('provider');
+  if (!provider) { setStatus(mount, t('dex.engine.off'), 'err', PS); return; }
+  setStatus(mount, t('dex.pool.busy'), 'busy', PS);
+  try {
+    const scan = await scanFactory(provider, v);
+    const me = get('address') || null;
+    const states = await Promise.all(
+      scan.pools.map((row) => poolState(provider, row, scan.quote, me)),
+    );
+    pools = {
+      sheet: null, factory: v, quote: scan.quote, sel: null,
+      rows: scan.pools,
+      st: new Map(states.map((st) => [st.pair, st])),
+    };
+    const chainId = getNetworkById(get('networkId'))?.chainId;
+    if (chainId) factoryRemember(chainId, v);
+    paintPoolList(mount);
+    setPoolLastUsed(mount);
+    setStatus(mount, t('dex.pool.n').replace('{n}', String(states.length)), states.length ? 'ok' : '', PS);
+  } catch (e) {
+    const whyText = {
+      bad: t('dex.pool.bad'),
+      contract: t('dex.pool.contract'),
+    }[e.why] || `${t('dex.pool.err')} ${esc(String(e.shortMessage || e.message || 'error').slice(0, 120))}`;
+    setStatus(mount, whyText, 'err', PS);
+  }
+}
+
+function setPoolLastUsed(mount) {
+  const lastEl = mount.querySelector('#dexPoolLast');
+  if (!lastEl) return;
+  const chainId = getNetworkById(get('networkId'))?.chainId;
+  const saved = chainId ? factoryRecall(chainId) : '';
+  if (!saved) { lastEl.innerHTML = ''; return; }
+  lastEl.innerHTML = `
+    <span>${esc(t('dex.pool.last'))} ${esc(shortAddr(saved))}</span>
+    <button type="button" id="dexPoolUseLast" class="dex-btn dex-btn-sm" aria-label="${esc(t('dex.pool.use'))} ${esc(saved)}">${esc(t('dex.pool.use'))}</button>`;
+  mount.querySelector('#dexPoolUseLast')?.addEventListener('click', () => {
+    const facIn = mount.querySelector('#dexPoolFactory');
+    if (facIn) facIn.value = saved;
+    scanPools(mount, saved);
+  });
+}
+
+// ── the LP panel ───────────────────────────────────────────────────────
+
+function openLp(mount, pair) {
+  const st = pools?.st.get(pair);
+  if (!st) return;
+  pools.sel = pair;
+  mount.querySelectorAll('#dexPoolList [data-dex-pair]').forEach((el) => {
+    el.classList.toggle('dex-on', el.getAttribute('data-dex-pair') === pair);
+  });
+  const body = mount.querySelector('#dexLpBody');
+  if (!body) return;
+  body.innerHTML = lpBodyHtml(st);
+  bindLpBody(mount, st);
+}
+
+function closeLp(mount) {
+  if (pools) pools.sel = null;
+  mount.querySelectorAll('#dexPoolList [data-dex-pair]')
+    .forEach((el) => el.classList.remove('dex-on'));
+  const body = mount.querySelector('#dexLpBody');
+  if (body) body.innerHTML = '';
+}
+
+function bindLpBody(mount, st) {
+  const body = mount.querySelector('#dexLpPanel');
+  if (!body) return;
+  const qd = st.quote.decimals;
+  const td = st.token.decimals;
+  const slip = body.querySelector('#dexLpSlip');
+  const qIn = body.querySelector('#dexLpAddQ');
+  const tIn = body.querySelector('#dexLpAddT');
+  const sIn = body.querySelector('#dexLpRmS');
+  const bpsOf = () => Number(slip?.value ?? SLIP_DEFAULT_BPS);
+  const [rQ, rT] = st.reserves;
+
+  const refreshAdd = () => {
+    const qv = qIn.value.trim();
+    const tv = tIn.value.trim();
+    let bq = parseAmount(qv, qd);
+    let bt = parseAmount(tv, td);
+    // the ratio helper: one leg filled, its mate empty → suggest the pool ratio
+    if (bt.ok && tv !== '' && qv === '') {
+      qIn.value = ethers.formatUnits(bt.value * rQ / rT, qd);
+      bq = parseAmount(qIn.value, qd);
+    } else if (bq.ok && qv !== '' && tv === '') {
+      tIn.value = ethers.formatUnits(bq.value * rT / rQ, td);
+      bt = parseAmount(tIn.value, td);
+    }
+    const ok = bq.ok && bt.ok;
+    const pv = ok ? lpPreviewAdd(st, bq.value, bt.value) : null;
+    const madeEl = body.querySelector('[data-dex-lp-made]');
+    const minEl = body.querySelector('[data-dex-lp-min]');
+    const warnEl = body.querySelector('[data-dex-lp-lwarn]');
+    if (madeEl) madeEl.textContent = pv ? `${fmt(pv.made, 18)}` : '—';
+    if (minEl) minEl.textContent = pv ? fmt(slippageMinOut(pv.made, bpsOf()), 18) : '—';
+    if (warnEl) warnEl.textContent = pv?.lopsided ? t('dex.lp.lwarn') : '';
+    const goEl = body.querySelector('#dexLpAddGo');
+    if (goEl) goEl.disabled = !(pv && pv.made > 0n && pv.why === 'ok');
+  };
+
+  const refreshRm = () => {
+    const lockedNow = st.lockUntil > nowSec();
+    const bs = parseAmount(sIn.value.trim(), 18);
+    const outEl = body.querySelector('[data-dex-lp-out]');
+    const minEl = body.querySelector('[data-dex-lp-min2]');
+    const warnEl = body.querySelector('[data-dex-lp-rwarn]');
+    const out = bs.ok ? lpPreviewRemove(st, bs.value) : null;
+    if (outEl) outEl.textContent = out
+      ? `${fmt(out.outQuote, qd)} ${esc(st.quote.symbol)} + ${fmt(out.outToken, td)} ${esc(st.token.symbol)}`
+      : '—';
+    if (minEl) minEl.textContent = out
+      ? `${fmt(slippageMinOut(out.outQuote, bpsOf()), qd)} + ${fmt(slippageMinOut(out.outToken, bpsOf()), td)}`
+      : '—';
+    if (warnEl) {
+      warnEl.textContent = !bs.ok ? ''
+        : bs.value > st.myShares ? t('dex.lp.toomuch')
+        : lockedNow ? t('dex.lp.locknow').replace('{until}', lockDate(st.lockUntil))
+        : '';
+    }
+    const goEl = body.querySelector('#dexLpRmGo');
+    if (goEl) goEl.disabled = !(bs.ok && bs.value > 0n && !lockedNow && bs.value <= st.myShares);
+  };
+
+  const setMax = async (input, dec, addr) => {
+    try {
+      const bal = await tokenContract(addr, get('provider')).balanceOf(get('address') || '');
+      input.value = fmt(bal, dec);
+    } catch { /* a dead rpc must not crash the input */ }
+  };
+  body.querySelector('#dexLpAddQMax')?.addEventListener('click', async () => setMax(qIn, qd, st.quote.address));
+  body.querySelector('#dexLpAddTMax')?.addEventListener('click', async () => setMax(tIn, td, st.token.address));
+  body.querySelector('#dexLpRmSMax')?.addEventListener('click', () => {
+    sIn.value = fmt(st.myShares, 18);
+    refreshRm();
+  });
+  qIn.addEventListener('input', debounced(refreshAdd));
+  tIn.addEventListener('input', debounced(refreshAdd));
+  sIn.addEventListener('input', debounced(refreshRm));
+  slip.addEventListener('change', () => { refreshAdd(); refreshRm(); });
+  body.querySelector('#dexLpAddGo')?.addEventListener('click', () => startLpAdd(mount, st));
+  body.querySelector('#dexLpRmGo')?.addEventListener('click', () => startLpRm(mount, st));
+  body.querySelector('[data-dex-lpclose]')?.addEventListener('click', () => closeLp(mount));
+  refreshAdd();
+  refreshRm();
+}
+
+// Approve one leg of an add (mirror of the trade's EXACT-cap sheet).
+function legApproveBody(con, pairAddress, amt) {
+  return `
+    <div class="dex-row"><span class="dex-k">${t('dex.sheet.a.token')}</span><span class="dex-v">${esc(con.symbol)}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.sheet.a.cap')}</span><span class="dex-v">${esc(fmt(amt, con.decimals))} ${esc(con.symbol)}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.sheet.a.spender')}</span><span class="dex-v">${esc(shortAddr(pairAddress))}</span></div>
+    <p class="dex-t-hint">${t('dex.sheet.a.hint')}</p>`;
+}
+
+function sheetBodyAdd(st, qAmt, tAmt, made, minMade, bps) {
+  return `
+    <div class="dex-row"><span class="dex-k">${t('dex.sheet.l.pay')}</span><span class="dex-v">${esc(fmt(qAmt, st.quote.decimals))} ${esc(st.quote.symbol)}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.sheet.l.pay')}</span><span class="dex-v">${esc(fmt(tAmt, st.token.decimals))} ${esc(st.token.symbol)}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.lp.est')}</span><span class="dex-v">${esc(fmt(made, 18))}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.lp.minsym')} (${bps / 100}%)</span><span class="dex-v">${esc(fmt(minMade, 18))}</span></div>`;
+}
+
+function sheetBodyRm(st, shares, outQ, outT, minQ, minT, bps) {
+  return `
+    <div class="dex-row"><span class="dex-k">${t('dex.sheet.l.burn')}</span><span class="dex-v">${esc(fmt(shares, 18))}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.lp.out')}</span><span class="dex-v">${esc(fmt(outQ, st.quote.decimals))} ${esc(st.quote.symbol)} + ${esc(fmt(outT, st.token.decimals))} ${esc(st.token.symbol)}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.lp.minsym')} (${bps / 100}%)</span><span class="dex-v">${esc(fmt(minQ, st.quote.decimals))} + ${esc(fmt(minT, st.token.decimals))}</span></div>`;
+}
+
+function lpErrText(e) {
+  return {
+    signer: t('dex.wallet.none'),
+    chain: t('dex.engine.off'),
+    revert: t('dex.lp.failm'),
+    pending: `${t('dex.lp.pending')} ${esc(e.hash ? shortAddr(e.hash) : '')}`,
+  }[e.why] || `${t('dex.pool.err')} ${esc(String(e.shortMessage || e.message || 'error').slice(0, 120))}`;
+}
+
+async function startLpAdd(mount, st) {
+  const body = mount.querySelector('#dexLpPanel');
+  if (!body) return;
+  const bq = parseAmount(body.querySelector('#dexLpAddQ')?.value ?? '', st.quote.decimals);
+  const bt = parseAmount(body.querySelector('#dexLpAddT')?.value ?? '', st.token.decimals);
+  if (!bq.ok || !bt.ok) { setStatus(mount, t('dex.lp.needboth'), 'err', PS); return; }
+  const pv = lpPreviewAdd(st, bq.value, bt.value);
+  if (pv.made === 0n) { setStatus(mount, t('dex.lp.zeromade'), 'err', PS); return; }
+  const bps = Number(body.querySelector('#dexLpSlip')?.value ?? SLIP_DEFAULT_BPS);
+  const minMade = slippageMinOut(pv.made, bps);
+  const addr = get('address');
+  try {
+    for (const leg of [st.quote, st.token]) {
+      const amt = leg.address === st.quote.address ? bq.value : bt.value;
+      const allow = await tokenContract(leg.address, get('provider')).allowance(addr, st.pair);
+      if (allow < amt) {
+        const s = openSheet(mount, t('dex.sheet.a.title'), legApproveBody(leg, st.pair, amt), LPSHEET_HOST, pools);
+        const ok = await runSheetSend(s, () => sendTx(st, leg.address, approveData(leg.address, st.pair, amt)));
+        if (!ok) return;
+      }
+    }
+    const s2 = openSheet(mount, t('dex.lp.add'), sheetBodyAdd(st, bq.value, bt.value, pv.made, minMade, bps), LPSHEET_HOST, pools);
+    await runSheetSend(s2, () => sendTx(st, st.pair, addLiqData(bq.value, bt.value, minMade)));
+    setStatus(mount, t('dex.lp.done'), 'ok', PS);
+    await refreshPool(mount, st.pair);
+  } catch (e) {
+    setStatus(mount, lpErrText(e), e.why === 'signer' ? '' : 'err', PS);
+  }
+}
+
+async function startLpRm(mount, st) {
+  const body = mount.querySelector('#dexLpPanel');
+  if (!body) return;
+  const bs = parseAmount(body.querySelector('#dexLpRmS')?.value ?? '', 18);
+  if (!bs.ok || bs.value === 0n) { setStatus(mount, t('dex.lp.needs'), 'err', PS); return; }
+  if (bs.value > st.myShares) { setStatus(mount, t('dex.lp.toomuch'), 'err', PS); return; }
+  if (st.lockUntil > nowSec()) { setStatus(mount, t('dex.lp.locknow').replace('{until}', lockDate(st.lockUntil)), 'err', PS); return; }
+  const bps = Number(body.querySelector('#dexLpSlip')?.value ?? SLIP_DEFAULT_BPS);
+  const out = lpPreviewRemove(st, bs.value);
+  const minQ = slippageMinOut(out.outQuote, bps);
+  const minT = slippageMinOut(out.outToken, bps);
+  try {
+    const s = openSheet(mount, t('dex.lp.rm'), sheetBodyRm(st, bs.value, out.outQuote, out.outToken, minQ, minT, bps), LPSHEET_HOST, pools);
+    await runSheetSend(s, () => sendTx(st, st.pair, removeLiqData(bs.value, minQ, minT)));
+    setStatus(mount, t('dex.lp.done'), 'ok', PS);
+    await refreshPool(mount, st.pair);
+  } catch (e) {
+    setStatus(mount, lpErrText(e), e.why === 'signer' ? '' : 'err', PS);
+  }
+}
+
+// Post-tx truth: re-read the one pool touched and repaint list + panel.
+async function refreshPool(mount, pair) {
+  if (!pools?.st.has(pair)) return;
+  const provider = get('provider');
+  if (!provider) return;
+  const me = get('address') || null;
+  const fresh = await poolState(provider, pools.st.get(pair), pools.quote, me);
+  pools.st.set(pair, fresh);
+  paintPoolList(mount);
 }
 
 // ── bind the card once a pair address resolves ────────────────────────
@@ -319,11 +721,11 @@ async function startTrade(mount, st) {
     const payer = st.buy ? st.quote : st.token;
     const allowance = await payer.contract.allowance(me, st.pairAddress);
     if (allowance < st.amountIn) {
-      const s = openSheet(mount, t('dex.sheet.a.title'), sheetBodyApprove(st, st.amountIn));
+      const s = openSheet(mount, t('dex.sheet.a.title'), sheetBodyApprove(st, st.amountIn), '#dexTradeBody', trade);
       const ok = await runSheetSend(s, () => sendTx(st, payer.address, approveData(payer.address, st.pairAddress, st.amountIn)));
       if (!ok) return;
     }
-    const s2 = openSheet(mount, t('dex.sheet.s.title'), sheetBodySwap(st, st.amountIn, st.minOut));
+    const s2 = openSheet(mount, t('dex.sheet.s.title'), sheetBodySwap(st, st.amountIn, st.minOut), '#dexTradeBody', trade);
     await runSheetSend(s2, () =>
       sendTx(st, st.pairAddress, swapData(st.buy, st.amountIn, st.minOut, me)));
     setStatus(mount, t('dex.swap.done'), 'ok');
@@ -393,7 +795,7 @@ export function renderDex(root, opts = {}) {
         <span class="dex-v" id="dexEngineState">${chainOk ? t('dex.engine.on') : t('dex.engine.off')}</span>
       </div>
     </div>
-    ${chainOk ? tradeStubHtml() : ''}`;
+    ${chainOk ? tradeStubHtml() + poolsStubHtml() : ''}`;
 
   // A network switch while the view is open repaints the truth. Off before on:
   // re-arming the same key must never stack handlers.
@@ -401,6 +803,7 @@ export function renderDex(root, opts = {}) {
     try { off('networkId', repaint); } catch { /* first paint has none */ }
   }
   if (trade?.repaintRes) { clearInterval(trade.repaintRes); trade = null; }
+  pools = null; // scan/list state dies with the paint — no intervals live here
   repaint = () => {
     if (typeof root.isConnected !== 'undefined' && !root.isConnected) {
       if (repaint) { try { off('networkId', repaint); } catch { /* already gone */ } }
@@ -426,6 +829,34 @@ export function renderDex(root, opts = {}) {
       if (e.key === 'Enter') openBtn.click();
     });
   }
+
+  // pools card: scan on click/Enter, the remembered factory as an explicit Use
+  const scanBtn = q(root, '#dexPoolScan');
+  const facIn = q(root, '#dexPoolFactory');
+  if (scanBtn && facIn) {
+    scanBtn.addEventListener('click', () => scanPools(root, facIn.value));
+    facIn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') scanBtn.click();
+    });
+  }
+  const listEl = q(root, '#dexPoolList');
+  if (listEl && !listEl.dataset.dexBound) {
+    listEl.dataset.dexBound = '1';
+    listEl.addEventListener('click', (e) => {
+      if (e.target.closest('[data-dex-lpclose]')) { closeLp(root); return; }
+      const row = e.target.closest('[data-dex-pair]');
+      if (!row) return;
+      const pair = row.getAttribute('data-dex-pair');
+      const act = e.target.closest('[data-dex-act]')?.getAttribute('data-dex-act');
+      if (act === 'trade') {
+        if (pairIn) pairIn.value = pair;
+        openTradePanel(root, pair);
+      } else if (act === 'lp') {
+        openLp(root, pair);
+      }
+    });
+  }
+  setPoolLastUsed(root);
 
   return { ok: true, chainOk, wallet: Boolean(addr) };
 }

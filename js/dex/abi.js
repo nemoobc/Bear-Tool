@@ -9,8 +9,8 @@
 // byte-wise with the codegen from the contract source, so a contract
 // change is forced through here — the UI's ABI may never drift silently.
 //
-// Ships token + pair (traded surfaces, M3). Factory joins at the launch
-// milestone (M5) — one namespace, never a partial hand-edit.
+// Ships token + pair (traded surfaces, M3) + factory (discovery, M4).
+// One namespace, never a partial hand-edit.
 // ═══════════════════════════════════════════════════════════════
 
 export const BEAR_TOKEN_ABI = [
@@ -38,6 +38,16 @@ export const BEAR_TOKEN_ABI = [
       {"type":"function","name":"transferFrom","stateMutability":"nonpayable","inputs":[{"name":"from","type":"address"},{"name":"to","type":"address"},{"name":"value","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
       {"type":"function","name":"twitter","stateMutability":"view","outputs":[{"name":"","type":"string"}]},
       {"type":"function","name":"website","stateMutability":"view","outputs":[{"name":"","type":"string"}]}
+    ];
+
+export const BEAR_FACTORY_ABI = [
+      {"type":"constructor","stateMutability":"nonpayable","inputs":[{"name":"quote_","type":"address"}]},
+      {"type":"event","name":"Launched","inputs":[{"name":"token","type":"address"},{"name":"pair","type":"address"},{"name":"launcher","type":"address"},{"name":"creatorFeeBps","type":"uint256"},{"name":"lpLockUntil","type":"uint64"},{"name":"lpShares","type":"uint256"}]},
+      {"type":"function","name":"launch","stateMutability":"nonpayable","inputs":[{"name":"meta","type":"tuple","components":[{"name":"name","type":"string"},{"name":"symbol","type":"string"},{"name":"image","type":"string"},{"name":"desc","type":"string"},{"name":"twitter","type":"string"},{"name":"telegram","type":"string"},{"name":"website","type":"string"}]},{"name":"totalSupply_","type":"uint256"},{"name":"creatorFeeBps_","type":"uint256"},{"name":"lpLockUntil","type":"uint64"},{"name":"seedQuote","type":"uint256"},{"name":"seedToken","type":"uint256"},{"name":"minShares","type":"uint256"}],"outputs":[{"name":"tokenOut","type":"address"},{"name":"pairOut","type":"address"}]},
+      {"type":"function","name":"pairOf","stateMutability":"view","inputs":[{"name":"","type":"address"}],"outputs":[{"name":"","type":"address"}]},
+      {"type":"function","name":"quote","stateMutability":"view","outputs":[{"name":"","type":"address"}]},
+      {"type":"function","name":"tokenCount","stateMutability":"view","outputs":[{"name":"","type":"uint256"}]},
+      {"type":"function","name":"tokens","stateMutability":"view","inputs":[{"name":"","type":"uint256"}],"outputs":[{"name":"","type":"address"}]}
     ];
 
 export const BEAR_PAIR_ABI = [
