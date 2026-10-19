@@ -1,8 +1,13 @@
 // Bear Tool — fork-eip7702-rescue.test.js
 // RESCUE, end to end on an anvil fork — the flow `Rescue` in Tools runs:
 // deploy the rescue helper, delegate the target EOA to it (EIP-7702 type-4),
-// then the RESCUER (gas sponsor) calls rescueETH() THROUGH the delegation, so
-// the delegated EOA sweeps its own balance into the SAFE.
+// then the RESCUER (gas sponsor) calls rescueERC20All() THROUGH the
+// delegation, so the delegated EOA sweeps its own TOKENS into the SAFE.
+//
+// Native ETH is NOT part of the story anymore (user request 2026-10-18): the
+// helper has no rescueETH and no receive(), so an EOA with only ETH has
+// nothing this flow can pull out — the test pins that ETH stays put and the
+// SAFE never fills with it (nothing can enter, nothing gets bricked).
 //
 // The Solidity is not copied into this file: it is read out of
 // js/eip7702-tools.js at run time, so the source this test compiles is by
@@ -14,7 +19,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { startFork, compileSource, deployContract, forkSkipReason, ANVIL_ACCOUNT, ANVIL_ACCOUNT_2, ANVIL_KEY_2, stopFork, waitForTx, withRpcRetry } from './fork-helper.mjs';
+import { startFork, compileSource, deployContract, deployErc20, forkSkipReason, ANVIL_ACCOUNT, ANVIL_ACCOUNT_2, ANVIL_KEY_2, stopFork, waitForTx, withRpcRetry } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -29,24 +34,36 @@ function appSource(name) {
 before(async () => { if (skip) return; await startFork(); });
 after(async () => { if (skip) return; await stopFork(); });
 
-test('fork: rescue helper delegates the target EOA and sweeps ETH into the SAFE', { skip }, async () => {
+// The surface pin (pure string — runs even where foundry is missing): the
+// request 2026-10-18 killed ETH-only rescue, on-chain AND on explorers' Write
+// Contract tab. Comments mentioning the names are fine; CODE is not.
+test('rescue surface: no rescueETH, no receive() — the ERC-20 sweep is the live surface', async () => {
+  const src = appSource('RESCUE_SOURCE');
+  assert.ok(!/function\s+rescueETH\b/.test(src), 'rescueETH must not exist (dropped by request 2026-10-18)');
+  assert.ok(!/function\s+receive\b/.test(src), 'helper must have no receive() — nothing can gift it ETH to get stuck');
+  assert.ok(/function\s+rescueERC20All\b/.test(src), 'the token sweep is the live path this test exercises');
+});
+
+test('fork: rescue helper delegates the target EOA and sweeps ERC-20 into the SAFE', { skip }, async () => {
   const { signer, provider, network } = await startFork();
   const { ethers } = await import('ethers');
 
-  // 1) deploy the rescue helper (SAFE = where the funds must land, RESCUER =
-  //    the sponsor account broadcasting every tx in this flow).
+  // 1) fresh ERC-20 (deployer = anvil #0 = the sponsor seen by `onlyRescuer`)
+  //    and the rescue helper: SAFE = where funds must land, RESCUER = sponsor.
+  const token = await deployErc20(signer);
+  const tokenAddr = await token.getAddress();
+  const deployerTokens = await token.balanceOf(ANVIL_ACCOUNT);
+  assert.ok(deployerTokens > 0n, 'the token template must mint its supply to the deployer');
   const SAFE = ethers.Wallet.createRandom().address;
   const { abi, bytecode } = await compileSource(appSource('RESCUE_SOURCE'), 'rescue');
   // The deployer is anvil's account #0 — the NonceManager signer has no .address.
   const helper = await deployContract(signer, abi, bytecode, [SAFE, ANVIL_ACCOUNT]);
   const helperAddr = await helper.getAddress();
 
-  // 2) the target: anvil's second account, which holds ETH on the fork —
-  //    exactly the user story (an EOA stuck with funds it cannot spend).
+  // 2) the target: anvil's second account — the user story is an EOA stuck
+  //    with assets it cannot spend. Hand it tokens worth rescuing first.
   const target = new ethers.Wallet(ANVIL_KEY_2, provider);
   assert.equal(target.address, ANVIL_ACCOUNT_2, 'target key is anvil account #2');
-  const safeBefore = await provider.getBalance(SAFE);
-  assert.equal(safeBefore, 0n, 'SAFE starts empty on the fork');
 
   // 3) authorize the target → helper. The nonce is tracked LOCALLY: anvil's
   //    fork state can lag, and a stale nonce makes the authorization invalid
@@ -74,14 +91,18 @@ test('fork: rescue helper delegates the target EOA and sweeps ETH into the SAFE'
     return;
   }
 
-  // Read the sweep amount HERE, after the authorize tx: that tx was paid by
-  // the target itself, so its balance is already lower than the 10000 ETH it
-  // starts with on a fork (the helper sweeps address(this).balance — whatever
-  // it is at execution time).
-  const targetBefore = await provider.getBalance(target.address);
-  assert.ok(targetBefore > 0n, 'the target must hold funds worth rescuing');
+  const amount = deployerTokens / 10n;        // 10% of the supply — plenty, deterministic
+  const funding = await withRpcRetry(() => token.transfer(target.address, amount), { label: 'token to target', attempts: 3, delayMs: 3000, timeoutMs: 45_000 });
+  await withRpcRetry(() => funding.wait(), { label: 'token funding receipt', attempts: 3, delayMs: 3000, timeoutMs: 45_000 });
+  const targetTokens = await token.balanceOf(target.address);
+  assert.equal(targetTokens, amount, 'the target must hold the tokens that will be swept');
+  assert.equal(await token.balanceOf(SAFE), 0n, 'SAFE starts empty on the fork');
 
-  // 4) execute rescueETH through the delegation. Anvil only runs the
+  // The sponsoring account pays for every tx in this flow, so the target's
+  // native ETH is untouched from here on — the pin at the end relies on it.
+  const targetEthBefore = await provider.getBalance(target.address);
+
+  // 4) execute rescueERC20All through the delegation. Anvil only runs the
   //    delegation when the tx carries a FRESH authorization list, and on
   //    legacy-fee chains ethers would otherwise send a type-0 tx and drop the
   //    list silently — force type 4 + explicit fee data (same as the batch test).
@@ -93,7 +114,7 @@ test('fork: rescue helper delegates the target EOA and sweeps ETH into the SAFE'
     authorizationList: [auth2],
     maxFeePerGas: fee.maxFeePerGas ?? fee.gasPrice,
     maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? fee.gasPrice,
-    data: helper.interface.encodeFunctionData('rescueETH', []),
+    data: helper.interface.encodeFunctionData('rescueERC20All', [tokenAddr]),
   });
   const receipt = await waitForTx(execTx, 'rescue execute');
   assert.equal(receipt.status, 1, 'delegated rescue must succeed');
@@ -101,23 +122,30 @@ test('fork: rescue helper delegates the target EOA and sweeps ETH into the SAFE'
   // 5) balances: poll instead of one read — anvil's fork state can sit a
   //    block behind the receipt (pattern shared with fork-send.test.js).
   const deadline = Date.now() + 30_000;
-  let safeAfter = await provider.getBalance(SAFE);
-  let targetAfter = await provider.getBalance(target.address);
-  while ((safeAfter !== safeBefore + targetBefore || targetAfter !== 0n) && Date.now() < deadline) {
+  let safeTokens = await token.balanceOf(SAFE);
+  let targetAfter = await token.balanceOf(target.address);
+  while ((targetAfter !== 0n || safeTokens !== targetTokens) && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 500));
-    safeAfter = await provider.getBalance(SAFE);
-    targetAfter = await provider.getBalance(target.address);
+    safeTokens = await token.balanceOf(SAFE);
+    targetAfter = await token.balanceOf(target.address);
   }
-  assert.equal(targetAfter, 0n, 'the delegated EOA must be emptied');
-  assert.equal(safeAfter, safeBefore + targetBefore, 'the SAFE must receive the whole balance');
+  assert.equal(targetAfter, 0n, 'the delegated EOA must be emptied of tokens');
+  assert.equal(safeTokens, targetTokens, 'the SAFE must receive the whole token balance');
+
+  // 6) native ETH is intentionally NOT recoverable (request 2026-10-18): no
+  //    rescueETH, no receive() — and the sponsor paid the gas, so the EOA's
+  //    ETH sits exactly where it was. Nothing entered the helper to brick.
+  assert.equal(await provider.getBalance(target.address), targetEthBefore, 'ETH stays put — no native rescue exists');
+  assert.equal(await provider.getBalance(SAFE), 0n, 'the SAFE receives no ETH either');
 });
 
-test('fork: a non-rescuer cannot call rescueETH through the delegation', { skip }, async () => {
+test('fork: a non-rescuer cannot call rescueERC20All through the delegation', { skip }, async () => {
   const { signer, provider, network } = await startFork();
   const { ethers } = await import('ethers');
 
   // Same helper shape with a DIFFERENT rescuer: the sponsor account is no
   // longer authorized, so the delegated call must revert on onlyRescuer.
+  const token = await deployErc20(signer);
   const SAFE = ethers.Wallet.createRandom().address;
   const stranger = ethers.Wallet.createRandom().address;
   const { abi, bytecode } = await compileSource(appSource('RESCUE_SOURCE'), 'rescue');
@@ -138,11 +166,15 @@ test('fork: a non-rescuer cannot call rescueETH through the delegation', { skip 
     return;
   }
 
-  const targetBefore = await provider.getBalance(target.address);
-  const safeBefore = await provider.getBalance(SAFE);
+  const amount = 1000n * 10n ** 18n;
+  const funding = await withRpcRetry(() => token.transfer(target.address, amount), { label: 'token to target (stranger rescuer)', attempts: 3, delayMs: 3000, timeoutMs: 45_000 });
+  await withRpcRetry(() => funding.wait(), { label: 'token funding receipt (stranger rescuer)', attempts: 3, delayMs: 3000, timeoutMs: 45_000 });
+
+  const targetTokens = await token.balanceOf(target.address);
+  const targetEthBefore = await provider.getBalance(target.address);
   const auth2 = target.authorizeSync({ chainId: network.chainId, address: helperAddr, nonce: targetNonce++ });
   const fee = await provider.getFeeData();
-  const data = helper.interface.encodeFunctionData('rescueETH', []);
+  const data = helper.interface.encodeFunctionData('rescueERC20All', [await token.getAddress()]);
   // The revert surfaces EITHER at eth_estimateGas (ethers gauges gas before
   // broadcasting and the guard fires there) or as a mined status=0 — waitForTx
   // enriches the latter with the replay verdict. Wrap both in one rejection.
@@ -157,6 +189,7 @@ test('fork: a non-rescuer cannot call rescueETH through the delegation', { skip 
     });
     await waitForTx(execTx, 'rescue execute (unauthorized)');
   }, /rescuer|revert/i, 'only RESCUER may sweep');
-  assert.equal(await provider.getBalance(SAFE), safeBefore, 'SAFE must be untouched');
-  assert.equal(await provider.getBalance(target.address), targetBefore, 'target keeps its funds');
+  assert.equal(await token.balanceOf(SAFE), 0n, 'SAFE must be untouched');
+  assert.equal(await token.balanceOf(target.address), targetTokens, 'target keeps its tokens');
+  assert.equal(await provider.getBalance(target.address), targetEthBefore, 'target keeps its ETH');
 });
