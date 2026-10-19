@@ -47,6 +47,7 @@ const subs = new Set();
 const idle = {
   on: false, pair: null, spent: 0n, cap: 0n, trades: 0, wallets: 0,
   cursor: 0, halted: null, lastNote: null, floor: 0n, ceil: 0n,
+  spentH: '0', capH: '0',
 };
 
 function publish() {
@@ -56,9 +57,16 @@ function publish() {
 function state() {
   if (!R) return idle;
   return {
-    on: true, pair: R.pair, spent: R.spent, cap: R.cap, trades: R.trades,
+    // A halted bot is DONE, not running: the panel must show the Start
+    // button again the moment the reason is on screen — the old runner
+    // kept `on` true through the halt window and hid the restart door.
+    on: !R.stopped, pair: R.pair, spent: R.spent, cap: R.cap, trades: R.trades,
     wallets: R.wallets.length, cursor: R.cursor, halted: R.halted,
     lastNote: R.lastNote, floor: R.floor, ceil: R.ceil,
+    // The meter speaks the user's dialect, not the chain's: wei here would
+    // read as a countdown to nowhere. Human units, computed where the
+    // decimals are known.
+    spentH: fmtRaw(R.spent, R.qDec), capH: fmtRaw(R.cap, R.qDec),
   };
 }
 
@@ -220,11 +228,11 @@ export function bindBot(host, ctx = {}) {
     if (fill) fill.style.width = `${Math.min(100, pct)}%`;
     if (bar) bar.setAttribute('aria-valuenow', String(Math.round(pct)));
     const spentEl = host.querySelector('#dexBotMeterText');
-    if (spentEl) spentEl.textContent = `${t('dex.bot.spent')} ${s.spent} / ${s.cap}`;
+    if (spentEl) spentEl.textContent = `${t('dex.bot.spent')} ${s.spentH} / ${s.capH}`;
     const trEl = host.querySelector('#dexBotTrades');
     if (trEl) trEl.textContent = `${t('dex.bot.trades')} ${s.trades}`;
     const addrEl = host.querySelector('#dexBotAddrs');
-    if (addrEl) addrEl.textContent = `${t('dex.bot.addrs')} ${s.wallets} · ${t('dex.bot.next')} ${s.cursor + 1}`;
+    if (addrEl) addrEl.textContent = t('dex.bot.addrs', { n: String(s.wallets), next: String(s.cursor + 1) });
     if (s.halted) say(t('dex.bot.halted', { why: t(`dex.bot.why.${s.halted}`) }), 'err');
     else if (s.lastNote) { say(s.lastNote); log(s.lastNote); }
   });
@@ -238,6 +246,9 @@ export function bindBot(host, ctx = {}) {
  * funding four wallets and then never trades is the worst thing this panel
  * could produce. Every too-late refusal is moved here, before the first send. */
 export async function start(p = {}) {
+  // A self-halted run is still R for 8s so the panel can show the reason —
+  // but starting again must not wait out that window.
+  if (R?.stopped) { clearTimeout(R.timer); R = null; publish(); }
   if (R) throw new Error(t('dex.bot.alreadyRunning'));
   if (starting) throw new Error(t('dex.bot.alreadyRunning'));
 
@@ -410,7 +421,9 @@ async function oneTick() {
   if (!sent) return;
   if (d.action === BUY) cur.spent += d.amount;
   cur.trades += 1;
-  note(`${d.action === BUY ? t('dex.bot.bought') : t('dex.bot.sold')} ${fmtRaw(d.amount, selling ? cur.tDec : cur.qDec)} ${selling ? cur.tSym : cur.qSym} · ${String(pick.account.address).slice(0, 8)}`);
+  note(d.action === BUY
+    ? t('dex.bot.bought', { addr: String(pick.account.address).slice(0, 8), amt: `${fmtRaw(d.amount, cur.qDec)} ${cur.qSym}` })
+    : t('dex.bot.sold', { addr: String(pick.account.address).slice(0, 8), amt: `${fmtRaw(d.amount, cur.tDec)} ${cur.tSym}` }));
 }
 
 async function send(signer, to, data) {
