@@ -164,3 +164,38 @@
   border: 1px solid rgba(128, 128, 128, 0.28); border-radius: 999px;
   font-size: 11px; text-decoration: none; }
 .dex-social:hover { border-color: var(--accent, #f80); }
+
+/* ── M6: the feed + the market maker ─────────────────────────────────── */
+.dex-feed { display: flex; flex-direction: column; margin-top: 4px; }
+.dex-feed-row { display: flex; align-items: center; gap: 8px;
+  padding: 6px 2px; border-bottom: 1px solid rgba(128, 128, 128, 0.16); }
+.dex-feed-open { display: flex; flex-direction: column; align-items: flex-start;
+  gap: 1px; flex: 1 1 auto; min-width: 0; background: none; border: 0;
+  color: inherit; font: inherit; cursor: pointer; text-align: left;
+  padding: 0; }
+.dex-feed-open:hover .dex-feed-sym { color: var(--accent, #f80); }
+.dex-feed-sym { font-weight: 700; }
+.dex-feed-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 100%; }
+.dex-feed-price { font-variant-numeric: tabular-nums; }
+.dex-feed-del { flex: 0 0 auto; width: 28px; height: 28px; border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.26); background: none;
+  color: var(--ink-soft); cursor: pointer; }
+.dex-feed-del:hover { border-color: #c0392b; color: #c0392b; }
+.dex-bot-toggle { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; width: 100%; background: none; border: 0; padding: 8px 2px 4px;
+  color: inherit; cursor: pointer; font: inherit; font-weight: 700; }
+.dex-bot-body { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.dex-bot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dex-bot-grid .field-label { font-size: 11px; color: var(--ink-soft); }
+.dex-bot-truth { border: 1px dashed rgba(128, 128, 128, 0.34);
+  border-radius: 8px; padding: 6px 8px; }
+.dex-bot-bar { height: 8px; border-radius: 999px;
+  background: rgba(128, 128, 128, 0.16); overflow: hidden; }
+.dex-bot-bar-fill { height: 100%; width: 0%;
+  background: var(--accent, #f80); border-radius: 999px;
+  transition: width 0.25s ease-out; }
+.dex-bot-meter-head { display: flex; justify-content: space-between; }
+.dex-bot-log { white-space: pre-wrap; max-height: 140px; overflow-y: auto;
+  font-size: 11px; color: var(--ink-soft);
+  border-top: 1px solid rgba(128, 128, 128, 0.16); padding-top: 4px; }

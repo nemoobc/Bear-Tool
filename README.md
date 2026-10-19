@@ -273,34 +273,19 @@ Bear-Tool/
 │   ├── eip7702-support.js # "does this node understand 7702?" probe, asked of every chain
 │   ├── deploy.js       # deploy wizard: solc compile → gas → deploy (+ 2-tx proxy) → auto-verify
 │   ├── dex/            # the launchpad, in its own folder (order: "buat folder dex")
-│   │   ├── index.js    # the Dex v2 view: welcome + Sepolia gate + the nav (feed/swap/pools) + create routing
+│   │   ├── index.js    # the Dex v2 view: welcome + Sepolia gate + cards (feed/swap/pools/launch/bot) + wiring
 │   │   ├── core.js     # shared launchpad helpers: the Sepolia gate, provider access, the one tx path, formatting
-│   │   ├── tokens.js   # the feed — a grid of POOL tokens from the chain (factory), each with its live price; local index only for instant paint
-│   │   ├── trade.js    # a coin's page: live curve state, chart + tape, buy()/sell(), creator claim/graduate
-│   │   ├── history.js  # the coin's trade tape: Bought/Sold logs → rows and OHLC candles
+│   │   ├── tokens.js   # M6 the feed — factory pools with live prices + tombstone rule applied, no extra RPC
 │   │   ├── launch.js   # the launch wizard: image → data URI, socials + fee slice + one-tx dev buy, ONE factory.launch tx, token from receipt
-│   │   ├── token.js    # the token page's data: the pair's Swap trail (tape rows, band OHLC) + https-only social links
-│   │   ├── token-page.js # v2 token page: face, on-chain socials, price, reserves, positions + safety chips — all read live
-│   │   ├── pump-source.js # the PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
-│   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over those same logs — 1m/5m/1h/1d time buckets cut client-side (a quiet bucket draws no candle; a flat bucket is lifted a sub-pixel so its candle still renders — 2026-10-16)
-│   │   ├── list.js     # per-coin delisting: hide/restore a coin from your own feed, per chain, reversible
-│   │   ├── watch.js    # the watchlist: star a coin, a watch scope in the feed, and an in-app price watcher (≥10% moves, app open only)
-│   │   ├── liquidity.js # the pool panel: add/remove backing, your share, what it is worth — the contract functions made reachable
-│   │   ├── bot.js      # the market maker: fund once, it derives its own addresses and trades until stopped
-│   │   ├── bot-engine.js  # the bot's rules, pure: when to buy/sell/hold/stop, and which address pays
-│   │   ├── bot-wallets.js # the addresses the bot makes for itself, derived from your own seed, never colliding
-│   │   ├── curve.js    # bonding-curve math (constant-product, virtual reserves, fees, graduation)
-│   │   ├── bear-source.js # v2 DEX contracts in ONE source: BearToken, BearPair (real pools), BearFactory + ABIs
-│   │   ├── pool-math.js # v2 pool math offchain: constant-product outputs, price, LP shares, slippage (BearPair's mirror)
-│   │   ├── factory.js  # v2 factory per chain: deploy (compile → tx), remembered; ONE source for its address
-│   │   ├── pools.js    # v2 discovery: the factory's Launched/PoolCreated logs → pool rows + metadata cache
-│   │   ├── pool-data.js # v2 shared reads: reserves (quote first), token info/decimals, LP position + lock, allowance
-│   │   ├── swap.js     # v2 Swap: engine (exact parse, contract-floor quotes, approve→swap tx) + the panel
-│   │   ├── trade-sheet.js # the ONE trade sheet: direction, presets, quote line + confirm, approve→swap — mounted by the token page AND the Swap panel
-│   │   ├── pool-list.js # v2 Pools panel: live reserves + price per pool, Add pool (factory createPool — pick an ERC-20 + quote, seed both sides) and per-row delete (local tombstone, the pool stays on chain), opens the Swap tab
-│   │   ├── lp.js       # v2 Liquidity panel: add / remove / lock the pair's LP shares — auto-fill, imbalance warning, fee-APR estimate
-│   │   ├── holders.js  # v2 holder scan: Transfer logs walked BACKWARD in chunks — complete, pruned or still reading; + the pair's 24h volume
-│   │   └── portfolio.js # v2 Portfolio panel: LP positions + token balances + your creator fees (claim / claim all), read live
+│   │   ├── token.js    # M5b the token page's data: the pair's Swap trail (tape rows, band OHLC) + https-only social links
+│   │   ├── list.js     # M6 per-coin tombstone: delete from YOUR feed, per chain, recurring scans cannot resurrect it
+│   │   ├── bot.js      # M6 the market maker: fund once, derives own addresses, band trades until stopped (pool engine only)
+│   │   ├── bot-engine.js  # M6 the bot's rules, pure: buy below / sell above / hold between / stop reasons; which wallet pays
+│   │   ├── bot-wallets.js # M6 the addresses the bot makes for itself, derived from your own seed, never colliding
+│   │   ├── contracts.js # the v3 source in ONE file: BearToken, BearPair (real pools), BearFactory + the UI ABIs
+│   │   ├── pools.js    # M4 discovery: the factory's Launched/PoolCreated logs → pool rows + metadata cache
+│   │   ├── swap.js     # M3 Swap: engine (exact parse, slippage floor, approve→swap data) + readPair surface
+│   │   └── abi.js      # the ABI ui = the compiler's canonical pin (canon) — all dex artifacts
 │   ├── sign-render.js  # how a signing payload is SHOWN: hex→text, binary labelled, bidi chars stripped (one copy, three sheets)
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
 │   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder

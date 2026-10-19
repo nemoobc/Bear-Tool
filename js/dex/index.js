@@ -41,6 +41,9 @@ import {
   tokenFace, pairOfToken,
 } from './launch.js';
 import { swapTape, candlesOf, socialUrl, EMPTY_TRAIL } from './token.js';
+import { feedStubHtml, feedHtml } from './tokens.js';
+import { withoutDeleted, rememberDeleted } from './list.js';
+import { botStubHtml, bindBot } from './bot.js';
 
 const { ethers } = globalThis;
 
@@ -427,6 +430,7 @@ async function scanPools(mount, raw) {
     const chainId = getNetworkById(get('networkId'))?.chainId;
     if (chainId) factoryRemember(chainId, v);
     paintPoolList(mount);
+    paintFeed(mount);
     setPoolLastUsed(mount);
     setStatus(mount, t('dex.pool.n').replace('{n}', String(states.length)), states.length ? 'ok' : '', PS);
   } catch (e) {
@@ -662,6 +666,7 @@ async function refreshPool(mount, pair) {
   const fresh = await poolState(provider, pools.st.get(pair), pools.quote, me);
   pools.st.set(pair, fresh);
   paintPoolList(mount);
+  paintFeed(mount);
 }
 
 // ── M5: the launch card — one token, one pair, one tx ─────────────────
@@ -1078,6 +1083,37 @@ function runSheetSend(sheet, send) {
 
 // ── paint ──────────────────────────────────────────────────────────────
 
+/** M6 feed: rows from the pool scan the pools card already runs, filtered by
+ *  the tombstones (list.js). No scan of its own — one pair per token by
+ *  design, so a tombstone is stored against the TOKEN (the feed's noun). */
+function paintFeed(mount) {
+  if (typeof mount?.querySelector !== 'function') return;
+  const body = q(mount, '#dexFeedBody');
+  if (!body) return;
+  const chainId = getNetworkById(get('networkId'))?.chainId;
+  if (!chainId || !pools?.st || pools.st.size === 0) return;
+  const pairs = [...pools.st.entries()];
+  const live = withoutDeleted(
+    pairs.map(([pair, st]) => ({ pair, token: st?.token?.address })),
+    chainId,
+  ).map((r) => r.pair.toLowerCase());
+  const keep = new Set(live);
+  body.innerHTML = feedHtml(pairs.filter(([p]) => keep.has(String(p).toLowerCase())));
+  body.querySelectorAll('[data-dex-feed-open]').forEach((b) => b.addEventListener('click', () => {
+    const pair = b.getAttribute('data-dex-feed-open');
+    const st = pools?.st?.get(pair);
+    openTokenPanel(mount, st?.token?.address ?? '', pair);
+  }));
+  body.querySelectorAll('[data-dex-feed-del]').forEach((b) => b.addEventListener('click', () => {
+    const pair = b.getAttribute('data-dex-feed-del');
+    const st = pools?.st?.get(pair);
+    if (st?.token?.address && chainId) {
+      rememberDeleted(chainId, st.token.address);
+      paintFeed(mount);
+    }
+  }));
+}
+
 export function renderDex(root, opts = {}) {
   if (!root) return { ok: false, reason: 'no-root' };
 
@@ -1101,7 +1137,7 @@ export function renderDex(root, opts = {}) {
         <span class="dex-v" id="dexEngineState">${chainOk ? t('dex.engine.on') : t('dex.engine.off')}</span>
       </div>
     </div>
-    ${chainOk ? tradeStubHtml() + poolsStubHtml() + launchStubHtml() : ''}`;
+    ${chainOk ? feedStubHtml() + tradeStubHtml() + poolsStubHtml() + launchStubHtml() + botStubHtml() : ''}`;
 
   // A network switch while the view is open repaints the truth. Off before on:
   // re-arming the same key must never stack handlers.
@@ -1121,6 +1157,9 @@ export function renderDex(root, opts = {}) {
     renderDex(root, opts);
   };
   on('networkId', repaint);
+
+  bindBot(root);                    // the bot panel binds itself; empty pair until pasted
+  paintFeed(root);                 // the feed paints whatever the scan already knows
 
   if (!chainOk) return { ok: true, chainOk, wallet: Boolean(addr) };
 
