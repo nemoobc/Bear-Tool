@@ -279,6 +279,7 @@ Bear-Tool/
 │   │   ├── trade.js    # a coin's page: live curve state, chart + tape, buy()/sell(), creator claim/graduate
 │   │   ├── history.js  # the coin's trade tape: Bought/Sold logs → rows and OHLC candles
 │   │   ├── launch.js   # the launch wizard: image → data URI, socials + fee slice + one-tx dev buy, ONE factory.launch tx, token from receipt
+│   │   ├── token.js    # the token page's data: the pair's Swap trail (tape rows, band OHLC) + https-only social links
 │   │   ├── token-page.js # v2 token page: face, on-chain socials, price, reserves, positions + safety chips — all read live
 │   │   ├── pump-source.js # the PumpToken contract (ERC-20 trading on its own bonding curve) + ABI
 │   │   ├── chart.js    # TradingView lightweight-charts renderer (pinned build + SRI) over those same logs — 1m/5m/1h/1d time buckets cut client-side (a quiet bucket draws no candle; a flat bucket is lifted a sub-pixel so its candle still renders — 2026-10-16)

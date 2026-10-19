@@ -38,7 +38,9 @@ import {
 } from './pools.js';
 import {
   launchFromReceipt, launchRecall, launchRemember, launchTx, seedMinShares,
+  tokenFace, pairOfToken,
 } from './launch.js';
+import { swapTape, candlesOf, socialUrl, EMPTY_TRAIL } from './token.js';
 
 const { ethers } = globalThis;
 
@@ -759,6 +761,110 @@ export function sheetBodyLaunch(asking) {
     <div class="dex-row"><span class="dex-k">${t('dex.lp.minsym')}</span><span class="dex-v">${esc(fmt(asking.minShares, 18))}</span></div>`;
 }
 
+// ── M5b: the token page — the coin's own face, a Swap chart, the tape ──
+// The DATA (token.js) never touches the DOM; this is the sheet wiring and
+// the paint. Read-only page: the sheet's confirm button is hide — the only
+// doors are ✕ and Trade (the same pair door the launch result opens).
+
+/** The token page's own body. Socials render ONLY when the chain says
+ *  socialsSet — and even then only https (socialUrl), no javascript: jump. */
+export function tokenPageHtml(st) {
+  const { face, trail, pair, qSymbol, dec } = st;
+  const chips = [];
+  if (face.socialsSet) {
+    const tw = socialUrl(face.twitter), tg = socialUrl(face.telegram), wb = socialUrl(face.website);
+    if (tw) chips.push(`<a class="dex-social" href="${esc(tw)}" target="_blank" rel="noopener noreferrer">X</a>`);
+    if (tg) chips.push(`<a class="dex-social" href="${esc(tg)}" target="_blank" rel="noopener noreferrer">Telegram</a>`);
+    if (wb) chips.push(`<a class="dex-social" href="${esc(wb)}" target="_blank" rel="noopener noreferrer">${esc(shortAddr(wb))}</a>`);
+  }
+  const rows = trail?.rows ?? [];
+  const tape = rows.length === 0
+    ? `<p class="dex-t-hint">${esc(t('dex.token.notrail'))}</p>`
+    : `<ul class="dex-tape">${rows.map((r) => `
+      <li class="dex-tape-row">
+        <span class="dex-tape-dir ${r.quoteIn ? 'up' : 'down'}" aria-hidden="true">${r.quoteIn ? '▲' : '▼'}</span>
+        <span class="dex-tape-amt">${esc(fmt(r.quoteIn ? r.amountIn : r.amountOut, dec))} ${esc(qSymbol || 'Q')}</span>
+        <span class="dex-tape-time">${r.ts ? esc(new Date(Number(r.ts) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : `#${r.block}`}</span>
+      </li>`).join('')}</ul>`;
+  return `
+    <div data-dex-token>
+      <div class="dex-row"><span class="dex-k">${esc(t('dex.launch.name'))}</span>
+        <span class="dex-v"><strong>${esc(face.name)}</strong> (${esc(face.symbol)})<br><span class="dex-pairaddr">${esc(face.token)}</span></span></div>
+      <div class="dex-row"><span class="dex-k">${esc(t('dex.launch.supply'))}</span><span class="dex-v">${esc(fmt(face.totalSupply, dec))}</span></div>
+      ${pair ? `<div class="dex-row"><span class="dex-k">${esc(t('dex.token.pair'))}</span><span class="dex-v">${esc(shortAddr(pair))}</span></div>` : ''}
+      ${face.desc ? `<div class="dex-row"><span class="dex-k">${esc(t('dex.token.desc'))}</span><span class="dex-v">${esc(face.desc)}</span></div>` : ''}
+      ${chips.length ? `<div class="dex-row"><span class="dex-k">${esc(t('dex.token.links'))}</span><span class="dex-v">${chips.join(' ')}</span></div>` : ''}
+      <canvas class="dex-candles" width="304" height="88" role="img" aria-label="${esc(t('dex.token.chart'))}"></canvas>
+      <div class="dex-t-h">${esc(t('dex.token.tapeh'))}</div>
+      ${tape}
+      ${pair ? `<div class="dex-actions"><button type="button" class="dex-btn" data-dex-token-trade>${esc(t('dex.launch.saved.trade'))}</button></div>` : ''}
+    </div>`;
+}
+
+/** Deterministic canvas candles — numbers in, paths out. No CSS reads (a
+ *  node test would have no window), no external fonts, no animation. */
+function drawCandles(canvas, cs) {
+  if (!canvas || !Array.isArray(cs) || cs.length === 0) return;
+  const g = canvas.getContext && canvas.getContext('2d');
+  if (!g) return;
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  const hi = Math.max(...cs.map((c) => c.h)), lo = Math.min(...cs.map((c) => c.l));
+  const span = hi - lo;
+  const y = (v) => 8 + (1 - ((span > 0 ? v - lo : 0.5) / (span || 1))) * (canvas.height - 16);
+  const step = canvas.width / cs.length;
+  const bar = Math.min(10, step * 0.56);
+  for (const [i, c] of cs.entries()) {
+    const x = i * step + step / 2;
+    g.strokeStyle = g.fillStyle = c.c >= c.o ? '#19a974' : '#d64d5a';
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x, y(c.h)); g.lineTo(x, y(c.l)); g.stroke(); // the wick — full range
+    const top = y(Math.max(c.o, c.c));
+    const h = Math.max(2, Math.abs(y(c.o) - y(c.c)));
+    if (h <= 2.02) g.fillRect(x - bar / 2, top - 1, bar, 2);
+    else g.fillRect(x - bar / 2, top, bar, h); // the body — open to close
+  }
+}
+
+let token = null; // module state { sheet } — the sheet owns its own close
+
+/** Open the read-only token page as a sheet over the launch card. Every
+ *  failure degrades DOWNWARD, never empty: face lost → honest error; pair
+ *  lost → page without tape; tape lost → blank chart, honest hole marker. */
+async function openTokenPanel(mount, tokenAddr, pairHint) {
+  const provider = get('provider');
+  if (!provider) { setStatus(mount, t('dex.engine.off'), 'err'); return; }
+  try {
+    const face = await tokenFace(provider, String(tokenAddr || '').trim());
+    let pair = String(pairHint || '').trim().toLowerCase();
+    if (!isAddress(pair)) {
+      const factory = (pools?.factory || '').trim();
+      pair = isAddress(factory) ? await pairOfToken(provider, factory, face.token).catch(() => '') : '';
+    }
+    const dec = await tokenContract(face.token, provider).decimals().then(Number).catch(() => 18);
+    const qSymbol = isAddress(face.quote)
+      ? await tokenContract(face.quote, provider).symbol().then(String).catch(() => '')
+      : '';
+    let trail = EMPTY_TRAIL;
+    if (isAddress(pair)) trail = await swapTape(provider, pair).catch(() => EMPTY_TRAIL);
+    token = { sheet: null };
+    const s = openSheet(mount, t('dex.token.title'),
+      tokenPageHtml({ face, trail, pair: isAddress(pair) ? pair : '', qSymbol, dec }),
+      LAUNCH_HOST, token);
+    s.confirmB.hidden = true; // read-only page: no confirm to press
+    s.confirmB.disabled = true;
+    const body = s.wrap.querySelector('[data-dex-sheet-body]');
+    drawCandles(body?.querySelector('.dex-candles'), candlesOf(trail.rows));
+    body?.querySelector('[data-dex-token-trade]')?.addEventListener('click', () => {
+      s.forceRemove();
+      const pairIn = mount.querySelector?.('#dexSwapPair');
+      if (pairIn) pairIn.value = pair;
+      openTradePanel(mount, pair);
+    });
+  } catch (e) {
+    setStatus(mount, `${t('dex.token.err.bad')} ${esc(e.shortMessage || e.message || '').slice(0, 80)}`, 'err', LS);
+  }
+}
+
 function launchResultHtml(st) {
   return `
     <div class="dex-live" data-dex-launch-result>
@@ -767,6 +873,7 @@ function launchResultHtml(st) {
       <div class="dex-row"><span class="dex-k">${t('dex.lp.mine')}</span><span class="dex-v">${esc(fmt(st.rec.lpShares, 18))}</span></div>
       <div class="dex-actions">
         <button type="button" class="dex-btn" data-dex-launch-openpair>${esc(t('dex.launch.saved.trade'))}</button>
+        <button type="button" class="dex-btn" data-dex-launch-otoken>${esc(t('dex.token.open'))}</button>
       </div>
     </div>`;
 }
@@ -843,6 +950,7 @@ async function startLaunch(mount, root) {
       if (pairIn) pairIn.value = rec.pair;
       openTradePanel(root, rec.pair);
     });
+    if (bodyEl) bodyEl.querySelector('[data-dex-launch-otoken]')?.addEventListener('click', () => openTokenPanel(root, rec.token, rec.pair));
   } catch (e) {
     setStatus(mount, launchErrText(e), e.why === 'signer' ? '' : 'err', LS);
   }
