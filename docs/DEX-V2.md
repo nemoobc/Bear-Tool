@@ -121,9 +121,10 @@ SISA    : testnet-only → dana nyata minim; audit pihak ketiga = non-goal v1 (d
 | M5a ✅ | Launch wizard: `launch.js` (data layer launch + event `Launched`) + wiring kartu launch `index.js` + guard `decodeLaunched` `pools.js` + i18n id/EN + css + 9 tes `tests/dex-launch.test.js` | **CI Auto-Test 39220443573 SUCCESS — 223 E2E passed (33.3m), unit+audit+E2E semua hijau** (2026-10-19), sha `3dab4e3` |
 | M5b ✅ | Halaman token (7 string publik + socialsSet + totalSupply) + chart/tape dari event `Swap` | unit 7/7 + CI 3-run SUCCESS (Fork unichain+worldchain hijau, `b09d448`, 2026-10-19) |
 | M6 ✅ | Bot (engine v3 tanpa konsep graduated + wallets derive/split + runner band-standar) + feed tokens.js + tombstone list.js + wiring + i18n 58×2 + css + 12 tes | unit 1575/0 + check 280 file + dist gate; **CI 3-run SUCCESS** (Fork rerun hijau — foundryup flake GitHub 500, bukan kode), sha `3443bcb` (2026-10-19) |
-| M7 | Audit + red-team + APK (`~/storage/documents/Bear-Tool-<sha>.apk`, tanda tangan pinned) | audit-full CLEAN, APK terkirim |
+| M7 ✅ | Audit + red-team + APK (`~/storage/documents/Bear-Tool-<sha>.apk`, tanda tangan pinned) | audit-full CLEAN, red-team 0 temuan (2026-10-19); **APK CI `39312593888` SUCCESS — `Bear-Tool-d522502.apk` terkirim** |
+| M8 ✅ | Chart canvas SENDIRI (`chart.js`: OHLCV bucket, SMA7/25, EMA7, BB, Wilder-RSI pane, volume, crosshair, zoom/pan/pinch — tanpa lib ke-3) + wajah token dari FILE (`media.js`: gate mime tanpa svg, 512px, ≤96 KiB — input URL dihapus) + feed search/sort + `describeTokenCall` (satu baris amount token untuk 3 sheet send) | unit 1585/0 + `dex-chart.test.js` 10/0 + check 284 + build ✓; **CI FULL GREEN `f4bfb10`** (Auto-Test `39319502132` ✓ Deploy ✓ Fork ✓, 2026-10-19); bugfix parity `0474f26` (unit 1587/0) |
 
 ## 6. ESTIMASI (dari angka nyata)
 
-- js/dex sekarang: **4151 baris / 14 file** + **17 file test**. Target v2: ~4800-5500 baris / ~13 file + 3 file kontrak.
+- js/dex sekarang: **4076 baris / 15 file** (+1 `chart.js` ~460, `media.js`, `lp.js` zombie gugur) + **18 file test**. Target v2: ~4800-5500 baris / ~13 file + 3 file kontrak.
 - Test: rewrite ~14, keep ~3 (delete/wiring pola), tambah e2e baru. Total = **XL** → wajib milestone (pecah di atas).
