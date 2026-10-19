@@ -118,7 +118,8 @@ SISA    : testnet-only → dana nyata minim; audit pihak ketiga = non-goal v1 (d
 | M2 ✅ | Kontrak + anvil: 3 artifact (`BearToken`/`BearPair`/`BearFactory`) satu source `contracts.js`; ABI ui = potongancompiler-paritet (canon pin); pair swap floor-kontrak; NO-NATIVE di pair | `node --test tests/dex-contracts.test.js tests/dex-abi.test.js` + sha `aa1b7ed` |
 | M3 ✅ | Trade sheet: paste alamat pair → baca live → quote `getAmountOut` (view mirror) → sheet 2 langkah (approve EXAKT → swap) + pita slippage fix + creator fee; jalur `safetx` waitForReceipt | `node --test tests/dex-swap.test.js` + sha `85f4d65` |
 | M4 ✅ | Pools + LP: `pools.js` (scan event `Launched` factory, `poolState` live, preview mint/burn = aturan kontrak persis — sqrt Newton + MIN rasio-lantai; `addLiqData`/`removeLiqData`; ingat factory per chain) + kartu pool + panel LP (posisi saya, approvals kaki-EXAKT dua sisi, gate kunci live) + `BEAR_FACTORY_ABI` canon + 10 tes baru (pools 7, view 2, abi 1); **unit 1550 (1547 pass / 0 fail / 3 skip), check 270 file OK, dist gate 4/4, build ✓** (2026-10-18) | `node --test tests/dex-pools.test.js tests/dex-swap.test.js tests/dex-abi.test.js` |
-| M5 | Launch wizard (factory.launch SATU tx + event `Launched`) + halaman token + chart/tape dari event `Swap` | unit + e2e hijau |
+| M5a ✅ | Launch wizard: `launch.js` (data layer launch + event `Launched`) + wiring kartu launch `index.js` + guard `decodeLaunched` `pools.js` + i18n id/EN + css + 9 tes `tests/dex-launch.test.js` | **CI Auto-Test 39220443573 SUCCESS — 223 E2E passed (33.3m), unit+audit+E2E semua hijau** (2026-10-19), sha `3dab4e3` |
+| M5b | Halaman token (7 string publik + socialsSet + totalSupply) + chart/tape dari event `Swap` | unit + e2e hijau |
 | M6 | Bot + pump/edu + feed; bersihkan sisa pump | unit hijau + CI |
 | M7 | Audit + red-team + APK (`~/storage/documents/Bear-Tool-<sha>.apk`, tanda tangan pinned) | audit-full CLEAN, APK terkirim |
 

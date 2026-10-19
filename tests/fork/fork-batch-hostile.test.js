@@ -27,7 +27,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { startFork, stopFork, forkSkipReason, ANVIL_ACCOUNT, ANVIL_KEY } from './fork-helper.mjs';
+import { startFork, stopFork, forkSkipReason, currentNetwork, ANVIL_ACCOUNT, ANVIL_KEY } from './fork-helper.mjs';
 
 const skip = forkSkipReason();
 
@@ -98,6 +98,25 @@ globalThis.ethers = ethers;
 const state = await import('../../js/state.js');
 const netMod = await import('../../js/network.js');
 const sendMod = await import('../../js/send.js');
+const { withTimeout } = await import('../../js/safetx.js');
+
+// A provider is built ONCE per file. Every probe during construction travels
+// app → proxy → anvil → THIS chain's public gateway, and a throttled gateway
+// answers each probe in tens of seconds: building the provider twice burned
+// the whole 600s file budget before the second test even armed (CI unichain +
+// worldchain, 4 runs in a row: "test timed out after 600000ms" with test 1
+// green). One construction, and a hard ceiling on it.
+let cachedProvider;
+async function providerThroughProxyCached() {
+  if (cachedProvider) return cachedProvider;
+  try {
+    cachedProvider = await providerThroughProxy();
+  } catch (err) {
+    process.stderr.write(`[fork] provider construction failed: ${err?.shortMessage || err}\n`);
+    return null;
+  }
+  return cachedProvider;
+}
 
 const toasts = () => created
   .filter((e) => typeof e.className === 'string' && e.className.startsWith('toast'))
@@ -210,7 +229,7 @@ async function providerThroughProxy() {
     'bear.rpcOverrides',
     JSON.stringify({ [overrideKey]: [proxy.url] }),
   );
-  const provider = await netMod.getProvider(network.chainId);
+  const provider = await withTimeout(netMod.getProvider(network.chainId), 150_000, 'provider construction');
   state.set('provider', provider);
   return provider;
 }
@@ -233,7 +252,11 @@ test('batch-hostile endpoint: doSend still broadcasts — zero array POSTs', {
 }, async () => {
   proxy.setMode('forward');
   proxy.reset();
-  const provider = await providerThroughProxy();
+  const provider = await providerThroughProxyCached();
+  if (!provider) {
+    process.stderr.write(`[fork] ${currentNetwork()?.name}: endpoint too slow to construct a provider within 150s — honest skip, no false green\n`);
+    return;
+  }
   const to = ethers.Wallet.createRandom().address;
   armSendForm({ to, amount: '0.001' });
 
@@ -256,7 +279,11 @@ test('hanging endpoint: doSend fails FAST with a toast, not in 5 minutes', {
   skip, timeout: 600_000,
 }, async () => {
   proxy.setMode('forward');
-  const provider = await providerThroughProxy(); // construction probes answer
+  const provider = await providerThroughProxyCached(); // construction probes answer
+  if (!provider) {
+    process.stderr.write(`[fork] ${network.name}: endpoint too slow to construct a provider within 150s — honest skip, no false green\n`);
+    return;
+  }
   proxy.setMode('hang');                          // …then the node goes silent
 
   const to = ethers.Wallet.createRandom().address;

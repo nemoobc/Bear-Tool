@@ -297,7 +297,11 @@ jobs:
         run: npm run test:e2e-wc
 
       - name: Run E2E suite (tests/e2e/*.spec.js)
-        run: npm run test:e2e -- --reporter=list
+        # retries=1: the fork-backed specs (11-onchain-fork etc.) read through
+        # public RPCs — CI 39224672508 died once on a 75s waitForFunction while
+        # the same spec was green in 39220443573 with identical code. One honest
+        # re-attempt keeps a gateway hiccup from faking a code regression.
+        run: npm run test:e2e -- --reporter=list --retries=1
 
       # Traces and error-context die with the runner otherwise: CI
       # 36992334807 failed seven sends and left nothing but the TAP wall
