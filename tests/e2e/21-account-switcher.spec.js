@@ -31,6 +31,11 @@ async function addSecondAccount(page, password = TEST_PW) {
   await appClick(page, '#accountPill');
   await page.waitForSelector('#addAccBtn', { timeout: 10_000 });
   await appClick(page, '#addAccBtn');
+  // Add Account now asks Create/Import/derive BEFORE the password (user
+  // request 2026-10-18). Derive is the choice that needs no seed phrase and
+  // works for a created wallet: prompt → password → the switcher re-opens.
+  await page.waitForSelector('#accAddDerive', { timeout: 10_000 });
+  await appClick(page, '#accAddDerive');
   await page.waitForSelector('#pwInput', { timeout: 10_000 });
   await page.fill('#pwInput', password);
   await appClick(page, '#pwOk');

@@ -56,6 +56,9 @@ test.describe('Wallet import', () => {
     await importWallet(page, { secret: w.mnemonic.phrase });
     await appClick(page, '#accountPill');
     await appClick(page, '#lockBtn');
+    // Locking no longer self-invites "Welcome back" (user request 2026-10-18):
+    // the bear logo is the manual door into the unlock sheet while dark.
+    await appClick(page, '#btnHome');
     await page.waitForSelector('#unlockPw', { timeout: 10_000 });
     await unlock(page, 'password123');
     await expectUnlocked(page);
