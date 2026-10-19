@@ -295,7 +295,7 @@ const SHELL = `
       <span class="dbr-loading-txt" id="dbrLoadingTxt">Loading…</span>
     </div>
     <iframe id="dbrFrame" class="dbr-frame" title="dApp page"
-      sandbox="allow-scripts allow-forms allow-popups allow-modals"
+      sandbox="allow-scripts allow-forms allow-modals"
       referrerpolicy="no-referrer" credentialless
       allow="clipboard-write" hidden></iframe>
     <div class="dbr-blocked" id="dbrBlocked" hidden></div>
@@ -659,7 +659,14 @@ const cardHTML = (d) => `
  * Everything else (no allow-top-navigation, no allow-downloads) is unchanged.
  */
 export function sandboxFor(url, selfOrigin = (typeof location !== 'undefined' ? location.origin : '')) {
-  const BASE = 'allow-scripts allow-forms allow-popups allow-modals';
+  // allow-popups is GONE (user report 2026-10-19, live): a cross-origin dApp's
+  // own "Connect" click spawns window.open('about:blank') — its WalletConnect
+  // modal lives in a popup this wallet can never see — and the browser then
+  // wears an unusable blank tab that the browser's own ✕ cannot reach. Blocking
+  // the popup kills the blank tab at birth; the honest connect path stays the
+  // wcHint: the site's own Connect -> WalletConnect, copy the wc: URI, pair in
+  // the pair sheet. Same-origin pages get no popups either — the minimal set.
+  const BASE = 'allow-scripts allow-forms allow-modals';
   try {
     const target = new URL(String(url), selfOrigin || undefined);
     if (target.origin === selfOrigin) return BASE;

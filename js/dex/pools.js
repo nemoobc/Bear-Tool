@@ -28,6 +28,23 @@ export function factoryContract(factoryAddress, providerLike) {
   return new ethers.Contract(factoryAddress, BEAR_FACTORY_ABI, providerLike);
 }
 
+/** One Launched log → plain row. Shared by the scanner and the launch receipt. */
+export function decodeLaunched(log) {
+  if (!Array.isArray(log?.topics) || !log.topics.length) return null;
+  const desc = FACTORY_I.parseLog({ topics: log.topics, data: log.data });
+  if (!desc) return null;
+  const ev = desc.args;
+  return {
+    token: String(ev.token).toLowerCase(),
+    pair: String(ev.pair).toLowerCase(),
+    launcher: String(ev.launcher).toLowerCase(),
+    creatorFeeBps: Number(ev.creatorFeeBps),
+    // 0 = no lock. uint64 fits Number until year 356T; this row is a date.
+    lockUntil: Number(ev.lpLockUntil),
+    lpShares: BigInt(ev.lpShares),
+  };
+}
+
 /**
  * One scanned pool row straight out of the Launched event: the addresses are
  * event data, everything else (reserves, symbols, my shares) is read live
@@ -48,22 +65,7 @@ export async function scanFactory(providerLike, factoryAddress) {
   return {
     factory: factoryAddress.toLowerCase(),
     quote: String(quote).toLowerCase(),
-    pools: pools.map((log) => {
-      const desc = FACTORY_I.parseLog(log.topics
-        ? { topics: log.topics, data: log.data }
-        : { topics: [], data: '0x' });
-      if (!desc) return null;
-      const ev = desc.args;
-      return {
-        token: String(ev.token).toLowerCase(),
-        pair: String(ev.pair).toLowerCase(),
-        launcher: String(ev.launcher).toLowerCase(),
-        creatorFeeBps: Number(ev.creatorFeeBps),
-        // 0 = no lock. uint64 fits Number until year 356T; this row is a date.
-        lockUntil: Number(ev.lpLockUntil),
-        lpShares: BigInt(ev.lpShares),
-      };
-    }).filter(Boolean),
+    pools: pools.map(decodeLaunched).filter(Boolean),
   };
 }
 

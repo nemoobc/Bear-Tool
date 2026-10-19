@@ -136,10 +136,14 @@ test('walletconnect imports for real and its gates are pure', async () => {
 // be given the flag — allow-scripts + allow-same-origin there means the frame
 // can read Bear Tool's localStorage, where the keystore lives. One function
 // decides, per URL; both directions are pinned here.
+//
+// allow-popups is gone (2026-10-19): a framed dApp spawning a popup produced
+// an about:blank tab the wallet owns nothing of — blocked at the sandbox, not
+// in a handler nobody has.
 test('sandboxFor: cross-origin gets its storage back, this origin never does', async () => {
   const mod = await import('../js/dapp-browser.js');
   const SELF = 'https://wallet.example';
-  const base = 'allow-scripts allow-forms allow-popups allow-modals';
+  const base = 'allow-scripts allow-forms allow-modals';
 
   // Cross-origin — the Aave case: without the flag the page dies blank.
   assert.equal(mod.sandboxFor('https://app.aave.com/', SELF), base + ' allow-same-origin');
@@ -154,17 +158,18 @@ test('sandboxFor: cross-origin gets its storage back, this origin never does', a
   assert.equal(mod.sandboxFor('', SELF), base);
 });
 
-// S2 (2026-10-16): the sandbox never grants more than storage — and never
-// top-navigation, downloads or a popup escape hatch (a framed page that can
-// navigate the top frame can replace the wallet UI with its own).
-test('sandboxFor never grants top-navigation, downloads or escape hatches', async () => {
+// S2 (2026-10-16), tightened 2026-10-19: the sandbox never grants more than
+// storage — and never top-navigation, downloads, or popups of any kind (the
+// plain flag AND the escape hatch): a framed dApp's window.open('about:blank')
+// was the blank-tab report; both spellings are blocked forever.
+test('sandboxFor never grants top-navigation, downloads, popups or escape hatches', async () => {
   const mod = await import('../js/dapp-browser.js');
   for (const url of ['https://app.aave.com/', 'not a url', '', 'http://x.example/path']) {
     for (const self of ['https://wallet.example', '']) {
       const flags = mod.sandboxFor(url, self);
       assert.ok(!/allow-top-navigation/.test(flags), 'top-navigation can never be granted: ' + flags);
       assert.ok(!/allow-downloads/.test(flags), 'downloads can never be auto-granted: ' + flags);
-      assert.ok(!/allow-popups-to-escape-sandbox/.test(flags), 'no popup escape hatch: ' + flags);
+      assert.ok(!/allow-popups/.test(flags), 'no popup flag of any kind — the blank about:blank tab came from here: ' + flags);
     }
   }
 });

@@ -117,3 +117,25 @@
 }
 .dex-warn { min-height: 0; font-size: 12px; color: #b06a00; margin: 2px 0 0; }
 .dex-row .dex-warn { font-size: 12px; }
+
+/* ── M5: the launch card ───────────────────────────────────────────── */
+.dex-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.dex-amtrow { display: flex; gap: 8px; }
+.dex-amtrow .dex-input { flex: 1 1 0; min-width: 0; }
+.dex-launch-more { font-size: 12px; color: var(--ink-soft); }
+.dex-launch-more summary { cursor: pointer; padding: 2px 0; color: var(--accent, #f80); }
+.dex-launch-more[open] summary { margin-bottom: 6px; }
+.dex-launch-more .dex-input { margin-top: 6px; }
+.dex-danger {
+  padding: 8px 10px; border: 1px solid #c0392b; border-radius: 10px;
+  font-size: 12px; color: #c0392b; background: rgba(192, 57, 43, 0.06);
+}
+.dex-launch-saved { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.dex-launch-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 2px; border-bottom: 1px solid rgba(128, 128, 128, 0.18);
+  font-size: 12px;
+}
+.dex-launch-row-head { font-weight: 700; color: var(--ink-soft); border-bottom: 1px solid rgba(128, 128, 128, 0.25); }
+.dex-launch-row > span:first-child { font-weight: 700; }
+.dex-launch-row .dex-btn-sm { margin-left: auto; }

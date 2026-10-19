@@ -77,8 +77,8 @@ test('dapps: page has DApps container', () => {
 test('dapps: the in-app frame is hardened', () => {
   assert.match(browserSrc, /referrerpolicy="no-referrer"/, 'must not leak the wallet URL as a referrer');
   assert.match(browserSrc, /credentialless/, 'must run without ambient cookies or storage');
-  assert.match(browserSrc, /'allow-scripts allow-forms allow-popups allow-modals'/,
-    'sandbox must stay minimal at its base: no popups-to-escape-sandbox, no top navigation');
+  assert.match(browserSrc, /'allow-scripts allow-forms allow-modals'/,
+    'sandbox must stay minimal at its base: no popups, no top navigation');
   // The markup itself never carries allow-same-origin — it is granted per
   // navigation by sandboxFor(), and only across origins. A literal in the
   // static sandbox attribute would be the unguarded version this file used to

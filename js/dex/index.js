@@ -33,9 +33,12 @@ import {
   SLIP_DEFAULT_BPS, SLIP_MAX_BPS,
 } from './swap.js';
 import {
-  addLiqData, factoryRecall, factoryRemember,
+  addLiqData, factoryContract, factoryRecall, factoryRemember,
   lpPreviewAdd, lpPreviewRemove, poolState, removeLiqData, scanFactory,
 } from './pools.js';
+import {
+  launchFromReceipt, launchRecall, launchRemember, launchTx, seedMinShares,
+} from './launch.js';
 
 const { ethers } = globalThis;
 
@@ -588,6 +591,15 @@ function lpErrText(e) {
   }[e.why] || `${t('dex.pool.err')} ${esc(String(e.shortMessage || e.message || 'error').slice(0, 120))}`;
 }
 
+function launchErrText(e) {
+  return {
+    signer: t('dex.wallet.none'),
+    chain: t('dex.engine.off'),
+    revert: t('dex.launch.failm'),
+    pending: `${t('dex.launch.pending')} ${esc(e.hash ? shortAddr(e.hash) : '')}`,
+  }[e.why] || `${t('dex.pool.err')} ${esc(String(e.shortMessage || e.message || 'error').slice(0, 120))}`;
+}
+
 async function startLpAdd(mount, st) {
   const body = mount.querySelector('#dexLpPanel');
   if (!body) return;
@@ -648,6 +660,192 @@ async function refreshPool(mount, pair) {
   const fresh = await poolState(provider, pools.st.get(pair), pools.quote, me);
   pools.st.set(pair, fresh);
   paintPoolList(mount);
+}
+
+// ── M5: the launch card — one token, one pair, one tx ─────────────────
+
+const LS = '#dexLaunchStatus'; // the launch card's own status slot
+const LAUNCH_HOST = '#dexLaunchBody';
+
+let launch = null; // { sheet, factory, last } — dies with the paint
+
+export function launchStubHtml() {
+  return `
+    <div class="dex-card" id="dexLaunchCard">
+      <div class="dex-card-head">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+        <span>${t('dex.launch.h')}</span>
+      </div>
+      <p class="dex-t-hint">${t('dex.launch.hint')}</p>
+      <div class="dex-danger">${t('dex.launch.warn')}</div>
+      <div class="dex-form" id="dexLaunchForm">
+        <input id="dexLaunchName" class="dex-input" type="text" spellcheck="false" autocomplete="off"
+               placeholder="${t('dex.launch.name')}" aria-label="${t('dex.launch.name')}" maxlength="40">
+        <input id="dexLaunchSymbol" class="dex-input" type="text" spellcheck="false" autocomplete="off"
+               placeholder="${t('dex.launch.sym')}" aria-label="${t('dex.launch.sym')}" maxlength="10">
+        <input id="dexLaunchSupply" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
+               placeholder="${t('dex.launch.supply')}" aria-label="${t('dex.launch.supply')}">
+        <input id="dexLaunchFee" class="dex-input" type="text" inputmode="numeric" spellcheck="false" autocomplete="off"
+               placeholder="${t('dex.launch.fee')}" aria-label="${t('dex.launch.fee')}">
+        <input id="dexLaunchLock" class="dex-input" type="text" inputmode="numeric" spellcheck="false" autocomplete="off"
+               placeholder="${t('dex.launch.lockdays')}" aria-label="${t('dex.launch.lockdays')}">
+        <div class="dex-amtrow">
+          <input id="dexLaunchSeedQ" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
+                 placeholder="${t('dex.launch.seedq')}" aria-label="${t('dex.launch.seedq')}">
+          <input id="dexLaunchSeedT" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
+                 placeholder="${t('dex.launch.seedt')}" aria-label="${t('dex.launch.seedt')}">        </div>
+        <details class="dex-launch-more">
+          <summary>${t('dex.launch.more')}</summary>
+          <input id="dexLaunchImg" class="dex-input" type="url" spellcheck="false" autocomplete="off"
+                 placeholder="${t('dex.launch.img')}" aria-label="${t('dex.launch.img')}">
+          <input id="dexLaunchDesc" class="dex-input" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="${t('dex.launch.desc')}" aria-label="${t('dex.launch.desc')}" maxlength="160">
+          <input id="dexLaunchTw" class="dex-input" type="url" spellcheck="false" autocomplete="off"
+                 placeholder="${t('dex.launch.tw')}" aria-label="${t('dex.launch.tw')}">
+          <input id="dexLaunchTg" class="dex-input" type="url" spellcheck="false" autocomplete="off"
+                 placeholder="${t('dex.launch.tg')}" aria-label="${t('dex.launch.tg')}">
+          <input id="dexLaunchWeb" class="dex-input" type="url" spellcheck="false" autocomplete="off"
+                 placeholder="${t('dex.launch.web')}" aria-label="${t('dex.launch.web')}">
+        </details>
+      </div>
+      <div class="dex-actions">
+        <button type="button" id="dexLaunchGo" class="dex-btn dex-btn-primary">${t('dex.launch.go')}</button>
+      </div>
+      <div class="dex-status" id="dexLaunchStatus"></div>
+      <div id="dexLaunchSaved" class="dex-launch-saved"></div>
+      <div id="dexLaunchBody"></div>
+    </div>`;
+}
+
+const WHY_LA = (e) => ({
+  name: t('dex.launch.err.name'), symbol: t('dex.launch.err.symbol'),
+  supply: t('dex.launch.err.supply'), seed: t('dex.launch.err.seed'),
+  seedover: t('dex.launch.err.seedover'), fee: t('dex.launch.err.fee'),
+  lock: t('dex.launch.err.lock'), min: t('dex.launch.err.min'),
+  factory: t('dex.launch.needfac'), token: t('dex.launch.err.err'),
+})[e.why];
+
+function savedListHtml(list) {
+  if (!list.length) return '';
+  return `
+    <div class="dex-launch-row dex-launch-row-head">${esc(t('dex.launch.saved.h'))}</div>
+    ${list.slice(0, 5).map((r) => `
+      <div class="dex-launch-row" data-dex-launch-token="${esc(r.token)}" data-dex-launch-pair="${esc(r.pair || '')}">
+        <span>${esc(r.symbol || shortAddr(r.token))}</span>
+        <span class="dex-pairaddr">${esc(r.name || '')}</span>
+        <button type="button" class="dex-btn dex-btn-sm" data-dex-launch-trade>${esc(t('dex.launch.saved.trade'))}</button>
+      </div>`).join('')}`;
+}
+
+function paintLaunchSaved(mount) {
+  const el = mount.querySelector('#dexLaunchSaved');
+  if (!el) return;
+  const chainId = getNetworkById(get('networkId'))?.chainId;
+  el.innerHTML = chainId ? savedListHtml(launchRecall(chainId)) : '';
+  if (launch) launch.list = chainId ? launchRecall(chainId) : [];
+}
+
+// The launch sheet rows: exported so the test pins what the user reads
+// before signing (mirror of tradeStubHtml/poolsStubHtml's contract).
+export function sheetBodyLaunch(asking) {
+  const lockLine = asking.lpLockUntil > 0n ? lockDate(Number(asking.lpLockUntil)) : t('dex.lp.opennow');
+  return `
+    <div class="dex-row"><span class="dex-k">${t('dex.launch.name')}</span><span class="dex-v">${esc(asking.meta.name)} (${esc(asking.meta.symbol)})</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.launch.supply')}</span><span class="dex-v">${esc(fmt(asking.totalSupply, 18))}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.sheet.l.pay')}</span><span class="dex-v">${esc(fmt(asking.seedQuote, 18))} ${esc(asking.quoteSymbol)}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.sheet.l.pay2')}</span><span class="dex-v">${esc(fmt(asking.seedToken, 18))}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.swap.fee')}</span><span class="dex-v">0.30%${asking.creatorFeeBps > 0 ? ` + ${esc(t('dex.swap.creator').replace('{bps}', String(asking.creatorFeeBps)))}` : ''}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.pool.lock.label')}</span><span class="dex-v">${esc(lockLine)}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.lp.minsym')}</span><span class="dex-v">${esc(fmt(asking.minShares, 18))}</span></div>`;
+}
+
+function launchResultHtml(st) {
+  return `
+    <div class="dex-live" data-dex-launch-result>
+      <div class="dex-row"><span class="dex-k">${t('dex.launch.result.t')}</span><span class="dex-v">${esc(st.meta.name)} (${esc(st.meta.symbol)})<br><span class="dex-pairaddr">${esc(st.tokenOut)}</span></span></div>
+      <div class="dex-row"><span class="dex-k">${t('dex.launch.result.p')}</span><span class="dex-v">${esc(shortAddr(st.pairOut))}</span></div>
+      <div class="dex-row"><span class="dex-k">${t('dex.lp.mine')}</span><span class="dex-v">${esc(fmt(st.rec.lpShares, 18))}</span></div>
+      <div class="dex-actions">
+        <button type="button" class="dex-btn" data-dex-launch-openpair>${esc(t('dex.launch.saved.trade'))}</button>
+      </div>
+    </div>`;
+}
+
+async function startLaunch(mount, root) {
+  const factoryAddr = (pools?.factory || (getNetworkById(get('networkId'))?.chainId
+    ? factoryRecall(getNetworkById(get('networkId')).chainId) : '')).trim();
+  if (!isAddress(factoryAddr)) { setStatus(mount, t('dex.launch.needfac'), 'err', LS); return; }
+  const body = mount.querySelector('#dexLaunchForm');
+  if (!body) return;
+  const name = mount.querySelector('#dexLaunchName')?.value?.trim() ?? '';
+  const symbol = mount.querySelector('#dexLaunchSymbol')?.value?.trim() ?? '';
+  const supply = parseAmount(mount.querySelector('#dexLaunchSupply')?.value ?? '', 18);
+  const feeRaw = Number.parseInt(mount.querySelector('#dexLaunchFee')?.value ?? '0', 10);
+  const lockDays = Number.parseInt(mount.querySelector('#dexLaunchLock')?.value ?? '0', 10);
+  const seedQ = parseAmount(mount.querySelector('#dexLaunchSeedQ')?.value ?? '', 18);
+  const seedT = parseAmount(mount.querySelector('#dexLaunchSeedT')?.value ?? '', 18);
+  if (!supply.ok) { setStatus(mount, t('dex.launch.err.supply'), 'err', LS); return; }
+  if (!seedQ.ok || !seedT.ok) { setStatus(mount, t('dex.launch.err.seed'), 'err', LS); return; }
+  const provider = get('provider');
+  if (!provider) { setStatus(mount, t('dex.engine.off'), 'err', LS); return; }
+  const asking = {
+    meta: {
+      name, symbol,
+      image: mount.querySelector('#dexLaunchImg')?.value?.trim() ?? '',
+      desc: mount.querySelector('#dexLaunchDesc')?.value?.trim() ?? '',
+      twitter: mount.querySelector('#dexLaunchTw')?.value?.trim() ?? '',
+      telegram: mount.querySelector('#dexLaunchTg')?.value?.trim() ?? '',
+      website: mount.querySelector('#dexLaunchWeb')?.value?.trim() ?? '',
+    },
+    totalSupply: supply.value,
+    creatorFeeBps: Number.isFinite(feeRaw) ? feeRaw : 0,
+    lpLockUntil: lockDays > 0 ? BigInt(nowSec() + lockDays * 86400) : 0n,
+    seedQuote: seedQ.value,
+    seedToken: seedT.value,
+    minShares: seedMinShares(seedQ.value, seedT.value, SLIP_DEFAULT_BPS),
+  };
+  let tx;
+  try {
+    tx = launchTx(factoryAddr, asking);
+  } catch (e) {
+    setStatus(mount, WHY_LA(e) || t('dex.launch.err.err'), 'err', LS);
+    return;
+  }
+  const addr = get('address');
+  try {
+    const quoteAddr = await factoryContract(factoryAddr, provider).quote();
+    const [qSym, qDec] = await Promise.all([
+      tokenContract(quoteAddr, provider).symbol(),
+      tokenContract(quoteAddr, provider).decimals(),
+    ]);
+    const allowance = await tokenContract(quoteAddr, provider).allowance(addr, factoryAddr);
+    if (allowance < asking.seedQuote) {
+      const s = openSheet(mount, t('dex.sheet.a.title'),
+        legApproveBody({ symbol: String(qSym), decimals: Number(qDec) }, factoryAddr, asking.seedQuote),
+        LAUNCH_HOST, launch);
+      const ok = await runSheetSend(s, () => sendTx({}, quoteAddr, approveData(quoteAddr, factoryAddr, asking.seedQuote)));
+      if (!ok) return;
+    }
+    const s2 = openSheet(mount, t('dex.launch.sheet'), sheetBodyLaunch(asking), LAUNCH_HOST, launch);
+    const v = await runSheetSend(s2, () => sendTx({}, factoryAddr, tx.data));
+    if (!v) return;
+    const rec = launchFromReceipt(v.receipt?.logs ?? []);
+    if (!rec) { setStatus(mount, t('dex.launch.err.err'), 'err', LS); return; }
+    launch = { sheet: null, factory: factoryAddr, last: { ...rec, name, symbol }, list: launch?.list ?? [] };
+    launchRemember(getNetworkById(get('networkId'))?.chainId, { ...rec, name, symbol });
+    const bodyEl = mount.querySelector('#dexLaunchBody');
+    if (bodyEl) bodyEl.innerHTML = launchResultHtml({ rec, tokenOut: rec.token, pairOut: rec.pair, meta: asking.meta });
+    paintLaunchSaved(mount);
+    setStatus(mount, t('dex.launch.done'), 'ok', LS);
+    await scanPools(root, factoryAddr); // the new pool belongs in the list too
+    if (bodyEl) bodyEl.querySelector('[data-dex-launch-openpair]')?.addEventListener('click', () => {
+      const pairIn = root.querySelector?.('#dexSwapPair');
+      if (pairIn) pairIn.value = rec.pair;
+      openTradePanel(root, rec.pair);
+    });
+  } catch (e) {
+    setStatus(mount, launchErrText(e), e.why === 'signer' ? '' : 'err', LS);
+  }
 }
 
 // ── bind the card once a pair address resolves ────────────────────────
@@ -795,7 +993,7 @@ export function renderDex(root, opts = {}) {
         <span class="dex-v" id="dexEngineState">${chainOk ? t('dex.engine.on') : t('dex.engine.off')}</span>
       </div>
     </div>
-    ${chainOk ? tradeStubHtml() + poolsStubHtml() : ''}`;
+    ${chainOk ? tradeStubHtml() + poolsStubHtml() + launchStubHtml() : ''}`;
 
   // A network switch while the view is open repaints the truth. Off before on:
   // re-arming the same key must never stack handlers.
@@ -804,6 +1002,7 @@ export function renderDex(root, opts = {}) {
   }
   if (trade?.repaintRes) { clearInterval(trade.repaintRes); trade = null; }
   pools = null; // scan/list state dies with the paint — no intervals live here
+  launch = null;
   repaint = () => {
     if (typeof root.isConnected !== 'undefined' && !root.isConnected) {
       if (repaint) { try { off('networkId', repaint); } catch { /* already gone */ } }
@@ -857,6 +1056,24 @@ export function renderDex(root, opts = {}) {
     });
   }
   setPoolLastUsed(root);
+
+  // launch card: new token through the factory the pools card scanned
+  const launchBtn = q(root, '#dexLaunchGo');
+  if (launchBtn) launchBtn.addEventListener('click', () => startLaunch(root, root));
+  paintLaunchSaved(root);
+  const savedEl = q(root, '#dexLaunchSaved');
+  if (savedEl && !savedEl.dataset.dexBound) {
+    savedEl.dataset.dexBound = '1';
+    savedEl.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-dex-launch-token]');
+      if (!row || !e.target.closest('[data-dex-launch-trade]')) return;
+      const pair = row.getAttribute('data-dex-launch-pair');
+      if (isAddress(pair)) {
+        if (pairIn) pairIn.value = pair;
+        openTradePanel(root, pair);
+      }
+    });
+  }
 
   return { ok: true, chainOk, wallet: Boolean(addr) };
 }
