@@ -171,7 +171,7 @@ test('tokenPageHtml paints the face, gates socials on https+socialsSet, renders 
   assert.match(html, /dex-tape-row/, 'the tape paints');
   assert.match(html, /#999/, 'a hole block is honest, not blank');
   assert.match(html, /data-dex-token-trade/, 'the trade door exists with a pair');
-  assert.match(html, /dex-candles/);
+  assert.match(html, /dex-chart-canvas/);
   // socialsSet forbidden → not a single chip, even with strings present
   const quiet = idx.tokenPageHtml({ face: { ...face, socialsSet: false }, trail: { rows: [] }, pair: '', qSymbol: '', dec: 18 });
   assert.doesNotMatch(quiet, /dex-social/, 'unset socials never render');

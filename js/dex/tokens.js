@@ -49,10 +49,33 @@ export function feedRowHtml(st, pair) {
     </div>`;
 }
 
-/** The feed card body. rows: [{pair, token...}] with tombstones applied by
- *  the caller (tokens.js stays dumb about storage). */
-export function feedHtml(ss) {
-  const items = (ss || []).map(([pair, st]) => feedRowHtml(st, pair.trim().toLowerCase()));
+/** The feed card body. ss: [[pair, st]] entries, filtered by the caller.
+ *  opts: { q, sort } — search text (symbol/name/pair substring) and a sort
+ *  key ('sym', 'price-asc', 'price-desc', 'vol'). Pure given the rows. */
+export function feedFilter(ss, q) {
+  const s = String(q || '').trim().toLowerCase();
+  if (!s) return ss || [];
+  return (ss || []).filter(([pair, st]) =>
+    String(st?.token?.symbol ?? '').toLowerCase().includes(s)
+    || String(st?.token?.name ?? '').toLowerCase().includes(s)
+    || String(pair ?? '').toLowerCase().includes(s));
+}
+
+export function feedSort(ss, mode = '') {
+  const rows = [...(ss || [])];
+  const cmp = {
+    sym: (a, b) => String(a[1]?.token?.symbol ?? '').localeCompare(String(b[1]?.token?.symbol ?? '')),
+    'price-asc': (a, b) => (feedPrice(a[1]) ?? Infinity) - (feedPrice(b[1]) ?? Infinity),
+    'price-desc': (a, b) => (feedPrice(b[1]) ?? -Infinity) - (feedPrice(a[1]) ?? -Infinity),
+    vol: (a, b) => ((b[1]?.vol24 ?? 0) - (a[1]?.vol24 ?? 0)),
+  }[mode];
+  if (!cmp) return rows;
+  return rows.sort(cmp);
+}
+
+export function feedHtml(ss, opts = {}) {
+  const shown = feedSort(feedFilter(ss, opts.q), opts.sort);
+  const items = shown.map(([pair, st]) => feedRowHtml(st, String(pair ?? '').trim().toLowerCase()));
   if (items.length === 0) {
     return `<p class="dex-t-hint">${esc(t('dex.feed.empty'))}</p>`;
   }
@@ -65,6 +88,18 @@ export function feedStubHtml() {
     <section class="dex-card" id="dexFeed">
       <h3 class="dex-card-h">${esc(t('dex.feed.title'))}</h3>
       <p class="dex-t-hint small">${esc(t('dex.feed.hint'))}</p>
+      <div class="dex-feed-tools">
+        <input id="dexFeedQ" class="dex-input" type="search" spellcheck="false"
+               placeholder="${esc(t('dex.feed.search'))}" aria-label="${esc(t('dex.feed.search'))}">
+        <select id="dexFeedSort" class="dex-input" aria-label="${esc(t('dex.feed.sort'))}">
+          <option value="">${esc(t('dex.feed.sortNew'))}</option>
+          <option value="sym">${esc(t('dex.feed.sortSym'))}</option>
+          <option value="price-asc">${esc(t('dex.feed.sortLo'))}</option>
+          <option value="price-desc">${esc(t('dex.feed.sortHi'))}</option>
+        </select>
+      </div>
       <div id="dexFeedBody">${esc(t('dex.feed.empty'))}</div>
     </section>`;
 }
+
+export const FEED_SORTS = ['', 'sym', 'price-asc', 'price-desc', 'vol'];

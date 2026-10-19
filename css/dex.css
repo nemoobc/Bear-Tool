@@ -199,3 +199,22 @@
 .dex-bot-log { white-space: pre-wrap; max-height: 140px; overflow-y: auto;
   font-size: 11px; color: var(--ink-soft);
   border-top: 1px solid rgba(128, 128, 128, 0.16); padding-top: 4px; }
+
+/* ── M8: the chart, the file face, the feed tools ────────────────────── */
+.dex-chart { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 4px; }
+.dex-chart-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.dex-chart-tools-legal { row-gap: 2px; }
+.dex-iv, .dex-leg { padding: 3px 8px; border-radius: 999px; border: 1px solid rgba(128,128,128,.26);
+  background: none; color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
+.dex-iv:hover, .dex-leg:hover { border-color: var(--accent, #f80); }
+.dex-iv.on { background: var(--accent, #f80); color: #fff; border-color: transparent; font-weight: 700; }
+.dex-leg.on { background: rgba(128,128,128,.22); }
+.dex-chart-canvas { width: 100%; min-width: 200px; height: 248px; touch-action: pan-y; cursor: crosshair; border: 1px solid rgba(128,128,128,.16); border-radius: 8px; }
+.dex-feed-tools { display: grid; grid-template-columns: 2fr 1fr; gap: 6px; margin: 4px 0; }
+.dex-file { display: inline-flex; }
+.dex-file-btn { display: inline-block; padding: 6px 12px; border-radius: 8px;
+  border: 1px dashed rgba(128,128,128,.4); cursor: pointer; font-size: 12px; }
+.dex-file-btn:hover, .dex-file-btn:focus-visible { border-color: var(--accent, #f80); outline: none; }
+.dex-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.dex-launch-img-done { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.dex-launch-img-done img { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; }

@@ -275,8 +275,10 @@ Bear-Tool/
 │   ├── dex/            # the launchpad, in its own folder (order: "buat folder dex")
 │   │   ├── index.js    # the Dex v2 view: welcome + Sepolia gate + cards (feed/swap/pools/launch/bot) + wiring
 │   │   ├── core.js     # shared launchpad helpers: the Sepolia gate, provider access, the one tx path, formatting
-│   │   ├── tokens.js   # M6 the feed — factory pools with live prices + tombstone rule applied, no extra RPC
+│   │   ├── tokens.js   # M6 the feed — factory pools with live prices + tombstone rule + search/sort, no extra RPC
 │   │   ├── launch.js   # the launch wizard: image → data URI, socials + fee slice + one-tx dev buy, ONE factory.launch tx, token from receipt
+│   │   ├── media.js    # M8 the token's face from a FILE: mime gate (no svg), 512px downscale, ≤96KB data URI — never a URL
+│   │   ├── chart.js    # M8 the candlestick chart, OUR canvas engine: OHLCV buckets, SMA/EMA/RSI/BB, crosshair, zoom/pan — no third-party lib
 │   │   ├── token.js    # M5b the token page's data: the pair's Swap trail (tape rows, band OHLC) + https-only social links
 │   │   ├── list.js     # M6 per-coin tombstone: delete from YOUR feed, per chain, recurring scans cannot resurrect it
 │   │   ├── bot.js      # M6 the market maker: fund once, derives own addresses, band trades until stopped (pool engine only)

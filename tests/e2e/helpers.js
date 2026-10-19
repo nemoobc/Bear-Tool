@@ -268,7 +268,11 @@ export async function createWallet(page, { name = 'Test Wallet', password = TEST
   await page.fill('#createName', name);
   await page.fill('#createPw', password);
   await page.fill('#createPw2', password);
-  await appClick(page, '#createBtn');
+  // One decision point, two ways in: force-skips the actionability ladder
+  // (the same reason appClick has a fallback), and the seed modal is the
+  // ONLY confirmation the wallet was made — never wait for the button.
+  await page.click('#createBtn', { timeout: 3000, force: true }).catch(() => {});
+  await page.waitForSelector('.seed-choice-btn', { timeout: 15_000 });
 
   // Wait for the seed modal, and read the mnemonic from data-copy: it is the
   // same string the app hands the clipboard, so there is nothing to parse and

@@ -44,6 +44,14 @@ import { swapTape, candlesOf, socialUrl, EMPTY_TRAIL } from './token.js';
 import { feedStubHtml, feedHtml } from './tokens.js';
 import { withoutDeleted, rememberDeleted } from './list.js';
 import { botStubHtml, bindBot } from './bot.js';
+import { fileToTokenImage } from './media.js';
+import { mountChart, bucketCandles, INTERVALS } from './chart.js';
+
+// A BigInt wei amount → a plain Number, always through one door (the chart
+// only paints; precision past 1e15 of wei is invisible by construction).
+const toNum18 = (v) => {
+  try { return Number(BigInt(v)) / 1e18; } catch { return 0; }
+};
 
 const { ethers } = globalThis;
 
@@ -703,10 +711,18 @@ export function launchStubHtml() {
                  placeholder="${t('dex.launch.seedt')}" aria-label="${t('dex.launch.seedt')}">        </div>
         <details class="dex-launch-more">
           <summary>${t('dex.launch.more')}</summary>
-          <input id="dexLaunchImg" class="dex-input" type="url" spellcheck="false" autocomplete="off"
-                 placeholder="${t('dex.launch.img')}" aria-label="${t('dex.launch.img')}">
           <input id="dexLaunchDesc" class="dex-input" type="text" spellcheck="false" autocomplete="off"
                  placeholder="${t('dex.launch.desc')}" aria-label="${t('dex.launch.desc')}" maxlength="160">
+          <label class="dex-file" for="dexLaunchImg">
+            <span class="dex-file-btn" id="dexLaunchImgBtn" role="button" tabindex="0" aria-controls="dexLaunchImgPrev">${t('dex.launch.imgPick')}</span>
+          </label>
+          <input id="dexLaunchImg" class="dex-sr" type="file" accept="image/png,image/jpeg,image/webp" aria-label="${t('dex.launch.img')}">
+          <div class="dex-launch-img-done" id="dexLaunchImgPrev" hidden>
+            <img alt="${t('dex.launch.imgAlt')}" aria-live="polite">
+            <span class="small" id="dexLaunchImgMeta"></span>
+            <button type="button" class="dex-feed-del" id="dexLaunchImgClear" aria-label="${t('dex.launch.imgClear')}">✕</button>
+          </div>
+          <p class="dex-t-hint" id="dexLaunchImgErr" role="status"></p>
           <input id="dexLaunchTw" class="dex-input" type="url" spellcheck="false" autocomplete="off"
                  placeholder="${t('dex.launch.tw')}" aria-label="${t('dex.launch.tw')}">
           <input id="dexLaunchTg" class="dex-input" type="url" spellcheck="false" autocomplete="off"
@@ -752,6 +768,45 @@ function paintLaunchSaved(mount) {
   if (launch) launch.list = chainId ? launchRecall(chainId) : [];
 }
 
+/** M8: the token's face — from the user's own file, never a URL.
+ *  Picks, downscales, caps, previews; the data URI rides on `root` until
+ *  the launch signs it. */
+function bindLaunchImage(root) {
+  const fileIn = root.querySelector?.('#dexLaunchImg');
+  if (!fileIn || typeof root.querySelector !== 'function') return;
+  const prev = root.querySelector('#dexLaunchImgPrev');
+  const prevImg = prev?.querySelector?.('img');
+  const metaEl = root.querySelector('#dexLaunchImgMeta');
+  const errEl = root.querySelector('#dexLaunchImgErr');
+  const clear = root.querySelector('#dexLaunchImgClear');
+  const ok = (msg) => { if (errEl) errEl.textContent = ''; if (metaEl) metaEl.textContent = msg; };
+  fileIn.addEventListener('change', async () => {
+    const file = fileIn.files?.[0];
+    if (!file) return;
+    try {
+      const { uri, bytes, width, height } = await fileToTokenImage(file, root.ownerDocument || document);
+      root._dexLaunchImg = uri;
+      if (prevImg) prevImg.src = uri;
+      if (prev) prev.hidden = false;
+      ok(`${t('dex.launch.imgOk')} — ${(bytes / 1024).toFixed(1)} KB, ${width}×${height}`);
+    } catch (e) {
+      root._dexLaunchImg = '';
+      if (prev) prev.hidden = true;
+      const why = e?.reason === 'mime' ? t('dex.launch.imgErrMime')
+        : e?.reason === 'broken' ? t('dex.launch.imgErrBroken')
+        : t('dex.launch.imgErrBig');
+      if (errEl) errEl.textContent = why;
+    }
+  });
+  clear?.addEventListener('click', () => {
+    root._dexLaunchImg = '';
+    fileIn.value = '';
+    if (prev) prev.hidden = true;
+    if (errEl) errEl.textContent = '';
+    ok('');
+  });
+}
+
 // The launch sheet rows: exported so the test pins what the user reads
 // before signing (mirror of tradeStubHtml/poolsStubHtml's contract).
 export function sheetBodyLaunch(asking) {
@@ -791,6 +846,11 @@ export function tokenPageHtml(st) {
         <span class="dex-tape-amt">${esc(fmt(r.quoteIn ? r.amountIn : r.amountOut, dec))} ${esc(qSymbol || 'Q')}</span>
         <span class="dex-tape-time">${r.ts ? esc(new Date(Number(r.ts) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : `#${r.block}`}</span>
       </li>`).join('')}</ul>`;
+  const iv = INTERVALS.map((x, i) => `<button type="button" class="dex-iv${i === 1 ? ' on' : ''}" data-dex-iv="${x.ms}" aria-pressed="${i === 1}">${esc(x.label)}</button>`);
+  const legs = [
+    ['sma7', 'SMA7', true], ['sma25', 'SMA25', true], ['ema7', 'EMA7', false],
+    ['bb', 'BB', false], ['rsi', 'RSI', false], ['vol', 'VOL', true],
+  ].map(([leg, lbl, on]) => `<button type="button" class="dex-leg${on ? ' on' : ''}" data-dex-leg="${leg}" aria-pressed="${on}">${esc(lbl)}</button>`);
   return `
     <div data-dex-token>
       <div class="dex-row"><span class="dex-k">${esc(t('dex.launch.name'))}</span>
@@ -799,7 +859,11 @@ export function tokenPageHtml(st) {
       ${pair ? `<div class="dex-row"><span class="dex-k">${esc(t('dex.token.pair'))}</span><span class="dex-v">${esc(shortAddr(pair))}</span></div>` : ''}
       ${face.desc ? `<div class="dex-row"><span class="dex-k">${esc(t('dex.token.desc'))}</span><span class="dex-v">${esc(face.desc)}</span></div>` : ''}
       ${chips.length ? `<div class="dex-row"><span class="dex-k">${esc(t('dex.token.links'))}</span><span class="dex-v">${chips.join(' ')}</span></div>` : ''}
-      <canvas class="dex-candles" width="304" height="88" role="img" aria-label="${esc(t('dex.token.chart'))}"></canvas>
+      <div class="dex-chart">
+        <div class="dex-chart-tools dex-chart-tools-iv" role="toolbar" aria-label="${esc(t('dex.token.chartIv'))}">${iv.join('')}</div>
+        <div class="dex-chart-tools dex-chart-tools-legal" role="toolbar" aria-label="${esc(t('dex.token.chartLeg'))}">${legs.join('')}</div>
+        <canvas class="dex-chart-canvas" data-dex-chart height="248" role="img" aria-label="${esc(t('dex.token.chart'))}"></canvas>
+      </div>
       <div class="dex-t-h">${esc(t('dex.token.tapeh'))}</div>
       ${tape}
       ${pair ? `<div class="dex-actions"><button type="button" class="dex-btn" data-dex-token-trade>${esc(t('dex.launch.saved.trade'))}</button></div>` : ''}
@@ -858,7 +922,38 @@ async function openTokenPanel(mount, tokenAddr, pairHint) {
     s.confirmB.hidden = true; // read-only page: no confirm to press
     s.confirmB.disabled = true;
     const body = s.wrap.querySelector('[data-dex-sheet-body]');
-    drawCandles(body?.querySelector('.dex-candles'), candlesOf(trail.rows));
+    // M8: the FULL chart — same raw trail, six buckets, own canvas engine.
+    const rawRows = trail.rows
+      .filter((r) => r.ts != null && r.price != null)
+      .map((r) => ({ ts: Number(r.ts) * 1000, price: r.price, amount: toNum18(r.quoteIn ? r.amountIn : r.amountOut) }));
+    const canvasEl = body?.querySelector('[data-dex-chart]');
+    if (canvasEl && rawRows.length > 0) {
+      const chart = mountChart(canvasEl, { height: 248 });
+      const bucket = (ms) => chart.setData(bucketCandles(rawRows, ms));
+      chart.canvas._dexBucket = bucket; // the chips call the re-bucket, the chart owns no data fetching
+      chart.setInterval(300_000);
+      bucket(300_000);
+      body.querySelectorAll('[data-dex-iv]').forEach((b) => b.addEventListener('click', () => {
+        const ms = Number(b.getAttribute('data-dex-iv'));
+        if (!Number.isFinite(ms)) return;
+        body.querySelectorAll('[data-dex-iv]').forEach((x) => {
+          x.classList.toggle('on', x === b);
+          x.setAttribute('aria-pressed', String(x === b));
+        });
+        chart.setInterval(ms);
+        bucket(ms);
+      }));
+      body.querySelectorAll('[data-dex-leg]').forEach((b) => b.addEventListener('click', () => {
+        const leg = b.getAttribute('data-dex-leg') || '';
+        const now = b.classList.toggle('on');
+        b.setAttribute('aria-pressed', String(now));
+        chart.toggle(leg, now);
+      }));
+      // the sheet feeds its close: keep our rAF from touching a dead canvas
+      s.forceRemove = ((f) => () => { chart.destroy(); return f(); })(s.forceRemove);
+    } else if (canvasEl) {
+      drawCandles(canvasEl, candlesOf(trail.rows)); // no timestamps → the honest ribbon, never a empty hole
+    }
     body?.querySelector('[data-dex-token-trade]')?.addEventListener('click', () => {
       s.forceRemove();
       const pairIn = mount.querySelector?.('#dexSwapPair');
@@ -903,7 +998,9 @@ async function startLaunch(mount, root) {
   const asking = {
     meta: {
       name, symbol,
-      image: mount.querySelector('#dexLaunchImg')?.value?.trim() ?? '',
+      // The image came from a FILE the user picked — a data URI this paint
+      // prepared (media.js). A URL would rot with its origin; bytes hold.
+      image: root._dexLaunchImg ?? '',
       desc: mount.querySelector('#dexLaunchDesc')?.value?.trim() ?? '',
       twitter: mount.querySelector('#dexLaunchTw')?.value?.trim() ?? '',
       telegram: mount.querySelector('#dexLaunchTg')?.value?.trim() ?? '',
@@ -1098,7 +1195,12 @@ function paintFeed(mount) {
     chainId,
   ).map((r) => r.pair.toLowerCase());
   const keep = new Set(live);
-  body.innerHTML = feedHtml(pairs.filter(([p]) => keep.has(String(p).toLowerCase())));
+  const qText = q(mount, '#dexFeedQ')?.value ?? '';
+  const sMode = q(mount, '#dexFeedSort')?.value ?? '';
+  body.innerHTML = feedHtml(
+    pairs.filter(([p]) => keep.has(String(p).toLowerCase())),
+    { q: qText, sort: sMode },
+  );
   body.querySelectorAll('[data-dex-feed-open]').forEach((b) => b.addEventListener('click', () => {
     const pair = b.getAttribute('data-dex-feed-open');
     const st = pools?.st?.get(pair);
@@ -1112,6 +1214,18 @@ function paintFeed(mount) {
       paintFeed(mount);
     }
   }));
+  // search + sort re-run the same pure path — the tools live ABOVE the body,
+  // so they survive repainting
+  const qIn = q(mount, '#dexFeedQ');
+  if (qIn && !qIn.dataset.dexBound) {
+    qIn.dataset.dexBound = '1';
+    qIn.addEventListener('input', () => paintFeed(mount));
+  }
+  const sIn = q(mount, '#dexFeedSort');
+  if (sIn && !sIn.dataset.dexBound) {
+    sIn.dataset.dexBound = '1';
+    sIn.addEventListener('change', () => paintFeed(mount));
+  }
 }
 
 export function renderDex(root, opts = {}) {
@@ -1207,6 +1321,7 @@ export function renderDex(root, opts = {}) {
   // launch card: new token through the factory the pools card scanned
   const launchBtn = q(root, '#dexLaunchGo');
   if (launchBtn) launchBtn.addEventListener('click', () => startLaunch(root, root));
+  bindLaunchImage(root);
   paintLaunchSaved(root);
   const savedEl = q(root, '#dexLaunchSaved');
   if (savedEl && !savedEl.dataset.dexBound) {
