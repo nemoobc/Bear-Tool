@@ -39,7 +39,7 @@ import { renderDex } from './dex/index.js';
 // WalletConnect path all run the same scan before their approval sheets, so
 // the Security Center's wording is true for all three, not just this one.
 import { createProvider, announceLock, announceAccounts, disconnectOrigin, PROVIDER_FLAG } from './dapp-bridge.js';
-import { executeLocal, currentChainId, splitSignParams, splitTypedParams, scanSignCall, decodeTokenCall, formatUnitsLean } from './dapp-exec.js';
+import { executeLocal, currentChainId, splitSignParams, splitTypedParams, scanSignCall, decodeTokenCall, formatUnitsLean, describeTokenCall, tokenMetaFor } from './dapp-exec.js';
 import { renderSignMessage, safeJson } from './sign-render.js';
 import { siteAllowed } from './dapp-sessions.js';
 import { startUpdateGuard } from './update-guard.js';
@@ -787,12 +787,8 @@ function describeSignCall(method, params) {
       // lengkap", report 2026-10-16). Display only; the signer signs bytes.
       const tc = p.data && p.data !== '0x' ? decodeTokenCall(p.data) : null;
       if (tc) {
-        const meta = p.to
-          ? (get('tokens') || []).find((x) => x && x.address && String(x.address).toLowerCase() === String(p.to).toLowerCase())
-          : null;
-        rows.push({ k: t('cf.amount'), v: meta && Number.isInteger(meta.decimals)
-          ? `${formatUnitsLean(tc.amount, meta.decimals)}${meta.symbol ? ` ${meta.symbol}` : ''}`
-          : `${tc.amount} · ${p.to ? wallet.shortAddress(String(p.to)) : ''}` });
+        const meta = tokenMetaFor(p.to, get('tokens'));
+        rows.push({ k: t('cf.amount'), v: describeTokenCall(tc, meta, p.to ? wallet.shortAddress(String(p.to)) : '') });
       }
     }
   } catch (e) {

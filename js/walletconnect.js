@@ -36,7 +36,7 @@ import { inspectUrl, VERDICT } from './dapp-safety.js';
 // guard the chain a broadcast actually goes out on. This path re-implemented
 // each by hand and disagreed with the others about what was even signable —
 // see the branches below.
-import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId, decodeTokenCall } from './dapp-exec.js';
+import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId, decodeTokenCall, describeTokenCall, tokenMetaFor } from './dapp-exec.js';
 
 export const WC_PROJECT_ID =
   (import.meta.env && import.meta.env.VITE_WC_PROJECT_ID) || '99909bde486039e2102663b92be74974';
@@ -501,6 +501,16 @@ async function handleRequest({ id, topic, params }) {
     // An approve call says APPROVE on the title and the button — the same
     // naming the native sheet uses ("ask tx approved ga ada", report 2026-10-16).
     const tokenCall = decodeTokenCall(tx.data);
+    // The money INSIDE the calldata, the same way the injected (app.js) and
+    // native sheets show it: a token transfer/approve carries the amount as
+    // its second word while the value field stays empty — the WC sheet only
+    // truncated the hex, so an ERC-20 move dApp over WalletConnect showed no
+    // amount at all ("interaksi tx ga lengkap", report 2026-10-16). The
+    // wallet's own token list turns raw units into "1.5 USDC"; an unknown
+    // token keeps its raw amount next to the contract it is calling.
+    const tokenMeta = tokenMetaFor(tx.to, get('tokens'));
+    const tokenAmount = describeTokenCall(tokenCall, tokenMeta,
+      tokenCall ? (tx.to ? shortAddr(tx.to) : '') : '');
     const ok = await confirmTx({
       title: (worst ? (worst.level === 'fail' ? '🚨 ' : '⚠️ ') : '') + (tokenCall && tokenCall.kind === 'approve' ? t('sign.approveTitle') : t('sign.txTitle')),
       danger: !!(worst && worst.level === 'fail'),
@@ -509,6 +519,7 @@ async function handleRequest({ id, topic, params }) {
         { k: t('site.chain'), v: chainId },
         { k: t('site.to'), v: tx.to ? shortAddr(tx.to) : t('sign.contractCreation') },
         { k: t('site.value'), v: fmtValue(tx.value, nativeUnit(localNet)) },
+        ...(tokenAmount ? [{ k: t('cf.amount'), v: tokenAmount }] : []),
         // The calldata itself, truncated — not a byte count. A user signing a
         // swap must see what the dApp is spending, not "244 bytes".
         { k: t('site.data'), v: tx.data && tx.data !== '0x'

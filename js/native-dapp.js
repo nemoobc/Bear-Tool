@@ -24,7 +24,7 @@ import { NATIVE_PROVIDER_SCRIPT } from './native-provider.js';
 // the security detectors, builds/validates a send transaction, and guards the
 // chain a broadcast goes out on. This path re-implemented each by hand and
 // got them wrong — see the personal_sign / typed-data / tx branches below.
-import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId, decodeTokenCall, formatUnitsLean } from './dapp-exec.js';
+import { splitSignParams, splitTypedParams, parseTyped, typedParts, providerOnCurrentChain, buildSendTx, scanSignCall, signPayload, currentChainId, decodeTokenCall, formatUnitsLean, describeTokenCall, tokenMetaFor } from './dapp-exec.js';
 
 const USER_REJECTED = { code: 4001, message: 'User rejected the request.' };
 const LOCKED = { code: 5100, message: 'Wallet is locked.' };
@@ -797,15 +797,10 @@ async function handleNativeRpc({ id, origin, payload }) {
     // raw units into "1.5 USDC"; an unknown token keeps its raw amount next
     // to the contract it is calling. Display only — the signer signs bytes.
     const tokenCall = decodeTokenCall(tx.data);
-    const tokenMeta = tokenCall && tx.to
-      ? (get('tokens') || []).find((x) => x && x.address && String(x.address).toLowerCase() === String(tx.to).toLowerCase())
-      : null;
+    const tokenMeta = tokenMetaFor(tx.to, get('tokens'));
     const nativeValue = tx.value ? BigInt(tx.value) : 0n;
-    const tokenAmount = tokenCall
-      ? (tokenMeta && Number.isInteger(tokenMeta.decimals)
-          ? `${formatUnitsLean(tokenCall.amount, tokenMeta.decimals)}${tokenMeta.symbol ? ` ${tokenMeta.symbol}` : ''}`
-          : `${tokenCall.amount} · ${tx.to ? shortAddr(tx.to) : ''}`)
-      : null;
+    const tokenAmount = describeTokenCall(tokenCall, tokenMeta,
+      tokenCall ? (tx.to ? shortAddr(tx.to) : '') : '');
     const ok = await askConfirm({
       // An approve call says APPROVE on the title and the button — the sheet
       // only named the action in a subhead before ("ask tx approved ga ada",

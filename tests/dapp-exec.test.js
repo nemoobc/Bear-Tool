@@ -604,3 +604,40 @@ test('signPayload: even hex → bytes, everything else → the literal string (p
     'odd nibble count is not hex — signed as the literal string, exactly as sign-render previews it');
   assert.equal(signPayload('0x'), '0x', 'fewer than one byte is not a byte string either');
 });
+
+// ── describeTokenCall / tokenMetaFor: the ONE sheet line every send surface
+// shows. Three hand-copies drifted — the WalletConnect path only truncated
+// the calldata, so an ERC-20 move dApp over WC showed no amount at all
+// ("interaksi tx ga lengkap", report 2026-10-16). These pins hold all three
+// surfaces to the same words.
+const { describeTokenCall, tokenMetaFor } = await import('../js/dapp-exec.js');
+
+test('describeTokenCall: known token → "1.5 MTK", unknown → raw units · target', () => {
+  const call = { to: '0x' + 'ab'.repeat(20), amount: 1_500_000_000_000_000_000n, kind: 'transfer' };
+  assert.equal(
+    describeTokenCall(call, { address: call.to, symbol: 'MTK', decimals: 18 }, '0xaaaa…bbbb'),
+    '1.5 MTK',
+  );
+  assert.equal(
+    describeTokenCall({ amount: 12345678900000000n }, null, '0xaaaa…bbbb'),
+    '12345678900000000 · 0xaaaa…bbbb',
+    'an unknown token keeps its RAW unit amount next to the contract it calls',
+  );
+  assert.equal(describeTokenCall({ amount: 7n }, { decimals: 6, symbol: 'USDC' }), '0.000007 USDC');
+  assert.equal(describeTokenCall(null, { symbol: 'X', decimals: 18 }), null, 'no token call → no row');
+  assert.equal(describeTokenCall({ amount: 9n }, null), '9', 'no target → bare units, never a dangling "·"');
+});
+
+test('tokenMetaFor: lowercase match, junk ignored, empty list safe', () => {
+  const tokens = [
+    { address: '0xAbbA'*0 + '0x' + 'AB'.repeat(20), symbol: 'UP', decimals: 18 },
+    { address: '0x99', symbol: 'JUNK', decimals: 2 },
+    null,
+    { symbol: 'NO-ADDRESS' },
+  ];
+  tokens[0].address = '0x' + 'AB'.repeat(20);
+  assert.equal(tokenMetaFor('0x' + 'ab'.repeat(20), tokens)?.symbol, 'UP', 'case-insensitive on the dApp side');
+  assert.equal(tokenMetaFor('', tokens), null);
+  assert.equal(tokenMetaFor('0xdead', tokens), null, 'a mismatch is a null, never the first token');
+  assert.equal(tokenMetaFor('0xdead', []), null);
+});

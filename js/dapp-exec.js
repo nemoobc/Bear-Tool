@@ -477,3 +477,28 @@ export function formatUnitsLean(v, decimals) {
   const frac = (v % base).toString().padStart(d, '0').replace(/0+$/, '');
   return frac ? `${whole}.${frac}` : String(whole);
 }
+
+/** ONE renderer for the money inside a token call — the sheet line every
+ *  send surface (injected app.js, native-dapp.js, walletconnect.js) shows.
+ *  Three hand-copies drifted: the WC path only truncated the hex, so an
+ *  ERC-20 move over WalletConnect showed no amount at all. The wallet's own
+ *  token list turns raw units into "1.5 USDC"; an unknown token keeps its
+ *  raw amount next to the contract it is calling.
+ *  @param {null | {amount: bigint}} tokenCall  decodeTokenCall result
+ *  @param {object | null} meta  the wallet's token record for the target
+ *  @param {string} shortTarget  pre-shortened target address (display)
+ *  @returns {string | null}  null = nothing to add (calldata is not transfer/approve)
+ */
+export function describeTokenCall(tokenCall, meta, shortTarget = '') {
+  if (!tokenCall) return null;
+  return meta && Number.isInteger(meta.decimals)
+    ? `${formatUnitsLean(tokenCall.amount, meta.decimals)}${meta.symbol ? ` ${meta.symbol}` : ''}`
+    : `${tokenCall.amount}${shortTarget ? ` · ${shortTarget}` : ''}`;
+}
+
+/** The wallet's record for the contract a dApp is calling, lowercase-matched. */
+export function tokenMetaFor(address, tokens) {
+  if (!address) return null;
+  return (Array.isArray(tokens) ? tokens : [])
+    .find((x) => x && x.address && String(x.address).toLowerCase() === String(address).toLowerCase()) || null;
+}
