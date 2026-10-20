@@ -67,12 +67,12 @@ contract rescue {
         require(success, "ERC20 transfer failed");
     }
     // ERC-721: the selector MUST be transferFrom(address,address,uint256).
-    // abi.encodeWithSignature("transferFrom", ...) hashes the string AS GIVEN
-    // — it does not append the argument types — so it produced 0x0c41b033, a
-    // selector no ERC-721 has, and every NFT sweep reverted with "ERC721
-    // transfer failed" (measured on anvil: the call fell through to the
-    // token's fallback instead of transferFrom). Same style as the ERC-20
-    // line above: the raw selector, spelled out.
+    // A bare abi.encodeWithSignature call hashes the string AS GIVEN — it
+    // does not append the argument types — so the old line produced
+    // 0x0c41b033, a selector no ERC-721 has, and every NFT sweep reverted
+    // with "ERC721 transfer failed" (measured on anvil: the call fell
+    // through to the token's fallback instead of transferFrom). Same style
+    // as the ERC-20 line above: the raw selector, spelled out.
     function rescueERC721(address token, uint256[] calldata ids) external onlyRescuer { for (uint256 i=0; i<ids.length; ++i) { (bool success, ) = token.call(abi.encodeWithSelector(0x23b872dd, address(this), SAFE, ids[i])); require(success, "ERC721 transfer failed"); } }
     function version() external pure returns (string memory) { return "1.2.0"; }
 }`;
