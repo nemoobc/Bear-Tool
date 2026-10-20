@@ -62,7 +62,10 @@ test('fork: rescue — helper [safe,sponsor] + type-4 delegate sweeps ERC-20 int
   // 2) helper deployed exactly like the app: constructor [safe, sponsor]
   const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
   const factory = new ethers.ContractFactory(abi, bytecode, signer);
-  const helper = await factory.deploy({ gasLimit: 3_000_000 }); // estimation shape-par with fork-eip7702
+  // v6: the LAST argument that is an object is the tx overrides — so args come
+  // first, overrides last. (Deploying without the args failed every leg once
+  // CI ran this file for real: "incorrect number of arguments to constructor".)
+  const helper = await factory.deploy(safe, await signer.getAddress(), { gasLimit: 3_000_000 });
   await withRpcRetry(() => helper.waitForDeployment(), { label: 'rescue helper deploy receipt' });
   const helperAddr = await helper.getAddress();
 
