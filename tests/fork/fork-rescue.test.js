@@ -44,7 +44,7 @@ test('fork: rescue — helper [safe,sponsor] + type-4 delegate sweeps ERC-20 int
   const { ethers } = await import('ethers');
 
   // The SOURCE must come from the app file — a copied drift stops being a test.
-  const toolsSrc = fs.readFileSync(path.join(__dirname, '..', 'js', 'eip7702-tools.js'), 'utf8');
+  const toolsSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'js', 'eip7702-tools.js'), 'utf8');
   const RESCUE_SOURCE = toolsSrc.match(/const RESCUE_SOURCE = `([\s\S]*?)`;/)?.[1];
   assert.ok(RESCUE_SOURCE?.includes('contract rescue'), 'RESCUE_SOURCE extracted from the app');
 
