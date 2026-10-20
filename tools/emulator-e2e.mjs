@@ -1595,10 +1595,15 @@ async function main() {
       return true;
     })()`).catch(() => {});
     await jsClick('#btnDeploy');
-    // Watch for up to ~40s: solc compiles in-browser, then gas is estimated.
-    // Two good endings (sheet, or a named stop), one bad (auto-deployed).
+    // Watch for up to ~2 minutes: solc compiles IN-BROWSER (the vendored
+    // 9 MB wasm), and on an x86_64 emulator that compile is far slower than
+    // on a phone — the 40 s this step used to wait for was measuring the
+    // emulator, not the app: the logcat of the failing run showed the
+    // solc worker being fetched and the app still alive in "Preparing
+    // deploy…" when the gate gave up. The app was compiling; the gate
+    // was not patient enough. 240 × 500 ms.
     let seenSheet = false, sawCancel = false, sawUsd = false, sawStop = false, autoDeployed = false, statusText = '';
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 240; i++) {
       const snap = await page.evaluate(`JSON.stringify({
         sheet: !!document.querySelector('#confirmYes'),
         cancel: !!document.querySelector('#confirmNo'),
@@ -1624,7 +1629,7 @@ async function main() {
       die('Deploy: menekan Deploy AUTO-DEPLOY tanpa lembar konfirmasi (bug 2026-10-15). Status: ' + statusText);
     }
     if (!seenSheet && !sawStop) {
-      // Neither a sheet nor a named stop within 40s — the button went dead.
+      // Neither a sheet nor a named stop within the budget — the button went dead.
       die('Deploy: tombol Deploy tidak menjawab sama sekali (tak ada lembar konfirmasi, tak ada error) — status: ' + statusText);
     }
     // If a sheet DID appear, it must carry a Cancel and a price line — the
