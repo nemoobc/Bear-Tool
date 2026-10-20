@@ -219,9 +219,15 @@ export function bindBot(host, ctx = {}) {
 
   // The panel only LISTENS. Leaving the page unsubscribes; the bot keeps trading.
   const un = subscribe((s) => {
-    startBtn.hidden = s.on;
-    stopBtn.hidden = !s.on;
-    meterEl.hidden = !s.on;
+    // The three buttons are OPTIONAL: the bot card is not on every page, and
+    // a page without it has no #dexBotStart / #dexBotStop / #dexBotMeter.
+    // subscribe() calls this callback straight away, so an unguarded write
+    // threw "Cannot set properties of null (setting 'hidden')" the moment
+    // the panel was bound — the Android E2E caught it as an uncaught error.
+    // Every other read below is already guarded; these three were not.
+    if (startBtn) startBtn.hidden = s.on;
+    if (stopBtn) stopBtn.hidden = !s.on;
+    if (meterEl) meterEl.hidden = !s.on;
     const pct = Number(budgetBps(s.spent, s.cap)) / 100;
     const fill = host.querySelector('#dexBotBarFill');
     const bar = host.querySelector('#dexBotBarHost');
