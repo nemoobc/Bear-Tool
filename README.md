@@ -290,8 +290,8 @@ Bear-Tool/
 │   │   └── abi.js      # the ABI ui = the compiler's canonical pin (canon) — all dex artifacts
 │   ├── sign-render.js  # how a signing payload is SHOWN: hex→text, binary labelled, bidi chars stripped (one copy, three sheets)
 │   ├── contracts.js    # contract sources + OZ-parity feature flags + ERC-1967 upgradeable transform
-│   ├── solc.js         # solc-js loader (SRI-pinned CDN, crossOrigin) + the ONE standard-JSON builder
-│   ├── solc-worker.js  # the same compile, off the main thread
+│   ├── solc.js         # compiler loader: vendored soljson first (sha384-pinned) → CDN mirror fallback, the ONE standard-JSON builder, one-line error summaries
+│   ├── solc-worker.js  # the same compile, off the main thread (neutral statuses, no jargon)
 │   ├── verify.js       # auto-verify: Sourcify v2 (keyless) then Etherscan V2 (user's key), same input
 │   ├── dapps.js        # DApps catalogue: filterable grid, category chips
 │   ├── discord.js      # the Discord view: connect, servers, channels, leave, send
@@ -319,7 +319,7 @@ Bear-Tool/
 │   ├── nft-intel.js    # drop eligibility, cost breakdown, contract safety signals
 │   ├── token-picker.js # in-app pickers rendered inside the app, not off-screen
 │   └── token-logo.js   # shared token mark renderer (dashboard + pickers)
-├── js/vendor/          # vendored runtime deps: ethers.umd.min.js (SRI), qrcode.min.js
+├── js/vendor/          # vendored runtime deps: ethers.umd.min.js (SRI), qrcode.min.js, soljson-0.8.37.js (sha384-pinned)
 ├── assets/             # original bear + logo SVG
 ├── docs/               # PROMPT, ARCHITECTURE-FIX, DESIGN-AUDIT, SECURITY-AUDIT*,
 │                       # CHAIN-PRESETS (RPC verification table), WC-REGISTRY-LISTING,
@@ -333,7 +333,11 @@ Bear-Tool/
 ## 🔒 Security notes
 
 - Keys encrypted with **PBKDF2 (310k iterations) + AES-GCM** via Web Crypto — never stored plaintext.
-- `ethers` is **vendored** at `js/vendor/ethers.umd.min.js` with a SHA-384 SRI in `index.html`, not fetched from a CDN at runtime. This is the wallet's one hard dependency — no ethers means no wallet — so a blocked or down CDN was a single point of total failure. The CDN build is kept only as a fallback if the vendored copy fails to execute. The version is pinned identically in `package.json` (no caret), so the test suite exercises the exact library the browser runs.
+- `ethers` is **vendored** at `js/vendor/ethers.umd.min.js` with a SHA-384 SRI in `index.html`, not fetched from a CDN at run
+  time. This is the wallet's one hard dependency — no ethers means no wallet — so a blocked or down CDN was a single point of total failure. The CDN build is kept only as a fallback if the vendored copy fails to execute. The version is pinned identically in `package.json` (no caret), so the test suite exercises the exact library the browser runs.
+- `soljson-0.8.37.js` (the Solidity compiler wasm, 9.2 MB) is **vendored** too — first compile no longer walks a public CDN on
+  phone networks; the bytes stay pinned by `tests/solc-artifact.test.js` (sha384). Compile failures surface as ONE sanitized
+  line; the raw dump rides in the activity log, never on screen.
   > This was broken in practice: `.gitignore` carried a bare `vendor/`, which matches any directory named `vendor` at any depth, so `js/vendor/ethers.umd.min.js` was silently ignored and never committed. Every fresh clone 404'd on the wallet's main script and fell through to the CDN fallback — exactly the single point of failure the vendoring existed to remove. The pattern is now `/vendor/` (root only) and the file is tracked. Verified by loading the app with `cdn.jsdelivr.net` blocked: `window.ethers` is 6.17.0 and **zero** CDN requests are made.
 - **EIP-7702 is powerful and dangerous**: a malicious delegation = total compromise. Only delegate to audited implementations. Mainnet requires type-4 RPC (Alchemy/QuickNode).
 - **Serve over HTTPS or `http://localhost`.** Web Crypto (`crypto.subtle`) is only exposed in a secure context. On plain HTTP from any other host the app boots fine but every keystore operation dies with `Cannot read properties of undefined (reading 'importKey')` — silent and unexplainable. The app now detects this and warns at boot. This is also why the DApps list is not framed blind: `index.html` needs `frame-src https:` for the iframe browser to load anything at all.

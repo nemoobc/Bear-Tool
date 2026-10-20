@@ -35,7 +35,7 @@ class FakeWorker {
   postMessage(msg) {
     this.sent.push(msg);
     queueMicrotask(() => {
-      this.onmessage?.({ data: { stage: 'status', message: 'Loading Solidity compiler…' } });
+      this.onmessage?.({ data: { stage: 'status', message: 'Preparing deploy…' } });
       if (FakeWorker.mode === 'load-error') {
         this.onmessage?.({ data: { stage: 'load-error', message: 'Failed to download the Solidity compiler from https://x' } });
         return;
@@ -68,8 +68,8 @@ test('compileContract lewat worker: URL worker, payload, hasil, status UI', asyn
   assert.ok(Array.isArray(w.sent[0].urls) && w.sent[0].urls.length >= 1,
     'daftar mirror CDN ikut dikirim ke worker');
   assert.match(w.sent[0].input, /"C\.sol"/, 'input standard-JSON terkirim utuh');
-  assert.ok(statuses.some((s) => /Loading Solidity compiler/.test(s)),
-    'status worker diteruskan ke onStatus UI');
+  assert.ok(statuses.some((s) => /Preparing deploy/.test(s)),
+    'status worker (netral, tanpa jargon "Solidity") diteruskan ke onStatus UI');
 });
 
 test('load-error diteruskan apa adanya — TANPA bungkus "crashed"', async () => {
@@ -88,12 +88,16 @@ test('load-error diteruskan apa adanya — TANPA bungkus "crashed"', async () =>
   solc.resetCompiler();
 });
 
-test('compile-error dibungkus jadi "Solidity compiler crashed: …"', async () => {
+test('compile-error dibungkus jadi "Compile failed — …" (satu baris, punya detail)', async () => {
   solc.resetCompiler();
   FakeWorker.mode = 'compile-error';
   await assert.rejects(
     () => solc.compileContract('contract C {}', 'C'),
-    /Solidity compiler crashed: boom/,
+    (err) => {
+      assert.match(err.message, /Compile failed — boom/, 'ringkasan jargon-bebas: ' + err.message);
+      assert.doesNotMatch(err.message, /crashed/);
+      return true;
+    },
   );
   FakeWorker.mode = 'ok';
   solc.resetCompiler();

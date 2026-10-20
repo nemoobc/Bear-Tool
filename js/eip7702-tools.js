@@ -117,29 +117,50 @@ export function abiHasName(abi, name) {
 }
 
 // ── compile a Solidity source → { abi, bytecode } ──
-// The compiler lives in solc.js. It used to be loaded straight from the CDN's
-// NODE build of solc, which no browser can execute — every compile here died.
+
+// The worker's status chatter ("Loading Solidity compiler…") is exactly the
+// noise the user asked gone (2026-10-20): the tools flow shows ONE neutral
+// line, deduped, no compiler jargon — failures surface as short summaries and
+// the technical dump stays in the activity log detail.
+let compileChatterShown = false;
 async function compileSource(source, contractName) {
-  return compileContract(source, contractName, { onStatus: (m) => toast(m, 'info') });
+  return compileContract(source, contractName, {
+    onStatus: (m) => {
+      if (compileChatterShown) return;
+      compileChatterShown = true;
+      toast(t('tools.compile.status'), 'info');
+      void m;
+    },
+  });
 }
 
 // ── deploy a compiled contract (BOUNDED wait — never spins forever) ──
 async function deployContract(signer, abi, bytecode, constructorArgs = []) {
-  const factory = new ethers.ContractFactory(abi, bytecode, signer);
-  const contract = await factory.deploy(...constructorArgs);
-  const tx = contract.deploymentTransaction();
-  const v = receiptVerdict(await waitForReceipt(tx));
-  if (v.kind === 'pending') {
-    throw new Error(`Helper deploy TX ${String(tx?.hash || '').slice(0, 12)}… is still unconfirmed. Check the explorer before retrying.`);
+  try {
+    const factory = new ethers.ContractFactory(abi, bytecode, signer);
+    const contract = await factory.deploy(...constructorArgs);
+    const tx = contract.deploymentTransaction();
+    const v = receiptVerdict(await waitForReceipt(tx));
+    if (v.kind === 'pending') {
+      throw new Error(`Helper deploy TX ${String(tx?.hash || '').slice(0, 12)}… is still unconfirmed. Check the explorer before retrying.`);
+    }
+    if (v.kind === 'replaced') {
+      // A replaced deploy did not land THIS hash — returning the contract would
+      // hand back one whose address may have no code, and every later call would
+      // fail with something unrelated.
+      throw new Error(`Helper deploy TX ${String(tx?.hash || '').slice(0, 12)}… was replaced in flight — check the replacement before retrying.`);
+    }
+    if (v.kind === 'failed') throw new Error('Helper contract deploy reverted');
+    return contract;
+  } catch (e) {
+    // The toast shows the short reason; the technical line lands in the
+    // activity log so a bug report carries something we can actually debug.
+    const msg = String(e?.shortMessage || e?.message || e || 'deploy failure').slice(0, 160);
+    try {
+      addActivity({ hash: null, type: 'deploy-helper', status: 'failed', ts: Date.now(), detail: 'helper deploy failed: ' + msg });
+    } catch { /* activity log optional */ }
+    throw Object.assign(new Error(msg), { cause: e });
   }
-  if (v.kind === 'replaced') {
-    // A replaced deploy did not land THIS hash — returning the contract would
-    // hand back one whose address may have no code, and every later call would
-    // fail with something unrelated.
-    throw new Error(`Helper deploy TX ${String(tx?.hash || '').slice(0, 12)}… was replaced in flight — check the replacement before retrying.`);
-  }
-  if (v.kind === 'failed') throw new Error('Helper contract deploy reverted');
-  return contract;
 }
 
 // ── fire-and-forget auto-verify (Sourcify keyless + Etherscan bila ada key) ──

@@ -38,7 +38,7 @@ async function waitForRuntime() {
     const M = self.Module;
     if (M && typeof M.cwrap === 'function') return M;
     if (Date.now() > deadline) {
-      throw new Error(`Solidity compiler did not finish starting up (timeout ${LOAD_TIMEOUT_MS}ms)`);
+      throw new Error(`Compiler did not finish starting up (timeout ${LOAD_TIMEOUT_MS}ms)`);
     }
     await new Promise((r) => { setTimeout(r, READY_POLL_MS); });
   }
@@ -49,22 +49,21 @@ async function ensureRuntime(urls) {
   let lastErr = null;
   for (const url of urls || []) {
     try {
-      say('Loading Solidity compiler…');
+      say('Preparing deploy…');
       importScripts(url);
       const M = await waitForRuntime();
       const compile = M.cwrap('solidity_compile', 'string', ['string', 'number']);
       if (typeof compile !== 'function') {
-        throw new Error('Solidity compiler loaded but exposed no solidity_compile()');
+        throw new Error('Compiler loaded but exposed no solidity_compile()');
       }
       runtime = { compile };
-      say('Solidity compiler ready.');
       return runtime;
     } catch (e) {
       lastErr = e;
-      say('Compiler download failed — trying a mirror…');
+      say('Compiler source unavailable — trying another source…');
     }
   }
-  throw lastErr || new Error('Failed to load the Solidity compiler');
+  throw lastErr || new Error('Failed to load the compiler');
 }
 
 self.onmessage = async (ev) => {

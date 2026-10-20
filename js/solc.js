@@ -33,6 +33,42 @@ export const SOLC_INTEGRITY = 'sha384-Q/PQcFjuBNF8rqPraGnYlnNVV0Tbq/R/oYmS7enwnI
 export const SOLC_FALLBACK_URLS = [
   `https://unpkg.com/solc@${SOLC_VERSION}/soljson.js`
 ];
+
+// ── vendored compiler (2026-10-20, live report) ──
+// First use used to walk the public CDN for a 9.2 MB wasm; phone networks made
+// that the fragile step of every rescue/deploy, and the loading chatter
+// ("Loading Solidity compiler…") is exactly what the user asked to never see
+// again. The bytes ship with the app now — byte-identical, pinned by sha384 in
+// tests/solc-artifact.test.js. CDN mirrors stay as the fallback for stripped
+// builds. Two URL flavours: page-relative (index.html) and worker-relative
+// (importScripts resolves against the worker's own location).
+export const SOLC_VENDOR_LABEL = 'soljson-0.8.37.js';
+export const SOLC_VENDOR_PAGE_URL = 'js/vendor/' + SOLC_VENDOR_LABEL;
+export const SOLC_VENDOR_WORKER_URL = 'vendor/' + SOLC_VENDOR_LABEL;
+export function compilerUrlList(forWorker) {
+  const vendor = forWorker ? SOLC_VENDOR_WORKER_URL : SOLC_VENDOR_PAGE_URL;
+  return [vendor, SOLC_URL, ...SOLC_FALLBACK_URLS];
+}
+
+// User-facing text for compile failures: ONE line, no excerpt block, ≤180
+// chars. Solc's formatted message is a multi-line dump (file:line, code lines,
+// carets); the full text rides on err.detail for the activity log — the toast
+// stream never shows source excerpts again.
+export function sanitizeCompileMessage(raw) {
+  const text = String(raw == null ? '' : raw);
+  if (!text.trim()) return 'unknown failure';
+  let line = '';
+  for (const rawLine of text.split('\n')) {
+    const s = rawLine.trim();
+    if (!s) continue;
+    if (s.startsWith('-->') || s.startsWith('^^') || s.startsWith('|') || /^\d+\s*\|/.test(s)) continue;
+    line = s;
+    break;
+  }
+  if (!line) line = text.split('\n').map(s => s.trim()).find(Boolean) || 'unknown failure';
+  if (line.length > 180) line = line.slice(0, 177) + '…';
+  return line;
+}
 const LOAD_TIMEOUT_MS = 120000;
 const READY_POLL_MS = 100;
 
@@ -50,7 +86,7 @@ function waitForRuntime(deadline) {
       const M = globalThis.Module;
       if (M && typeof M.cwrap === 'function') return resolve(M);
       if (Date.now() > deadline) {
-        return reject(new Error(`Solidity compiler did not finish starting up (timeout ${LOAD_TIMEOUT_MS}ms)`));
+        return reject(new Error(`Compiler did not finish starting up (timeout ${LOAD_TIMEOUT_MS}ms)`));
       }
       setTimeout(check, READY_POLL_MS);
     };
@@ -65,7 +101,7 @@ function loadScript(url, integrity) {
     if (integrity) { script.integrity = integrity; script.crossOrigin = 'anonymous'; }
     script.async = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to download the Solidity compiler from ' + url));
+    script.onerror = () => reject(new Error('Failed to download the compiler from ' + url));
     document.head.appendChild(script);
   });
 }
@@ -100,12 +136,13 @@ function openWorker(urls, { onStatus } = {}) {
       if (m.stage === 'status') { onStatus?.(m.message); return; }
       if (m.stage === 'result') { settle(null, m.output); return; }
       if (m.stage === 'load-error') {
-        // Download/runtime text is the final message — pass it through.
-        settle(Object.assign(new Error(m.message || 'Failed to load the Solidity compiler'), { bearNoWrap: true }));
+        // Download/runtime text is the final message — cap it to one line; the
+        // raw text already never contains source excerpts.
+        settle(Object.assign(new Error('Deploy tool failed to load — ' + sanitizeCompileMessage(m.message || 'unknown load failure')), { bearNoWrap: true }));
         return;
       }
       if (m.stage === 'compile-error') {
-        settle(Object.assign(new Error('Solidity compiler crashed: ' + (m.message || 'unknown error')), { bearNoWrap: true }));
+        settle(Object.assign(new Error('Compile failed — ' + sanitizeCompileMessage(m.message || 'unknown error')), { bearNoWrap: true }));
       }
     };
     worker.onerror = (e) => {
@@ -118,11 +155,11 @@ function openWorker(urls, { onStatus } = {}) {
     resolve({
       compile: (json) => new Promise((res, rej) => {
         if (workerDead) { rej(workerDead); return; }
-        if (pending) { rej(new Error('Solidity compiler is busy — one compile at a time')); return; }
-        const timer = setTimeout(() => {
+        if (pending) { rej(new Error('Compiler busy — one compile at a time')); return; }
+              const timer = setTimeout(() => {
           pending = null;
           rej(Object.assign(
-            new Error(`Solidity compiler did not finish starting up (timeout ${LOAD_TIMEOUT_MS}ms)`),
+            new Error(`Compiler did not finish starting up (timeout ${LOAD_TIMEOUT_MS}ms)`),
             { bearNoWrap: true },
           ));
         }, LOAD_TIMEOUT_MS);
@@ -145,34 +182,37 @@ export function loadCompiler({ onStatus } = {}) {
   compilerPromise = (async () => {
     // Some bundlers/tests provide a ready solc-js object.
     if (typeof globalThis.solc?.compile === 'function') return globalThis.solc;
-    const urls = [SOLC_URL, ...SOLC_FALLBACK_URLS];
+    // Vendored bytes first (offline, no CDN walk); CDN mirrors stay as
+    // fallbacks for stripped builds. Worker gets the worker-relative list.
+    const urls = compilerUrlList(false);
+    const workerUrls = compilerUrlList(true);
     // 1) worker — off-thread compile, immune to the main-thread wasm block.
     if (typeof Worker !== 'undefined') {
       try {
-        return await openWorker(urls, { onStatus });
+        return await openWorker(workerUrls, { onStatus });
       } catch {
-        onStatus?.('Compiler worker unavailable — loading in the page instead…');
+        onStatus?.('Preparing deploy…');
         // fall through: legacy loader keeps old browsers and tests working
       }
     }
     // 2) main-thread loader (legacy path).
-    if (typeof document === 'undefined') throw new Error('Cannot load the Solidity compiler without a DOM');
+    if (typeof document === 'undefined') throw new Error('Cannot load the compiler without a DOM');
     let lastErr = null;
     for (const url of urls) {
       try {
-        onStatus?.(`Loading Solidity compiler ${SOLC_VERSION} (~9 MB, first run only)…`);
+        onStatus?.('Preparing deploy… (large helper file, first time only)');
         await loadScript(url, SOLC_INTEGRITY);
         const M = await waitForRuntime(Date.now() + LOAD_TIMEOUT_MS);
         const compile = M.cwrap('solidity_compile', 'string', ['string', 'number']);
-        if (typeof compile !== 'function') throw new Error('Solidity compiler loaded but exposed no solidity_compile()');
-        onStatus?.('Solidity compiler ready.');
+        if (typeof compile !== 'function') throw new Error('Compiler loaded but exposed no solidity_compile()');
+        onStatus?.('Deploy tool ready.');
         return { compile: (json) => compile(json, 1), version: () => SOLC_VERSION };
       } catch (e) {
         lastErr = e;
-        onStatus?.(`Compiler download failed — trying a mirror…`);
+        onStatus?.('Compiler source unavailable — trying another source…');
       }
     }
-    throw lastErr || new Error('Failed to load the Solidity compiler');
+    throw lastErr || new Error('Failed to load the compiler');
   })();
   compilerPromise.catch(() => { compilerPromise = null; });
   return compilerPromise;
@@ -219,11 +259,17 @@ export async function compileContract(source, contractName, opts = {}) {
     // bearNoWrap = the message is already final (worker download/runtime text
     // or a pre-wrapped compile crash) — re-wrapping would stutter it.
     if (e && e.bearNoWrap) throw e;
-    throw new Error('Solidity compiler crashed: ' + (e?.message || String(e)));
+    throw Object.assign(new Error('Deploy tool crashed — ' + sanitizeCompileMessage(e?.message || String(e))), { detail: 'compiler: ' + String(e?.message || e) });
   }
   const errors = (output.errors || []).filter(e => e.severity === 'error');
   if (errors.length) {
-    throw new Error('Compile error: ' + (errors[0].formattedMessage || errors[0].message || 'unknown error'));
+    // Solc's formatted message is a multi-line excerpt dump (file:line, code
+    // lines, carets). The toast gets the one-line summary; the full dump rides
+    // on err.detail for the activity log — user-facing screens never show the
+    // source again (user report 2026-10-20: "solc solidity jangan ditampilkan").
+    const first = errors[0];
+    const summary = sanitizeCompileMessage(first?.formattedMessage || first?.message || 'unknown compile failure');
+    throw Object.assign(new Error('Compile failed — ' + summary), { detail: first?.formattedMessage || first?.message || '' });
   }
   const contract = output.contracts?.[fileName]?.[contractName];
   if (!contract?.evm?.bytecode?.object) throw new Error('Compiler returned no bytecode for ' + contractName);
