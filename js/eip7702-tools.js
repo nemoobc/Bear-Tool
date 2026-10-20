@@ -1740,14 +1740,14 @@ export async function revokeDelegation() {
       { k: t('cf.target'), v: target },
       { k: t('cf.current.delegation'), v: delegate },
       { k: t('cf.gas.sponsor.executor'), v: wallet.shortAddress(sponsorAddress) },
-      { k: t('cf.est.fee'), v: feeRowValue(revokeFee, net) },
+      { k: revokeFee.measured ? t('cf.est.fee') : t('cf.est.fee.max'), v: feeRowValue(revokeFee, net) },
       { k: t('cf.action'), v: t('cf.revoke.back.to.plain.eoa') }
     ],
     confirmText: t('cf.revoke'), danger: true,
     // Gas only: a revocation moves no value, it just clears the delegation.
     gasWei: revokeFee.feeWei,
     valueWei: 0n,
-    totalNote: t('cf.total.fee.only'),
+    totalNote: t('cf.total.fee.only') + (revokeFee.measured ? '' : ' · ' + t('cf.total.fee.max')),
   });
   if (!ok) return;
 
