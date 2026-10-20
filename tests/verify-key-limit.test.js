@@ -95,12 +95,16 @@ test('verify: i18n EN+ID cover every new key', () => {
 });
 
 const e7Source = readFileSync('js/eip7702-tools.js', 'utf8');
-test('verify: every eip7702 deploy site auto-verifies (batch/rescue/claimer)', () => {
+test('verify: batch/claimer deploy sites auto-verify; rescue must NOT (2026-10-20 privacy)', () => {
   const calls = e7Source.match(/(?<!function )verifyHelperDeployed\(/g) || [];
-  assert.equal(calls.length, 6, `6 deploy sites must call skip nothing (got ${calls.length})`);
+  assert.equal(calls.length, 4, `4 call sites remain: batch ×2 + claimer ×2 — rescue opted out (got ${calls.length})`);
   // The definition itself:
   assert.match(e7Source, /function verifyHelperDeployed/);
-  for (const src of ['BATCH_SOURCE', 'RESCUE_SOURCE', 'AIRDROP_CLAIMER_SOURCE']) {
+  // Rescue opts out: its ctor args carry the SAFE destination — a verify POST
+  // would publish them decoded on repo.sourcify.dev (user report 2026-10-20).
+  for (const src of ['BATCH_SOURCE', 'AIRDROP_CLAIMER_SOURCE']) {
     assert.ok(e7Source.includes(`source: ${src}`), `${src} must be handed to verification`);
   }
+  assert.doesNotMatch(e7Source, /verifyHelperDeployed\(\{[^)]*RESCUE_SOURCE/,
+    'rescue helper must never auto-verify — safe address stays private');
 });

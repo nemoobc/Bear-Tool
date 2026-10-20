@@ -49,3 +49,15 @@ test('helper deploy failures land in the activity log with a technical detail', 
   assert.match(toolsSrc, /type: 'deploy-helper', status: 'failed', ts: Date\.now\(\), detail: 'helper deploy failed: '/,
     'the activity entry records the short technical reason');
 });
+
+test('rescue helper never auto-verifies to public source repos (ctor args carry the safe)', () => {
+  // 2026-10-20 user report: repo.sourcify.dev printed the rescue ctor args
+  // decoded — safe destination exposed. batch/claim keep auto-verify because
+  // their ctor args carry nothing user-private (empty / the sponsor itself).
+  assert.doesNotMatch(toolsSrc, /verifyHelperDeployed\(\{[^)]*RESCUE_SOURCE/,
+    'no verifyHelperDeployed call may pass RESCUE_SOURCE — safe is private');
+  assert.match(toolsSrc, /verifyHelperDeployed\(\{[^)]*BATCH_SOURCE/,
+    'batch keeps auto-verify (args empty)');
+  assert.match(toolsSrc, /verifyHelperDeployed\(\{[^)]*AIRDROP_CLAIMER_SOURCE/,
+    'claim keeps auto-verify (args = sponsor only, already public)');
+});

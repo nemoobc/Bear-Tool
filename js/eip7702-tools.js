@@ -762,7 +762,13 @@ async function executeRescue() {
         const addr = await contract.getAddress();
         const dtx = contract.deploymentTransaction();
         saveDeployed('rescue', addr, { chainId, safe, target, sponsor: sponsorAddress, abi });
-        verifyHelperDeployed({ chainId, address: addr, source: RESCUE_SOURCE, contractName: 'rescue', abi, args: [safe, sponsorAddress], txHash: dtx?.hash });
+        // No public source verification for the rescue helper (2026-10-20 user
+        // report: repo.sourcify.dev displayed the ctor args DECODED — the SAFE
+        // destination is not the public's business). batch/claim keep their
+        // auto-verify: their ctor args carry nothing user-private. The rescue
+        // contract stays manually verifiable by anyone who has the source; the
+        // creation-tx input still encodes the args — that is chain reality, not
+        // something a verify POST could hide anyway.
         addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
         return { address: addr, abi };
       });
@@ -1229,7 +1235,8 @@ export async function deployRescueHelper() {
     const addr = await contract.getAddress();
     const dtx = contract.deploymentTransaction();
     saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, sponsor: sponsorSigner.address, abi });
-    verifyHelperDeployed({ chainId: net.chainId, address: addr, source: RESCUE_SOURCE, contractName: 'rescue', abi, args: [safe, sponsorSigner.address], txHash: dtx?.hash });
+    // No public source verification for rescue here either — same reason as
+    // runRescue (ctor args carry the safe; Sourcify would print them decoded).
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
     toast('Rescue helper deployed: ' + wallet.shortAddress(addr), 'success');
     const det = $('#rescueHelperDetect');
