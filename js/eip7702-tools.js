@@ -15,6 +15,10 @@ import * as wallet from './wallet.js';
 import { saveDeployed, findDeployed, listDeployed, removeDeployed } from './registry.js';
 import { compileContract } from './solc.js';
 import { autoVerify } from './verify.js';
+import {
+  boundSweepGas, feeWeiFromGas, authNonceFor,
+  measurePlainBaseline, measureSweepGas,
+} from './rescue-fee.js';
 
 const { ethers } = globalThis;
 
@@ -62,9 +66,25 @@ contract rescue {
         (bool success, ) = token.call(abi.encodeWithSelector(0xa9059cbb, SAFE, abi.decode(ret, (uint256))));
         require(success, "ERC20 transfer failed");
     }
-    function rescueERC721(address token, uint256[] calldata ids) external onlyRescuer { for (uint256 i=0; i<ids.length; ++i) { (bool success, ) = token.call(abi.encodeWithSignature("transferFrom", address(this), SAFE, ids[i])); require(success, "ERC721 transfer failed"); } }
-    function version() external pure returns (string memory) { return "1.1.0"; }
+    // ERC-721: the selector MUST be transferFrom(address,address,uint256).
+    // abi.encodeWithSignature("transferFrom", ...) hashes the string AS GIVEN
+    // — it does not append the argument types — so it produced 0x0c41b033, a
+    // selector no ERC-721 has, and every NFT sweep reverted with "ERC721
+    // transfer failed" (measured on anvil: the call fell through to the
+    // token's fallback instead of transferFrom). Same style as the ERC-20
+    // line above: the raw selector, spelled out.
+    function rescueERC721(address token, uint256[] calldata ids) external onlyRescuer { for (uint256 i=0; i<ids.length; ++i) { (bool success, ) = token.call(abi.encodeWithSelector(0x23b872dd, address(this), SAFE, ids[i])); require(success, "ERC721 transfer failed"); } }
+    function version() external pure returns (string memory) { return "1.2.0"; }
 }`;
+
+// The version a rescue helper must report before it is reused for an ERC-721
+// sweep. v1.1.0 called transferFrom with the WRONG selector (see the source
+// above), so its NFT path could only revert: reusing one would burn the
+// sponsor's gas on a transaction that moves nothing. The registry records the
+// version it deployed, so an old entry is recognised without an extra RPC —
+// the same "redeploy instead of trusting the label" rule the claimer flow
+// already uses for its minimum-calldata helper.
+const RESCUE_HELPER_VERSION = '1.2.0';
 
 const AIRDROP_CLAIMER_SOURCE = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -395,7 +415,12 @@ async function executeBatch() {
         { k: t('cf.network'), v: net.name },
         { k: t('cf.delegation'), v: t('cf.permanent.until.revoked.tools.revoke') },
       ],
-      confirmText: t('cf.execute'), danger: net.type === 'mainnet'
+      confirmText: t('cf.execute'), danger: net.type === 'mainnet',
+      // The money line: the native value the calls move — the user's own
+      // money, in dollars. The gas of the three transactions is NOT in here
+      // (each of them is charged separately and the row above says so), so
+      // the total line says "excl. gas" instead of pretending.
+      valueWei: totalValue,
     });
     if (!ok) return;
   }
@@ -513,7 +538,8 @@ function toggleRescueFields() {
 // "deploy baru?" instead of silently burning gas.
 const RESCUE_PROBE_ABI = [
   'function SAFE() view returns (address)',
-  'function RESCUER() view returns (address)'
+  'function RESCUER() view returns (address)',
+  'function version() view returns (string)'
 ];
 // Minimal encode-only fragments — no solc round-trip for a pasted contract.
 const RESCUE_MANUAL_ABI = [
@@ -538,7 +564,12 @@ async function probeRescueContract(addr, provider, expectSafe, expectRescuer) {
     if (expectRescuer && rescuer.toLowerCase() !== expectRescuer.toLowerCase()) {
       return { ...det, ok: false, reason: `deployer/RESCUER ${wallet.shortAddress(rescuer)} ≠ sponsor ${wallet.shortAddress(expectRescuer)} — onlyRescuer would revert` };
     }
-    return { ...det, ok: true };
+    // The version is read, not assumed: a helper without version() is a
+    // foreign contract of unknown vintage, and an old one (v1.1.0) sweeps
+    // NFTs with the wrong selector. The caller decides what to do with it.
+    let version = null;
+    try { version = String(await c.version()); } catch { version = null; }
+    return { ...det, version, ok: true };
   } catch {
     return { ok: false, reason: 'not a Bear rescue contract (SAFE/RESCUER could not be read)' };
   }
@@ -615,6 +646,158 @@ function requireTargetKey() {
   if (!key) { toast('Target private key is required for rescue', 'error'); return null; }
   if (!addressFromKey(key)) { toast('Invalid target private key', 'error'); return null; }
   return key;
+}
+
+// ── what the rescue will cost, measured before the user approves it ──────
+// The sheet has to say what the transaction costs, and it has to be a number
+// the chain can vouch for. Two facts decide HOW it is measured:
+//
+//   * The sweep is an EIP-7702 type-4 transaction: the delegation tuple and
+//     the rescue call ride in the SAME tx. A plain estimate of the same call
+//     is a lie — with no code at the target the node prices an empty call
+//     (22,460 gas measured on anvil, against the 79,859 the real type-4
+//     transaction is worth). So the estimate carries the same shape the
+//     broadcast carries: the authorization list, signed by the target, with
+//     the target's own nonce (a tuple with the wrong nonce is silently
+//     skipped by the node and the estimate collapses back to that lie).
+//
+//   * The helper contract must EXIST for the node to price the sweep: the
+//     delegation target has no code when it has not been deployed yet, so
+//     there the sheet shows the documented worst case and says so.
+//
+// js/rescue-fee.js holds the numbers, the plausibility floors and the
+// measurement; this function wires them to the chain.
+async function quoteRescueFee({ provider, net, target, targetKey, sponsorAddress, safe, type, tokenAddr, rescueWei, tokenIds, manualHelper }) {
+  const chainId = Number(net.chainId);
+  const bound = boundSweepGas({ type, idCount: countRescueIds(tokenIds) });
+
+  // Which helper the sweep will delegate to. Read-only: the registry lookup
+  // mirrors the deploy path's predicate, and a record whose contract is gone
+  // is not reused (the deploy path would replace it anyway).
+  let helper = manualHelper ? { address: manualHelper.address, abi: manualHelper.abi } : null;
+  if (!helper) {
+    try {
+      const found = findDeployed('rescue', chainId, (item) =>
+        item.safe?.toLowerCase() === safe.toLowerCase()
+        && item.sponsor?.toLowerCase() === sponsorAddress.toLowerCase());
+      if (found) {
+        const { alive } = await contractExists(provider, found.address);
+        if (alive) helper = { address: found.address, abi: found.abi || RESCUE_MANUAL_ABI };
+      }
+    } catch { helper = null; }
+  }
+
+  // The calldata the sweep will carry — the same encoding the broadcast
+  // uses, so the estimate prices the transaction that will actually go out.
+  let data = null;
+  try {
+    if (helper) {
+      const iface = new ethers.Interface(helper.abi || RESCUE_MANUAL_ABI);
+      if (type === 'erc721') {
+        const ids = rescueIdsOf(tokenIds);
+        if (ids.length) data = iface.encodeFunctionData('rescueERC721', [tokenAddr, ids]);
+      } else if (rescueWei != null) {
+        data = iface.encodeFunctionData('rescueERC20', [tokenAddr, rescueWei]);
+      }
+    }
+  } catch { data = null; }
+
+  // Measure the shape the broadcast will use: a plain call when the target
+  // is already delegated to this helper, a type-4 transaction otherwise.
+  let measured = null;
+  if (data) {
+    try {
+      const delegated = await getDelegation(provider, target);
+      const already = !!delegated && delegated.toLowerCase() === String(helper.address).toLowerCase();
+      if (already) {
+        measured = await measureSweepGas({ provider, from: sponsorAddress, to: target, data });
+      } else if (targetKey) {
+        const nonce = await provider.getTransactionCount(target);
+        const authNonce = authNonceFor({ targetNonce: nonce, sponsorAddress, targetAddress: target });
+        const targetSigner = new ethers.Wallet(targetKey, provider);
+        const authorization = targetSigner.authorizeSync({
+          chainId, address: helper.address, nonce: authNonce,
+        });
+        const plainGas = await measurePlainBaseline({ provider, from: sponsorAddress, to: target, data });
+        measured = await measureSweepGas({
+          provider, from: sponsorAddress, to: target, data, authorization, plainGas,
+        });
+      }
+    } catch { measured = null; }
+  }
+
+  // The price the transaction will carry: the same maxFeePerGas the
+  // broadcast sets, so the figure is the ceiling the sponsor can be charged.
+  const pricePerGas = await txPricePerGas(provider);
+
+  const gas = measured ? measured.gas : bound;
+  return {
+    gas,
+    measured: !!measured,
+    kind: measured?.kind || null,
+    pricePerGas,
+    feeWei: feeWeiFromGas(gas, pricePerGas),
+    willDeploy: !helper,   // the helper is deployed AFTER this sheet — a
+                            // separate transaction with its own fee
+  };
+}
+
+// The ERC-721 id list, parsed the way the broadcast parses it. Shared so the
+// estimate and the transaction can never disagree about what is swept.
+function rescueIdsOf(tokenIds) {
+  return (tokenIds || '').split(',').map((s) => BigInt(s.trim())).filter((n) => n >= 0n);
+}
+
+// How many ids the sheet's bound has to cover. Counts the entries without
+// parsing them: a list that cannot be parsed is refused later by the flow
+// itself, and a bound must not depend on a list it cannot read.
+function countRescueIds(tokenIds) {
+  try {
+    return rescueIdsOf(tokenIds).length;
+  } catch {
+    return (tokenIds || '').split(',').map((s) => s.trim()).filter(Boolean).length;
+  }
+}
+
+// ── what an EIP-7702 transaction will cost, measured before the ask ─────
+// rescue / claim / revoke all broadcast the same shape: a plain call when
+// the target is already delegated, a type-4 transaction carrying the
+// target's own tuple otherwise. The measurement lives in js/rescue-fee.js;
+// this wires it to each flow's shape.
+//
+// The price is the one the transaction will CARRY: the same maxFeePerGas the
+// broadcast sets, so the figure is the ceiling the sponsor can be charged —
+// never a made-up number.
+async function txPricePerGas(provider) {
+  try {
+    const feeData = await provider.getFeeData();
+    return feeData?.maxFeePerGas ?? feeData?.gasPrice ?? null;
+  } catch { return null; }
+}
+
+// Measure one EIP-7702 transaction the way it will be broadcast.
+//   delegated: the target is already delegated → the broadcast is a plain call
+//   authorization: the signed tuple for a type-4 broadcast (null → plain)
+//   boundGas: the documented worst case, used when the node cannot price it
+async function quote7702Fee({ provider, from, to, data = '0x', authorization = null, delegated = false, minExtra, boundGas = null }) {
+  const plainGas = delegated ? null : await measurePlainBaseline({ provider, from, to, data });
+  const m = await measureSweepGas({
+    provider, from, to, data,
+    authorization: delegated ? null : authorization,
+    plainGas, minExtra,
+  });
+  const pricePerGas = await txPricePerGas(provider);
+  const gas = m ? m.gas : boundGas;
+  return { gas, measured: !!m, pricePerGas, feeWei: feeWeiFromGas(gas, pricePerGas) };
+}
+
+// The "Est. fee" row of a sheet: native amount, gas figure and the price it
+// was computed with. `measured` false means the number is the documented
+// worst case, not a measurement — the caller says so in the row label.
+function feeRowValue(fee, net) {
+  if (fee.feeWei == null) return t('cf.unknown');
+  const gwei = fee.pricePerGas != null ? ` @ ${ethers.formatUnits(fee.pricePerGas, 'gwei')} gwei` : '';
+  return `${ethers.formatEther(fee.feeWei)} ${net.symbol} (${fee.gas.toString()} gas${gwei})`;
 }
 
 async function executeRescue() {
@@ -701,19 +884,29 @@ async function executeRescue() {
   if (manualHelperRaw) {
     if (!wallet.isValidAddress(manualHelperRaw)) return toast('Invalid contract address', 'error');
     const det = await probeRescueContract(manualHelperRaw, provider, safe, sponsorAddress);
-    if (det.ok) {
+    // An NFT sweep needs the v1.2.0 helper: v1.1.0 called transferFrom with
+    // the wrong selector, so its ERC-721 path could only revert. A pasted old
+    // helper is therefore "unusable" FOR NFTs — the user is offered a fresh
+    // deploy instead of burning the sponsor's gas on a transaction that moves
+    // nothing. ERC-20 sweeps are unaffected (that path was always correct).
+    const staleForNft = det.ok && type === 'erc721' && det.version !== RESCUE_HELPER_VERSION;
+    if (det.ok && !staleForNft) {
       manualHelper = { address: manualHelperRaw, abi: RESCUE_MANUAL_ABI, reused: true };
       // Record it: the probe proved SAFE+RESCUER match, which is exactly the
-      // registry predicate — next run reuses it without pasting again.
+      // registry predicate — next run reuses it without pasting again. The
+      // version travels with the record: an unknown version (a foreign
+      // contract) stays unknown, so an NFT sweep never reuses it.
       saveDeployed('rescue', manualHelperRaw,
-        { chainId: Number(net.chainId), safe, target, sponsor: sponsorAddress, abi: RESCUE_MANUAL_ABI });
+        { chainId: Number(net.chainId), safe, target, sponsor: sponsorAddress, abi: RESCUE_MANUAL_ABI, version: det.version });
       toast('Using the pasted rescue contract: ' + wallet.shortAddress(manualHelperRaw), 'info');
     } else {
       const okProbe = await confirmTx({
         title: t('cf.pasted.contract.unusable.deploy.a.new.one'),
         rows: [
           { k: t('cf.contract'), v: manualHelperRaw },
-          { k: t('cf.detected'), v: det.reason },
+          { k: t('cf.detected'), v: staleForNft
+            ? `helper reports v${det.version || '?'} — the NFT path needs v${RESCUE_HELPER_VERSION} (older helpers call transferFrom with the wrong selector)`
+            : det.reason },
           { k: t('cf.action'), v: t('cf.deploy.a.fresh.rescue.helper.saved.reused.on.later.runs') },
         ],
         confirmText: t('cf.deploy.baru'),
@@ -722,6 +915,25 @@ async function executeRescue() {
       // fall through to the registry/ensure-deploy path below
     }
   }
+
+  // ── what it costs, measured before the user approves it ──
+  // The sheet has to carry the price. A price that was guessed is a price
+  // that lies, so it is measured on the node — and when the node cannot
+  // price it (the helper does not exist yet: its code is what the sweep
+  // runs), the sheet says "max" and shows the documented bound instead.
+  const fee = await quoteRescueFee({
+    provider, net, target, targetKey, sponsorAddress, safe, type, tokenAddr, rescueWei, tokenIds, manualHelper,
+  });
+  const feeLabel = fee.feeWei != null
+    ? `${ethers.formatEther(fee.feeWei)} ${net.symbol} (${fee.gas.toString()} gas @ ${ethers.formatUnits(fee.pricePerGas, 'gwei')} gwei)`
+    : t('cf.unknown');
+  // The $ line is the GAS only: the tokens being swept are the user's own,
+  // moving to their own SAFE — nothing is bought here, so nothing is priced
+  // twice. When the helper still has to be deployed, that deployment is a
+  // SECOND transaction (asked separately) and this sheet says so.
+  const feeNotes = [t('cf.total.fee.only')];
+  if (!fee.measured) feeNotes.push(t('cf.total.fee.max'));
+  if (fee.willDeploy) feeNotes.push(t('cf.total.fee.tx'));
 
   {
     const ok = await confirmTx({
@@ -735,8 +947,15 @@ async function executeRescue() {
         { k: t('cf.gas.sponsor.executor'), v: wallet.shortAddress(sponsorAddress) },
         { k: t('cf.network'), v: net.name },
         { k: t('cf.delegation'), v: t('cf.permanent.until.revoked.tools.revoke') },
+        { k: fee.measured ? t('cf.est.fee') : t('cf.est.fee.max'), v: feeLabel },
+        ...(fee.willDeploy ? [{ k: t('cf.transactions'), v: t('cf.tx.rescue.plan') }] : []),
       ],
-      confirmText: t('cf.rescue'), danger: net.type === 'mainnet'
+      confirmText: t('cf.rescue'), danger: net.type === 'mainnet',
+      // The money line: the measured (or bounded) gas fee in wei, no native
+      // value moving — the rescue sweeps tokens, the sponsor pays the gas.
+      gasWei: fee.feeWei,
+      valueWei: 0n,
+      totalNote: feeNotes.join(' · '),
     });
     if (!ok) return;
   }
@@ -754,14 +973,18 @@ async function executeRescue() {
     // eksplisit (tidak pernah senyap).
     const helper = manualHelper || await ensureDeployedHelper('rescue', 'Rescue', chainId,
       item => item.safe?.toLowerCase() === safe.toLowerCase()
-        && item.sponsor?.toLowerCase() === sponsorAddress.toLowerCase(),
+        && item.sponsor?.toLowerCase() === sponsorAddress.toLowerCase()
+        // An NFT sweep may only reuse a v1.2.0 helper (v1.1.0's transferFrom
+        // selector was wrong → it can only revert). An entry without a
+        // recorded version is an old one: it is redeployed, never reused.
+        && (type !== 'erc721' || item.version === RESCUE_HELPER_VERSION),
       provider,
       async () => {
         const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
         const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, sponsorAddress]);
         const addr = await contract.getAddress();
         const dtx = contract.deploymentTransaction();
-        saveDeployed('rescue', addr, { chainId, safe, target, sponsor: sponsorAddress, abi });
+        saveDeployed('rescue', addr, { chainId, safe, target, sponsor: sponsorAddress, abi, version: RESCUE_HELPER_VERSION });
         // No public source verification for the rescue helper (2026-10-20 user
         // report: repo.sourcify.dev displayed the ctor args DECODED — the SAFE
         // destination is not the public's business). batch/claim keep their
@@ -785,7 +1008,7 @@ async function executeRescue() {
       // into the field). The old all-sweep took the choice away.
       calldata = rescueContract.interface.encodeFunctionData('rescueERC20', [tokenAddr, rescueWei]);
     } else if (type === 'erc721') {
-      const ids = tokenIds.split(',').map(s => BigInt(s.trim())).filter(n => n >= 0n);
+      const ids = rescueIdsOf(tokenIds);
       if (!ids.length) return toast('Enter valid token IDs', 'error');
       calldata = rescueContract.interface.encodeFunctionData('rescueERC721', [tokenAddr, ids]);
     } else {
@@ -833,6 +1056,56 @@ async function executeRescue() {
     renderDeployedRegistry();
     emit('refresh');
   });
+}
+
+// A revoke does no work: the transaction only clears the delegation
+// (measured on anvil: 46,001 gas estimated, 36,800 burned). The bound is
+// the honest ceiling for a node that cannot price the type-4 shape.
+const REVOKE_GAS_BOUND = 60000n;
+
+// ── what the claim will cost, measured before the ask ──────────────────
+// The claim is the rescue's shape: ONE EIP-7702 transaction that delegates
+// the target and calls the claimer in the same tx, so the same measurement
+// applies. The claimer the flow will use is looked up READ-ONLY here (the
+// registry entry the deploy path would find) — when it is not there yet, the
+// claim cannot be priced and the documented bound answers instead.
+async function quoteClaimFee({ provider, chainId, sponsorAddress, target, targetKey, contractAddr, claimData, tokenAddr, safe, minWei }) {
+  const bound = boundSweepGas({ type: 'erc20' });
+  let helper = null;
+  try {
+    const found = findDeployed('airdrop', chainId, (item) =>
+      String(item.rescuer || item.target || '').toLowerCase() === sponsorAddress.toLowerCase()
+      && abiHasName(item.abi, 'claimAndForwardMin'));
+    if (found) {
+      const { alive } = await contractExists(provider, found.address);
+      if (alive) helper = { address: found.address, abi: found.abi };
+    }
+  } catch { helper = null; }
+
+  if (!helper || !targetKey) {
+    const pricePerGas = await txPricePerGas(provider);
+    return { gas: bound, measured: false, pricePerGas, feeWei: feeWeiFromGas(bound, pricePerGas) };
+  }
+  try {
+    const iface = new ethers.Interface(helper.abi);
+    const data = iface.encodeFunctionData('claimAndForwardMin', [contractAddr, claimData, tokenAddr, safe, minWei]);
+    const delegated = await getDelegation(provider, target);
+    const already = !!delegated && delegated.toLowerCase() === String(helper.address).toLowerCase();
+    let authorization = null;
+    if (!already) {
+      const nonce = await provider.getTransactionCount(target);
+      const authNonce = authNonceFor({ targetNonce: nonce, sponsorAddress, targetAddress: target });
+      authorization = new ethers.Wallet(targetKey, provider).authorizeSync({
+        chainId, address: helper.address, nonce: authNonce,
+      });
+    }
+    return await quote7702Fee({
+      provider, from: sponsorAddress, to: target, data, authorization, delegated: already, boundGas: bound,
+    });
+  } catch {
+    const pricePerGas = await txPricePerGas(provider);
+    return { gas: bound, measured: false, pricePerGas, feeWei: feeWeiFromGas(bound, pricePerGas) };
+  }
 }
 
 // ── claim airdrop ──
@@ -907,6 +1180,15 @@ async function executeClaim() {
   } catch { balReadOk = false; }
 
   {
+    // The price of the claim, measured before the ask: the claim is the
+    // same EIP-7702 shape as the rescue (delegate + claim in one tx), so
+    // the same measurement applies. Read-only: the claimer the flow will
+    // use is looked up in the registry, never deployed from here.
+    const claimFee = await quoteClaimFee({
+      provider, net, chainId: Number(net.chainId), sponsorAddress,
+      target: targetAddress, targetKey: targetKeyField,
+      contractAddr, claimData, tokenAddr, safe, minWei,
+    });
     const ok = await confirmTx({
       title: net.type === 'mainnet' ? 'CLAIM AIRDROP ON MAINNET!' : `Claim on ${net.name}?`,
       rows: [
@@ -918,8 +1200,14 @@ async function executeClaim() {
         { k: t('cf.gas.sponsor'), v: wallet.shortAddress(sponsorAddress) },
         { k: t('cf.network'), v: net.name },
         { k: t('cf.delegation'), v: t('cf.permanent.until.revoked.tools.revoke') },
+        { k: claimFee.measured ? t('cf.est.fee') : t('cf.est.fee.max'), v: feeRowValue(claimFee, net) },
       ],
-      confirmText: t('cf.claim'), danger: net.type === 'mainnet'
+      confirmText: t('cf.claim'), danger: net.type === 'mainnet',
+      // Gas only: the claimed tokens are the user's own, arriving in their
+      // own SAFE — nothing is bought here, so nothing is priced twice.
+      gasWei: claimFee.feeWei,
+      valueWei: 0n,
+      totalNote: t('cf.total.fee.only') + (claimFee.measured ? '' : ' · ' + t('cf.total.fee.max')),
     });
     if (!ok) return;
   }
@@ -1234,7 +1522,7 @@ export async function deployRescueHelper() {
     const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, sponsorSigner.address]);
     const addr = await contract.getAddress();
     const dtx = contract.deploymentTransaction();
-    saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, sponsor: sponsorSigner.address, abi });
+    saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, sponsor: sponsorSigner.address, abi, version: RESCUE_HELPER_VERSION });
     // No public source verification for rescue here either — same reason as
     // runRescue (ctor args carry the safe; Sourcify would print them decoded).
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
@@ -1425,15 +1713,41 @@ export async function revokeDelegation() {
   const delegate = await getDelegation(provider, target);
   if (!delegate) return toast('No active delegation on this address — nothing to revoke.', 'info');
 
+  // The price of the revoke, measured before the ask: a type-4 transaction
+  // with no data, whose tuple points at the zero address. A revoke does no
+  // work, so its correct estimate and its skipped-tuple estimate are the
+  // same number (46,001 measured) — the margin rule the sweeps use does not
+  // apply, and the app verifies afterwards that the delegation really was
+  // cleared.
+  let revokeFee = { gas: REVOKE_GAS_BOUND, measured: false, pricePerGas: null, feeWei: null };
+  try {
+    const nonce = await provider.getTransactionCount(target);
+    const selfSponsor = String(sponsorAddress).toLowerCase() === String(target).toLowerCase();
+    const authNonce = selfSponsor ? nonce + 1 : nonce;
+    const targetSigner = key ? new ethers.Wallet(key, provider) : get('signer').connect(provider);
+    const authorization = targetSigner.authorizeSync({
+      chainId: net.chainId, address: EIP7702.ZERO_ADDRESS, nonce: authNonce,
+    });
+    revokeFee = await quote7702Fee({
+      provider, from: sponsorAddress, to: target, data: '0x', authorization,
+      minExtra: 0n, boundGas: REVOKE_GAS_BOUND,
+    });
+  } catch { /* honest fallback: the bound below */ }
+
   const ok = await confirmTx({
     title: t('cf.revoke.eip.7702.delegation'),
     rows: [
       { k: t('cf.target'), v: target },
       { k: t('cf.current.delegation'), v: delegate },
       { k: t('cf.gas.sponsor.executor'), v: wallet.shortAddress(sponsorAddress) },
+      { k: t('cf.est.fee'), v: feeRowValue(revokeFee, net) },
       { k: t('cf.action'), v: t('cf.revoke.back.to.plain.eoa') }
     ],
-    confirmText: t('cf.revoke'), danger: true
+    confirmText: t('cf.revoke'), danger: true,
+    // Gas only: a revocation moves no value, it just clears the delegation.
+    gasWei: revokeFee.feeWei,
+    valueWei: 0n,
+    totalNote: t('cf.total.fee.only'),
   });
   if (!ok) return;
 

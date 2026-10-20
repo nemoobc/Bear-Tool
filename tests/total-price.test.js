@@ -129,3 +129,42 @@ test('confirmTx meneruskan kunci uang ke totalPriceRow sebelum modal terbuka', (
   assert.match(src, /export async function confirmTx\(\{ title, rows,.*\.\.\.money \}\)/);
   assert.match(src, /await totalPriceRow\(money\)/);
 });
+
+// ── the 7702 flows: every sheet that authorizes a transaction carries its
+// price (user report 2026-10-20: "di fitur rescue ga ada ask tx gas fee
+// total usd" — the rescue sheet showed no fee and no total). The other
+// Tools flows had the same hole and are pinned here too.
+test('rescue → gasWei (diukur) + valueWei 0 + catatan total', () => {
+  const src = read('eip7702-tools.js');
+  assert.match(src, /gasWei: fee\.feeWei/, 'the rescue sheet must carry the measured fee');
+  assert.match(src, /valueWei: 0n/, 'a rescue moves no native value — only tokens');
+  assert.match(src, /totalNote: feeNotes\.join\(' · '\)/);
+  assert.match(src, /cf\.est\.fee\.max/, 'a number that is a bound must say so');
+});
+
+test('claim → gasWei + valueWei 0', () => {
+  const src = read('eip7702-tools.js');
+  assert.match(src, /gasWei: claimFee\.feeWei/, 'the claim sheet must carry the measured fee');
+  assert.match(src, /valueWei: 0n/);
+});
+
+test('revoke → gasWei (revoke does no work, but it is still a transaction)', () => {
+  const src = read('eip7702-tools.js');
+  assert.match(src, /gasWei: revokeFee\.feeWei/, 'the revoke sheet must carry the fee');
+});
+
+test('batch → valueWei (native yang dipindahkan user = uang dia)', () => {
+  const src = read('eip7702-tools.js');
+  assert.match(src, /valueWei: totalValue/, 'the batch sheet must carry the value it moves');
+});
+
+test('the fee is measured on the node, never invented', () => {
+  const fee = read('rescue-fee.js');
+  const tools = read('eip7702-tools.js');
+  assert.match(fee, /measureSweepGas/, 'the measurement lives in one module');
+  assert.match(tools, /quote7702Fee\(/, 'the flows share that one measurement');
+  assert.match(fee, /SWEEP_DELEGATION_MIN_EXTRA/,
+    'a skipped delegation tuple must be distinguishable from a priced one');
+  // A price the node could not give is never dressed up as a measurement.
+  assert.match(tools, /fee\.measured \? t\('cf\.est\.fee'\) : t\('cf\.est\.fee\.max'\)/);
+});
