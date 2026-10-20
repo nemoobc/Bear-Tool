@@ -2121,6 +2121,18 @@ async function main() {
     step('hunt: + Add Account derives a second wallet from the seed');
     if (!(await jsClick('#addAccBtn'))) throw new Error('hunt: #addAccBtn missing');
     await sleep(700);
+    // "+ Add Account" shows the CHOICE first (create / import / derive) and
+    // asks for the password only once a flow is picked — the app's own
+    // request of 2026-10-18 ("add wallet harusnya ga munculin password tapi
+    // munculin create wallet sama import wallet"). This step still asserted
+    // the OLD order (password straight away), so it failed on a correct app:
+    // the hunt run of 2026-10-20 died here with "deriving did not ask for
+    // the password" while the app was doing exactly what was asked.
+    if (!(await page.evaluate('!!document.getElementById("accAddDerive")'))) {
+      throw new Error('hunt: + Add Account did not offer the create/import/derive choice');
+    }
+    await jsClick('#accAddDerive');
+    await sleep(700);
     if (!(await page.evaluate('!!document.getElementById("pwInput")'))) throw new Error('hunt: deriving did not ask for the password');
     await page.type('#pwInput', WALLET_PW);
     await page.click('#pwOk');
