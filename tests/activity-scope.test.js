@@ -89,6 +89,11 @@ test('view activity menampilkan baris scope lain saat scope ini kosong', () => {
   // The main list keeps the ONE shared filter — the token modal reads it too.
   assert.match(body, /const visible = currentNetworkActivity\(\)/,
     'list utama tetap pakai helper bersama');
+  // …and the groups it renders must actually be DEFINED. A refactor that
+  // used `groups` without binding it shipped a ReferenceError on the live
+  // screen (caught by the Android E2E, not by these source assertions).
+  assert.match(body, /const groups = activityGroups\(\)/,
+    'kelompok scope lain harus memang dibuat');
   // Every extra row carries its scope, so a tap opens the record it shows.
   assert.match(body, /row\.dataset\.actScope/, 'baris extra harus membawa scope-nya');
   assert.match(view, /data-act-scope="\$\{scope\}"/, 'tiap baris extra menandai scope-nya');

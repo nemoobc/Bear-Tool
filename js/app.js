@@ -3053,6 +3053,10 @@ function renderActivity() {
   const list = $('#activityList');
   if (!list) return;
   const visible = currentNetworkActivity();
+  // The rows of the OTHER scopes (this wallet on another network, other
+  // accounts of this keystore) — shown when this scope is empty, so the
+  // user's own transactions are never invisible.
+  const groups = activityGroups();
   if (!visible.length) {
     // "Empty" is honest only WITH its scope: this list journals what you DID
     // inside Bear Tool on THIS wallet + network — it has never been a chain
