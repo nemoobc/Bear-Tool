@@ -9,7 +9,7 @@
 // JavaScript, so it has to be checked here instead.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { appSource } from './helpers/app-source.mjs';
 
 // Halaman = index.html + section view (M2: src/views/*.jsx) — supaya setiap
@@ -91,4 +91,39 @@ test('the testnet hint describes the state the switch is actually in', () => {
   for (const key of ['set.testnet.hint', 'set.testnet.hint.off']) {
     assert.ok(src.includes(`'${key}':`), key + ' harus ada di kamus');
   }
+});
+
+// ── the keys the CODE asks for ────────────────────────────────────────────
+// The sibling test above covers the keys in the MARKUP (data-i18n). The code
+// asks for its own: every t('…') in js/ and src/.
+//
+// A key that is used but never defined renders ITSELF on screen — the user
+// reads "dex.sheet.l.pay2" where a sentence belongs. That happened: the
+// DEX launch sheet asked for a key that was never added to either table,
+// and nothing noticed (the markup test cannot see a t() call).
+import { join } from 'node:path';
+
+function walkJs(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    if (entry.startsWith('.')) continue;
+    const p = join(dir, entry);
+    if (statSync(p).isDirectory()) walkJs(p, out);
+    else if (/\.(js|jsx)$/.test(entry)) out.push(p);
+  }
+  return out;
+}
+
+const usedKeys = new Set();
+const base = new URL('../', import.meta.url).pathname;
+for (const f of [...walkJs(join(base, 'js')), ...walkJs(join(base, 'src'))]) {
+  const body = readFileSync(f, 'utf8');
+  for (const m of body.matchAll(/\b(?:t|__t)\(\s*['"]([a-z][\w.-]*)['"]/g)) usedKeys.add(m[1]);
+}
+
+test('every key the code asks for exists in BOTH tables', () => {
+  const missEn = [...usedKeys].filter((k) => !EN.has(k)).sort();
+  const missId = [...usedKeys].filter((k) => !ID.has(k)).sort();
+  assert.deepEqual(missEn, [], `these render as their own key name in English: ${missEn.join(', ')}`);
+  assert.deepEqual(missId, [], `these render as their own key name in Indonesian: ${missId.join(', ')}`);
+  assert.ok(usedKeys.size > 100, 'the scan must actually find keys');
 });

@@ -815,7 +815,7 @@ export function sheetBodyLaunch(asking) {
     <div class="dex-row"><span class="dex-k">${t('dex.launch.name')}</span><span class="dex-v">${esc(asking.meta.name)} (${esc(asking.meta.symbol)})</span></div>
     <div class="dex-row"><span class="dex-k">${t('dex.launch.supply')}</span><span class="dex-v">${esc(fmt(asking.totalSupply, 18))}</span></div>
     <div class="dex-row"><span class="dex-k">${t('dex.sheet.l.pay')}</span><span class="dex-v">${esc(fmt(asking.seedQuote, 18))} ${esc(asking.quoteSymbol)}</span></div>
-    <div class="dex-row"><span class="dex-k">${t('dex.sheet.l.pay2')}</span><span class="dex-v">${esc(fmt(asking.seedToken, 18))}</span></div>
+    <div class="dex-row"><span class="dex-k">${t('dex.sheet.l.burn')}</span><span class="dex-v">${esc(fmt(asking.seedToken, 18))}</span></div>
     <div class="dex-row"><span class="dex-k">${t('dex.swap.fee')}</span><span class="dex-v">0.30%${asking.creatorFeeBps > 0 ? ` + ${esc(t('dex.swap.creator').replace('{bps}', String(asking.creatorFeeBps)))}` : ''}</span></div>
     <div class="dex-row"><span class="dex-k">${t('dex.pool.lock.label')}</span><span class="dex-v">${esc(lockLine)}</span></div>
     <div class="dex-row"><span class="dex-k">${t('dex.lp.minsym')}</span><span class="dex-v">${esc(fmt(asking.minShares, 18))}</span></div>`;
