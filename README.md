@@ -254,6 +254,7 @@ Bear-Tool/
 │   ├── app.js          # entry: boot, router, topbar, mobile nav, wallet modals,
 │   │                   #        dashboard, network picker, add-token autodetect
 │   ├── state.js        # singleton state + pub/sub + activity persistence
+│   ├── activity-view.js# the Activity list's rows, icons and scope sections
 │   ├── update-guard.js # stale-tab detector: an old tab says so instead of acting
 │   ├── network.js      # networks, CHAIN_PRESETS (verified), tokens, ABIs,
 │   │                   #        EIP-7702 constants, delegation, gas price

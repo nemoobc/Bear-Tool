@@ -172,9 +172,12 @@ test('nav Swap menawarkan pilihan juga saat sedang di Bridge', () => {
 });
 
 test('activity: kapital di depan + waktu pendek, bukan huruf kecil mentah', () => {
-  assert.match(jsApp, /activity-action">\$\{escapeHtml\(titleCase\(a\.type\)\)\} — \$\{escapeHtml\(titleCase\(a\.status\)\)\}/,
+  // The row markup lives in js/activity-view.js (app.js is the biggest file
+  // in the app; the audit's own drift alarm keeps it that way).
+  const actView = fs.readFileSync(new URL('../js/activity-view.js', import.meta.url), 'utf8');
+  assert.match(actView, /activity-action">\$\{escapeHtml\(titleCase\(a\.type\)\)\} — \$\{escapeHtml\(titleCase\(a\.status\)\)\}/,
     'baris activity harus titleCase (live report: "swap — success")');
-  assert.match(jsApp, /fmtTimeShort\(a\.ts\)/, 'daftar activity memakai waktu pendek');
+  assert.match(actView, /fmtTimeShort\(a\.ts\)/, 'daftar activity memakai waktu pendek');
 });
 
 test('send: picker in-app seperti swap, bukan select polos OS', () => {

@@ -27,6 +27,7 @@ globalThis.localStorage = {
 };
 const st = await import('../js/state.js');
 const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+const view = readFileSync(new URL('../js/activity-view.js', import.meta.url), 'utf8');
 
 const ME = '0x1111111111111111111111111111111111111111';
 const OTHER = '0x2222222222222222222222222222222222222222';
@@ -90,5 +91,5 @@ test('view activity menampilkan baris scope lain saat scope ini kosong', () => {
     'list utama tetap pakai helper bersama');
   // Every extra row carries its scope, so a tap opens the record it shows.
   assert.match(body, /row\.dataset\.actScope/, 'baris extra harus membawa scope-nya');
-  assert.match(app, /data-act-scope="\$\{scope\}"/, 'tiap baris extra menandai scope-nya');
+  assert.match(view, /data-act-scope="\$\{scope\}"/, 'tiap baris extra menandai scope-nya');
 });
