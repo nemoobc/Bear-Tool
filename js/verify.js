@@ -185,22 +185,40 @@ export async function verifySourcify({
 
 // Sourcify has answered in more than one shape across versions, so the verdict
 // is read defensively: status/verification.status/match/verification.match.
+//
+// The shapes that MATTER are the real ones, not the ones a test imagined:
+// the v2 check answers the match under `contract.match` — 'exact_match' or
+// 'partial_match' — beside a job flag, and the job's own status reads
+// 'successful'. The old reader knew only 'perfect'/'partial', so a contract
+// Sourcify had verified came back as "still pending" and the deploy reported
+// a failed auto-verify for a contract that was published and verified. The
+// app's own submit-sourcify-rescue.mjs tool reads contract.match — the
+// working recipe and the shipped reader disagreed.
 function terminalSourcify(d) {
   const v = d?.verification || d || {};
-  const status = String(v.status ?? d?.status ?? '').toLowerCase();
-  const match = v.match ?? d?.match;
+  const match = v.match ?? d?.match ?? d?.contract?.match ?? null;
   const matchName = typeof match === 'string' ? match.toLowerCase() : String(match?.kind || match?.status || '').toLowerCase();
+  const status = String(v.status ?? d?.status ?? '').toLowerCase();
   const err = d?.error?.message || d?.error;
   if (err && !d?.verificationId) return { ok: false, msg: String(err) };
   // An in-flight ticket is never a verdict, whatever else it carries.
   if (['pending', 'queued', 'processing', 'running', 'started', 'idle', 'in progress', 'in_progress'].includes(status)) return null;
-  if (['finished', 'success', 'succeeded', 'completed', 'verified'].includes(status)) {
+  if (['finished', 'success', 'successful', 'succeeded', 'completed', 'verified'].includes(status)) {
     return { ok: true, msg: matchName ? `Sourcify ${matchName} match` : 'Sourcify verified' };
   }
   if (['error', 'failed', 'mismatch'].includes(status)) {
     return { ok: false, msg: String(v.message || d?.message || status) };
   }
-  if (matchName === 'perfect' || matchName === 'partial') return { ok: true, msg: `Sourcify ${matchName} match` };
+  // The match itself is a verdict: Sourcify's own words.
+  if (['exact_match', 'exact match', 'perfect', 'partial_match', 'partial match', 'partial'].includes(matchName)) {
+    return { ok: true, msg: `Sourcify ${matchName} match` };
+  }
+  // A finished job with no match at all is a FAILURE, not "keep waiting":
+  // polling it to the end used to end in "still pending" for a contract that
+  // had been rejected long ago — a false "unverified" on the scoreboard.
+  if (d?.isJobCompleted === true || v?.isJobCompleted === true) {
+    return { ok: false, msg: String(v.message || d?.message || 'no match') };
+  }
   return null;
 }
 
@@ -251,7 +269,12 @@ export async function verifyEtherscan({
     );
     const d = await bodyJson(r);
     const verdict = String(d?.result ?? '');
-    if (/^(pass|exact match)/i.test(verdict)) return { service: 'etherscan', ok: true, msg: verdict };
+    // "Already Verified" is a PASS, not a pending state: the submit answer
+    // says so (handled above), and the status answer says it too — the reader
+    // used to keep polling it and end with a false "no status".
+    if (/^(pass|exact match)/i.test(verdict) || /already verified/i.test(verdict)) {
+      return { service: 'etherscan', ok: true, msg: verdict };
+    }
     if (/^fail/i.test(verdict)) throw new Error(`etherscan: ${verdict}`);
     // Keys/chains are fatal — polling a rejected key just burns the budget.
     if (/api ?key|not supported|invalid/i.test(verdict)) throw new Error(`etherscan: ${verdict}`);

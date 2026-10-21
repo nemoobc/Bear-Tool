@@ -140,6 +140,51 @@ test('verify: constructor arguments are ABI-encoded, without 0x', () => {
 });
 
 // ── Sourcify ───────────────────────────────────────────────────
+test('verify: the REAL Sourcify v2 answer is read as a verdict', async () => {
+  // The v2 check answers the match under `contract.match` ('exact_match' /
+  // 'partial_match') beside a job flag — that is the shape the app's own
+  // submit-sourcify-rescue.mjs tool reads and the shape the service
+  // returns. The shipped reader knew only 'perfect'/'partial', so every
+  // auto-verify ended in "still pending" for a contract Sourcify had in
+  // fact verified: the deploy reported a failed auto-verify and the
+  // explorer kept the source unpublished.
+  const { source } = erc20Bundle();
+  const stdJsonInput = solc.buildStandardJsonInput(source, 'BearERC20', {});
+  let polls = 0;
+  const fetchFn = makeFetch([
+    [(u, o) => o.method === 'POST' && u.includes('/v2/verify/1/' + ADDR),
+      { body: { verificationId: 'tkt-real' } }],
+    [(u) => u.includes('/v2/verify/tkt-real'),
+      () => (polls++ === 0
+        ? { body: { isJobCompleted: false } }
+        : { body: { isJobCompleted: true, contract: { match: 'exact_match' } } })],
+  ]);
+  const out = await verify.verifySourcify({
+    chainId: 1, address: ADDR, stdJsonInput, contractName: 'BearERC20',
+    creationTxHash: '0xdead', fetchFn, sleepFn: noSleep,
+  });
+  assert.equal(out.ok, true, 'a verified contract must read as verified');
+  assert.match(out.msg, /exact_match/);
+});
+
+test('verify: a finished job with no match is a failure, not "keep waiting"', async () => {
+  const { source } = erc20Bundle();
+  const stdJsonInput = solc.buildStandardJsonInput(source, 'BearERC20', {});
+  const fetchFn = makeFetch([
+    [(u, o) => o.method === 'POST' && u.includes('/v2/verify/1/' + ADDR),
+      { body: { verificationId: 'tkt-bad' } }],
+    [(u) => u.includes('/v2/verify/tkt-bad'),
+      { body: { isJobCompleted: true, contract: null, message: 'no bytecode match' } }],
+  ]);
+  const out = await verify.verifySourcify({
+    chainId: 1, address: ADDR, stdJsonInput, contractName: 'BearERC20',
+    creationTxHash: '0xdead', fetchFn, sleepFn: noSleep, polls: 2,
+  });
+  assert.equal(out.ok, false, 'a rejected verification must read as a failure');
+  assert.match(out.msg, /no bytecode match|no match/i,
+    'a rejected verification must say so instead of polling to the end');
+});
+
 test('verify: Sourcify gets standard JSON input and a creation tx, then polls the ticket', async () => {
   const { source } = erc20Bundle();
   const stdJsonInput = solc.buildStandardJsonInput(source, 'BearERC20', {});
