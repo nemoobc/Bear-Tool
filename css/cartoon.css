@@ -2607,6 +2607,18 @@ select.input option, select.select option, .input option {
    rule at all, so a tabindex="0" row measured cursor:auto and looked identical
    to plain text — only the pre-existing :hover transform hinted at it. */
 .activity-item--openable { cursor: pointer; }
+/* The "other networks" / "other wallets" sections: rows the app holds for
+   this user but does not show in the main (this wallet + this network)
+   list. A heading keeps them apart from the main list — nothing is mixed
+   in, they are just no longer invisible. */
+.activity-scope { margin-top: var(--sp-16); }
+.activity-scope-head {
+  font-weight: 800;
+  font-size: 15px;
+  margin-bottom: var(--sp-4);
+}
+.activity-scope .small.dim { margin-bottom: var(--sp-8); }
+.activity-scope .activity-item { margin-bottom: var(--sp-8); }
 .activity-item {
   display: flex;
   align-items: flex-start;

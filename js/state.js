@@ -167,6 +167,39 @@ export function removeActivity(hash) {
   persistActivity();
 }
 
+/**
+ * The user's OWN activity rows that the current scope does not show.
+ *
+ * The main Activity list is scoped to this wallet + this network (one shared
+ * filter, so the token modal and the view cannot disagree). When that scope
+ * is empty the screen used to say "no transactions made in Bear Tool yet" and
+ * point at the explorer — while the app HELD the user's rows on another
+ * network or under another account (user report 2026-10-21: "list activity
+ * kosong padahal aku pernah tx" / "harusnya ga perlu buka link explore").
+ *
+ * These rows are what the view shows instead of that dead end. Nothing is
+ * mixed into the main list: they are the user's rows, named by the scope
+ * they live in.
+ *
+ * Pure: the caller passes the rows, the active network and the active wallet.
+ *
+ * @param {Array} rows
+ * @param {string} networkId
+ * @param {string} address
+ * @returns {{otherNetworks: Array, otherWallets: Array}}
+ */
+export function activityElsewhere(rows, networkId, address) {
+  const all = (rows || []).filter((a) => a && a.hash);
+  const mine = all.filter((a) => a.addr === address);
+  return {
+    // The same wallet, another network: switch the network to see them in
+    // the main list.
+    otherNetworks: mine.filter((a) => a.netId !== networkId),
+    // Another account of this keystore, this network: switch the account.
+    otherWallets: all.filter((a) => a.addr !== address && a.netId === networkId),
+  };
+}
+
 /** True when this hash is already recorded, whatever its status. */
 export function hasActivity(hash) {
   return state.activity.some((a) => a.hash === hash);
