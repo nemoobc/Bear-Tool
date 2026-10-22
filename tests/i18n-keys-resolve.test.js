@@ -127,3 +127,26 @@ test('every key the code asks for exists in BOTH tables', () => {
   assert.deepEqual(missId, [], `these render as their own key name in Indonesian: ${missId.join(', ')}`);
   assert.ok(usedKeys.size > 100, 'the scan must actually find keys');
 });
+
+// ── placeholder parity ─────────────────────────────────────────────────────
+// t('key', params) fills the {{name}} slots (see __ in js/i18n.js). If
+// English fills {time} while Indonesian asks for {waktu}, one language
+// renders the raw brace text — "Terakhir diakses {waktu}" — and nobody sees
+// it until a translator reads the screen. dapp.tab.lastAccessed shipped
+// exactly that split (found 2026-10-22), so the names are pinned here.
+test('every key carries the SAME placeholder names in both languages', () => {
+  const valOf = (block) => Object.fromEntries(
+    [...block.matchAll(/^\s*'([a-z][\w.-]*)'\s*:\s*'((?:[^'\\]|\\.)*)'/gm)].map((m) => [m[1], m[2]])
+  );
+  const enVals = valOf(enBlock);
+  const idVals = valOf(idBlock);
+  // Brace-style agnostic ({{n}} and {n} both count as "n") — the DEX keys
+  // fill single braces by hand with .replace(), and that works; what must
+  // never differ is the NAME one language expects from the other.
+  const ph = (s) => [...String(s).matchAll(/\{\{?(\w+)\}?\}/g)].map((m) => m[1]).sort().join(',');
+  const bad = Object.keys(enVals)
+    .filter((k) => idVals[k] !== undefined && ph(enVals[k]) !== ph(idVals[k]));
+  assert.deepEqual(bad, [],
+    `placeholder beda nama antara EN dan ID — satu bahasa menyisakan teks kurung kurawal: ${bad.join(', ')}`);
+  assert.ok(Object.keys(enVals).length > 400, 'the value scan must actually parse the tables');
+});
