@@ -302,6 +302,7 @@ export async function verifyEtherscan({
  */
 export async function autoVerify({
   net, address, source, contractName, abi, args, compiler = {}, creationTxHash,
+  publishArgs = true,
   fetchFn = globalThis.fetch, sleepFn = defaultSleep, onStatus,
 } = {}) {
   const skip = localSkipReason(net, address);
@@ -311,7 +312,15 @@ export async function autoVerify({
   let constructorArguments;
   try {
     stdJsonInput = buildStandardJsonInput(source, contractName, compiler);
-    constructorArguments = encodeConstructorArgs(abi, args);
+    // publishArgs=false publishes the SOURCE (so the deployed code is
+    // auditable and the explorer shows it verified) WITHOUT handing the
+    // explorer the creation tx or the encoded constructor arguments. Sourcify
+    // then does a RUNTIME-only match and never renders the decoded "Constructor
+    // Arguments" block — which is exactly the block that used to print the
+    // rescue helper's SAFE address in the clear (user report 2026-10-20). The
+    // address is an immutable, so it is in the runtime bytecode either way;
+    // what this hides is the human-readable decode, not the chain fact.
+    constructorArguments = publishArgs ? encodeConstructorArgs(abi, args) : '';
   } catch (e) {
     const line = `Verify skipped: ${e?.message || e}`;
     onStatus?.(line);
@@ -328,14 +337,25 @@ export async function autoVerify({
     }
   };
 
+  // publishArgs=false → drop the creation tx from the Sourcify POST. Without
+  // it Sourcify does a runtime-only (partial) match and never renders the
+  // decoded constructor-args block, so the rescue helper's SAFE stays out of
+  // the explorer UI while its source is still published and auditable.
   await run('sourcify', () => verifySourcify({
     chainId: Number(net.chainId), address, stdJsonInput, contractName,
-    creationTxHash, fetchFn, sleepFn, onStatus,
+    creationTxHash: publishArgs ? creationTxHash : undefined,
+    fetchFn, sleepFn, onStatus,
   }));
 
   const key = getEtherscanKey();
   const limitUntil = etherscanDailyLimitUntil();
-  if (!key) {
+  if (!publishArgs) {
+    // Etherscan's verify endpoint always reconstructs/decodes constructor
+    // arguments from what it has, so it cannot honour "publish source but hide
+    // the ctor args". Sourcify already published the source above; skip here
+    // rather than leak the args back out.
+    results.push({ service: 'etherscan', skipped: true, msg: 'ctor args withheld (source published on Sourcify only)' });
+  } else if (!key) {
     results.push({ service: 'etherscan', skipped: true, msg: 'no API key saved (Sourcify ran keyless)' });
   } else if (limitUntil > Date.now()) {
     // A earlier run already hit the day cap — do not burn another failing

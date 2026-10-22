@@ -50,12 +50,22 @@ test('helper deploy failures land in the activity log with a technical detail', 
     'the activity entry records the short technical reason');
 });
 
-test('rescue helper never auto-verifies to public source repos (ctor args carry the safe)', () => {
+test('rescue helper verifies with publishArgs:false — source published, SAFE never decoded', () => {
   // 2026-10-20 user report: repo.sourcify.dev printed the rescue ctor args
-  // decoded — safe destination exposed. batch/claim keep auto-verify because
-  // their ctor args carry nothing user-private (empty / the sponsor itself).
-  assert.doesNotMatch(toolsSrc, /verifyHelperDeployed\(\{[^)]*RESCUE_SOURCE/,
-    'no verifyHelperDeployed call may pass RESCUE_SOURCE — safe is private');
+  // decoded — safe destination exposed. Resolution (user chose "verify tapi
+  // tanpa bocorin safe"): rescue DOES verify so the deployed code is auditable
+  // and shows as verified, but with publishArgs:false — the creation tx +
+  // encoded ctor args are withheld from the POST, so Sourcify does a
+  // runtime-only match and never renders the decoded-args block that used to
+  // print SAFE. batch/claim verify normally (their args carry nothing private).
+  const rescueCalls = toolsSrc.split('\n').filter((l) => /verifyHelperDeployed\(/.test(l) && /RESCUE_SOURCE/.test(l));
+  assert.equal(rescueCalls.length, 2,
+    `both rescue deploy sites must call verifyHelperDeployed with RESCUE_SOURCE (got ${rescueCalls.length})`);
+  for (const c of rescueCalls) {
+    assert.match(c, /publishArgs: false/,
+      'every rescue verify call must withhold ctor args — SAFE stays out of the explorer');
+  }
+  // batch/claim keep auto-verify with args (publishArgs defaults true).
   assert.match(toolsSrc, /verifyHelperDeployed\(\{[^)]*BATCH_SOURCE/,
     'batch keeps auto-verify (args empty)');
   assert.match(toolsSrc, /verifyHelperDeployed\(\{[^)]*AIRDROP_CLAIMER_SOURCE/,

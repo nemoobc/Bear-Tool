@@ -186,8 +186,8 @@ async function deployContract(signer, abi, bytecode, constructorArgs = []) {
 // ── fire-and-forget auto-verify (Sourcify keyless + Etherscan bila ada key) ──
 // Verifikasi tidak pernah memblokir atau menggagalkan deploy: sudah di
 // chain itu untungnya terpisah. Kegagalan verify hanya jadi toast + status.
-function verifyHelperDeployed({ chainId, address, source, contractName, abi, args = [], txHash }) {
-  autoVerify({ net: { chainId: Number(chainId) }, address, source, contractName, abi, args, creationTxHash: txHash })
+function verifyHelperDeployed({ chainId, address, source, contractName, abi, args = [], txHash, publishArgs = true }) {
+  autoVerify({ net: { chainId: Number(chainId) }, address, source, contractName, abi, args, creationTxHash: txHash, publishArgs })
     .then((r) => { if (r && !r.skipped) toast(`Verify: ${r.line}`, r.ok ? 'success' : 'info'); })
     .catch(() => { /* best effort — deploy sudah landed */ });
 }
@@ -985,13 +985,15 @@ async function executeRescue() {
         const addr = await contract.getAddress();
         const dtx = contract.deploymentTransaction();
         saveDeployed('rescue', addr, { chainId, safe, target, sponsor: sponsorAddress, abi, version: RESCUE_HELPER_VERSION });
-        // No public source verification for the rescue helper (2026-10-20 user
-        // report: repo.sourcify.dev displayed the ctor args DECODED — the SAFE
-        // destination is not the public's business). batch/claim keep their
-        // auto-verify: their ctor args carry nothing user-private. The rescue
-        // contract stays manually verifiable by anyone who has the source; the
-        // creation-tx input still encodes the args — that is chain reality, not
-        // something a verify POST could hide anyway.
+        // Rescue helper IS verified now — but with publishArgs:false. The ctor
+        // args carry the SAFE address, and the 2026-10-20 report was that
+        // Sourcify rendered them DECODED. Withholding the creation tx makes
+        // Sourcify do a runtime-only match: the source gets published (so the
+        // deployed code is auditable and the explorer shows it verified) while
+        // the decoded-args block that used to print SAFE never renders. Note
+        // the address is an immutable — it is in the runtime bytecode either
+        // way; this hides the human-readable decode, not the chain fact.
+        verifyHelperDeployed({ chainId, address: addr, source: RESCUE_SOURCE, contractName: 'rescue', abi, args: [safe, sponsorAddress], txHash: dtx?.hash, publishArgs: false });
         addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
         return { address: addr, abi };
       });
@@ -1523,8 +1525,9 @@ export async function deployRescueHelper() {
     const addr = await contract.getAddress();
     const dtx = contract.deploymentTransaction();
     saveDeployed('rescue', addr, { chainId: Number(net.chainId), safe, target, sponsor: sponsorSigner.address, abi, version: RESCUE_HELPER_VERSION });
-    // No public source verification for rescue here either — same reason as
-    // runRescue (ctor args carry the safe; Sourcify would print them decoded).
+    // Same publishArgs:false as runRescue — publish the source, withhold the
+    // ctor args so the explorer never renders the SAFE address decoded.
+    verifyHelperDeployed({ chainId: Number(net.chainId), address: addr, source: RESCUE_SOURCE, contractName: 'rescue', abi, args: [safe, sponsorSigner.address], txHash: dtx?.hash, publishArgs: false });
     addActivity({ hash: dtx?.hash, type: 'deploy-helper', status: 'success', ts: Date.now(), detail: `rescue → ${addr}` });
     toast('Rescue helper deployed: ' + wallet.shortAddress(addr), 'success');
     const det = $('#rescueHelperDetect');

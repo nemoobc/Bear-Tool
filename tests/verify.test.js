@@ -451,3 +451,51 @@ test('verify: every request carries a deadline, so a hung socket cannot hold the
     assert.ok(opts && opts.signal, `${url}: fetch must carry an AbortSignal deadline`);
   }
 });
+
+// ── publishArgs:false — publish source, withhold ctor args ────────────────
+// rescue helper verifies so its deployed code is auditable, but its ctor args
+// carry the SAFE destination. Withholding the creation tx makes Sourcify do a
+// runtime-only match and never render the decoded-args block that printed SAFE
+// (2026-10-20 report). Etherscan always decodes ctor args, so it is skipped.
+test('verify: publishArgs:false sends NO creation tx to Sourcify and skips Etherscan', async () => {
+  store.clear();
+  const { source } = erc20Bundle();
+  let polls = 0;
+  const fetchFn = makeFetch([
+    [(u, o) => o.method === 'POST' && u.includes('/v2/verify/'), { body: { verificationId: 't' } }],
+    [(u) => u.includes('/v2/verify/t'), () => (polls++ === 0 ? { body: { status: 'pending' } } : { body: { status: 'finished', match: 'partial' } })],
+  ]);
+  // A key is present, so the ONLY reason Etherscan is skipped is publishArgs:false.
+  verify.setEtherscanKey('DUMMYKEY');
+  const ctorArgs = [{ type: 'constructor', inputs: [{ name: '_name', type: 'string' }] }];
+  const out = await verify.autoVerify({
+    net: NET, address: ADDR, source, contractName: 'BearERC20',
+    abi: ctorArgs, args: ['Foo'], creationTxHash: '0xdeadbeef',
+    publishArgs: false, fetchFn, sleepFn: noSleep,
+  });
+  assert.equal(out.skipped, false);
+  assert.equal(out.ok, true, 'runtime-only Sourcify match still counts as verified');
+
+  const post = fetchFn.calls.find((c) => c.url.includes('/v2/verify/') && c.opts.method === 'POST');
+  const body = JSON.parse(post.opts.body);
+  assert.ok(!('creationTransactionHash' in body),
+    'publishArgs:false must withhold the creation tx so ctor args are never decoded');
+  assert.ok(fetchFn.calls.every((c) => !c.url.includes('etherscan.io')),
+    'Etherscan always decodes ctor args — it must be skipped when args are withheld');
+  assert.match(out.line, /etherscan: ctor args withheld/);
+
+  // Control: with publishArgs:true (default) the creation tx IS sent.
+  let polls2 = 0;
+  const fetch2 = makeFetch([
+    [(u, o) => o.method === 'POST' && u.includes('/v2/verify/'), { body: { verificationId: 't2' } }],
+    [(u) => u.includes('/v2/verify/t2'), () => (polls2++ === 0 ? { body: { status: 'pending' } } : { body: { status: 'finished', match: 'exact_match' } })],
+  ]);
+  await verify.autoVerify({
+    net: NET, address: ADDR, source, contractName: 'BearERC20',
+    abi: ctorArgs, args: ['Foo'], creationTxHash: '0xdeadbeef',
+    fetchFn: fetch2, sleepFn: noSleep,
+  });
+  const post2 = fetch2.calls.find((c) => c.url.includes('/v2/verify/') && c.opts.method === 'POST');
+  assert.equal(JSON.parse(post2.opts.body).creationTransactionHash, '0xdeadbeef',
+    'default publishArgs:true still sends the creation tx (batch/claimer)');
+});

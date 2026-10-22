@@ -95,16 +95,21 @@ test('verify: i18n EN+ID cover every new key', () => {
 });
 
 const e7Source = readFileSync('js/eip7702-tools.js', 'utf8');
-test('verify: batch/claimer deploy sites auto-verify; rescue must NOT (2026-10-20 privacy)', () => {
+test('verify: all 6 deploy sites auto-verify; rescue ones withhold ctor args (publishArgs:false)', () => {
   const calls = e7Source.match(/(?<!function )verifyHelperDeployed\(/g) || [];
-  assert.equal(calls.length, 4, `4 call sites remain: batch ×2 + claimer ×2 — rescue opted out (got ${calls.length})`);
+  assert.equal(calls.length, 6, `6 call sites: batch ×2 + claimer ×2 + rescue ×2 (got ${calls.length})`);
   // The definition itself:
   assert.match(e7Source, /function verifyHelperDeployed/);
-  // Rescue opts out: its ctor args carry the SAFE destination — a verify POST
-  // would publish them decoded on repo.sourcify.dev (user report 2026-10-20).
+  // batch/claimer verify with their args (nothing user-private in them).
   for (const src of ['BATCH_SOURCE', 'AIRDROP_CLAIMER_SOURCE']) {
     assert.ok(e7Source.includes(`source: ${src}`), `${src} must be handed to verification`);
   }
-  assert.doesNotMatch(e7Source, /verifyHelperDeployed\(\{[^)]*RESCUE_SOURCE/,
-    'rescue helper must never auto-verify — safe address stays private');
+  // Rescue verifies too, but ONLY with publishArgs:false — its ctor args carry
+  // the SAFE destination, so the creation tx + args are withheld and Sourcify
+  // does a runtime-only match (source auditable, SAFE never decoded).
+  const rescueCalls = e7Source.split('\n').filter((l) => /verifyHelperDeployed\(/.test(l) && /RESCUE_SOURCE/.test(l));
+  assert.equal(rescueCalls.length, 2, 'both rescue sites verify');
+  for (const c of rescueCalls) {
+    assert.match(c, /publishArgs: false/, 'rescue verify must withhold ctor args');
+  }
 });
