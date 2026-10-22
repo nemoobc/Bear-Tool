@@ -179,7 +179,11 @@ async function confirmDeployFee({ provider, signer, bytecode, label, danger = fa
     // feeWeiFromGas returns null for a 0 gas/price — keep the "unknown" note
     // rather than dropping both the fee row and the caveat.
     if (w != null) { gasWei = w; note = null; }
-  } catch { /* estimation failed — show "unknown" rather than guess a number */ }
+  } catch (e) {
+    // The node REFUSED (e.g. sponsor balance below the deploy cost) — say why
+    // instead of pretending it never answered.
+    note = 'fee not shown — ' + String(e?.shortMessage || e?.message || 'the node did not answer').slice(0, 90);
+  }
   const ok = await confirmTx({
     title: danger ? `DEPLOY ${String(label).toUpperCase()} HELPER ON MAINNET!` : `Deploy ${label} helper — confirm the fee`,
     rows: [
