@@ -168,3 +168,17 @@ test('the fee is measured on the node, never invented', () => {
   // A price the node could not give is never dressed up as a measurement.
   assert.match(tools, /fee\.measured \? t\('cf\.est\.fee'\) : t\('cf\.est\.fee\.max'\)/);
 });
+
+// ── kejujuran sub-cent + pemisah baris (temuan screenshot emulator 2026-10-22) ──
+
+test('biaya sub-cent tidak dibulatkan jadi $0.00 — "< $0.01" yang jujur', async () => {
+  // Emulator e288a9c: gas 0.0286 POL dengan POL di bawah ~$0.17 menghasilkan
+  // $0.004 → toFixed(2) menyajikannya "≈ $0.00", biaya nyata yang terbaca
+  // gratis. Angka yang sama dengan tampilan lama dipakai di sini.
+  rate(0.15);
+  const row = await totalPriceRow({ gasWei: 28612622512028232n }); // 0.0286 POL ≈ $0.0043
+  assert.equal(row.v, '≈ < $0.01', 'sub-cent keeps its magnitude, never a confident $0.00');
+});
+// The layout gates for the same sheet (gap between label and value) live in
+// tests/sheet-layout.test.js — one home per concern.
+

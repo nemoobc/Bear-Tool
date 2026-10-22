@@ -1225,9 +1225,13 @@ select.input option, select.select option, .input option {
   text-align: left;
   font-size: 0.9rem;
 }
-.tx-detail .row { display: flex; justify-content: space-between; padding: 4px 0; }
-.tx-detail .row .k { color: var(--ink-soft); }
-.tx-detail .row .v { font-weight: 600; word-break: break-all; }
+/* gap: a long value WRAPS (break-all below), and without it the first
+   wrapped line starts flush against the label — "Est. cost0.02…" in the
+   deploy confirm, "Message…" in the sign sheet (emulator 2026-10-22).
+   Label never shrinks; wrapped value lines stay right-aligned. */
+.tx-detail .row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.tx-detail .row .k { color: var(--ink-soft); flex: 0 0 auto; }
+.tx-detail .row .v { font-weight: 600; word-break: break-all; text-align: right; }
 
 /* ═══════════ NFT GRID ═══════════ */
 .nft-grid {
@@ -1619,6 +1623,12 @@ select.input option, select.select option, .input option {
   color: var(--ink-soft);
   font-weight: 600;
   white-space: nowrap;
+  /* Label and value are TWO spans, and JSX drops the whitespace between
+     them — so "Balance:" and "0.00" rendered as "Balance:0.00" (emulator
+     2026-10-22). The gap is the separator. */
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
 }
 /* Hug the pair fields: -4px left the button floating too far from both
    sides (report: "agak jauh sama kedua pairnya"). */

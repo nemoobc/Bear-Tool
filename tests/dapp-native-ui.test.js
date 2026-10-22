@@ -998,7 +998,10 @@ test('the tx sheet leads with the amount and names the action (OKX shape)', () =
   // Long values wrap: "Transactions...not be undone" ambiguity is dead.
   assert.match(java, /if \(vv\.length\(\) > 28\) \{[\s\S]{0,260}vv\.setSingleLine\(false\)/,
     'nilai panjang wrap — bukan dipotong tengah jadi ambigu');
-  assert.match(java, /vv\.setMaxLines\(3\)/);
+  // The DEPTH of that clamp and the stacked layout live in
+  // tests/sheet-layout.test.js (one home per fact): side by side, three
+  // lines still cut the permission sentence at "cannot be u…" (emulator
+  // 2026-10-22).
   // Both sheets are bottom sheets that LOOK like bottom sheets (grab handle).
   assert.equal((java.match(/gbg\.setColor\(0xFFDCD4C4\)/g) || []).length, 2,
     'grab handle di sheet confirm DAN picker — satu bahasa visual');

@@ -469,7 +469,15 @@ export async function totalPriceRow({ tx, valueWei, gasWei, spendUsd, totalNote 
     notes.push('excl. gas');
   }
   const noteStr = notes.length ? ` (${notes.join(' · ')})` : '';
-  if (usd != null) return { k: 'Total price', v: `≈ $${usd.toFixed(2)}${noteStr}` };
+  if (usd != null) {
+    // A real cost that ROUNDS to $0.00 reads as "free": the emulator's
+    // deploy confirm showed ≈ $0.00 for 0.0286 POL of gas because POL's
+    // rate × that gas lands under half a cent (2026-10-22 screenshots).
+    // Sub-cent keeps magnitude honest — same doctrine as the "(USD ?)"
+    // line below: never print a confident number the data can't carry.
+    const label = usd > 0 && usd < 0.01 ? '< $0.01' : `$${usd.toFixed(2)}`;
+    return { k: 'Total price', v: `≈ ${label}${noteStr}` };
+  }
 
   // No rate, no spendUsd: the native parts are still worth showing.
   const parts = [];

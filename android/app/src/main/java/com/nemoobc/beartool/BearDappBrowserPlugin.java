@@ -543,24 +543,33 @@ public class BearDappBrowserPlugin extends Plugin {
         vv.setText(v);
         vv.setTextColor(SHEET_VAL);
         vv.setTextSize(13);
-        // Long values WRAP (up to 3 lines, left-aligned). They used to be
+        // Long values WRAP (up to 4 lines, left-aligned). They used to be
         // middle-truncated to one line — a permission row read
         // "Transactions...not be undone", and the sheet was ambiguous about
         // the one consequence that cannot be undone (report 2026-10-16 "ask
         // ... masih ambigu"). Short values keep the tidy right-aligned line.
+        //
+        // 2026-10-22 (emulator, sheet "Can ask you to sendTransactions"):
+        // side by side, the LABEL ate half the sheet and the value was
+        // clamped after three lines — the sentence ended at "once sent it
+        // cannot be u…". The one consequence the sheet exists to name was
+        // cut off, on the sheet the user consents with. A long value now
+        // gets the FULL width, under its label.
         if (vv.length() > 28) {
+            row.setOrientation(LinearLayout.VERTICAL);
             vv.setGravity(android.view.Gravity.START);
             vv.setSingleLine(false);
-            vv.setMaxLines(3);
+            vv.setMaxLines(4);
             vv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            row.addView(kv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            row.addView(vv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         } else {
             vv.setGravity(android.view.Gravity.END);
             vv.setSingleLine(true);
             vv.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+            row.addView(kv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            row.addView(vv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         }
-
-        row.addView(kv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        row.addView(vv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         box.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
     }
 
