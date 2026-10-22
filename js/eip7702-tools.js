@@ -155,6 +155,45 @@ async function compileSource(source, contractName) {
 }
 
 // ── deploy a compiled contract (BOUNDED wait — never spins forever) ──
+// ask-tx #2: the deploy fee, priced off the REAL bytecode.
+//
+// The first confirm fires BEFORE the source compiles, so at that point the fee
+// is unknowable — there is no bytecode to estimate gas from. Once
+// compileSource hands back the bytecode we can estimateGas it, so this second
+// confirm shows the actual deploy fee before any transaction is signed.
+// Cancelling here (or at confirm #1) spends nothing.
+//
+// Returns true to proceed. On cancel it throws an error flagged `cancelled`
+// so callers can abort quietly without a scary error toast.
+async function confirmDeployFee({ provider, signer, bytecode, label, danger = false }) {
+  let gasWei = null;
+  let note = 'fee could not be estimated — the node did not answer';
+  try {
+    const from = await signer.getAddress();
+    const [gas, feeData] = await Promise.all([
+      provider.estimateGas({ from, data: bytecode }),
+      provider.getFeeData(),
+    ]);
+    const price = feeData?.maxFeePerGas ?? feeData?.gasPrice ?? 0n;
+    const w = feeWeiFromGas(gas, price);
+    // feeWeiFromGas returns null for a 0 gas/price — keep the "unknown" note
+    // rather than dropping both the fee row and the caveat.
+    if (w != null) { gasWei = w; note = null; }
+  } catch { /* estimation failed — show "unknown" rather than guess a number */ }
+  const ok = await confirmTx({
+    title: danger ? `DEPLOY ${String(label).toUpperCase()} HELPER ON MAINNET!` : `Deploy ${label} helper — confirm the fee`,
+    rows: [
+      { k: t('cf.action'), v: `Deploy ${label} helper (1 deploy tx, reused on later runs)` },
+      ...(note ? [{ k: t('cf.est.fee'), v: note }] : []),
+    ],
+    confirmText: t('cf.deploy'),
+    danger,
+    ...(gasWei != null ? { gasWei } : {}),
+  });
+  if (!ok) throw Object.assign(new Error(`${label} helper deploy cancelled`), { cancelled: true });
+  return true;
+}
+
 async function deployContract(signer, abi, bytecode, constructorArgs = []) {
   try {
     const factory = new ethers.ContractFactory(abi, bytecode, signer);
@@ -356,7 +395,8 @@ async function ensureDeployedHelper(type, label, chainId, predicate, provider, d
     toast(`${label} helper deployed: ` + wallet.shortAddress(entry.address), 'success');
     return { ...entry, reused: false };
   } catch (e) {
-    toast(e?.message || String(e), 'error');
+    // A cancel at either confirm is not a failure — say so quietly.
+    toast(e?.message || String(e), e?.cancelled ? 'info' : 'error');
     return null;
   }
 }
@@ -437,6 +477,8 @@ async function executeBatch() {
       provider,
       async () => {
         const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
+        // ask-tx #2: the bytecode exists now, so price the deploy before signing.
+        await confirmDeployFee({ provider, signer, bytecode, label: 'Batch', danger: net.type === 'mainnet' });
         const contract = await deployContract(signer, abi, bytecode);
         const addr = await contract.getAddress();
         const dtx = contract.deploymentTransaction();
@@ -981,6 +1023,8 @@ async function executeRescue() {
       provider,
       async () => {
         const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
+        // ask-tx #2: bytecode in hand → price the deploy before signing.
+        await confirmDeployFee({ provider, signer: sponsorSigner, bytecode, label: 'Rescue', danger: net.type === 'mainnet' });
         const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, sponsorAddress]);
         const addr = await contract.getAddress();
         const dtx = contract.deploymentTransaction();
@@ -1231,6 +1275,8 @@ async function executeClaim() {
       provider,
       async () => {
         const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
+        // ask-tx #2: bytecode in hand → price the deploy before signing.
+        await confirmDeployFee({ provider, signer: sponsorSigner, bytecode, label: 'Claim', danger: net.type === 'mainnet' });
         const contract = await deployContract(sponsorSigner, abi, bytecode, [sponsorAddress]);
         const addr = await contract.getAddress();
         const dtx = contract.deploymentTransaction();
@@ -1462,6 +1508,8 @@ export async function deployBatchHelper() {
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
     const { abi, bytecode } = await compileSource(BATCH_SOURCE, 'batch');
+    // ask-tx #2: bytecode in hand → price the deploy before signing.
+    await confirmDeployFee({ provider, signer, bytecode, label: 'Batch', danger: net.type === 'mainnet' });
     const contract = await deployContract(signer, abi, bytecode);
     const addr = await contract.getAddress();
     const dtx = contract.deploymentTransaction();
@@ -1472,7 +1520,8 @@ export async function deployBatchHelper() {
     renderDeployedRegistry();
     renderHelperStatus();
   } catch (e) {
-    toast(e?.message || String(e), 'error');
+    // A cancel at either confirm is not a failure — say so quietly.
+    toast(e?.message || String(e), e?.cancelled ? 'info' : 'error');
   } finally {
     setBtnDots(btn, false);
   }
@@ -1521,6 +1570,8 @@ export async function deployRescueHelper() {
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
     const { abi, bytecode } = await compileSource(RESCUE_SOURCE, 'rescue');
+    // ask-tx #2: bytecode in hand → price the deploy before signing.
+    await confirmDeployFee({ provider, signer: sponsorSigner, bytecode, label: 'Rescue', danger: net.type === 'mainnet' });
     const contract = await deployContract(sponsorSigner, abi, bytecode, [safe, sponsorSigner.address]);
     const addr = await contract.getAddress();
     const dtx = contract.deploymentTransaction();
@@ -1535,7 +1586,8 @@ export async function deployRescueHelper() {
     renderHelperStatus();
     renderDeployedRegistry();
   } catch (e) {
-    toast(e?.message || String(e), 'error');
+    // A cancel at either confirm is not a failure — say so quietly.
+    toast(e?.message || String(e), e?.cancelled ? 'info' : 'error');
   } finally {
     setBtnDots(btn, false);
   }
@@ -1571,6 +1623,8 @@ export async function deployAirdropClaimer() {
     });
     if (!ok) { setBtnDots(btn, false); toast('Deploy cancelled', 'info'); return; }
     const { abi, bytecode } = await compileSource(AIRDROP_CLAIMER_SOURCE, 'airdropClaimer');
+    // ask-tx #2: bytecode in hand → price the deploy before signing.
+    await confirmDeployFee({ provider, signer: sponsorSigner, bytecode, label: 'Claim', danger: net.type === 'mainnet' });
     // RESCUER = sponsor (yang membayar & broadcast tx eksekusi) — selaras dgn
     // rescue. Ikat ke target membuat onlyRescuer revert saat sponsor berbeda
     // dari wallet aktif.
@@ -1584,7 +1638,8 @@ export async function deployAirdropClaimer() {
     renderHelperStatus();
     renderDeployedRegistry();
   } catch (e) {
-    toast(e?.message || String(e), 'error');
+    // A cancel at either confirm is not a failure — say so quietly.
+    toast(e?.message || String(e), e?.cancelled ? 'info' : 'error');
   } finally {
     setBtnDots(btn, false);
   }
