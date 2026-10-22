@@ -11,7 +11,7 @@
 
 import { $, escapeHtml, toast } from './ui.js';
 import { get, set } from './state.js';
-import { getNetworkById, ERC721_ABI } from './network.js';
+import { getNetworkById, ERC721_ABI, ERC1155_ABI } from './network.js';
 import { listDeployed } from './registry.js';
 import { detectNfts } from './nft-detect.js';
 
@@ -111,19 +111,41 @@ export function chunkBlockRange(fromBlock, toBlock, size = LOG_CHUNK) {
   return out;
 }
 
-// ERC-721 Transfer indexes tokenId (topics[3]); ERC-1155 TransferSingle
-// carries id as the second data word.
+// ERC-721 Transfer indexes tokenId (topics[3]). ERC-1155 TransferSingle has
+// THREE indexed addresses (operator, from, to) — its data holds exactly two
+// words in EIP-1155 order: (uint256 _id, uint256 _value). The id is the FIRST
+// data word; the old code sliced the second one, decoded the QUANTITY as a
+// tokenId, and every 1155 lookup asked for token #<qty>.
 export function decodeNftLog(log, standard) {
   try {
     if (standard === 'erc1155') {
-      const word = String(log.data || '').slice(66, 130);
-      if (word.length < 64) return null;
-      return BigInt('0x' + word).toString();
+      const hex = String(log.data || '').replace(/^0x/i, '');
+      if (hex.length < 64) return null;
+      return BigInt('0x' + hex.slice(0, 64)).toString();
     }
     const t = log.topics?.[3];
     if (!t) return null;
     return BigInt(t).toString();
   } catch { return null; }
+}
+
+// TransferBatch (what marketplaces actually use to move 1155s) carries
+// ids[] — decoded through the real event ABI, never by hand-slicing:
+// the array sits after an offset+length header. Returns every id the log
+// proves the owner received; [] for anything unparseable.
+const ERC1155_IFACE = new ethers.Interface([
+  'event TransferSingle(address indexed _operator, address indexed _from, address indexed _to, uint256 _id, uint256 _value)',
+  'event TransferBatch(address indexed _operator, address indexed _from, address indexed _to, uint256[] _ids, uint256[] _values)',
+]);
+const ERC1155_BATCH_TOPIC0 = ethers.id('TransferBatch(address,address,address,uint256[],uint256[])');
+
+export function decodeErc1155Log(log) {
+  try {
+    const parsed = ERC1155_IFACE.parseLog({ topics: log.topics, data: log.data });
+    if (!parsed) return [];
+    const ids = parsed.name === 'TransferBatch' ? parsed.args._ids : [parsed.args._id];
+    return ids.map((x) => x.toString());
+  } catch { return []; }
 }
 
 // Walk backwards from toBlock in LOG_CHUNK slices (each request under
@@ -133,16 +155,29 @@ export async function scanEventTokenIds(provider, contractAddr, owner, standard,
   const maxChunks = opts.maxChunks ?? LOG_MAX_CHUNKS;
   const maxIds = opts.maxIds ?? MAX_PER_CONTRACT;
   const ownerTopic = ethers.zeroPadValue(owner, 32);
-  const topic0 = standard === 'erc1155'
-    ? ethers.id('TransferSingle(address,address,address,uint256,uint256)')
-    : ethers.id('Transfer(address,address,uint256)');
-  const topics = [topic0, null, ownerTopic]; // any from, to = owner
+  // ERC-1155 indexes THREE addresses (operator, from, to), so the filter is
+  // 4 slots deep and topic0 asks for BOTH transfer events in one request
+  // (getLogs treats an array as OR):
+  //   - _to is topics[3]. The old [sig, null, owner] landed the owner on
+  //     topics[2] = _from — the scan matched the wallet's OUTGOING transfers
+  //     and every receive slipped past, so the gallery stayed empty.
+  // ERC-721 has only (from, to) indexed: owner on topics[2] is _to, as before.
+  const topics = standard === 'erc1155'
+    ? [[
+        ethers.id('TransferSingle(address,address,address,uint256,uint256)'),
+        ERC1155_BATCH_TOPIC0,
+      ], null, null, ownerTopic]
+    : [ethers.id('Transfer(address,address,uint256)'), null, ownerTopic];
   const found = new Set();
   let to = toBlock;
   for (let i = 0; i < maxChunks && to >= fromBlock; i++) {
     const from = Math.max(fromBlock, to - LOG_CHUNK + 1);
     const logs = await provider.getLogs({ address: contractAddr, topics, fromBlock: from, toBlock: to });
     for (const log of logs) {
+      if (standard === 'erc1155' && log.topics?.[0] === ERC1155_BATCH_TOPIC0) {
+        for (const id of decodeErc1155Log(log)) found.add(id);
+        continue;
+      }
       const id = decodeNftLog(log, standard);
       if (id != null) found.add(id);
     }
@@ -191,9 +226,19 @@ export async function enumerateNfts(address, chainId, provider, targets = null) 
         if (latestBlock == null) latestBlock = await provider.getBlockNumber();
         const from = Math.max(0, latestBlock - LOG_CHUNK * LOG_MAX_CHUNKS);
         const ids = await scanEventTokenIds(provider, c.address, address, standard, from, latestBlock);
+        // ERC-1155 has no tokenURI() — the standard's metadata call is uri(id),
+        // and a receive log only proves the token ARRIVED: a balance check
+        // drops the ones since sent away. The 721 path keeps tokenURI().
+        const c1155 = standard === 'erc1155' ? new ethers.Contract(c.address, ERC1155_ABI, provider) : null;
         for (const id of ids) {
           try {
-            const tokenUri = await contract.tokenURI(id);
+            if (c1155 && (await c1155.balanceOf(address, id)) === 0n) continue;
+            const rawUri = c1155 ? await c1155.uri(id) : await contract.tokenURI(id);
+            // EIP-1155 lets uri() carry an {id} placeholder (case-insensitive,
+            // hex, zero-padded to 32 bytes) — fetch it filled or 404s.
+            const tokenUri = c1155 && /\{id\}/i.test(rawUri)
+              ? String(rawUri).replace(/\{id\}/gi, BigInt(id).toString(16).padStart(64, '0'))
+              : rawUri;
             const meta = await fetchNftMetadata(tokenUri);
             mine.push({
               contractAddress: c.address,
