@@ -353,6 +353,19 @@ test.describe('dApp browser', () => {
     // overlapping the stage, not a dropdown pinned under the top bar.
     await appClick(page, '#dbrMenu');
     await expect(page.locator('#dbrMenuPop')).toBeVisible();
+    // The bubble enters with dbr-menu-in (css/cartoon.css, 160ms:
+    // translateY(10px) → 0). boundingBox() reports the TRANSFORMED box and
+    // — unlike a click — waits for nothing, so measuring straight after
+    // toBeVisible() catches the bubble 1–2px low and the "clear above the
+    // bar" check fails for a menu that is placed correctly (CI 2026-10-22
+    // on 1689715: 746 vs ≤745 — exactly the animation's tail; the same
+    // tree passed at 4df473f). Let the transform land, then measure.
+    await page.waitForFunction(() => {
+      const el = document.querySelector('#dbrMenuPop');
+      if (!el || el.hidden) return false;
+      const tr = getComputedStyle(el).transform;
+      return tr === 'none' || tr === 'matrix(1, 0, 0, 1, 0, 0)';
+    });
     const menuBox = await page.locator('#dbrMenuPop').boundingBox();
     const barBox = await page.locator('#dbrBar').boundingBox();
     expect(menuBox.y + menuBox.height, 'the bubble floats clear above the control bar')
