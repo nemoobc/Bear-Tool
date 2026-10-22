@@ -125,3 +125,23 @@ test('registry: corrupt / non-object data falls back to empty registry', () => {
   const reg = registry.loadRegistry();
   assert.equal(reg.batch.length, 0, 'invalid entries dropped');
 });
+// The registry is written AFTER the chain confirmed a deploy — the gas is
+// spent. A full/disabled localStorage must not throw out of saveDeployed
+// (bug found 2026-10-22: persist() was the only unguarded writer in the
+// project, and its throw turned a confirmed on-chain success into a red
+// error right after the user paid, inviting a double-gas retry). The save
+// degrades to "lives this session only" and still answers the list.
+test('registry: a throwing localStorage never fails a save (deploy already happened)', () => {
+  const real = globalThis.localStorage.setItem;
+  globalThis.localStorage.setItem = () => { throw new Error('QuotaExceededError'); };
+  try {
+    const list = registry.saveDeployed('rescue', A, { chainId: 1, safe: B, target: C });
+    assert.ok(Array.isArray(list), 'saveDeployed still answers the in-memory list');
+    assert.strictEqual(list.length, 1, 'the entry lives for this session');
+  } finally {
+    globalThis.localStorage.setItem = real;
+  }
+  // And the store itself was NOT corrupted: a later healthy save roundtrips.
+  registry.saveDeployed('rescue', A, { chainId: 1, safe: B, target: C });
+  assert.ok(registry.findDeployed('rescue', 1), 'a healthy write after the failure still persists');
+});

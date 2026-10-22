@@ -40,7 +40,20 @@ export function loadRegistry() {
 }
 
 function persist(reg) {
-  localStorage.setItem(REGISTRY_KEY, JSON.stringify(reg));
+  // Private mode / quota (the records carry full ABIs, so this key grows):
+  // every caller saves AFTER the chain confirmed a deploy — the gas is
+  // already spent. A storage failure must not turn that confirmed on-chain
+  // success into a red error at the worst possible moment (the user reads
+  // "failed" over a contract that exists and retries = pays twice). The
+  // honest cost of the swallow is a REDEPLOY next session, logged here —
+  // same trade state.js already makes for custom tokens. Keystore writes
+  // stay unguarded on purpose (wallet.js): a wallet that cannot be saved
+  // must fail loudly.
+  try {
+    localStorage.setItem(REGISTRY_KEY, JSON.stringify(reg));
+  } catch (e) {
+    console.warn('[BearTool] registry not persisted (helper still deployed):', e?.message || e);
+  }
 }
 
 // Save a deployed contract. Dedupes on (type, address, chainId) — a
