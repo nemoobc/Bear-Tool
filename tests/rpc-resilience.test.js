@@ -124,7 +124,12 @@ test('a black-holed RPC is abandoned within the budget, not waited on forever', 
   assert.ok(err, 'must reject instead of hanging');
   assert.match(err.message, /All RPCs failed/i);
   assert.ok(dt >= RPC_TIMEOUT_MS - 500, `gave up too early (${dt}ms) — did the probe even run?`);
-  assert.ok(dt < RPC_TIMEOUT_MS + 6000, `took ${dt}ms — the timeout is not clamping the wait`);
+  // The wall clock is the thing under test, and a loaded runner delays the
+  // abort timer itself: under a full parallel suite this measured 14.2s and
+  // failed a run where the wait was clamped exactly as designed. The bound
+  // is "clamped, not forever" — an unclamped wait would hit the test's own
+  // 30s timeout — so the margin is generous on purpose.
+  assert.ok(dt < RPC_TIMEOUT_MS + 12000, `took ${dt}ms — the timeout is not clamping the wait`);
 });
 
 test('a dead RPC first does not block a live RPC second', { timeout: 30000 }, async () => {

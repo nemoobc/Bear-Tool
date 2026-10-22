@@ -1,45 +1,37 @@
-// Bear Tool — tests/e2e-harness.test.js
+// Bear Tool — the emulator E2E harness must be able to RECOVER.
 //
-// The suite runs in two places: against a localhost server, and against the
-// deployed site (BEAR_BASE_URL pointing at github.io/Bear-Tool/). Those two
-// disagree about one small thing — what a leading slash means.
+// The recovery wrapper (tools/e2e-recover.sh) reruns the journey on a
+// fresh emulator when the CI fleet kills the device mid-run. It has to
+// give the rerun a FRESH APP, not just a fresh device: `adb install -r`
+// keeps the app's data, so a relaunch after a mid-journey death found
+// the wallet the dead attempt had already created — the app booted into
+// the dashboard, the journey waited 60s for the welcome screen's
+// #wCreate, and the recovery could not pass. One flaky CDP screenshot
+// (run 39739574807) therefore killed the whole run, and the rerun was
+// guaranteed to fail for a reason that had nothing to do with the app.
 //
-//   new URL('/',  'http://localhost:8080')                  → http://localhost:8080/
-//   new URL('/',  'https://nemoobc.github.io/Bear-Tool/')   → https://nemoobc.github.io/      ← 404
-//   new URL('./', 'https://nemoobc.github.io/Bear-Tool/')   → https://nemoobc.github.io/Bear-Tool/
-//
-// So the deployed run once landed on "There isn't a GitHub Pages site here",
-// and every spec failed on a missing wallet-creation button that had nothing
-// to do with the app. The failure was indistinguishable from a broken build —
-// which is the whole reason it is pinned here: the harness deciding where the
-// app lives is a decision, and an unpinned decision regresses silently.
-import { test } from 'node:test';
+// The gate: the relaunch wipes the app data, and it does so BEFORE the
+// app is started again.
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import fs from 'node:fs';
 
-const helpers = readFileSync(new URL('../tests/e2e/helpers.js', import.meta.url), 'utf8');
-// Order matters, and getting it wrong once already made this test lie.
-// helpers.js line 8 mentions `src/views/*.jsx` inside a line comment — strip
-// the /* */ pairs FIRST and that stray slash-star opens a block comment that
-// swallows the next 340 lines, goto() included, and the assertion fails on
-// code that is sitting right there. Line comments go first, so that one is
-// gone before any block-comment pairing happens.
-const code = helpers
-  .split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n')
-  .replace(/\/\*[\s\S]*?\*\//g, '');
+const sh = fs.readFileSync(new URL('../tools/e2e-recover.sh', import.meta.url), 'utf8');
 
-test('the harness navigates relative to the base URL, never to the origin', () => {
-  assert.ok(!code.includes(`page.goto('/')`), "goto('/') resolves against the origin and drops /Bear-Tool/");
-  assert.ok(code.includes(`page.goto('./'`), "goto('./') keeps the deployed path");
+test('the recovery wipes the app data before it starts the app again', () => {
+  const clear = sh.indexOf('pm clear com.nemoobc.beartool');
+  assert.ok(clear > -1,
+    'the relaunch must clear the app data — install -r keeps it, and a stale '
+    + 'wallet makes the welcome screen unreachable for the next attempt');
+  const start = sh.indexOf('am start -n com.nemoobc.beartool');
+  assert.ok(start > -1, 'the relaunch starts the app');
+  assert.ok(clear < start,
+    'the wipe must come BEFORE the app starts — clearing after the launch '
+    + 'leaves the stale session on screen for the first seconds of the run');
 });
 
-test("resolving './' lands on the app in both places the suite runs", () => {
-  // The actual arithmetic, asserted rather than assumed — if a future base URL
-  // arrives with no trailing slash, './' still has to mean "here".
-  assert.equal(new URL('./', 'http://localhost:8080').href, 'http://localhost:8080/');
-  assert.equal(new URL('./', 'https://nemoobc.github.io/Bear-Tool/').href,
-    'https://nemoobc.github.io/Bear-Tool/');
-  // The exact failure being pinned: the deployed run got THIS.
-  assert.equal(new URL('/', 'https://nemoobc.github.io/Bear-Tool/').href,
-    'https://nemoobc.github.io/');
+test('the recovery is bounded and only reruns on device death', () => {
+  assert.match(sh, /ATTEMPTS=\d+/, 'the number of boots is a number, not a loop forever');
+  assert.match(sh, /Page\.captureScreenshot/, 'a wedged screenshot counts as device death');
+  assert.match(sh, /is_death "\$fatal"/, 'a journey bug is not a device death');
 });

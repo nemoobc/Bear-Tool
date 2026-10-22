@@ -85,6 +85,14 @@ while :; do
   [ "$booted" = 1 ] || { echo "[recover] boot never completed" >&2; exit "$rc"; }
 
   adb install -r "$APK" >> e2e-stdout.log 2>&1 || echo "[recover] INSTALL_RC=$?" >&2
+  # WIPE THE APP DATA. `install -r` KEEPS the app's data, so a relaunch
+  # after a mid-journey death found the wallet the dead attempt had already
+  # created: the app booted straight into the dashboard, the journey waited
+  # forever for the welcome screen's #wCreate, and the recovery could not
+  # possibly pass — one flaky CDP screenshot (run 39739574807: attempt 1 died
+  # on "Page.captureScreenshot", attempt 2 then timed out on #wCreate) turned
+  # into a dead run. A fresh attempt must start as fresh as the first one.
+  adb shell pm clear com.nemoobc.beartool >> e2e-stdout.log 2>&1 || echo "[recover] PM_CLEAR_RC=$?" >&2
   # the original logcat capture died with the device — follow the new one
   adb logcat -v time >> logcat-stream.txt 2>&1 &
   adb shell am start -n com.nemoobc.beartool/.MainActivity >> e2e-stdout.log 2>&1 || true
