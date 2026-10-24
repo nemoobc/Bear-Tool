@@ -63,6 +63,19 @@ test('web confirm sheet: a long label folds, it never pushes the row out', () =>
     'shrink:0 on the label is the overflow: the label never wraps, it runs out of the card');
   assert.match(k[0], /overflow-wrap:\s*anywhere/,
     'a label longer than its column must fold inside it');
+
+  // The value floor must stay small. Measured on a 320px device (CI emulator,
+  // 2026-10-24): a 6em floor (≈86px) left so little room that the label column
+  // shrank to ~40px and every label broke mid-word ("Symb o l", "Tra nsac
+  // tions"). 4em (≈58px) keeps the value readable while leaving a label enough
+  // width to wrap at its SPACE instead of per-letter. A floor past ~5em starts
+  // re-creating that defect on the narrowest sheet — lock it down.
+  const valueMin = cols[1][0];
+  const emMatch = valueMin.match(/^([\d.]+)em$/);
+  assert.ok(emMatch, `the value floor is an em length, got "${valueMin}"`);
+  assert.ok(Number(emMatch[1]) >= 3 && Number(emMatch[1]) <= 5,
+    `a value floor of ${valueMin} is out of band: below ~3em the value starves, `
+    + 'above ~5em the label breaks mid-word on a narrow sheet');
 });
 
 test('web confirm sheet: a long value breaks at spaces, not mid-number', () => {

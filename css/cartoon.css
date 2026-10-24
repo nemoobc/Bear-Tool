@@ -1246,7 +1246,16 @@ select.input option, select.select option, .input option {
    value never below 86px, scrollWidth == clientWidth, all inside the card. */
 .tx-detail .row {
   display: grid;
-  grid-template-columns: minmax(0, auto) minmax(6em, 1fr);
+  /* Measured on a 320px device (CI emulator, 2026-10-24): the value floor used
+     to be 6em (≈86px), which left so little room on a narrow sheet that the
+     label column shrank to ~40px and every label broke mid-word ("Symb o l",
+     "Tra nsac tions"). 4em (≈58px) keeps the value readable while returning
+     enough width for a label to wrap at its SPACE instead of per-letter —
+     measured 216px-wide sheet: label 62px ("Transac/tions" on two lines),
+     value 58px, zero horizontal overflow on every row (was 34px label, 6-bar
+     value). `auto` on the label column means a SHORT label still hugs its
+     text on a wide sheet (Transactions 90px at 320px, not a fixed 50% cap). */
+  grid-template-columns: minmax(0, auto) minmax(4em, 1fr);
   gap: 12px;
   padding: 4px 0;
 }
