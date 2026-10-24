@@ -221,7 +221,16 @@ export async function skipIntro(page) {
   const visible = await intro.isVisible().catch(() => false);
   if (!visible) return; // already auto-hidden by the safety timer
   await intro.click({ position: { x: 20, y: 20 }, timeout: 3000 }).catch(() => {});
-  await page.waitForSelector('#intro.hidden', { timeout: 5000 }).catch(() => {});
+  // `waitForSelector('#intro.hidden')` waits for that selector to be VISIBLE,
+  // but `.hidden` is by definition not visible — so it burned the full 5s
+  // every time the intro was still on screen (log: "resolved to hidden… 14×").
+  // Measured on 23-wc-sign (CI, 2026-10-24): those 5s ate the margin of an
+  // already-heavy beforeEach and the test timed out before its sheet opened.
+  // Poll the actual class instead: it turns true the instant the safety timer
+  // or the click hides the intro.
+  await page
+    .waitForFunction(() => document.getElementById('intro')?.classList.contains('hidden'), null, { timeout: 5000 })
+    .catch(() => {});
 }
 
 // headless-shell bug: locator.click() can hang on "stable"/"receives events"
