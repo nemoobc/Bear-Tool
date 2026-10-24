@@ -1225,13 +1225,50 @@ select.input option, select.select option, .input option {
   text-align: left;
   font-size: 0.9rem;
 }
-/* gap: a long value WRAPS (break-all below), and without it the first
-   wrapped line starts flush against the label — "Est. cost0.02…" in the
-   deploy confirm, "Message…" in the sign sheet (emulator 2026-10-22).
-   Label never shrinks; wrapped value lines stay right-aligned. */
-.tx-detail .row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
-.tx-detail .row .k { color: var(--ink-soft); flex: 0 0 auto; }
-.tx-detail .row .v { font-weight: 600; word-break: break-all; text-align: right; }
+/* Label/value detail rows — measured at 320px (emulator + browser, 2026-10-22/23),
+   three failure modes:
+   1. no gap → a wrapping value starts flush against the label ("Est. cost0.02…"
+      in the deploy confirm, "Message…" in the sign sheet);
+   2. label `flex:0 0 auto` (shrink:0) → the label kept its full unwrapped width
+      and never folded, so a long one ("Stays until you revoke it in Settings →
+      Security") pushed value AND label out of the card — scrollWidth 463 vs
+      clientWidth 260. shrink:1 was no better: it slivers the label to ~23px
+      against a wrapping value. Flex alone can't hug a short label AND contain
+      a long one;
+   3. grid `auto` label with no floor under the value → a long label grew its
+      track to unwrapped width and starved the value to 0px (invisible); and
+      `minmax(0,45%)` set a definite growth limit, so EVERY row got a fixed
+      106px label column and short labels stopped hugging.
+   A GRID closes all three: `minmax(0,auto)` hugs a short label / wraps a long
+   one inside leftover space, `minmax(6em,1fr)` puts a hard floor under the
+   value so no label can collapse it, gap keeps wrapped lines off the label.
+   Measured: short label 61px hugging, value 163px, long label wraps at 138px,
+   value never below 86px, scrollWidth == clientWidth, all inside the card. */
+.tx-detail .row {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(6em, 1fr);
+  gap: 12px;
+  padding: 4px 0;
+}
+.tx-detail .row .k {
+  color: var(--ink-soft);
+  min-width: 0;
+  overflow-wrap: anywhere; /* a label longer than its column folds instead of running out of the card */
+}
+.tx-detail .row .v {
+  font-weight: 600;
+  /* `word-break: break-all` filled every line by splitting at ANY character,
+     so the deploy cost "0.145237027788990096 POL (…)" broke mid-number
+     ("…8899" / "0096 POL") even though a space was available. `anywhere`
+     keeps a word whole while it fits and splits only on overflow — numbers
+     and sentences read straight, a space-less address/hex still folds inside
+     the card (measured: 400-char hex contained). It also lowers min-content,
+     so the column can shrink and wrap rather than overflow. */
+  overflow-wrap: anywhere;
+  word-break: normal;
+  text-align: right;
+  min-width: 0;
+}
 
 /* ═══════════ NFT GRID ═══════════ */
 .nft-grid {
