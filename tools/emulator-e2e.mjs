@@ -1557,6 +1557,36 @@ async function main() {
   if (String(dexShell).includes('"stateCard":false')) die('Dex: kartu state tidak dirender');
   if ((JSON.parse(dexShell) || {}).rows < 3) die('Dex: baris state kurang dari tiga (jaringan/dompet/mesin)');
 
+  // The launch card wears ONE labelled LP group (565fff2): the seed pair and
+  // the lock are the pool's opening position — the same thing the Pools card
+  // manages — so they sit in one fieldset instead of three loose dials.
+  step('dex: the launch card keeps its LP knobs in one labelled group');
+  const launchCard = await page.evaluate(`JSON.stringify({
+    card: !!document.querySelector('#dexLaunchCard'),
+    group: !!document.querySelector('#dexLaunchCard .dex-lp-group'),
+    legend: ((document.querySelector('#dexLaunchCard .dex-lp-legend') || {}).innerText || '').trim(),
+    lockInGroup: !!document.querySelector('#dexLaunchCard .dex-lp-group #dexLaunchLock'),
+    seedQInGroup: !!document.querySelector('#dexLaunchCard .dex-lp-group #dexLaunchSeedQ'),
+    seedTInGroup: !!document.querySelector('#dexLaunchCard .dex-lp-group #dexLaunchSeedT'),
+    identityInGroup: !!document.querySelector('#dexLaunchCard .dex-lp-group #dexLaunchName'),
+    identity: !!document.querySelector('#dexLaunchName'),
+  })`).catch(() => 'evaluate-failed');
+  report.launchCard = launchCard;
+  await page.evaluate(`(function(){ var c = document.querySelector('#dexLaunchCard'); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'center' }); })()`).catch(() => {});
+  await sleep(300);
+  await page.shot('36-dex-launch-card');
+  if (String(launchCard) === 'evaluate-failed') die('Launch: tidak bisa membaca kartu launch');
+  const lc = JSON.parse(String(launchCard));
+  if (!lc.card) die('Launch: #dexLaunchCard tidak dirender');
+  if (!lc.group) die('Launch: fieldset dex-lp-group hilang — LP jadi tiga dial lepas lagi (regresi 565fff2)');
+  if (!lc.legend) die('Launch: legend kosong — grup LP tanpa nama');
+  if (String(lc.legend).startsWith('dex.launch.')) die('Launch: legend menampilkan nama key mentah — i18n tidak resolve');
+  if (!lc.lockInGroup) die('Launch: #dexLaunchLock keluar dari grup LP');
+  if (!lc.seedQInGroup) die('Launch: #dexLaunchSeedQ keluar dari grup LP');
+  if (!lc.seedTInGroup) die('Launch: #dexLaunchSeedT keluar dari grup LP');
+  if (lc.identityInGroup) die('Launch: #dexLaunchName ikut terbungkus grup LP — identitas bukan LP');
+  if (!lc.identity) die('Launch: #dexLaunchName hilang dari kartu');
+
   step('tools: the sponsor wallet picker lists the wallets we actually have');
   if (await openView('deploy')) {
     await sleep(1200);
