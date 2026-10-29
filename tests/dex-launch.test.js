@@ -192,6 +192,30 @@ test('launchStubHtml: labelled inputs, no emoji discard, no prefill', async () =
   assert.match(stub, /aria-label=/, 'every input is labelled for a screen reader');
   assert.doesNotMatch(stub, /[\u{1F300}-\u{1FAFF}]/u, 'no emoji in the chrome');
   assert.doesNotMatch(stub, /value="0x/, 'no prefill');
+
+  // The three LP knobs are ONE labelled group ("LP was confusing, it should
+  // be one thing with pools"): the seed pair IS the pool's opening liquidity
+  // and the lock locks the shares it mints. Loose between the token fields
+  // they read as unrelated dials — the group ties them to the Pools card.
+  const group = stub.match(/<fieldset class="dex-lp-group">[\s\S]*?<\/fieldset>/);
+  assert.ok(group, 'the opening-liquidity fields sit in one fieldset');
+  for (const id of ['dexLaunchLock', 'dexLaunchSeedQ', 'dexLaunchSeedT']) {
+    assert.equal(group[0].includes(`id="${id}"`), true, `#${id} is inside the LP group`);
+  }
+  assert.match(group[0], /<legend[^>]*>\$\{t\('dex\.launch\.lp\.h'\)\}|<legend[^>]*>[^<]+<\/legend>/,
+    'the group carries a legend');
+  // and the launch form is where the OTHER fields are NOT: the group must
+  // not swallow name/symbol/supply/fee (those are token identity, not LP)
+  for (const id of ['dexLaunchName', 'dexLaunchSymbol', 'dexLaunchSupply', 'dexLaunchFee']) {
+    assert.equal(group[0].includes(`id="${id}"`), false, `#${id} is not an LP field`);
+  }
+  // both locales must speak the group — a bare key name on screen is the bug
+  const i18nSrc = await import('node:fs').then((fs) =>
+    fs.readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8'));
+  for (const key of ['dex.launch.lp.h', 'dex.launch.lp.hint']) {
+    const hits = (i18nSrc.match(new RegExp(`'${key.replace(/\./g, '\\.')}':`, 'g')) || []).length;
+    assert.equal(hits, 2, `${key} must exist in en AND id (found ${hits})`);
+  }
   // the sheet builder keeps the number lines the user must read
   const sheet = v.sheetBodyLaunch({
     meta: { name: 'B Meme', symbol: 'BM' },

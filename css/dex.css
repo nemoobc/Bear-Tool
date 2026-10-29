@@ -122,6 +122,27 @@
 .dex-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .dex-amtrow { display: flex; gap: 8px; }
 .dex-amtrow .dex-input { flex: 1 1 0; min-width: 0; }
+/* The opening-liquidity group: a browser default <fieldset> carries a border
+   and its own padding, which would fight the card's flat column — reset it
+   to a hairline group so the three LP knobs read as one block (they are one
+   on-chain object: the pool's opening position). */
+.dex-lp-group {
+  border: 1px dashed rgba(128, 128, 128, 0.45);
+  border-radius: 10px;
+  padding: 8px 10px 10px;
+  margin: 2px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-inline-size: 0; /* a fieldset defaults to min-content width — kill it */
+}
+.dex-lp-legend {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  padding: 0 4px;
+}
+.dex-lp-group .dex-t-hint { margin: -2px 0 2px; }
 .dex-launch-more { font-size: 12px; color: var(--ink-soft); }
 .dex-launch-more summary { cursor: pointer; padding: 2px 0; color: var(--accent, #f80); }
 .dex-launch-more[open] summary { margin-bottom: 6px; }

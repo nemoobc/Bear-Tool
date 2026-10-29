@@ -702,13 +702,24 @@ export function launchStubHtml() {
                placeholder="${t('dex.launch.supply')}" aria-label="${t('dex.launch.supply')}">
         <input id="dexLaunchFee" class="dex-input" type="text" inputmode="numeric" spellcheck="false" autocomplete="off"
                placeholder="${t('dex.launch.fee')}" aria-label="${t('dex.launch.fee')}">
-        <input id="dexLaunchLock" class="dex-input" type="text" inputmode="numeric" spellcheck="false" autocomplete="off"
-               placeholder="${t('dex.launch.lockdays')}" aria-label="${t('dex.launch.lockdays')}">
-        <div class="dex-amtrow">
-          <input id="dexLaunchSeedQ" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
-                 placeholder="${t('dex.launch.seedq')}" aria-label="${t('dex.launch.seedq')}">
-          <input id="dexLaunchSeedT" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
-                 placeholder="${t('dex.launch.seedt')}" aria-label="${t('dex.launch.seedt')}">        </div>
+        <!-- The three LP knobs live TOGETHER, named for what they really are:
+             seed quote + seed tokens ARE the pool's opening liquidity, and the
+             lock is a lock on the LP shares that seed mints. Sprinkled loose
+             between token fields they read as three unrelated dials ("LP is
+             confusing"); as one labelled group they match the Pools card the
+             user manages them in afterwards. Ids unchanged — the wiring and
+             the tests address them by id. -->
+        <fieldset class="dex-lp-group">
+          <legend class="dex-lp-legend">${t('dex.launch.lp.h')}</legend>
+          <p class="dex-t-hint">${t('dex.launch.lp.hint')}</p>
+          <input id="dexLaunchLock" class="dex-input" type="text" inputmode="numeric" spellcheck="false" autocomplete="off"
+                 placeholder="${t('dex.launch.lockdays')}" aria-label="${t('dex.launch.lockdays')}">
+          <div class="dex-amtrow">
+            <input id="dexLaunchSeedQ" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
+                   placeholder="${t('dex.launch.seedq')}" aria-label="${t('dex.launch.seedq')}">
+            <input id="dexLaunchSeedT" class="dex-input" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"
+                   placeholder="${t('dex.launch.seedt')}" aria-label="${t('dex.launch.seedt')}">        </div>
+        </fieldset>
         <details class="dex-launch-more">
           <summary>${t('dex.launch.more')}</summary>
           <input id="dexLaunchDesc" class="dex-input" type="text" spellcheck="false" autocomplete="off"
