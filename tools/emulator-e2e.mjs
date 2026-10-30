@@ -1536,6 +1536,22 @@ async function main() {
   // surface: the nav lands on the view, #dexRoot is painted by renderDex
   // (not just the React static shell), and the state card shows its three
   // honest rows. Later milestones pin their own surfaces at this exact spot.
+  // The Dex engine lives on exactly ONE chain (core.js DEX_CHAIN_ID —
+  // sepolia); the tabs matrix above left the phone on polygon, where
+  // renderDex paints only the state card and every card below it (pools,
+  // launch) does not exist. The native picker switches WITHOUT a reload (a
+  // reload orphans this driver's CDP session — run 38631206692), so park on
+  // sepolia for the walk. Polygon is restored right after the launch check:
+  // the deploy steps below were measured on POL and assume it.
+  step('dex: the phone parks on sepolia — the one chain the Dex engine takes');
+  if (!(await jsClick('#networkPill'))) throw new Error('sepolia switch: #networkPill missing');
+  await page.wait('#netListTestnet [data-net="sepolia"]', 15000);
+  if (!(await jsClick('#netListTestnet [data-net="sepolia"]'))) throw new Error('sepolia switch: sepolia row not tappable');
+  for (let i = 0; i < 24 && await overlayOpen(); i++) await sleep(250);
+  const dexNet = await page.evaluate(`window.localStorage.getItem('bear.networkId')`).catch(() => '');
+  report.dexNet = dexNet;
+  if (String(dexNet) !== 'sepolia') throw new Error('sepolia switch did not land: ' + String(dexNet));
+
   step('dex: the nav lands on the fresh v2 shell and paints its state');
   if (!(await openView('dex'))) {
     report.dexView = 'no-host';
@@ -1586,6 +1602,17 @@ async function main() {
   if (!lc.seedTInGroup) die('Launch: #dexLaunchSeedT keluar dari grup LP');
   if (lc.identityInGroup) die('Launch: #dexLaunchName ikut terbungkus grup LP — identitas bukan LP');
   if (!lc.identity) die('Launch: #dexLaunchName hilang dari kartu');
+
+  // Hand the phone back to polygon: the Tools/Deploy steps below were
+  // measured on POL and the native picker already proved it switches live.
+  step('dex: the phone hands back to polygon for the deploy steps below');
+  if (!(await jsClick('#networkPill'))) throw new Error('polygon restore: #networkPill missing');
+  await page.wait('#netListMainnet [data-net="polygon"]', 15000);
+  if (!(await jsClick('#netListMainnet [data-net="polygon"]'))) throw new Error('polygon restore: polygon row not tappable');
+  for (let i = 0; i < 24 && await overlayOpen(); i++) await sleep(250);
+  const backNet = await page.evaluate(`window.localStorage.getItem('bear.networkId')`).catch(() => '');
+  report.dexNetBack = backNet;
+  if (String(backNet) !== 'polygon') throw new Error('polygon restore did not land: ' + String(backNet));
 
   step('tools: the sponsor wallet picker lists the wallets we actually have');
   if (await openView('deploy')) {
