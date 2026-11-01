@@ -164,7 +164,15 @@ export async function refreshSendBalances() {
 }
 
 // live preview + gas estimate (best effort)
+// Monotonic claim for updateSendPreview's writers — see the note inside.
+let previewSeq = 0;
 export async function updateSendPreview() {
+  // One writer per keystroke. This is async (a fee fetch sits in the middle)
+  // and nothing ordered the writers, so a slow answer for an EARLIER amount
+  // could land after a fast one for the current amount and repaint the
+  // preview with numbers the fields no longer hold. Every invocation claims
+  // the sequence; a claimant that lost while awaiting writes nothing.
+  const seq = ++previewSeq;
   const to = $('#sendTo')?.value?.trim() || '';
   const amt = $('#sendAmount')?.value || '';
   const preview = $('#sendPreview');
@@ -188,6 +196,7 @@ export async function updateSendPreview() {
       // Bounded like the rest: a dead node must leave "Est. gas" on "—"
       // within 8s, not freeze the Send screen for 300s (ethers' default).
       const feeData = await withTimeout(provider.getFeeData(), RPC_TIMEOUT_MS, 'preview fee');
+      if (seq !== previewSeq) return;   // a newer keystroke owns the preview now
       const gasLimit = tokenSel === 'native' ? 21000n : 65000n;
       // Show the number doSend will actually reserve: the worst-case cap at
       // the SELECTED speed (same buildFeeParams the send check uses). The old
@@ -196,17 +205,31 @@ export async function updateSendPreview() {
       // "affordable" while the node rejected the send for insufficient funds.
       const speed = document.querySelector('.gas-btn.active')?.dataset.speed || 'normal';
       const worst = buildFeeParams(feeData, speed);
-      const gasEth = ethers.formatEther(gasLimit * (worst.maxFeePerGas ?? worst.baseFee));
-      const nativeUsd = get('tokens').find(x => !x.address)?.usd || 0;
-      const usdText = nativeUsd ? ` ($${(parseFloat(gasEth) * nativeUsd).toFixed(2)})` : '';
-      const net = getNetworkById(get('networkId'));
-      gasLine = `<div class="small">Gas: ~${escapeHtml(gasEth)} ${escapeHtml(net?.symbol || '')}${escapeHtml(usdText)}</div>`;
-      // The "Est. gas" row exists in the markup but was never written to, so
-      // it sat on "—" forever and made the Send screen look stuck.
-      if (gasValue) gasValue.textContent = `${gasEth} ${net?.symbol || ''}`.trim();
-      if (gasUsd) gasUsd.textContent = nativeUsd ? `$${(parseFloat(gasEth) * nativeUsd).toFixed(2)}` : '';
+      // An unknown fee multiplies out to 0/undefined (a node answering nulls —
+      // several L2s without feeHistory — arrives here as baseFee 0n). Printing
+      // "Gas: ~0.0 ETH" is a confident lie about a free transaction; the
+      // confirm dialog already treats 0n gas as unreadable (ui.js totalPriceRow),
+      // and the preview must not disagree with it. Unknown = the row keeps "—".
+      const worstFee = worst.maxFeePerGas ?? worst.baseFee;
+      if (worstFee && worstFee > 0n) {
+        const gasEth = ethers.formatEther(gasLimit * worstFee);
+        const nativeUsd = get('tokens').find(x => !x.address)?.usd || 0;
+        const usdText = nativeUsd ? ` ($${(parseFloat(gasEth) * nativeUsd).toFixed(2)})` : '';
+        const net = getNetworkById(get('networkId'));
+        gasLine = `<div class="small">Gas: ~${escapeHtml(gasEth)} ${escapeHtml(net?.symbol || '')}${escapeHtml(usdText)}</div>`;
+        // The "Est. gas" row exists in the markup but was never written to, so
+        // it sat on "—" forever and made the Send screen look stuck.
+        if (gasValue) gasValue.textContent = `${gasEth} ${net?.symbol || ''}`.trim();
+        if (gasUsd) gasUsd.textContent = nativeUsd ? `$${(parseFloat(gasEth) * nativeUsd).toFixed(2)}` : '';
+      } else {
+        // Actively reset — a stale figure from the previous preview must not
+        // survive into this one, or the row reads a price we do not have.
+        if (gasValue) gasValue.textContent = '—';
+        if (gasUsd) gasUsd.textContent = '';
+      }
     }
   } catch { /* gas preview is optional */ }
+  if (seq !== previewSeq) return;   // same claim before the one remaining write
   preview.innerHTML = `${escapeHtml(t('send.previewSending'))} <b>${escapeHtml(amt)}</b> ${escapeHtml(t('send.previewTo'))} <span class="mono">${escapeHtml(wallet.shortAddress(to))}</span>${gasLine}`;
   preview.classList.remove('hidden');
 }

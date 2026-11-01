@@ -717,9 +717,19 @@ export async function doSwap() {
         // exposure to this one swap. The trade-off is a second approval once
         // the allowance is spent, which is the correct order of those two costs.
         const txApprove = await withTimeout(c.approve(approveTo, amountWei), BROADCAST_TIMEOUT_MS, 'approve broadcast');
-        const { timedOut: approveTimedOut } = await waitForReceipt(txApprove, { timeoutMs: 90000, label: 'approve confirmation' });
-        if (approveTimedOut) {
+        const approveRes = await waitForReceipt(txApprove, { timeoutMs: 90000, label: 'approve confirmation' });
+        if (approveRes.timedOut) {
           toast('Approve sent but not confirmed in time. Re-open Swap and try again once it lands.', 'info');
+          return;
+        }
+        if (approveRes.reverted) {
+          // The approval LANDED as a failure (status 0): the allowance never
+          // moved, so the swap below would fail at the router — after burning
+          // the gas this already cost. Only `timedOut` used to be read here,
+          // so a reverted approve walked straight into a doomed swap and the
+          // user saw the router's revert noise instead of the real reason.
+          // Stop with the truth, and never spend a second transaction on it.
+          toast('The approval failed on chain — the token refused it, so the swap was not sent.', 'error');
           return;
         }
       }

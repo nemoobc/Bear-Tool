@@ -58,9 +58,20 @@ export async function gasLimitFor({ provider, isNative, from, to, tokenAddress, 
   // MAX exists to remove. The caller says what it is about to do; if it stays
   // silent we keep the old per-kind default rather than guess high.
   if (isNative && !fallback) return { limit: defaultGasLimit(true), source: 'default' };
-  if (provider && from && to) {
+  // Estimate ONLY a transaction the caller actually described: real calldata
+  // sent to the contract it will be sent to. A token send's gas cannot come
+  // from estimating a value-less native transfer to the RECIPIENT — ethers
+  // silently drops the unknown `tokenAddress` field (copyRequest copies only
+  // known keys — ethers providers/provider.js), so that call estimated a
+  // DIFFERENT transaction: 21k to an EOA (filtered by the guard below, correct
+  // by luck) or, to a contract with a payable fallback, whatever the fallback
+  // burns. Trusted as the token transfer's limit, that under-reserves the fee
+  // check and resurrects "MAX then error" for exactly the destination class
+  // this wallet targets (smart wallets, EIP-7702 accounts). No caller has
+  // real calldata today, so every token path honestly takes the table default.
+  if (provider && from && data && data !== '0x') {
     try {
-      const limit = await provider.estimateGas({ from, to: tokenAddress, data: data || '0x' });
+      const limit = await provider.estimateGas({ from, to: tokenAddress || to, data });
       // A node that answers with something absurd is worse than a table value.
       if (limit && limit > 21000n && limit < 5_000_000n) return { limit, source: 'estimated' };
     } catch { /* fall through */ }
