@@ -405,6 +405,28 @@ async function ensureDeployedHelper(type, label, chainId, predicate, provider, d
   }
 }
 
+// Pure parse of one batch's ETH values: total, or a row-numbered refusal.
+// Exported because the negative rejection is a policy that costs real gas
+// when it is missing (see executeBatch) and a policy nobody can call cannot
+// be tested. ethers v6 parseEther happily returns -1e18 for "-1" — the EVM
+// has no negative call value, so any negative row is rejected here instead
+// of cancelling other rows' value in the total or throwing at encode time.
+export function sumBatchValues(values) {
+  let total = 0n;
+  for (let i = 0; i < values.length; i++) {
+    let v;
+    try { v = ethers.parseEther(String(values[i] || '0')); }
+    catch { throw Object.assign(new Error(`Invalid ETH value in call #${i + 1}`), { row: i + 1 }); }
+    if (v < 0n) {
+      throw Object.assign(
+        new Error(`ETH value in call #${i + 1} must not be negative — the EVM has no negative call value`),
+        { row: i + 1, negative: true });
+    }
+    total += v;
+  }
+  return total;
+}
+
 async function executeBatch() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const valid = batchCalls.filter(b => b.to); // T7: value-only rows (empty data) are legal
@@ -435,11 +457,15 @@ async function executeBatch() {
 
   // Value guard BEFORE the prompt: execute() draws value from the delegated
   // EOA's own balance, so a total above that balance can only revert on-chain.
-  let totalValue = 0n;
-  for (let i = 0; i < valid.length; i++) {
-    try { totalValue += ethers.parseEther(String(valid[i].value || '0')); }
-    catch { return toast(`Invalid ETH value in call #${i + 1}`, 'error'); }
-  }
+  // Parse + negative rejection live in sumBatchValues (exported, unit-tested):
+  // ethers v6 parseEther ACCEPTS "-1", so a negative row used to pass this
+  // loop, cancel its positives in the total ([10, -10] → 0n → the dialog
+  // printed "0 ETH" while a 10 ETH call rode along) and then throw at
+  // encodeFunctionData (uint256 out-of-range) — after the helper deploy had
+  // already been paid for when one was needed.
+  let totalValue;
+  try { totalValue = sumBatchValues(valid.map(b => b.value)); }
+  catch (e) { return toast(e.message, 'error'); }
   if (totalValue > 0n) {
     let balance = 0n;
     try { balance = await provider.getBalance(get('address')); }
@@ -1159,6 +1185,29 @@ async function quoteClaimFee({ provider, chainId, sponsorAddress, target, target
 }
 
 // ── claim airdrop ──
+/**
+ * Read the token's scale for the on-chain minimum encoding.
+ *
+ * Decimals are REQUIRED: minWei is a GUARD the contract enforces
+ * (`require(bal >= minAmount)`), so guessing it is not a display issue —
+ * for a 6-decimal token (USDC/USDT) the old "assuming 18" fallback made
+ * minWei 10^12× too large, the claim reverted CLAIM<MIN on-chain, and the
+ * sponsor's gas was burned after the transaction was already sent. Rescue
+ * survives the same failure only because its balance guard refuses before
+ * broadcast; the claim has no such guard, so the read must fail CLOSED.
+ *
+ * Symbol is display-only: unreadable → '?', the flow continues.
+ * Returns { decimals: number|null, symbol: string }.
+ */
+export async function readTokenScale(tc) {
+  let decimals = null;
+  try { decimals = Number(await tc.decimals()); } catch { /* required below */ }
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) decimals = null;
+  let symbol = '?';
+  try { symbol = String(await tc.symbol()).trim() || '?'; } catch { /* display-only */ }
+  return { decimals, symbol };
+}
+
 async function executeClaim() {
   if (!get('unlocked')) { requireUnlock(); return; }
   const contractAddr = $('#claimContract').value.trim();
@@ -1207,15 +1256,17 @@ async function executeClaim() {
 
   // Read the token's scale first so the typed amount is encoded with the right
   // decimals, and take the before-numbers the result box will compare against.
-  let decimals = 18;
-  let symbol = '?';
-  try {
-    const tc = new ethers.Contract(tokenAddr,
-      ['function decimals() view returns (uint8)', 'function symbol() view returns (string)'], provider);
-    decimals = Number(await tc.decimals());
-    symbol = String(await tc.symbol()).trim() || '?';
-    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) decimals = 18;
-  } catch { toast('Could not read token decimals/symbol — assuming 18.', 'info'); }
+  // Decimals unreadable = STOP (readTokenScale): the claim's minimum is an
+  // on-chain guard, and a guessed scale sends a doomed transaction whose gas
+  // the sponsor pays. Only a missing symbol downgrades to '?'.
+  const tokenContract = new ethers.Contract(tokenAddr,
+    ['function decimals() view returns (uint8)', 'function symbol() view returns (string)'], provider);
+  const scale = await readTokenScale(tokenContract);
+  if (scale.decimals == null) {
+    return toast('Could not read token decimals on this network — the on-chain minimum cannot be guessed. Check that the token address is the ERC-20 on this chain.', 'error');
+  }
+  const decimals = scale.decimals;
+  const symbol = scale.symbol;
 
   let minWei;
   try { minWei = ethers.parseUnits(amountRaw, decimals); } catch { return toast('Invalid claim amount', 'error'); }
