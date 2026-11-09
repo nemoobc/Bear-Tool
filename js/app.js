@@ -10,7 +10,7 @@ import { POPULAR_TOKENS, ERC20_ABI,
          addCustomNetwork, removeCustomNetwork, getCustomNetworks, CHAIN_PRESETS,
          applyRpcOverrides, providerEndpoint, detectNetworkType, isBundledContract,
          isSafeRpcUrl, rpcLabel} from './network.js';
-import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals } from './nft-intel.js';
+import { resolveSlug, checkEligibility, nftIntel, collectionAsk, contractSafety, costBreakdown, renderCost, renderSignals, osChainFor } from './nft-intel.js';
 import * as wallet from './wallet.js';
 import { $, $all, toast, openModal, closeModal, spinner, confirmTx, promptPassword,
          fmtAmount, fmtUsd, fmtTime, fmtTimeShort, escapeHtml, animateValue, titleCase } from './ui.js';
@@ -1027,12 +1027,15 @@ function bindOpenSeaPanel() {
     const statusEl = status(); if (!statusEl) return;
     const input = $('#openSeaContract')?.value?.trim();
     const addr = $('#openSeaWlAddress')?.value?.trim() || get('address');
-    const chainId = getNetworkById(get('networkId'))?.chain || 'ethereum';
+    // OpenSea's chain SLUG for the active network — via osChainFor, because
+    // network objects have no `.chain` field (the old `?.chain` read was
+    // undefined on every network, so every lookup silently ran on ethereum).
+    const osChain = osChainFor(getNetworkById(get('networkId')));
     if (!input) return statusEl.textContent = t('wl.fillFirst');
     if (!addr) return statusEl.textContent = t('wl.noWallet');
     statusEl.textContent = t('wl.analyzing');
     try {
-      const r = await resolveSlug(input, chainId);
+      const r = await resolveSlug(input, osChain);
       const verdict = await checkEligibility({ slug: r.slug, address: addr });
 
       const head = `<div class="intel-head"><strong>${escapeHtml(r.slug)}</strong>`
@@ -1054,8 +1057,10 @@ function bindOpenSeaPanel() {
 
       // Eligible → gather the rest.
       statusEl.textContent = t('wl.eligible');
-      const intel = r.contract ? await nftIntel({ contract: r.contract, tokenId: r.input?.tokenId, chain: chainId }).catch(() => null) : null;
-      const ask = r.slug ? await collectionAsk({ slug: r.slug, chain: chainId }).catch(() => ({ lowest: null })) : { lowest: null };
+      const intel = r.contract
+        ? await nftIntel({ contract: r.contract, tokenId: r.tokenId ?? r.input?.tokenId, chain: r.chain || osChain || 'ethereum' }).catch(() => null)
+        : null;
+      const ask = r.slug ? await collectionAsk({ slug: r.slug }).catch(() => ({ lowest: null })) : { lowest: null };
       const gasWei = await estimateMintGas(r.contract, addr).catch(() => 0n);
       const ethUsd = await ethPriceUsd().catch(() => null);
       const cost = costBreakdown({
@@ -1149,19 +1154,27 @@ function bindOpenSeaPanel() {
       s.textContent = t('os.listingCancelled');
     } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'err.cancellingListing'); }
   });
-  // Accept top offer — needs contract (+token ID); a full asset link works too
+  // Accept top offer — a full asset link carries its own token id, and the
+  // collection may be a link, slug or contract: resolve it exactly like the
+  // eligibility check (right chain, { nft: … } unwrap) instead of handing a
+  // slug to a route that never existed. The old read hit
+  // /orders/offers?asset_contract_address=… — removed upstream (404 since at
+  // least 2026-11-09) — so it always reported "No active offers found".
   $('#btnAcceptTopOffer')?.addEventListener('click', async () => {
     const s = status(); if (!s) return;
     const input = $('#openSeaContract')?.value?.trim();
-    const tokenId = $('#openSeaTokenId')?.value?.trim();
     const parsed = parseOpenSeaInput(input || '');
-    const contract = parsed?.contract || input;
-    if (!contract || !tokenId) return s.textContent = t('os.fillOffer');
+    const tokenId = $('#openSeaTokenId')?.value?.trim() || parsed?.tokenId;
+    if (!input || !tokenId) return s.textContent = t('os.fillOffer');
     s.textContent = t('os.findingOffer');
     try {
-      const result = await getHighestOffer({ contract, tokenId });
-      s.textContent = result?.price ? `Top offer: $${result.price} — ready to accept.` : 'No active offers found.';
-    } catch { s.textContent = t('os.noOffers'); }
+      const osChain = osChainFor(getNetworkById(get('networkId')));
+      const r = await resolveSlug(input, osChain, tokenId);
+      const result = await getHighestOffer({ slug: r.slug, tokenId, chain: r.chain || osChain });
+      s.textContent = result?.price
+        ? `Top offer: ${result.price} ${result.symbol} — ready to accept.`
+        : 'No active offers found.';
+    } catch (e) { s.textContent = '⚠️ ' + explainError(e, 'err.offers'); }
   });
 }
 

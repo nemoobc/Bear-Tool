@@ -61,6 +61,40 @@ const CHAIN_BY_ID = {
   sepolia: 'sepolia', amoy: 'amoy', 'bsc-testnet': 'bsc',
 };
 
+// OpenSea's chain slug per chainId. Network objects carry `chainId` (and an
+// `id`), never a `chain` slug — the old caller read `net?.chain`, which is
+// undefined on EVERY network, so every lookup silently ran on 'ethereum':
+// a Polygon contract was resolved against Ethereum's index and failed as
+// "not indexed". Measured against the official OpenSea OpenAPI spec
+// (api.opensea.io/api/v2/openapi.json, fetched 2026-11-09).
+const OS_CHAIN_BY_CHAINID = {
+  1: 'ethereum', 11155111: 'sepolia',
+  56: 'bsc', 97: 'bsc-testnet',
+  137: 'polygon', 80002: 'amoy',
+  42161: 'arbitrum', 421614: 'arbitrum-sepolia',
+  10: 'optimism', 11155420: 'optimism-sepolia',
+  8453: 'base', 84532: 'base-sepolia',
+  43114: 'avalanche', 43113: 'avalanche-fuji',
+  100: 'gnosis', 42220: 'celo', 146: 'sonic',
+  59144: 'linea', 534352: 'scroll',
+};
+
+/**
+ * Network → OpenSea chain slug, or null when OpenSea cannot know this chain.
+ * Fail CLOSED: a guessed 'ethereum' silently queries the wrong chain's index,
+ * which is exactly the bug this replaces. Custom networks (id 'custom-…')
+ * fall back to their id only when the id itself looks like a slug; otherwise
+ * the caller must refuse contract lookups and ask for a link/slug instead.
+ */
+export function osChainFor(net) {
+  if (!net) return null;
+  const byChainId = OS_CHAIN_BY_CHAINID[Number(net.chainId)];
+  if (byChainId) return byChainId;
+  const id = String(net.id || '');
+  if (/^[a-z0-9][a-z0-9-]*$/.test(id) && !id.startsWith('custom-')) return id;
+  return null;
+}
+
 /** Accepts an OpenSea link, a bare contract, a slug, or an asset link. */
 export function parseDropInput(input) {
   const s = (input || '').trim();
@@ -85,21 +119,47 @@ export function parseDropInput(input) {
 
 /**
  * Resolve any accepted input to a collection slug.
- * The API is slug-keyed, but a contract address alone is enough: fetching token
- * #0 of a contract returns that NFT's `collection`, which IS the slug. That is
+ *
+ * The API is slug-keyed, but a contract address alone is enough: fetching ONE
+ * NFT of a contract returns that NFT's `collection`, which IS the slug. That is
  * the documented workaround for the missing contract→slug route.
+ *
+ * Chain: an assets URL states its own chain and it wins; otherwise the caller's
+ * chain (osChainFor) is used, and a missing one is a REFUSAL, not a guess —
+ * resolving against the wrong chain's index reports a real contract as
+ * "not indexed". The response is `{ nft: … }` per the official OpenAPI spec
+ * (2026-11-09); reading `collection` off the wrapper threw for every contract.
+ *
+ * Token id: the user's own id beats a guess; with neither, token 0 then 1 are
+ * tried (many collections start at 1) before giving up.
  */
-export async function resolveSlug(input, chain = 'ethereum') {
+export async function resolveSlug(input, chain = null, tokenId = null) {
   const p = parseDropInput(input);
   if (!p) throw new Error('Could not read that link, address or slug.');
   if (p.kind === 'collection') return { slug: p.slug, input: p };
   const c = p.contract;
   if (!c) throw new Error('No contract address in that input.');
-  const nft = await osGet(`/chain/${chain}/contract/${c}/nfts/${p.tokenId || 0}`);
-  if (!nft || !nft.collection) {
-    throw new Error('OpenSea does not index that contract yet, so the collection could not be resolved.');
+  const useChain = p.chain || chain;
+  if (!useChain) {
+    throw new Error('OpenSea cannot be queried for this network — paste the collection link or slug instead.');
   }
-  return { slug: nft.collection, contract: c, chain, input: p };
+  const wanted = p.tokenId || tokenId || null;
+  const fetchNft = async (id) => {
+    const body = await osGet(`/chain/${useChain}/contract/${c}/nfts/${id}`);
+    return body?.nft || body;                 // unwrap { nft: … }
+  };
+  let nft = await fetchNft(wanted ?? 0);
+  if (!nft && wanted == null) nft = await fetchNft(1);
+  if (!nft || !nft.collection) {
+    throw new Error(`OpenSea does not index that contract on ${useChain}, so the collection could not be resolved.`);
+  }
+  return {
+    slug: nft.collection,
+    contract: c,
+    chain: useChain,
+    tokenId: nft.identifier ?? wanted ?? null,
+    input: p,
+  };
 }
 
 // ── eligibility: is this address a recorded holder? ───────────────────────
@@ -184,7 +244,8 @@ export async function checkEligibility({ slug, address }) {
 
 // ── NFT facts: price, OpenSea's own risk flag, traits ───────────────────
 export async function nftIntel({ contract, tokenId, chain = 'ethereum' }) {
-  const nft = await osGet(`/chain/${chain}/contract/${contract}/nfts/${tokenId ?? 0}`);
+  const body = await osGet(`/chain/${chain}/contract/${contract}/nfts/${tokenId ?? 0}`);
+  const nft = body?.nft || body;               // spec wraps it: { nft: … } (2026-11-09)
   if (!nft) return null;
   const usd = typeof nft.estimated_value_usd === 'number' ? nft.estimated_value_usd : null;
   return {
@@ -206,12 +267,29 @@ export async function nftIntel({ contract, tokenId, chain = 'ethereum' }) {
   };
 }
 
-/** Cheapest ask for the collection, in ETH and USD. Labelled as an ASK. */
-export async function collectionAsk({ slug, chain = 'ethereum' }) {
-  const offers = await osGet(`/chain/${chain}/offers/collection/${encodeURIComponent(slug)}?limit=20`);
-  const list = Array.isArray(offers?.offers) ? offers.offers : [];
-  const priced = list
-    .map((o) => ({ price: Number(o.price?.amount), symbol: o.price?.currency || 'ETH' }))
+/**
+ * Lowest ACTIVE ask for the collection — OpenSea's best listing, price
+ * ascending (official spec: GET /listings/collection/{slug}/best →
+ * { listings: [{ status, price: { current: { currency, decimals, value } } }] },
+ * fetched 2026-11-09).
+ *
+ * The old code fetched the OFFERS endpoint — collection-wide BIDS — and read
+ * `price.amount`, a field that does not exist (the payload carries
+ * `price.value` in base units), so every row was filtered out and the "Lowest
+ * ask / floor" row in the cost breakdown showed 0 no matter what. Measured
+ * live 2026-11-09: offers payload has price.{currency,decimals,value};
+ * /collections/{slug} no longer carries floor_price either.
+ */
+export async function collectionAsk({ slug }) {
+  const data = await osGet(`/listings/collection/${encodeURIComponent(slug)}/best`);
+  const rows = Array.isArray(data?.listings) ? data.listings : [];
+  const priced = rows
+    .filter((l) => !l.status || l.status === 'ACTIVE')
+    .map((l) => {
+      const cur = l?.price?.current || {};
+      const dec = Number.isInteger(cur.decimals) ? cur.decimals : 18;
+      return { price: Number(cur.value ?? NaN) / 10 ** dec, symbol: cur.currency || 'ETH' };
+    })
     .filter((o) => Number.isFinite(o.price) && o.price > 0)
     .sort((a, b) => a.price - b.price);
   return { lowest: priced[0] || null, count: priced.length };

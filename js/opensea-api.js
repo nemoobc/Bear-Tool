@@ -168,23 +168,43 @@ export async function getListings({ contract, tokenId, chain = 'ethereum' }) {
 }
 
 // ── Get Offers for a Token ────────────────────────────────
-export async function getOffers({ contract, tokenId, chain = 'ethereum' }) {
-  try {
-    const data = await osFetch(`/orders/offers?asset_contract_address=${contract}&token_ids=${tokenId}&order_by=price&order_direction=desc&limit=20`);
-    return (data?.orders || []).map(o => ({
+// v2 is slug-keyed. The old /orders/offers?asset_contract_address=… route was
+// removed upstream — live-verified 404 NOT_FOUND on 2026-11-09 — so every read
+// came back [] no matter what and the UI always said "No active offers found".
+// Official spec (api.opensea.io/api/v2/openapi.json, fetched 2026-11-09):
+//   GET /offers/collection/{slug}/nfts/{identifier}
+//     → { offers: [{ status, price: { currency, decimals, value }, … }] }
+// `value` is in base units (wei), not a human amount. Errors PROPAGATE: a
+// swallowed failure is indistinguishable from "nobody made an offer".
+export async function getOffers({ slug, contract, tokenId, chain = 'ethereum' }) {
+  if (!slug) {
+    if (!contract) throw new Error('Missing collection or contract');
+    const body = await osFetch(`/chain/${chain}/contract/${contract}/nfts/${tokenId}`);
+    const nft = body?.nft || body;             // spec wraps it: { nft: … }
+    slug = nft?.collection;
+    if (!slug) throw new Error('OpenSea does not index that contract on ' + chain + '.');
+  }
+  const data = await osFetch(`/offers/collection/${encodeURIComponent(slug)}/nfts/${encodeURIComponent(tokenId)}`);
+  return (data?.offers || []).map(o => {
+    const cur = o?.price || {};
+    const dec = Number.isInteger(cur.decimals) ? cur.decimals : 18;
+    return {
       hash: o.order_hash,
-      price: o.current_price ? Number(o.current_price) / 1e18 : 0,
-      maker: o.maker?.address,
-      expiry: o.expiration_time,
+      price: Number(cur.value ?? NaN) / 10 ** dec,
+      symbol: cur.currency || 'ETH',
+      maker: o.protocol_data?.parameters?.offerer || null,
+      expiry: o.order_created_at,
       protocol: o.protocol_address,
+      status: o.status,
       side: 'bid'
-    }));
-  } catch { return []; }
+    };
+  });
 }
 
 // ── Get Highest Offer ─────────────────────────────────────
-export async function getHighestOffer({ contract, tokenId }) {
-  const offers = await getOffers({ contract, tokenId });
+export async function getHighestOffer({ slug, contract, tokenId, chain }) {
+  const offers = (await getOffers({ slug, contract, tokenId, chain }))
+    .filter((o) => !o.status || o.status === 'ACTIVE');
   if (!offers.length) return null;
   return offers.sort((a, b) => b.price - a.price)[0];
 }
