@@ -1197,15 +1197,70 @@ async function quoteClaimFee({ provider, chainId, sponsorAddress, target, target
  * broadcast; the claim has no such guard, so the read must fail CLOSED.
  *
  * Symbol is display-only: unreadable → '?', the flow continues.
- * Returns { decimals: number|null, symbol: string }.
+ * On a decimals failure the caught error is returned as `error` (present
+ * ONLY on failure, so a healthy read stays exactly { decimals, symbol }) —
+ * the caller needs it to tell a dead RPC from a non-ERC-20 address.
+ * Returns { decimals: number|null, symbol: string, error?: Error }.
  */
 export async function readTokenScale(tc) {
   let decimals = null;
-  try { decimals = Number(await tc.decimals()); } catch { /* required below */ }
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) decimals = null;
+  let decErr = null;
+  try { decimals = Number(await tc.decimals()); } catch (e) { decErr = e; }
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
+    decimals = null;
+    decErr = decErr || new Error('decimals out of range');
+  }
   let symbol = '?';
   try { symbol = String(await tc.symbol()).trim() || '?'; } catch { /* display-only */ }
-  return { decimals, symbol };
+  return decErr && decimals == null ? { decimals, symbol, error: decErr } : { decimals, symbol };
+}
+
+/**
+ * Is this a dead-endpoint failure rather than the contract saying something?
+ * Measured 2026-11-09 against a live public RPC: 5 of 25 rapid decimals()
+ * reads on 1rpc.io/eth failed with "missing response for request" — a
+ * transport flake, not a property of the token. Decode/revert answers are
+ * the opposite class: the node DID answer, and retrying cannot change it.
+ */
+export function isTransportError(err) {
+  if (!err) return false;
+  const m = String(err.shortMessage || err.message || err);
+  if (/could not decode|call_exception|bad data decoding|decimals out of range|revert/i.test(m)) return false;
+  return /missing response|timeout|timed out|429|rate limit|max retries|econn|fetch failed|network|transport|failed to|unexpected token|doctype|server error|bad response|50[234]|429/i.test(m);
+}
+
+/**
+ * The scale read with ONE bounded retry, for transport failures only.
+ * A flaky public RPC must not lock the claim behind an honest-but-final
+ * error; a node that answers "not an ERC-20" must not be asked twice.
+ * `sleep` is injectable so tests do not wait.
+ */
+export async function readTokenScaleResilient(tc, { retries = 1, delayMs = 700, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  let scale = await readTokenScale(tc);
+  for (let i = 0; i < retries && scale.decimals == null && isTransportError(scale.error); i++) {
+    await sleep(delayMs);
+    scale = await readTokenScale(tc);
+  }
+  return scale;
+}
+
+/**
+ * The three honest endings of a failed scale read. Each names its own next
+ * step, and the transport case carries the node's own short reason — the
+ * old single sentence could not tell "your RPC is rate-limiting you" from
+ * "that address is not an ERC-20 here", so both looked like a wrong address.
+ */
+export function scaleFailureMessage(kind, err, net) {
+  const why = String(err?.shortMessage || err?.message || err || '').replace(/\s+/g, ' ').trim().slice(0, 90);
+  if (kind === 'transport') {
+    return 'Could not read token decimals — the RPC endpoint did not answer'
+      + (why ? ` (${why})` : '')
+      + '. Try again, or pick another RPC in Network settings.';
+  }
+  if (kind === 'no-contract') {
+    return `No contract at that address on ${net?.name || 'this network'} — that token address belongs to a different chain.`;
+  }
+  return 'Could not read token decimals on this network — the on-chain minimum cannot be guessed. Check that the token address is the ERC-20 on this chain.';
 }
 
 async function executeClaim() {
@@ -1256,14 +1311,29 @@ async function executeClaim() {
 
   // Read the token's scale first so the typed amount is encoded with the right
   // decimals, and take the before-numbers the result box will compare against.
-  // Decimals unreadable = STOP (readTokenScale): the claim's minimum is an
+  // Decimals unreadable = STOP (fail CLOSED): the claim's minimum is an
   // on-chain guard, and a guessed scale sends a doomed transaction whose gas
   // the sponsor pays. Only a missing symbol downgrades to '?'.
+  // One bounded retry first (a public RPC dropping a response is measured,
+  // 5/25 reads on 1rpc), then say WHICH failure it was: a dead endpoint, an
+  // address with no code on this chain, and a contract without decimals()
+  // are three problems with three different next steps.
   const tokenContract = new ethers.Contract(tokenAddr,
     ['function decimals() view returns (uint8)', 'function symbol() view returns (string)'], provider);
-  const scale = await readTokenScale(tokenContract);
+  const scale = await readTokenScaleResilient(tokenContract);
   if (scale.decimals == null) {
-    return toast('Could not read token decimals on this network — the on-chain minimum cannot be guessed. Check that the token address is the ERC-20 on this chain.', 'error');
+    let kind;
+    if (isTransportError(scale.error)) {
+      kind = 'transport';
+    } else {
+      // The node answered something undecodable — ask whether there is even
+      // a contract here before blaming the token's ABI.
+      try {
+        const code = await provider.getCode(tokenAddr);
+        kind = (!code || code === '0x') ? 'no-contract' : 'not-erc20';
+      } catch (e) { kind = 'transport'; scale.error = e; }
+    }
+    return toast(scaleFailureMessage(kind, scale.error, net), 'error');
   }
   const decimals = scale.decimals;
   const symbol = scale.symbol;
