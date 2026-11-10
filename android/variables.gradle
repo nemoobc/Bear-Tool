@@ -1,5 +1,5 @@
 ext {
-    minSdkVersion = 33 // Android 13 — floor the app is built for (user requirement)
+    minSdkVersion = 30 // Android 13 — floor the app is built for (user requirement)
     compileSdkVersion = 36
     targetSdkVersion = 33 // Android 13 behavior target
     androidxActivityVersion = '1.11.0'
