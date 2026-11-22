@@ -87,6 +87,16 @@ const CASES = [
     new Error('OpenSea 404: no collection named zz-nope'), /no collection/i],
   ['opensea 429',
     new Error('HTTP 429 rate limit'), /rate-limit/i],
+  // From the 2026-11-14 device send test: ethers v6 wrapped anvil's 403
+  // (upstream archive token) as CALL_EXCEPTION with no revert data, and the
+  // user got the no-rule fallback — "written to the browser console" — on a
+  // phone with no console.
+  ['node refused to estimate (no revert data)',
+    Object.assign(new Error(
+      'missing revert data (action="estimateGas", data=null, reason=null, ' +
+      'transaction={ "data": "0x", "from": "0x5618582c", "to": "0x70997970" })'
+    ), { code: 'CALL_EXCEPTION' }),
+    /would not simulate|simulated|fee could not be calculated/i],
 ];
 
 for (const [name, input, pattern] of CASES) {
@@ -217,6 +227,23 @@ test('a failure with no message still tells the user something', () => {
     assert.ok(out.trim().length > 0, `${label}: pesan kosong sampai ke user → ${JSON.stringify(out)}`);
     assert.doesNotMatch(out, /\bundefined\b|\bnull\b|\[object/, `${label}: nilai technical bocor → ${out}`);
   }
+});
+
+// The whole point of the estimateGas rule: that failure used to hit the no-rule
+// fallback, whose "detail was written to the browser console" is a dead end on
+// a phone. The new sentence must win, and the raw machine text must not leak.
+test('a node refusing to estimate gets a real sentence, not the console fallback', () => {
+  const err = Object.assign(new Error(
+    'missing revert data (action="estimateGas", data=null, reason=null, transaction={ "data": "0x" })'
+  ), { code: 'CALL_EXCEPTION' });
+  const out = explainError(err, 'Send');
+  assert.doesNotMatch(out, /browser console/i, `masih fallback console: "${out}"`);
+  assert.doesNotMatch(out, /missing revert data|CALL_EXCEPTION|0x[0-9a-f]{8,}/i, `teks mentah bocor: "${out}"`);
+  assert.match(out, /try again/i, `tanpa aksi berikutnya: "${out}"`);
+  // The same words on a swap quote carry action="call" — a different problem.
+  // The estimateGas rule must not claim it.
+  const call = explainError(new Error('missing revert data (action="call", data=null)'), 'Swap');
+  assert.doesNotMatch(call, /would not simulate/i, `rule estimateGas menelan action="call": "${call}"`);
 });
 
 // The trim() guard must not start swallowing real sentences: the whole point of

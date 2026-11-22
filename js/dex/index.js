@@ -1039,6 +1039,7 @@ async function startLaunch(mount, root) {
       tokenContract(quoteAddr, provider).decimals(),
     ]);
     const allowance = await tokenContract(quoteAddr, provider).allowance(addr, factoryAddr);
+    asking.quoteSymbol = String(qSym); // the sheet prints "You deposit 0.2 <symbol>"
     if (allowance < asking.seedQuote) {
       const s = openSheet(mount, t('dex.sheet.a.title'),
         legApproveBody({ symbol: String(qSym), decimals: Number(qDec) }, factoryAddr, asking.seedQuote),
@@ -1074,6 +1075,10 @@ async function startLaunch(mount, root) {
 async function openTradePanel(mount, pairAddress) {
   const body = mount.querySelector('#dexTradeBody');
   if (!body) return;
+  // A new open starts from a clean sheet: leaving the previous pair's symbols
+  // and reserves on screen while the new address fails to read made a wrong
+  // address look like a live pool with stale numbers.
+  body.innerHTML = `<div class="dex-sending">${t('dex.trade.opening')}</div>`;
   setStatus(mount, t('dex.trade.opening'), 'busy');
   const addr = get('address') || '';
   if (!addr) { setStatus(mount, t('dex.wallet.none'), 'err'); return; }
@@ -1159,6 +1164,20 @@ async function startTrade(mount, st) {
   }
 }
 
+// The sheet speaks the user's language, never the module's: a locked wallet
+// used to print the raw "no-signer" string into the sheet body while the
+// status line stayed empty — the user saw a dead end and no reason.
+const SHEET_ERR_KEY = {
+  signer: 'dex.wallet.none',
+  chain: 'dex.engine.off',
+  revert: 'dex.swap.failm',
+};
+export function sheetErrorText(e) {
+  const key = SHEET_ERR_KEY[e?.why];
+  if (key) return t(key);
+  return String(e?.shortMessage || e?.message || 'error').slice(0, 150);
+}
+
 // One send-button lifecycle: confirm → busy (send) → settle. Rejecting the
 // confirm (cancel) resolves false and the chain never starts.
 function runSheetSend(sheet, send) {
@@ -1173,13 +1192,16 @@ function runSheetSend(sheet, send) {
       const body = sheet.wrap.querySelector('[data-dex-sheet-body]');
       if (body) body.innerHTML = `<div class="dex-sending">${t('dex.swap.send')}</div>`;
       try {
-        await send();
+        // The verdict must reach the caller: startLaunch reads the launch
+        // token/pair straight from `v.receipt.logs`. Resolving a bare `true`
+        // here made every successful launch report "refused by the chain".
+        const out = await send();
         sheet.forceRemove();
-        resolve(true);
+        resolve(out === undefined || out === null ? true : out);
       } catch (e) {
         sheet.wrap._busy = false; // the caller may cancel the error sheet
         const body2 = sheet.wrap.querySelector('[data-dex-sheet-body]');
-        if (body2) body2.innerHTML = `<div class="dex-sending dex-err">${escapeHtml(String(e.shortMessage || e.message || 'error').slice(0, 150))}</div>`;
+        if (body2) body2.innerHTML = `<div class="dex-sending dex-err">${escapeHtml(sheetErrorText(e))}</div>`;
         sheet.confirmB.disabled = false;
         sheet.cancelB.disabled = false;
         done = false;

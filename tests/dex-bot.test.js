@@ -202,3 +202,70 @@ test('tombstone: delete per chain, scans cannot resurrect it, address junk ignor
   const live = ls.withoutDeleted(rows, 11155111);
   assert.deepEqual(live.map((r) => r.pair), ['0x' + '02'.repeat(20)], 'the deleted coin does not come back');
 });
+
+// Regression: receiptVerdict() reports the on-chain outcome as `kind`, never
+// as `ok`. Reading `?.ok` made the funding loop throw fundFailed right after a
+// SUCCESSFUL gas drip (device run: 2 drips mined, 0 WETH transfers) and made
+// send() report every mined swap as a failure. Source-level guard — the wiring
+// lives inside start()/send(), which need a browser+chain to execute.
+test('bot.js reads receiptVerdict verdicts by kind, never by the phantom .ok field', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../js/dex/bot.js', import.meta.url), 'utf8');
+  const calls = src.match(/receiptVerdict\(/g) || [];
+  assert.ok(calls.length >= 3, `expected the funding loop and send() to consult the verdict, found ${calls.length}`);
+  const direct = src.match(/receiptVerdict\([\s\S]{0,80}?\)\??\.\w+/g) || [];
+  for (const u of direct) assert.match(u, /\.kind\b/, `verdict access must be .kind: ${u}`);
+  assert.doesNotMatch(src, /receiptVerdict\([^)]*\)\??\.ok\b/, '.ok does not exist on a verdict');
+});
+
+// Regression B5: the band fields used to be `floorpct`/`ceilpct` while loadCfg
+// and start() spoke `floorPct`/`ceilPct`. Every field written by the user was
+// filed under a key nobody read, so start() always fell back to 90/110 and the
+// pool sat in-band with nothing to sell ("no address has enough balance").
+// Device proof: DOM showed floorpct=150 but botState().floor was 0.9 * price.
+// One canonical spelling now runs from the markup through save/restore to
+// start(); this test fails the moment any one of those three drifts again.
+test('bot band: every panel field is a real config key, camelCase end to end', async () => {
+  const PAIR = '0x' + '12'.repeat(20);
+  SEED_STORE.clear();
+  const html = b.botStubHtml();
+  const keys = [...html.matchAll(/data-cfg="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(keys.sort(), ['budget', 'ceilPct', 'floorPct', 'seconds', 'size', 'wallets'],
+    'the panel exposes exactly one field per config slot');
+  const cfg = b.loadCfg(PAIR);
+  for (const k of keys) assert.ok(k in cfg, `field "${k}" has no loadCfg slot — its value would be ignored`);
+
+  // Restore from a saved band, then round-trip a fresh one.
+  b.saveCfg(PAIR, { floorPct: 150, ceilPct: 300, size: '0.005' });
+  assert.deepEqual(
+    [b.loadCfg(PAIR).floorPct, b.loadCfg(PAIR).ceilPct, b.loadCfg(PAIR).size],
+    [150, 300, '0.005'],
+    'a saved band must come back with the same camelCase keys the fields use',
+  );
+  // A pre-fix localStorage entry with the old lowercase spelling still loads.
+  SEED_STORE.clear();
+  SEED_STORE.set('bear.dex.bot.' + PAIR, JSON.stringify({ floorpct: 88, ceilpct: 121 }));
+  assert.deepEqual([b.loadCfg(PAIR).floorPct, b.loadCfg(PAIR).ceilPct], [88, 121]);
+
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../js/dex/bot.js', import.meta.url), 'utf8');
+  assert.match(src, /p\.floorPct \?\?/, 'start() must read the canonical floorPct key');
+  assert.match(src, /p\.ceilPct \?\?/, 'start() must read the canonical ceilPct key');
+  assert.doesNotMatch(src, /field\('floorpct'|field\('ceilpct'/, 'no lowercase band field may return');
+});
+
+// Regression B6: SLIP_BPS was 100n, but slippageMinOut only accepts an integer
+// Number. The TypeError landed inside tick()'s silent catch, so every swap
+// died before broadcast: on-device proof was 4 funding tx mined, 0 trades,
+// panel still saying "Running". Guard the type AND the real call.
+test('bot slippage: SLIP_BPS is a Number that slippageMinOut actually accepts', async () => {
+  const s = await import('../js/dex/swap.js');
+  assert.equal(typeof b.SLIP_BPS, 'number', 'a bigint bps is rejected by slippageMinOut');
+  assert.equal(b.SLIP_BPS, 100);
+  const out = 1_215_942_629_948_532_819_474n; // real getAmountOut from the fork
+  assert.equal(s.slippageMinOut(out, b.SLIP_BPS), (out * 9900n) / 10000n);
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../js/dex/bot.js', import.meta.url), 'utf8');
+  assert.match(src, /SLIP_BPS = 100;/, 'the bot constant must stay a plain integer Number');
+  assert.doesNotMatch(src, /SLIP_BPS\s*=\s*\d+n\b/, 'no bigint slippage may come back');
+});

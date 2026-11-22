@@ -50,6 +50,59 @@ export function decodeLaunched(log) {
  * event data, everything else (reserves, symbols, my shares) is read live
  * right before it is shown.
  */
+// A scan from genesis is the slowest thing the DEX card does: the pool list
+// asked the RPC for every Launched log since block 0 on every open, and a
+// public RPC answers that in seconds — or stalls. The scan remembers where it
+// stopped per chain+factory, so the second open only asks for the new blocks.
+const SCAN_CACHE_PREFIX = 'bear.dex.scan.';
+const REORG_OVERLAP = 12; // a shallow reorg re-reads the tail instead of trusting it
+
+export function scanCacheKey(chainId, factoryAddress) {
+  return `${SCAN_CACHE_PREFIX}${chainId}.${String(factoryAddress).toLowerCase()}`;
+}
+
+/** Old rows first, new rows win per token: an overlap block is not a dupe. */
+export function mergeScanRows(oldRows, newRows) {
+  const byToken = new Map();
+  for (const row of [...(oldRows || []), ...(newRows || [])]) {
+    if (row?.token) byToken.set(String(row.token).toLowerCase(), row);
+  }
+  return [...byToken.values()];
+}
+
+function readScanCache(key) {
+  try {
+    const raw = globalThis.localStorage?.getItem(key);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    if (!Number.isFinite(saved?.block) || !Array.isArray(saved?.pools)) return null;
+    return {
+      block: saved.block,
+      pools: saved.pools.map((r) => ({ ...r, lpShares: BigInt(r.lpShares ?? 0) })),
+    };
+  } catch { return null; }
+}
+
+function writeScanCache(key, block, pools) {
+  try {
+    // lpShares is a BigInt; JSON has no BigInt. The row travels as a string
+    // and comes back as one, the same flattening launch memory already uses.
+    globalThis.localStorage?.setItem(key, JSON.stringify({
+      block,
+      pools: pools.map((r) => ({ ...r, lpShares: String(r.lpShares ?? 0n) })),
+    }));
+  } catch { /* private mode / quota — the scan still answers, just slower */ }
+}
+
+/** The chain decides the cache key; a provider without getNetwork gets none. */
+async function scanChainId(providerLike) {
+  try {
+    const net = await providerLike?.getNetwork?.();
+    const id = Number(net?.chainId);
+    return Number.isFinite(id) ? id : null;
+  } catch { return null; }
+}
+
 export async function scanFactory(providerLike, factoryAddress) {
   const factory = factoryContract(factoryAddress, providerLike);
   // An address without code would play factory by throwing at the first
@@ -58,14 +111,29 @@ export async function scanFactory(providerLike, factoryAddress) {
   if (typeof code === 'string' && code.replace(/^0x/, '') === '') {
     const e = new Error('dex/pools: not-a-contract'); e.why = 'contract'; throw e;
   }
-  const [quote, pools] = await Promise.all([
+  const chainId = await scanChainId(providerLike);
+  const cacheKey = chainId == null ? '' : scanCacheKey(chainId, factoryAddress);
+  const cached = cacheKey ? readScanCache(cacheKey) : null;
+  let latest = null;
+  try { latest = await providerLike.getBlockNumber?.(); } catch { latest = null; }
+  if (!Number.isFinite(latest)) latest = null;
+
+  // A cached height ABOVE the chain (fork restarted, RPC swapped) describes
+  // pools this chain never had: drop it and scan honestly from zero.
+  const usable = cached && latest != null && cached.block <= latest;
+  const fromBlock = usable ? Math.max(0, cached.block - REORG_OVERLAP) : 0;
+  const oldRows = usable ? cached.pools : [];
+
+  const [quote, logs] = await Promise.all([
     factory.quote(),
-    factory.queryFilter(factory.filters.Launched(), 0, 'latest'),
+    factory.queryFilter(factory.filters.Launched(), fromBlock, 'latest'),
   ]);
+  const pools = mergeScanRows(oldRows, logs.map(decodeLaunched).filter(Boolean));
+  if (cacheKey && latest != null) writeScanCache(cacheKey, latest, pools);
   return {
     factory: factoryAddress.toLowerCase(),
     quote: String(quote).toLowerCase(),
-    pools: pools.map(decodeLaunched).filter(Boolean),
+    pools,
   };
 }
 

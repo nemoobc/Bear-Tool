@@ -61,6 +61,15 @@ const TABLE = [
     'Another transaction from this wallet is pending. Wait for it, or raise the fee above what it paid.'],
   [/gas limit reached|out of gas/i,
     'The transaction ran out of gas before it finished. Try again, or use a route that does more work.'],
+  // The node would not even simulate the transaction, so there is no fee to
+  // quote and no revert reason to show. Seen on a local fork (2026-11-14 send
+  // test): anvil asked its upstream for historical state, the upstream answered
+  // 403, and the user saw "The technical detail was written to the browser
+  // console" — a dead end on a phone, where there is no console. Specific
+  // action="estimateGas" only: the same words on a swap quote (action="call")
+  // are a different problem with a different remedy.
+  [/missing revert data[\s\S]{0,120}?action="estimateGas"/i,
+    'The network node would not simulate this transaction, so the fee could not be calculated. Try again — if this is a custom network, its node may be missing some chain data.'],
 
   // ── the amount does not fit ──────────────────────────────────────────────
   [/ERC20: transfer amount exceeds balance|ds-math-sub-underflow|insufficient balance/i,

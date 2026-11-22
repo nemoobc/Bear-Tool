@@ -35,7 +35,11 @@ import { canDerive, botStartIndex, deriveBotWallets, splitBudget } from './bot-w
 export { WHY };
 export { canDerive, botStartIndex, deriveBotWallets, splitBudget };
 
-export const SLIP_BPS = 100n; // 1% — wider than the manual default: the bot cannot watch a revert and re-quote
+// 1% — wider than the manual default: the bot cannot watch a revert and
+// re-quote. A NUMBER, not 100n: slippageMinOut's contract is an integer
+// 1..3000 Number, and a bigint threw inside tick(), which swallowed it — so
+// every bot swap silently failed with zero trades and a "Running" panel.
+export const SLIP_BPS = 100;
 const CFG = (pair) => `bear.dex.bot.${pair}`;
 const esc = (x) => escapeHtml(String(x));
 
@@ -80,8 +84,11 @@ function loadCfg(pair) {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(CFG(pair)) || '{}'); } catch { /* corrupt → defaults */ }
   return {
-    floorPct: clamp(saved.floorPct ?? 90, 1, 1000),
-    ceilPct: clamp(saved.ceilPct ?? 110, 1, 1000),
+    // The panel's data-cfg keys are the camelCase names below. Older builds
+    // saved the lowercase spelling (the fields used to be `floorpct`), so
+    // accept it here instead of silently throwing a user's saved band away.
+    floorPct: clamp(saved.floorPct ?? saved.floorpct ?? 90, 1, 1000),
+    ceilPct: clamp(saved.ceilPct ?? saved.ceilpct ?? 110, 1, 1000),
     size: String(saved.size ?? '0.01'),
     budget: String(saved.budget ?? ''),
     wallets: clamp(saved.wallets ?? 4, 1, 20),
@@ -131,8 +138,8 @@ export function botStubHtml() {
         <label class="dex-k" for="dexBotPair">${esc(t('dex.bot.pair'))}</label>
         <input id="dexBotPair" class="dex-input" placeholder="0x…" spellcheck="false" aria-label="${esc(t('dex.bot.pair'))}">
         <div class="dex-bot-grid">
-          ${field('floorpct', 'dex.bot.floor', 'dex.bot.floorHint', 1, 1000, '1')}
-          ${field('ceilpct', 'dex.bot.ceil', 'dex.bot.ceilHint', 1, 1000, '1')}
+          ${field('floorPct', 'dex.bot.floor', 'dex.bot.floorHint', 1, 1000, '1')}
+          ${field('ceilPct', 'dex.bot.ceil', 'dex.bot.ceilHint', 1, 1000, '1')}
           ${field('size', 'dex.bot.size', 'dex.bot.sizeHint', null, null, '0.01')}
           ${field('budget', 'dex.bot.budget', 'dex.bot.budgetHint', null, null, '10')}
           ${field('wallets', 'dex.bot.wallets', 'dex.bot.walletsHint', 1, 20, '1')}
@@ -329,14 +336,17 @@ export async function start(p = {}) {
     // gas FIRST — a wallet holding quote but no native coin cannot send its
     // own approve or swap; the swap would burn nothing but time.
     for (let i = 0; i < wallets.length; i++) {
+      // receiptVerdict reports an on-chain OUTCOME as `kind`, not `ok` — the
+      // old `?.ok` read a field that never existed, so every start() threw
+      // fundFailed right after the first successful gas drip.
       const g = await master.sendTransaction({ to: wallets[i].address, value: gasDrip })
         .then((sent) => waitForReceipt(sent, { label: `dex bot gas ${i + 1}` }))
-        .then((v) => receiptVerdict(v)?.ok);
+        .then((v) => receiptVerdict(v)?.kind === 'success');
       if (!g) throw new Error(t('dex.bot.fundFailed'));
       if (shares[i] > 0n) {
         const s = await masterQC.transfer(wallets[i].address, shares[i])
           .then((sent) => waitForReceipt(sent, { label: `dex bot fund ${i + 1}` }))
-          .then((v) => receiptVerdict(v)?.ok);
+          .then((v) => receiptVerdict(v)?.kind === 'success');
         if (!s) throw new Error(t('dex.bot.fundFailed'));
       }
     }
@@ -436,7 +446,8 @@ async function send(signer, to, data) {
   try {
     const sentTx = await signer.sendTransaction({ to, data });
     const v = receiptVerdict(await waitForReceipt(sentTx, { label: 'dex bot' }));
-    return !!v?.ok;
+    // same field-name trap as the funding loop: verdict exposes `kind`, never `ok`.
+    return v?.kind === 'success';
   } catch { return false; }
 }
 

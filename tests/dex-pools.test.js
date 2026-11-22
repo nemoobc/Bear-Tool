@@ -170,3 +170,63 @@ test('factoryRemember/Recall per chainId, Forget clears one chain only', () => {
     delete globalThis.localStorage;
   }
 });
+
+// ── T12 scan cache: second open asks only the new blocks ──────────────
+test('scanFactory: cache per chain+factory, overlap re-read, fork reset rescans', async () => {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  };
+  const evIface = new realEthers.Interface(BEAR_FACTORY_ABI);
+  const mkLog = (token, pair) => {
+    const ev = evIface.encodeEventLog(evIface.getEvent('Launched'),
+      [token, pair, FAC, 10n, 0n, 5n]);
+    return { topics: ev.topics, data: ev.data };
+  };
+  const TOKB = '0x' + '03'.repeat(20), PAIRB = '0x' + '04'.repeat(20);
+  const calls = [];
+  let latest = 100;
+  let logs = [mkLog(TOKA, PAIRA)];
+  const prov = {
+    getCode: async () => '0x6080',
+    getNetwork: async () => ({ chainId: 11155111n }),
+    getBlockNumber: async () => latest,
+  };
+  READS.clear();
+  READS.set(FAC.toLowerCase(), {
+    quote: FAKEQ,
+    queryFilter: async (_f, from, to) => { calls.push([from, to]); return logs; },
+  });
+
+  const one = await p.scanFactory(prov, FAC);
+  assert.equal(one.pools.length, 1);
+  assert.deepEqual(calls[0], [0, 'latest'], 'the first scan is honest: from zero');
+  const key = p.scanCacheKey(11155111, FAC);
+  assert.equal(JSON.parse(store.get(key)).block, 100, 'the cache remembers the height');
+  assert.equal(JSON.parse(store.get(key)).pools[0].lpShares, '5', 'BigInt flattens to a string');
+
+  // second open: only the overlap tail is asked, the row survives from cache
+  latest = 104; logs = [];
+  const two = await p.scanFactory(prov, FAC);
+  assert.deepEqual(calls[1], [100 - 12, 'latest'], 'only new blocks + reorg overlap');
+  assert.equal(two.pools.length, 1, 'cached rows come back without a rescan');
+  assert.equal(two.pools[0].lpShares, 5n, 'lpShares thaws back to BigInt');
+
+  // an overlap block repeating the same event is not a duplicate
+  logs = [mkLog(TOKA, PAIRA), mkLog(TOKB, PAIRB)];
+  const three = await p.scanFactory(prov, FAC);
+  assert.equal(three.pools.length, 2, 'token-keyed merge: repeat log, one row');
+
+  // a chain shorter than the cache (fork restarted) rescans from zero
+  store.set(key, JSON.stringify({ block: 999, pools: [] }));
+  const four = await p.scanFactory(prov, FAC);
+  assert.deepEqual(calls[calls.length - 1], [0, 'latest'], 'stale height → full scan');
+  assert.equal(four.pools.length, 2);
+
+  // no getNetwork → no cache, but the scan still answers
+  const bare = await p.scanFactory({ getCode: async () => '0x6080' }, FAC);
+  assert.equal(bare.pools.length, 2);
+  delete globalThis.localStorage;
+});

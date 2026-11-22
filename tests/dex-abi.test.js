@@ -22,7 +22,11 @@ const art = compileDex(DEX_SOLIDITY);
 // flattened). If the shipped file and this fan-out stop matching, the UI's
 // ABI has drifted and no wallet should ever encode against it.
 function canonSetT(abi) {
-  const tt = (c) => c.map((x) => x.components?.length ? { name: x.name, type: x.type, components: tt(x.components) } : { name: x.name, type: x.type });
+  // `indexed` is NOT cosmetic: a log's topics/data split follows it, so a
+  // fragment that drops it decodes real chain logs as "data out-of-bounds".
+  const tt = (c) => c.map((x) => x.components?.length
+    ? { name: x.name, type: x.type, ...(x.indexed ? { indexed: true } : {}), components: tt(x.components) }
+    : { name: x.name, type: x.type, ...(x.indexed ? { indexed: true } : {}) });
   return new Set(abi.map((e) => {
     const o = { type: e.type, name: e.name };
     if (e.stateMutability) o.stateMutability = e.stateMutability;

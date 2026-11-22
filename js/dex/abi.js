@@ -15,9 +15,9 @@
 
 export const BEAR_TOKEN_ABI = [
       {"type":"constructor","stateMutability":"nonpayable","inputs":[{"name":"factory_","type":"address"},{"name":"meta","type":"tuple","components":[{"name":"name","type":"string"},{"name":"symbol","type":"string"},{"name":"image","type":"string"},{"name":"desc","type":"string"}]},{"name":"totalSupply_","type":"uint256"},{"name":"quoteToken_","type":"address"}]},
-      {"type":"event","name":"Approval","inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"},{"name":"value","type":"uint256"}]},
+      {"type":"event","name":"Approval","inputs":[{"name":"owner","type":"address","indexed":true},{"name":"spender","type":"address","indexed":true},{"name":"value","type":"uint256"}]},
       {"type":"event","name":"SocialsSet","inputs":[{"name":"twitter","type":"string"},{"name":"telegram","type":"string"},{"name":"website","type":"string"}]},
-      {"type":"event","name":"Transfer","inputs":[{"name":"from","type":"address"},{"name":"to","type":"address"},{"name":"value","type":"uint256"}]},
+      {"type":"event","name":"Transfer","inputs":[{"name":"from","type":"address","indexed":true},{"name":"to","type":"address","indexed":true},{"name":"value","type":"uint256"}]},
       {"type":"function","name":"allowance","stateMutability":"view","inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},
       {"type":"function","name":"allowances","stateMutability":"view","inputs":[{"name":"","type":"address"},{"name":"","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},
       {"type":"function","name":"approve","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"value","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
@@ -37,28 +37,28 @@ export const BEAR_TOKEN_ABI = [
       {"type":"function","name":"transfer","stateMutability":"nonpayable","inputs":[{"name":"to","type":"address"},{"name":"value","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
       {"type":"function","name":"transferFrom","stateMutability":"nonpayable","inputs":[{"name":"from","type":"address"},{"name":"to","type":"address"},{"name":"value","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
       {"type":"function","name":"twitter","stateMutability":"view","outputs":[{"name":"","type":"string"}]},
-      {"type":"function","name":"website","stateMutability":"view","outputs":[{"name":"","type":"string"}]}
+      {"type":"function","name":"website","stateMutability":"view","outputs":[{"name":"","type":"string"}]},
     ];
 
 export const BEAR_FACTORY_ABI = [
       {"type":"constructor","stateMutability":"nonpayable","inputs":[{"name":"quote_","type":"address"}]},
-      {"type":"event","name":"Launched","inputs":[{"name":"token","type":"address"},{"name":"pair","type":"address"},{"name":"launcher","type":"address"},{"name":"creatorFeeBps","type":"uint256"},{"name":"lpLockUntil","type":"uint64"},{"name":"lpShares","type":"uint256"}]},
+      {"type":"event","name":"Launched","inputs":[{"name":"token","type":"address","indexed":true},{"name":"pair","type":"address","indexed":true},{"name":"launcher","type":"address","indexed":true},{"name":"creatorFeeBps","type":"uint256"},{"name":"lpLockUntil","type":"uint64"},{"name":"lpShares","type":"uint256"}]},
       {"type":"function","name":"launch","stateMutability":"nonpayable","inputs":[{"name":"meta","type":"tuple","components":[{"name":"name","type":"string"},{"name":"symbol","type":"string"},{"name":"image","type":"string"},{"name":"desc","type":"string"},{"name":"twitter","type":"string"},{"name":"telegram","type":"string"},{"name":"website","type":"string"}]},{"name":"totalSupply_","type":"uint256"},{"name":"creatorFeeBps_","type":"uint256"},{"name":"lpLockUntil","type":"uint64"},{"name":"seedQuote","type":"uint256"},{"name":"seedToken","type":"uint256"},{"name":"minShares","type":"uint256"}],"outputs":[{"name":"tokenOut","type":"address"},{"name":"pairOut","type":"address"}]},
       {"type":"function","name":"pairOf","stateMutability":"view","inputs":[{"name":"","type":"address"}],"outputs":[{"name":"","type":"address"}]},
       {"type":"function","name":"quote","stateMutability":"view","outputs":[{"name":"","type":"address"}]},
       {"type":"function","name":"tokenCount","stateMutability":"view","outputs":[{"name":"","type":"uint256"}]},
-      {"type":"function","name":"tokens","stateMutability":"view","inputs":[{"name":"","type":"uint256"}],"outputs":[{"name":"","type":"address"}]}
+      {"type":"function","name":"tokens","stateMutability":"view","inputs":[{"name":"","type":"uint256"}],"outputs":[{"name":"","type":"address"}]},
     ];
 
 export const BEAR_PAIR_ABI = [
       {"type":"constructor","stateMutability":"nonpayable","inputs":[{"name":"factory_","type":"address"},{"name":"token_","type":"address"},{"name":"quote_","type":"address"},{"name":"creator_","type":"address"},{"name":"creatorFeeBps_","type":"uint256"}]},
-      {"type":"event","name":"Approval","inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"},{"name":"value","type":"uint256"}]},
-      {"type":"event","name":"FeesClaimed","inputs":[{"name":"creator","type":"address"},{"name":"amount","type":"uint256"}]},
-      {"type":"event","name":"LiquidityAdded","inputs":[{"name":"who","type":"address"},{"name":"shares","type":"uint256"}]},
-      {"type":"event","name":"LiquidityRemoved","inputs":[{"name":"who","type":"address"},{"name":"shares","type":"uint256"}]},
-      {"type":"event","name":"Locked","inputs":[{"name":"who","type":"address"},{"name":"until","type":"uint64"}]},
-      {"type":"event","name":"Swap","inputs":[{"name":"who","type":"address"},{"name":"to","type":"address"},{"name":"amountIn","type":"uint256"},{"name":"amountOut","type":"uint256"},{"name":"quoteIn","type":"bool"}]},
-      {"type":"event","name":"Transfer","inputs":[{"name":"from","type":"address"},{"name":"to","type":"address"},{"name":"value","type":"uint256"}]},
+      {"type":"event","name":"Approval","inputs":[{"name":"owner","type":"address","indexed":true},{"name":"spender","type":"address","indexed":true},{"name":"value","type":"uint256"}]},
+      {"type":"event","name":"FeesClaimed","inputs":[{"name":"creator","type":"address","indexed":true},{"name":"amount","type":"uint256"}]},
+      {"type":"event","name":"LiquidityAdded","inputs":[{"name":"who","type":"address","indexed":true},{"name":"shares","type":"uint256"}]},
+      {"type":"event","name":"LiquidityRemoved","inputs":[{"name":"who","type":"address","indexed":true},{"name":"shares","type":"uint256"}]},
+      {"type":"event","name":"Locked","inputs":[{"name":"who","type":"address","indexed":true},{"name":"until","type":"uint64"}]},
+      {"type":"event","name":"Swap","inputs":[{"name":"who","type":"address","indexed":true},{"name":"to","type":"address","indexed":true},{"name":"amountIn","type":"uint256"},{"name":"amountOut","type":"uint256"},{"name":"quoteIn","type":"bool"}]},
+      {"type":"event","name":"Transfer","inputs":[{"name":"from","type":"address","indexed":true},{"name":"to","type":"address","indexed":true},{"name":"value","type":"uint256"}]},
       {"type":"fallback","stateMutability":"payable"},
       {"type":"function","name":"addLiquidity","stateMutability":"nonpayable","inputs":[{"name":"quoteAmt","type":"uint256"},{"name":"tokenAmt","type":"uint256"},{"name":"minShares","type":"uint256"}],"outputs":[{"name":"made","type":"uint256"}]},
       {"type":"function","name":"allowance","stateMutability":"view","inputs":[{"name":"","type":"address"},{"name":"","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},
@@ -86,5 +86,5 @@ export const BEAR_PAIR_ABI = [
       {"type":"function","name":"totalSupply","stateMutability":"view","outputs":[{"name":"","type":"uint256"}]},
       {"type":"function","name":"transfer","stateMutability":"nonpayable","inputs":[{"name":"to","type":"address"},{"name":"value","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
       {"type":"function","name":"transferFrom","stateMutability":"nonpayable","inputs":[{"name":"from","type":"address"},{"name":"to","type":"address"},{"name":"value","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
-      {"type":"receive","stateMutability":"payable"}
+      {"type":"receive","stateMutability":"payable"},
     ];

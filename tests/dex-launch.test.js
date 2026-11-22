@@ -117,6 +117,43 @@ test('launchFromReceipt decodes Launched off the receipt logs (shared decoder)',
   assert.equal(l.launchFromReceipt([{ topics: [], data: '0x' }]), null, 'a foreign log is ignored');
 });
 
+// ── T4b the ABI must match the bytes the FACTORY emits ────────────────
+// The contract indexes token/pair/launcher (`event Launched(address indexed
+// token, address indexed pair, address indexed launcher, ...)`), so a real
+// receipt log carries 4 topics + 3 data words. Without the indexed flags the
+// decoder wants all six fields in `data` and every scan dies "data
+// out-of-bounds" the moment the first token is launched.
+test('Launched ABI keeps the indexed flags and decodes a chain-shaped log', () => {
+  const evAbi = BEAR_FACTORY_ABI.find((x) => x.type === 'event' && x.name === 'Launched');
+  assert.deepEqual(
+    evAbi.inputs.filter((i) => i.indexed).map((i) => i.name),
+    ['token', 'pair', 'launcher'],
+    'the three addresses are indexed in BearFactory.launch',
+  );
+  const pad = (a) => '0x' + a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+  const { AbiCoder, id } = realEthers;
+  const log = {
+    topics: [
+      id('Launched(address,address,address,uint256,uint64,uint256)'),
+      pad(TOK),
+      pad(PAIR),
+      pad(FAC),
+    ],
+    data: AbiCoder.defaultAbiCoder().encode(
+      ['uint256', 'uint64', 'uint256'],
+      [45n, 1893456000n, 10n ** 21n],
+    ),
+  };
+  const row = l.launchFromReceipt([log]);
+  assert.ok(row, 'the real log shape decodes');
+  assert.equal(row.token, TOK.toLowerCase());
+  assert.equal(row.pair, PAIR.toLowerCase());
+  assert.equal(row.launcher, FAC.toLowerCase());
+  assert.equal(row.creatorFeeBps, 45);
+  assert.equal(row.lockUntil, 1893456000);
+  assert.equal(row.lpShares, 10n ** 21n);
+});
+
 // ── T5 the token face reads the coin's own public strings ─────────────
 test('tokenFace reads the 9 public getters and normalizes addresses', async () => {
   READS.clear();
@@ -271,4 +308,18 @@ test('renderDex wires Launch; with no factory scan the card answers needfac', as
   launchGo.click();
   assert.match(launchStatus.textContent, /Pools|factory/i,
     `needfac speaks: ${launchStatus.textContent}`);
+});
+
+// ── T10 the send sheet speaks the user's language ─────────────────────
+test('sheetErrorText: signer/chain/revert map to localized text, raw pipe stays', async () => {
+  const v = await import('../js/dex/index.js');
+  const { t } = await import('../js/i18n.js');
+  assert.equal(v.sheetErrorText({ why: 'signer' }), t('dex.wallet.none'));
+  assert.equal(v.sheetErrorText({ why: 'chain' }), t('dex.engine.off'));
+  assert.equal(v.sheetErrorText({ why: 'revert' }), t('dex.swap.failm'));
+  // a plain error keeps its message — the why-tagged ones never leak the tag
+  assert.match(v.sheetErrorText(new Error('boom')), /boom/);
+  assert.doesNotMatch(v.sheetErrorText({ why: 'signer' }), /no-signer/);
+  // shortMessage wins over message when ethers provides one
+  assert.equal(v.sheetErrorText({ shortMessage: 'short one', message: 'long one' }), 'short one');
 });
