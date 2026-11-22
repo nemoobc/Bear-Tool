@@ -1098,7 +1098,13 @@ select.input option, select.select option, .input option {
   position: fixed;
   bottom: 20px;
   right: 20px;
-  z-index: 2000;
+  /* Above .modal-overlay (9500): an unlock attempt with a wrong password used
+     to raise the toast correctly and still show NOTHING — the non-dismissible
+     modal's dark overlay sat on top of it. Measured on device 2026-11-22:
+     toast 2000, overlay 9500, both fixed, overlay display:flex. Keep it below
+     #intro (9999), which owns the first paint. Toast stays pointer-events:none,
+     so lifting it cannot swallow a tap meant for the modal underneath. */
+  z-index: 9600;
   display: flex;
   flex-direction: column;
   gap: 8px;
