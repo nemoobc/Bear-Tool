@@ -74,6 +74,17 @@ const opt = (name, dflt) => {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : dflt;
 };
 
+// Flags that consume the NEXT argv entry. One list for both jobs below: the
+// spec-filter pass must skip their values or `--workers 4` silently becomes a
+// request for the three specs whose path contains "4", and the forwarding pass
+// must carry them to Playwright. Two lists drifted apart once already —
+// `--workers` was forwarded but its `4` was treated as a filter — so this is
+// the single source of truth. (`--workers=4` dodged it; the spaced form did not.)
+const VALUE_FLAGS = new Set([
+  '--browser', '--project', '--grep', '--reporter',
+  '--workers', '--retries', '--timeout', '--output',
+]);
+
 // ── a static server, in this process ───────────────────────────────────────
 // serve.js already exists for the box, but this needs to start and stop with the
 // run. A port left behind by a crashed run is the failure mode that makes the
@@ -160,9 +171,8 @@ try {
   // A bare argument filters specs by substring, so `01` and `wallet-create` both
   // work and a positional path is not mistaken for a filter. Flags are excluded and
   // so are the values that follow them.
-  const flagVals = new Set(['--browser', '--project', '--grep', '--reporter']);
   const terms = argv.filter((a, i) =>
-    !a.startsWith('--') && !flagVals.has(argv[i - 1]));
+    !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]));
   const wanted = terms.length ? specs.filter((s) => terms.some((t) => s.includes(t))) : specs;
   if (terms.length && !wanted.length) {
     throw new Error(`tidak ada spec yang cocok dengan: ${terms.join(', ')}`);
@@ -298,13 +308,14 @@ try {
   // Flags whose VALUE is the next argv element must carry it along — a bare
   // `--grep` reaching Playwright is "--grep argument missing". Measured by
   // `--grep "…"` failing here while the suite itself was fine (2026-10-07).
-  const takesValue = new Set(['--grep', '--reporter', '--project', '--workers', '--retries', '--timeout', '--output']);
+  // Same VALUE_FLAGS as the filter pass: forwarding without filtering used to
+  // turn `--workers 4` into a 3-spec run with a misleading send-view failure.
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith('--') || a === '--headed' || a === '--list' || a === '--browser') continue;
     args.push(a);
     const v = argv[i + 1];
-    if (takesValue.has(a) && v && !v.startsWith('--')) { args.push(v); i++; }
+    if (VALUE_FLAGS.has(a) && v && !v.startsWith('--')) { args.push(v); i++; }
   }
   for (const g of terms) args.push(g);
 
